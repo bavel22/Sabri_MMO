@@ -1,0 +1,272 @@
+# Sabri MMO
+
+A class-based action MMORPG built with Unreal Engine 5, Node.js, and PostgreSQL.
+
+## Project Overview
+
+**Game Type**: Class-based action MMORPG  
+**Engine**: Unreal Engine 5 (Client)  
+**Backend**: Node.js + Express (Server)  
+**Database**: PostgreSQL  
+**Target Scale**: 1000-5000 concurrent players  
+**Timeline**: 6 months (MVP) → 12 months (Full release)  
+**Team Size**: 1 developer (solo)  
+
+## Technology Stack
+
+### Client (UE5)
+- **Engine**: Unreal Engine 5.3.2
+- **Languages**: C++, Blueprint
+- **Systems**: UMG UI, Niagara VFX, Control Rig Animation
+- **Networking**: HTTP requests, WebSocket integration
+
+### Server (Node.js)
+- **Runtime**: Node.js 18.19.0 LTS
+- **Framework**: Express.js 4.18.2
+- **Real-time**: Socket.io 4.7.4
+- **Database**: PostgreSQL 15.4
+- **Cache**: Redis 7.2.3
+
+### Development
+- **Platform**: Windows 11 (Development) → Linux (Production)
+- **Version Control**: Git
+- **Containerization**: Docker
+- **AI Assistance**: ChatGPT/GPT-4, GitHub Copilot
+
+## Project Structure
+
+```
+Sabri_MMO/
+├── README.md                    # This file
+├── MMO_Development_Plan.md      # Comprehensive development plan
+├── Technology_Stack.md          # Technology stack documentation
+├── Project_File_Structure.md    # Complete file structure guide
+├── .gitignore                   # Git ignore file
+├── docs/                        # Documentation
+├── client/                      # UE5 client project
+├── server/                      # Node.js server project
+├── database/                    # Database files and migrations
+├── assets/                      # Game assets and resources
+├── tools/                       # Development tools and utilities
+├── tests/                       # Test files and test data
+├── scripts/                     # Build and deployment scripts
+├── config/                      # Configuration files
+└── deployment/                  # Deployment configurations
+```
+
+## Development Phases
+
+### Phase 0: Pre-Development (Week 0)
+- Project planning and setup
+- Environment configuration
+- Learning and resource gathering
+
+### Phase 1: Foundation (Weeks 1-4)
+- Database and backend setup
+- UE5 client foundation
+- Basic UI and authentication
+- Core combat system
+
+### Phase 2: World & Content (Weeks 5-8)
+- Zone system and world building
+- NPCs and quest system
+- Inventory and item system
+- Advanced features and polish
+
+### Phase 3: Social & Economy (Weeks 9-12)
+- Chat and communication
+- Guild system
+- Economy and trading
+- Advanced content and polish
+
+### Phase 4: Production & Launch (Weeks 13-16)
+- Production infrastructure
+- Analytics and monitoring
+- Community and launch preparation
+- Launch and post-launch support
+
+## Getting Started
+
+### Prerequisites
+
+- **Windows 11** (Development)
+- **Visual Studio 2022** with C++ development tools
+- **Unreal Engine 5.3.2**
+- **Node.js 18.19.0 LTS**
+- **PostgreSQL 15.4**
+- **Redis 7.2.3**
+- **Git 2.42.0**
+
+### Installation
+
+1. **Clone the repository**
+   ```bash
+   git clone <repository-url>
+   cd Sabri_MMO
+   ```
+
+2. **Set up the database**
+   ```bash
+   # Install PostgreSQL and Redis
+   # Create game database
+   # Run migrations from database/migrations/
+   # Load seed data from database/seeds/
+   ```
+
+3. **Set up the server**
+   ```bash
+   cd server
+   npm install
+   cp .env.example .env
+   # Configure .env with your database settings
+   npm start
+   ```
+
+4. **Set up the client**
+   ```bash
+   # Open UE5 project in client/
+   # Configure project settings
+   # Build and run
+   ```
+
+### Environment Variables
+
+Create a `.env` file in the `server/` directory:
+
+```env
+# Database
+DATABASE_URL=postgresql://username:password@localhost:5432/sabri_mmo
+REDIS_URL=redis://localhost:6379
+
+# Authentication
+JWT_SECRET=your-secret-key
+JWT_EXPIRES_IN=24h
+
+# Server
+PORT=3001
+NODE_ENV=development
+
+# Client
+CLIENT_URL=http://localhost:3000
+```
+
+## Development Workflow
+
+### Daily Routine
+1. **Morning Standup**: Update progress and set priorities
+2. **Development**: Work on current sprint tasks
+3. **Testing**: Test new features and fix bugs
+4. **Evening Wrap-up**: Document progress and plan next day
+
+### Git Workflow
+```bash
+# Create feature branch
+git checkout -b feature/feature-name
+
+# Make changes and commit
+git add .
+git commit -m "feat: add feature description"
+
+# Push and create pull request
+git push origin feature/feature-name
+```
+
+### AI Assistance
+- Use AI for code generation (95% success rate for Node.js)
+- Review and test all AI-generated code
+- Document AI workflows and prompts
+- Maintain code quality standards
+
+## Testing
+
+### Backend Tests
+```bash
+cd server
+npm test
+npm run test:coverage
+npm run test:integration
+```
+
+### Load Testing
+```bash
+cd tools
+node load_tester.js
+```
+
+### Database Tests
+```bash
+cd database
+psql -d sabri_mmo -f tests/test_queries.sql
+```
+
+## Deployment
+
+### Development
+```bash
+docker-compose -f docker-compose.dev.yml up
+```
+
+### Staging
+```bash
+docker-compose -f docker-compose.staging.yml up
+```
+
+### Production
+```bash
+docker-compose -f docker-compose.prod.yml up
+```
+
+## Monitoring
+
+### Application Metrics
+- **Prometheus**: Metrics collection
+- **Grafana**: Visualization
+- **Custom Dashboard**: Game-specific metrics
+
+### Error Tracking
+- **Sentry**: Error monitoring
+- **Custom Logging**: Application logs
+- **Performance Monitoring**: Response times
+
+## Contributing
+
+This is a solo development project. For future collaboration:
+
+1. Follow the established coding standards
+2. Write comprehensive tests
+3. Update documentation
+4. Use semantic versioning
+5. Follow the Git workflow
+
+## License
+
+This project is proprietary. All rights reserved.
+
+## Support
+
+For questions or support:
+- Check the documentation in `docs/`
+- Review the development plan in `MMO_Development_Plan.md`
+- Refer to the technology stack in `Technology_Stack.md`
+
+## Progress
+
+### Current Status: Phase 0 - Pre-Development
+- [x] Project structure created
+- [x] Technology stack defined
+- [x] Git repository configured
+- [ ] Environment setup
+- [ ] Development tools installed
+- [ ] Learning resources reviewed
+
+### Next Steps
+1. Complete environment setup
+2. Install and configure all development tools
+3. Set up database and server
+4. Begin Phase 1 development
+
+---
+
+**Last Updated**: 2026-02-01  
+**Version**: 0.1.0  
+**Status**: Pre-Development
