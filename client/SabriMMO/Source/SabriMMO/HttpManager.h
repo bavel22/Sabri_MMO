@@ -8,11 +8,15 @@
 
 class IHttpRequest;
 class IHttpResponse;
+class UMMOGameInstance;
 
 UCLASS()
 class SABRIMMO_API UHttpManager : public UBlueprintFunctionLibrary
 {
     GENERATED_BODY()
+
+private:
+    static UMMOGameInstance* GetGameInstance(UObject* WorldContextObject);
 
 public:
     UFUNCTION(BlueprintCallable, Category = "Network", meta = (WorldContext = "WorldContextObject"))
@@ -28,7 +32,16 @@ public:
     static void LoginUser(UObject* WorldContextObject, const FString& Username, const FString& Password);
 
     static void OnRegisterResponse(TSharedPtr<IHttpRequest> Request, TSharedPtr<IHttpResponse> Response, bool bWasSuccessful);
-    static void OnLoginResponse(TSharedPtr<IHttpRequest> Request, TSharedPtr<IHttpResponse> Response, bool bWasSuccessful);
+    static void OnLoginResponse(UObject* WorldContextObject, TSharedPtr<IHttpRequest> Request, TSharedPtr<IHttpResponse> Response, bool bWasSuccessful);
+
+    UFUNCTION(BlueprintCallable, Category = "Network", meta = (WorldContext = "WorldContextObject"))
+    static void GetCharacters(UObject* WorldContextObject);
+
+    UFUNCTION(BlueprintCallable, Category = "Network", meta = (WorldContext = "WorldContextObject"))
+    static void CreateCharacter(UObject* WorldContextObject, const FString& CharacterName, const FString& CharacterClass);
+
+    static void OnGetCharactersResponse(TSharedPtr<IHttpRequest> Request, TSharedPtr<IHttpResponse> Response, bool bWasSuccessful);
+    static void OnCreateCharacterResponse(UObject* WorldContextObject, TSharedPtr<IHttpRequest> Request, TSharedPtr<IHttpResponse> Response, bool bWasSuccessful);
 
     static void OnHealthCheckResponse(TSharedPtr<IHttpRequest> Request, TSharedPtr<IHttpResponse> Response, bool bWasSuccessful);
 };

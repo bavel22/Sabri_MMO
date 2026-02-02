@@ -232,6 +232,94 @@ app.get('/api/auth/verify', authenticateToken, async (req, res) => {
     }
 });
 
+// Character endpoints
+app.get('/api/characters', authenticateToken, async (req, res) => {
+    try {
+        const result = await pool.query(
+            'SELECT character_id, name, class, level, x, y, z, health, mana, created_at FROM characters WHERE user_id = $1 ORDER BY created_at DESC',
+            [req.user.user_id]
+        );
+        
+        res.json({
+            message: 'Characters retrieved successfully',
+            characters: result.rows
+        });
+    } catch (err) {
+        console.error('Get characters error:', err);
+        res.status(500).json({ error: 'Failed to retrieve characters' });
+    }
+});
+
+app.post('/api/characters', authenticateToken, async (req, res) => {
+    try {
+        const { name, characterClass } = req.body;
+        
+        // Validation
+        if (!name || name.length < 2 || name.length > 50) {
+            return res.status(400).json({ error: 'Character name must be between 2 and 50 characters' });
+        }
+        
+        // Check if character name already exists for this user
+        const existingChar = await pool.query(
+            'SELECT character_id FROM characters WHERE user_id = $1 AND name = $2',
+            [req.user.user_id, name]
+        );
+        
+        if (existingChar.rows.length > 0) {
+            return res.status(409).json({ error: 'You already have a character with this name' });
+        }
+        
+        // Validate class (optional field)
+        const validClasses = ['warrior', 'mage', 'archer', 'healer'];
+        const charClass = characterClass && validClasses.includes(characterClass.toLowerCase()) 
+            ? characterClass.toLowerCase() 
+            : 'warrior';
+        
+        // Create character
+        const result = await pool.query(
+            `INSERT INTO characters (user_id, name, class, level, x, y, z, health, mana) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) 
+             RETURNING character_id, name, class, level, x, y, z, health, mana, created_at`,
+            [req.user.user_id, name, charClass, 1, 0, 0, 0, 100, 100]
+        );
+        
+        const character = result.rows[0];
+        
+        res.status(201).json({
+            message: 'Character created successfully',
+            character
+        });
+        
+    } catch (err) {
+        console.error('Create character error:', err);
+        res.status(500).json({ error: 'Failed to create character' });
+    }
+});
+
+app.get('/api/characters/:id', authenticateToken, async (req, res) => {
+    try {
+        const characterId = req.params.id;
+        
+        const result = await pool.query(
+            'SELECT character_id, name, class, level, x, y, z, health, mana, created_at FROM characters WHERE character_id = $1 AND user_id = $2',
+            [characterId, req.user.user_id]
+        );
+        
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Character not found' });
+        }
+        
+        res.json({
+            message: 'Character retrieved successfully',
+            character: result.rows[0]
+        });
+        
+    } catch (err) {
+        console.error('Get character error:', err);
+        res.status(500).json({ error: 'Failed to retrieve character' });
+    }
+});
+
 // Test endpoint - will be replaced with auth later
 app.get('/api/test', (req, res) => {
   res.json({ message: 'Hello from MMO Server!' });

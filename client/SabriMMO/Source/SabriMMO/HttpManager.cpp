@@ -5,6 +5,17 @@
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
 #include "Http.h"
+#include "Kismet/GameplayStatics.h"
+#include "MMOGameInstance.h"
+
+UMMOGameInstance* UHttpManager::GetGameInstance(UObject* WorldContextObject)
+{
+    if (!WorldContextObject)
+    {
+        return nullptr;
+    }
+    return Cast<UMMOGameInstance>(UGameplayStatics::GetGameInstance(WorldContextObject));
+}
 
 void UHttpManager::TestServerConnection(UObject* WorldContextObject)
 {
@@ -101,7 +112,9 @@ void UHttpManager::LoginUser(UObject* WorldContextObject, const FString& Usernam
     UE_LOG(LogTemp, Log, TEXT("Logging in user: %s"), *Username);
 
     TSharedPtr<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
-    Request->OnProcessRequestComplete().BindStatic(&UHttpManager::OnLoginResponse);
+    Request->OnProcessRequestComplete().BindLambda([WorldContextObject](TSharedPtr<IHttpRequest> Request, TSharedPtr<IHttpResponse> Response, bool bWasSuccessful) {
+        UHttpManager::OnLoginResponse(WorldContextObject, Request, Response, bWasSuccessful);
+    });
     Request->SetURL(TEXT("http://localhost:3001/api/auth/login"));
     Request->SetVerb(TEXT("POST"));
     Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
@@ -114,7 +127,7 @@ void UHttpManager::LoginUser(UObject* WorldContextObject, const FString& Usernam
     Request->ProcessRequest();
 }
 
-void UHttpManager::OnLoginResponse(TSharedPtr<IHttpRequest> Request, TSharedPtr<IHttpResponse> Response, bool bWasSuccessful)
+void UHttpManager::OnLoginResponse(UObject* WorldContextObject, TSharedPtr<IHttpRequest> Request, TSharedPtr<IHttpResponse> Response, bool bWasSuccessful)
 {
     if (bWasSuccessful && Response.IsValid())
     {
@@ -126,8 +139,58 @@ void UHttpManager::OnLoginResponse(TSharedPtr<IHttpRequest> Request, TSharedPtr<
 
         if (ResponseCode == 200)
         {
-            UE_LOG(LogTemp, Display, TEXT("✓ Login successful! Token: [Hidden]"));
-            // TODO: Extract and store JWT token in GameInstance for authenticated requests
+            // Extract token and user data from JSON response
+            FString TokenPrefix = TEXT("\"token\":\"");
+            int32 TokenStart = ResponseContent.Find(TokenPrefix);
+            if (TokenStart != INDEX_NONE)
+            {
+                TokenStart += TokenPrefix.Len();
+                int32 TokenEnd = ResponseContent.Find(TEXT("\""), ESearchCase::CaseSensitive, ESearchDir::FromStart, TokenStart);
+                if (TokenEnd != INDEX_NONE)
+                {
+                    FString Token = ResponseContent.Mid(TokenStart, TokenEnd - TokenStart);
+                    
+                    // Extract username and user_id
+                    FString UsernamePrefix = TEXT("\"username\":\"");
+                    int32 UsernameStart = ResponseContent.Find(UsernamePrefix);
+                    FString Username = TEXT("Unknown");
+                    int32 UserId = 0;
+                    
+                    if (UsernameStart != INDEX_NONE)
+                    {
+                        UsernameStart += UsernamePrefix.Len();
+                        int32 UsernameEnd = ResponseContent.Find(TEXT("\""), ESearchCase::CaseSensitive, ESearchDir::FromStart, UsernameStart);
+                        if (UsernameEnd != INDEX_NONE)
+                        {
+                            Username = ResponseContent.Mid(UsernameStart, UsernameEnd - UsernameStart);
+                        }
+                    }
+                    
+                    // Extract user_id
+                    FString UserIdPrefix = TEXT("\"user_id\":");
+                    int32 UserIdStart = ResponseContent.Find(UserIdPrefix);
+                    if (UserIdStart != INDEX_NONE)
+                    {
+                        UserIdStart += UserIdPrefix.Len();
+                        int32 UserIdEnd = ResponseContent.Find(TEXT(","), ESearchCase::CaseSensitive, ESearchDir::FromStart, UserIdStart);
+                        if (UserIdEnd != INDEX_NONE)
+                        {
+                            FString UserIdStr = ResponseContent.Mid(UserIdStart, UserIdEnd - UserIdStart);
+                            UserId = FCString::Atoi(*UserIdStr);
+                        }
+                    }
+                    
+                    // Set auth data in GameInstance and broadcast event
+                    if (UMMOGameInstance* GI = GetGameInstance(WorldContextObject))
+                    {
+                        GI->SetAuthData(Token, Username, UserId);
+                    }
+                    else
+                    {
+                        UE_LOG(LogTemp, Error, TEXT("Failed to get GameInstance for login response"));
+                    }
+                }
+            }
         }
         else if (ResponseCode == 401)
         {
@@ -141,5 +204,124 @@ void UHttpManager::OnLoginResponse(TSharedPtr<IHttpRequest> Request, TSharedPtr<
     else
     {
         UE_LOG(LogTemp, Error, TEXT("✗ Failed to connect to login server"));
+    }
+}
+
+void UHttpManager::GetCharacters(UObject* WorldContextObject)
+{
+    UE_LOG(LogTemp, Log, TEXT("Fetching characters for user..."));
+
+    TSharedPtr<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
+    Request->OnProcessRequestComplete().BindStatic(&UHttpManager::OnGetCharactersResponse);
+    Request->SetURL(TEXT("http://localhost:3001/api/characters"));
+    Request->SetVerb(TEXT("GET"));
+    Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+    
+    if (UMMOGameInstance* GI = GetGameInstance(WorldContextObject))
+    {
+        if (GI->IsAuthenticated())
+        {
+            Request->SetHeader(TEXT("Authorization"), GI->GetAuthHeader());
+        }
+    }
+
+    Request->ProcessRequest();
+}
+
+void UHttpManager::OnGetCharactersResponse(TSharedPtr<IHttpRequest> Request, TSharedPtr<IHttpResponse> Response, bool bWasSuccessful)
+{
+    if (bWasSuccessful && Response.IsValid())
+    {
+        int32 ResponseCode = Response->GetResponseCode();
+        FString ResponseContent = Response->GetContentAsString();
+
+        UE_LOG(LogTemp, Log, TEXT("Get Characters Response Code: %d"), ResponseCode);
+        UE_LOG(LogTemp, Log, TEXT("Get Characters Response: %s"), *ResponseContent);
+
+        if (ResponseCode == 200)
+        {
+            UE_LOG(LogTemp, Display, TEXT("✓ Characters retrieved successfully!"));
+        }
+        else if (ResponseCode == 401)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("✗ Not authenticated. Please login first."));
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("✗ Failed to get characters: %s"), *ResponseContent);
+        }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("✗ Failed to connect to character server"));
+    }
+}
+
+void UHttpManager::CreateCharacter(UObject* WorldContextObject, const FString& CharacterName, const FString& CharacterClass)
+{
+    UE_LOG(LogTemp, Log, TEXT("Creating character: %s (Class: %s)"), *CharacterName, *CharacterClass);
+
+    TSharedPtr<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
+    Request->OnProcessRequestComplete().BindLambda([WorldContextObject](TSharedPtr<IHttpRequest> Request, TSharedPtr<IHttpResponse> Response, bool bWasSuccessful) {
+        UHttpManager::OnCreateCharacterResponse(WorldContextObject, Request, Response, bWasSuccessful);
+    });
+    Request->SetURL(TEXT("http://localhost:3001/api/characters"));
+    Request->SetVerb(TEXT("POST"));
+    Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+    
+    if (UMMOGameInstance* GI = GetGameInstance(WorldContextObject))
+    {
+        if (GI->IsAuthenticated())
+        {
+            Request->SetHeader(TEXT("Authorization"), GI->GetAuthHeader());
+        }
+    }
+
+    // Create JSON payload
+    FString JsonPayload = FString::Printf(TEXT("{\"name\":\"%s\",\"characterClass\":\"%s\"}"), 
+        *CharacterName, *CharacterClass);
+    Request->SetContentAsString(JsonPayload);
+
+    Request->ProcessRequest();
+}
+
+void UHttpManager::OnCreateCharacterResponse(UObject* WorldContextObject, TSharedPtr<IHttpRequest> Request, TSharedPtr<IHttpResponse> Response, bool bWasSuccessful)
+{
+    if (bWasSuccessful && Response.IsValid())
+    {
+        int32 ResponseCode = Response->GetResponseCode();
+        FString ResponseContent = Response->GetContentAsString();
+
+        UE_LOG(LogTemp, Log, TEXT("Create Character Response Code: %d"), ResponseCode);
+        UE_LOG(LogTemp, Log, TEXT("Create Character Response: %s"), *ResponseContent);
+
+        if (ResponseCode == 201)
+        {
+            UE_LOG(LogTemp, Display, TEXT("✓ Character created successfully!"));
+            
+            // Broadcast OnCharacterCreated event
+            if (UMMOGameInstance* GI = GetGameInstance(WorldContextObject))
+            {
+                UE_LOG(LogTemp, Log, TEXT("Broadcasting OnCharacterCreated event..."));
+                GI->OnCharacterCreated.Broadcast();
+                UE_LOG(LogTemp, Log, TEXT("OnCharacterCreated event broadcast complete"));
+            }
+        }
+        else if (ResponseCode == 401)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("✗ Not authenticated. Please login first."));
+        }
+        else if (ResponseCode == 409)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("✗ Character with this name already exists"));
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("✗ Failed to create character: %s"), *ResponseContent);
+        }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("✗ Failed to connect to character creation server"));
     }
 }
