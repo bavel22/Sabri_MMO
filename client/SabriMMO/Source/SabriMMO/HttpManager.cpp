@@ -16,12 +16,12 @@ void UHttpManager::HealthCheck(UObject* WorldContextObject)
 {
     TSharedPtr<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
     Request->OnProcessRequestComplete().BindStatic(&UHttpManager::OnHealthCheckResponse);
-    Request->SetURL(TEXT("http://localhost:3000/health"));
+    Request->SetURL(TEXT("http://localhost:3001/health"));
     Request->SetVerb(TEXT("GET"));
     Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
     Request->ProcessRequest();
 
-    UE_LOG(LogTemp, Log, TEXT("Sending health check request to: http://localhost:3000"));
+    UE_LOG(LogTemp, Log, TEXT("Sending health check request to: http://localhost:3001"));
 }
 
 void UHttpManager::OnHealthCheckResponse(TSharedPtr<IHttpRequest> Request, TSharedPtr<IHttpResponse> Response, bool bWasSuccessful)
@@ -45,6 +45,101 @@ void UHttpManager::OnHealthCheckResponse(TSharedPtr<IHttpRequest> Request, TShar
     }
     else
     {
-        UE_LOG(LogTemp, Error, TEXT("✗ Failed to connect to server. Is it running on port 3000?"));
+        UE_LOG(LogTemp, Error, TEXT("✗ Failed to connect to server. Is it running on port 3001?"));
+    }
+}
+
+void UHttpManager::RegisterUser(UObject* WorldContextObject, const FString& Username, const FString& Email, const FString& Password)
+{
+    UE_LOG(LogTemp, Log, TEXT("Registering user: %s"), *Username);
+
+    TSharedPtr<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
+    Request->OnProcessRequestComplete().BindStatic(&UHttpManager::OnRegisterResponse);
+    Request->SetURL(TEXT("http://localhost:3001/api/auth/register"));
+    Request->SetVerb(TEXT("POST"));
+    Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+
+    // Create JSON payload
+    FString JsonPayload = FString::Printf(TEXT("{\"username\":\"%s\",\"email\":\"%s\",\"password\":\"%s\"}"), 
+        *Username, *Email, *Password);
+    Request->SetContentAsString(JsonPayload);
+
+    Request->ProcessRequest();
+}
+
+void UHttpManager::OnRegisterResponse(TSharedPtr<IHttpRequest> Request, TSharedPtr<IHttpResponse> Response, bool bWasSuccessful)
+{
+    if (bWasSuccessful && Response.IsValid())
+    {
+        int32 ResponseCode = Response->GetResponseCode();
+        FString ResponseContent = Response->GetContentAsString();
+
+        UE_LOG(LogTemp, Log, TEXT("Register Response Code: %d"), ResponseCode);
+        UE_LOG(LogTemp, Log, TEXT("Register Response: %s"), *ResponseContent);
+
+        if (ResponseCode == 201)
+        {
+            UE_LOG(LogTemp, Display, TEXT("✓ User registered successfully! Token stored for authenticated requests."));
+        }
+        else if (ResponseCode == 409)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("✗ Username or email already exists"));
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("✗ Registration failed: %s"), *ResponseContent);
+        }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("✗ Failed to connect to registration server"));
+    }
+}
+
+void UHttpManager::LoginUser(UObject* WorldContextObject, const FString& Username, const FString& Password)
+{
+    UE_LOG(LogTemp, Log, TEXT("Logging in user: %s"), *Username);
+
+    TSharedPtr<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
+    Request->OnProcessRequestComplete().BindStatic(&UHttpManager::OnLoginResponse);
+    Request->SetURL(TEXT("http://localhost:3001/api/auth/login"));
+    Request->SetVerb(TEXT("POST"));
+    Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+
+    // Create JSON payload
+    FString JsonPayload = FString::Printf(TEXT("{\"username\":\"%s\",\"password\":\"%s\"}"), 
+        *Username, *Password);
+    Request->SetContentAsString(JsonPayload);
+
+    Request->ProcessRequest();
+}
+
+void UHttpManager::OnLoginResponse(TSharedPtr<IHttpRequest> Request, TSharedPtr<IHttpResponse> Response, bool bWasSuccessful)
+{
+    if (bWasSuccessful && Response.IsValid())
+    {
+        int32 ResponseCode = Response->GetResponseCode();
+        FString ResponseContent = Response->GetContentAsString();
+
+        UE_LOG(LogTemp, Log, TEXT("Login Response Code: %d"), ResponseCode);
+        UE_LOG(LogTemp, Log, TEXT("Login Response: %s"), *ResponseContent);
+
+        if (ResponseCode == 200)
+        {
+            UE_LOG(LogTemp, Display, TEXT("✓ Login successful! Token: [Hidden]"));
+            // TODO: Extract and store JWT token in GameInstance for authenticated requests
+        }
+        else if (ResponseCode == 401)
+        {
+            UE_LOG(LogTemp, Warning, TEXT("✗ Invalid credentials"));
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("✗ Login failed: %s"), *ResponseContent);
+        }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("✗ Failed to connect to login server"));
     }
 }

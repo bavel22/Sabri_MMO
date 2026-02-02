@@ -65,7 +65,7 @@ static void HealthCheck(UObject* WorldContextObject)
 - **Static function** - Creates and sends HTTP request
 - **Key Operations:**
   1. Creates HTTP request via FHttpModule
-  2. Sets URL to `http://localhost:3000/health`
+  2. Sets URL to `http://localhost:3001/health`
   3. Sets HTTP method to GET
   4. Sets Content-Type header to application/json
   5. Binds static callback for response
@@ -110,14 +110,14 @@ static void OnHealthCheckResponse(TSharedPtr<IHttpRequest> Request, TSharedPtr<I
 
 **Connection Details:**
 - **Client Port:** Ephemeral (random high port)
-- **Server Port:** 3000 (Node.js default)
+- **Server Port:** 3001 (Node.js default)
 - **Protocol:** HTTP/1.1
 - **Transport:** TCP/IP
 
 **Request Headers:**
 ```
 GET /health HTTP/1.1
-Host: localhost:3000
+Host: localhost:3001
 Content-Type: application/json
 User-Agent: UnrealEngine/5.7
 ```
@@ -212,7 +212,7 @@ HttpManager.HealthCheck(WorldContextObject)
 ```cpp
 TSharedPtr<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
 Request->OnProcessRequestComplete().BindStatic(&UHttpManager::OnHealthCheckResponse);
-Request->SetURL(TEXT("http://localhost:3000/health"));
+Request->SetURL(TEXT("http://localhost:3001/health"));
 Request->SetVerb(TEXT("GET"));
 Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
 Request->ProcessRequest();
@@ -253,7 +253,7 @@ void UHttpManager::OnHealthCheckResponse(TSharedPtr<IHttpRequest> Request, TShar
 
 ### 1. Server Not Running
 **Symptom:** Connection timeout
-**UE5 Log:** `Failed to connect to server. Is it running on port 3000?`
+**UE5 Log:** `Failed to connect to server. Is it running on localhost:3001?`
 **Cause:** Node.js process not started
 
 ### 2. Database Connection Failed
@@ -265,7 +265,7 @@ void UHttpManager::OnHealthCheckResponse(TSharedPtr<IHttpRequest> Request, TShar
 ### 3. Network Firewall
 **Symptom:** Connection refused
 **UE5 Log:** `Failed to connect to server`
-**Cause:** Windows Firewall blocking port 3000
+**Cause:** Windows Firewall blocking port 3001
 
 ### 4. CORS Error (if not using cors middleware)
 **Symptom:** HTTP 403 or browser error
@@ -322,7 +322,7 @@ void UHttpManager::OnHealthCheckResponse(TSharedPtr<IHttpRequest> Request, TShar
 1. **Happy Path:** Server running, database connected
 2. **Server Down:** Stop Node.js process
 3. **Database Down:** Stop PostgreSQL service
-4. **Network Error:** Block port 3000
+4. **Network Error:** Block port 3001
 
 ## Debugging Tools
 

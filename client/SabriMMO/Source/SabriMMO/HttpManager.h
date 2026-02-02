@@ -21,5 +21,14 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Network", meta = (WorldContext = "WorldContextObject"))
     static void HealthCheck(UObject* WorldContextObject);
 
+    UFUNCTION(BlueprintCallable, Category = "Network", meta = (WorldContext = "WorldContextObject"))
+    static void RegisterUser(UObject* WorldContextObject, const FString& Username, const FString& Email, const FString& Password);
+
+    UFUNCTION(BlueprintCallable, Category = "Network", meta = (WorldContext = "WorldContextObject"))
+    static void LoginUser(UObject* WorldContextObject, const FString& Username, const FString& Password);
+
+    static void OnRegisterResponse(TSharedPtr<IHttpRequest> Request, TSharedPtr<IHttpResponse> Response, bool bWasSuccessful);
+    static void OnLoginResponse(TSharedPtr<IHttpRequest> Request, TSharedPtr<IHttpResponse> Response, bool bWasSuccessful);
+
     static void OnHealthCheckResponse(TSharedPtr<IHttpRequest> Request, TSharedPtr<IHttpResponse> Response, bool bWasSuccessful);
 };
