@@ -33,6 +33,37 @@ A class-based action MMORPG built with Unreal Engine 5, Node.js, and PostgreSQL.
 - **Containerization**: Docker
 - **AI Assistance**: ChatGPT/GPT-4, GitHub Copilot
 
+## Implemented Features
+
+### Authentication System
+- JWT-based authentication
+- User login/registration endpoints
+- Token validation middleware
+- Secure password hashing with bcrypt
+
+### Character Management
+- FCharacterData struct (BlueprintType)
+- MMOGameInstance with character storage
+- HTTP endpoints: GetCharacters, CreateCharacter
+- Character selection and persistence
+
+### UI Widgets
+- **WBP_CharacterSelect**: Main selection screen with scrollable list
+- **WBP_CharacterEntry**: Individual character display row
+- **WBP_CreateCharacter**: Character creation dialog with name/class selection
+- Mouse cursor control and input mode switching
+
+### Blueprint Integration
+- BP_GameFlow with event bindings
+- OnLoginSuccess → GetCharacters → Show UI
+- OnCharacterListReceived → Populate list
+- OnCharacterCreated → Refresh list
+
+### Database
+- PostgreSQL characters table
+- JWT-authenticated API endpoints
+- Character data: id, name, class, level
+
 ## Project Structure
 
 ```
@@ -94,10 +125,9 @@ Sabri_MMO/
 - **Unreal Engine 5.3.2**
 - **Node.js 18.19.0 LTS**
 - **PostgreSQL 15.4**
-- **Redis 7.2.3**
-- **Git 2.42.0**
+- **Git**
 
-### Installation
+### Server Setup
 
 1. **Clone the repository**
    ```bash
@@ -251,22 +281,23 @@ For questions or support:
 
 ## Progress
 
-### Current Status: Phase 0 - Pre-Development
+### Current Status: Phase 1 - Foundation (In Progress)
 - [x] Project structure created
 - [x] Technology stack defined
 - [x] Git repository configured
-- [ ] Environment setup
-- [ ] Development tools installed
-- [ ] Learning resources reviewed
+- [x] Database schema implemented
+- [x] Authentication system working
+- [x] Character Select UI complete
+- [ ] Character creation flow polished
+- [ ] Enter World functionality
+- [ ] Game world integration
 
 ### Next Steps
-1. Complete environment setup
-2. Install and configure all development tools
-3. Set up database and server
-4. Begin Phase 1 development
+1. Complete Enter World button functionality
+2. Integrate character spawn into game world
 
 ---
 
-**Last Updated**: 2026-02-01  
-**Version**: 0.1.0  
-**Status**: Pre-Development
+**Last Updated**: 2026-02-02  
+**Version**: 0.2.0  
+**Status**: Phase 1 - Character System Complete
