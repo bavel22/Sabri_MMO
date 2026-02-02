@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/GameInstance.h"
+#include "CharacterData.h"
 #include "MMOGameInstance.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnLoginSuccess);
@@ -30,6 +31,9 @@ public:
     UPROPERTY(BlueprintReadOnly, Category = "MMO Auth")
     bool bIsLoggedIn;
 
+    UPROPERTY(BlueprintReadOnly, Category = "MMO Auth")
+    TArray<FCharacterData> CharacterList;
+
     // Event Dispatchers
     UPROPERTY(BlueprintAssignable, Category = "MMO Events")
     FOnLoginSuccess OnLoginSuccess;
@@ -55,4 +59,20 @@ public:
 
     UFUNCTION(BlueprintPure, Category = "MMO Auth")
     FString GetAuthHeader() const;
+
+    UFUNCTION(BlueprintCallable, Category = "MMO Auth")
+    void SetCharacterList(const TArray<FCharacterData>& Characters);
+
+    UFUNCTION(BlueprintCallable, Category = "MMO Auth")
+    void SelectCharacter(int32 CharacterId);
+
+    UFUNCTION(BlueprintPure, Category = "MMO Auth")
+    FCharacterData GetSelectedCharacter() const;
+
+private:
+    UPROPERTY()
+    int32 SelectedCharacterId;
+
+    UPROPERTY()
+    FCharacterData SelectedCharacter;
 };

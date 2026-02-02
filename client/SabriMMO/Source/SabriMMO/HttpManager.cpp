@@ -212,7 +212,9 @@ void UHttpManager::GetCharacters(UObject* WorldContextObject)
     UE_LOG(LogTemp, Log, TEXT("Fetching characters for user..."));
 
     TSharedPtr<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
-    Request->OnProcessRequestComplete().BindStatic(&UHttpManager::OnGetCharactersResponse);
+    Request->OnProcessRequestComplete().BindLambda([WorldContextObject](TSharedPtr<IHttpRequest> Request, TSharedPtr<IHttpResponse> Response, bool bWasSuccessful) {
+        UHttpManager::OnGetCharactersResponse(WorldContextObject, Request, Response, bWasSuccessful);
+    });
     Request->SetURL(TEXT("http://localhost:3001/api/characters"));
     Request->SetVerb(TEXT("GET"));
     Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
@@ -223,12 +225,17 @@ void UHttpManager::GetCharacters(UObject* WorldContextObject)
         {
             Request->SetHeader(TEXT("Authorization"), GI->GetAuthHeader());
         }
+        else
+        {
+            UE_LOG(LogTemp, Error, TEXT("Cannot get characters: Not authenticated"));
+            return;
+        }
     }
 
     Request->ProcessRequest();
 }
 
-void UHttpManager::OnGetCharactersResponse(TSharedPtr<IHttpRequest> Request, TSharedPtr<IHttpResponse> Response, bool bWasSuccessful)
+void UHttpManager::OnGetCharactersResponse(UObject* WorldContextObject, TSharedPtr<IHttpRequest> Request, TSharedPtr<IHttpResponse> Response, bool bWasSuccessful)
 {
     if (bWasSuccessful && Response.IsValid())
     {
@@ -240,7 +247,101 @@ void UHttpManager::OnGetCharactersResponse(TSharedPtr<IHttpRequest> Request, TSh
 
         if (ResponseCode == 200)
         {
-            UE_LOG(LogTemp, Display, TEXT("✓ Characters retrieved successfully!"));
+            // Parse character list from JSON
+            TArray<FCharacterData> CharacterList;
+            
+            // Simple JSON parsing (basic implementation)
+            FString CharactersPrefix = TEXT("\"characters\":[");
+            int32 CharactersStart = ResponseContent.Find(CharactersPrefix);
+            if (CharactersStart != INDEX_NONE)
+            {
+                CharactersStart += CharactersPrefix.Len();
+                int32 CharactersEnd = ResponseContent.Find(TEXT("]"), ESearchCase::CaseSensitive, ESearchDir::FromStart, CharactersStart);
+                if (CharactersEnd != INDEX_NONE)
+                {
+                    FString CharactersArray = ResponseContent.Mid(CharactersStart, CharactersEnd - CharactersStart);
+                    
+                    // Parse each character object
+                    TArray<FString> CharacterObjects;
+                    CharactersArray.ParseIntoArray(CharacterObjects, TEXT("},{"));
+                    
+                    for (FString& CharObj : CharacterObjects)
+                    {
+                        // Clean up the string
+                        CharObj = CharObj.Replace(TEXT("{"), TEXT(""));
+                        CharObj = CharObj.Replace(TEXT("}"), TEXT(""));
+                        CharObj = CharObj.Replace(TEXT("["), TEXT(""));
+                        CharObj = CharObj.Replace(TEXT("]"), TEXT(""));
+                        
+                        FCharacterData CharData;
+                        
+                        // Parse character_id
+                        FString IdPrefix = TEXT("\"character_id\":");
+                        int32 IdStart = CharObj.Find(IdPrefix);
+                        if (IdStart != INDEX_NONE)
+                        {
+                            IdStart += IdPrefix.Len();
+                            FString IdStr = CharObj.Mid(IdStart);
+                            int32 CommaPos = IdStr.Find(TEXT(","));
+                            if (CommaPos != INDEX_NONE)
+                            {
+                                IdStr = IdStr.Left(CommaPos);
+                            }
+                            CharData.CharacterId = FCString::Atoi(*IdStr);
+                        }
+                        
+                        // Parse name
+                        FString NamePrefix = TEXT("\"name\":\"");
+                        int32 NameStart = CharObj.Find(NamePrefix);
+                        if (NameStart != INDEX_NONE)
+                        {
+                            NameStart += NamePrefix.Len();
+                            int32 NameEnd = CharObj.Find(TEXT("\""), ESearchCase::CaseSensitive, ESearchDir::FromStart, NameStart);
+                            if (NameEnd != INDEX_NONE)
+                            {
+                                CharData.Name = CharObj.Mid(NameStart, NameEnd - NameStart);
+                            }
+                        }
+                        
+                        // Parse class
+                        FString ClassPrefix = TEXT("\"class\":\"");
+                        int32 ClassStart = CharObj.Find(ClassPrefix);
+                        if (ClassStart != INDEX_NONE)
+                        {
+                            ClassStart += ClassPrefix.Len();
+                            int32 ClassEnd = CharObj.Find(TEXT("\""), ESearchCase::CaseSensitive, ESearchDir::FromStart, ClassStart);
+                            if (ClassEnd != INDEX_NONE)
+                            {
+                                CharData.CharacterClass = CharObj.Mid(ClassStart, ClassEnd - ClassStart);
+                            }
+                        }
+                        
+                        // Parse level
+                        FString LevelPrefix = TEXT("\"level\":");
+                        int32 LevelStart = CharObj.Find(LevelPrefix);
+                        if (LevelStart != INDEX_NONE)
+                        {
+                            LevelStart += LevelPrefix.Len();
+                            FString LevelStr = CharObj.Mid(LevelStart);
+                            int32 CommaPos = LevelStr.Find(TEXT(","));
+                            if (CommaPos != INDEX_NONE)
+                            {
+                                LevelStr = LevelStr.Left(CommaPos);
+                            }
+                            CharData.Level = FCString::Atoi(*LevelStr);
+                        }
+                        
+                        CharacterList.Add(CharData);
+                    }
+                }
+            }
+            
+            // Store character list in GameInstance
+            if (UMMOGameInstance* GI = GetGameInstance(WorldContextObject))
+            {
+                GI->SetCharacterList(CharacterList);
+                UE_LOG(LogTemp, Display, TEXT("✓ Characters retrieved successfully! Found %d characters"), CharacterList.Num());
+            }
         }
         else if (ResponseCode == 401)
         {
