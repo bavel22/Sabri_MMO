@@ -38,7 +38,7 @@ AI Assistance: Medium (85% success)
 
 ### **Server: Node.js + Express**
 ```
-Components:
+Components:ist 
 - Express.js (REST API)
 - Socket.io (real-time WebSocket)
 - PostgreSQL (database)
@@ -194,12 +194,18 @@ Day 25-26: UI Framework
 - Add chat window placeholder
 - Test UI responsiveness
 
-Day 27-28: Character Selection System
-- Create character selection widget
-- Implement character display
-- Add character creation flow
-- Connect to backend APIs
-- Test character selection flow
+Day 27-28: Character Selection System ✅ COMPLETED
+- Create WBP_CharacterSelect widget with Scale Box → Size Box → Canvas Panel layout
+- Implement character list Scroll Box with dynamic population
+- Create WBP_CharacterEntry widget with name, class, level display
+- Add SetupCharacterData function to populate entry widgets
+- Create WBP_CreateCharacter widget with name input and class dropdown
+- Add Create Character button event (opens creation dialog)
+- Add Enter World button event (loads game level)
+- Add Select button on each character entry for selection
+- Implement mouse cursor control and input mode switching
+- Connect to backend APIs (GetCharacters, CreateCharacter)
+- Test character selection flow end-to-end
 
 Day 29-30: Basic Animation System
 - Set up animation blueprint
@@ -796,6 +802,202 @@ CREATE TABLE items (
 
 -- Additional tables for inventory, guilds, quests, combat, etc.
 ```
+
+## Character Select UI Implementation ✅ COMPLETED
+
+### **Overview**
+Complete character selection system with dynamic list population, character creation dialog, and game entry flow.
+
+### **C++ Backend Components**
+
+#### **FCharacterData Struct** (`CharacterData.h`)
+```cpp
+USTRUCT(BlueprintType)
+struct FCharacterData {
+    UPROPERTY(BlueprintReadWrite)
+    int32 CharacterId;
+    UPROPERTY(BlueprintReadWrite)
+    FString Name;
+    UPROPERTY(BlueprintReadWrite)
+    FString CharacterClass;
+    UPROPERTY(BlueprintReadWrite)
+    int32 Level;
+};
+```
+
+#### **MMOGameInstance Extensions**
+- `CharacterList` (TArray<FCharacterData>) - stores user's characters
+- `SelectedCharacter` (FCharacterData) - currently selected character
+- `OnCharacterListReceived` event dispatcher
+- `OnCharacterCreated` event dispatcher
+- `SetCharacterList()`, `SelectCharacter()`, `GetSelectedCharacter()` functions
+
+#### **HttpManager API Methods**
+- `GetCharacters()` - fetches character list from server
+- `CreateCharacter(name, class)` - creates new character
+- Parses JSON responses and stores data in GameInstance
+
+### **Widget Blueprints**
+
+#### **WBP_CharacterSelect** (Main Selection Screen)
+**Hierarchy:**
+```
+Canvas Panel
+└── Scale Box (fill screen, center content)
+    └── Size Box (400x500, padding)
+        └── Canvas Panel
+            ├── Text: "Select Character" (title)
+            ├── Scroll Box: CharacterListScrollBox
+            └── Horizontal Box (buttons)
+                ├── Button: CreateCharacterButton
+                └── Button: EnterWorldButton
+```
+
+**Event Construct:**
+```
+Get Game Instance → Cast to MMOGameInstance
+    ↓
+Get Character List
+    ↓
+For Each Loop over CharacterList
+    ↓
+Create Widget (WBP_CharacterEntry)
+    ↓
+Call SetupCharacterData (pass Array Element)
+    ↓
+Add Child to Scroll Box (CharacterListScrollBox)
+```
+
+#### **WBP_CharacterEntry** (Individual Character Row)
+**Hierarchy:**
+```
+Canvas Panel
+└── Horizontal Box
+    ├── Text: NameText
+    ├── Text: ClassText
+    ├── Text: LevelText
+    └── Button: SelectButton
+        └── Text: "Select"
+```
+
+**Variables:**
+- `CharacterId` (int32, Expose on Spawn)
+
+**Functions:**
+- `SetupCharacterData(CharacterData)` - sets all text fields and CharacterId
+
+**Event Graph:**
+```
+On Clicked (SelectButton)
+    ↓
+Get Game Instance → Cast to MMOGameInstance
+    ↓
+Select Character (CharacterId)
+```
+
+#### **WBP_CreateCharacter** (Character Creation Dialog)
+**Hierarchy:**
+```
+Canvas Panel
+└── Scale Box
+    └── Size Box (400x350)
+        └── Canvas Panel
+            ├── Text: "Create Character"
+            ├── Editable Text Box: NameInput
+            ├── Combo Box String: ClassDropdown
+            └── Horizontal Box
+                ├── Button: CancelButton
+                └── Button: CreateButton
+```
+
+**Event Construct:**
+```
+ClassDropdown → Add Option: "warrior"
+    ↓
+Add Option: "mage"
+    ↓
+Add Option: "rogue"
+    ↓
+Add Option: "priest"
+    ↓
+Set Selected Option: "warrior"
+```
+
+**Create Button:**
+```
+On Clicked
+    ↓
+Get Game Instance → Cast to MMOGameInstance
+    ↓
+Create Character
+    Name: NameInput → Get Text
+    Class: ClassDropdown → Get Selected Option
+    ↓
+Remove from Parent
+```
+
+**Cancel Button:**
+```
+On Clicked
+    ↓
+Remove from Parent
+    ↓
+Create Widget (WBP_CharacterSelect)
+    ↓
+Add to Viewport
+```
+
+### **BP_GameFlow Integration**
+
+#### **Event Bindings (BeginPlay)**
+```
+Sequence
+    ↓ Then 0: Bind OnLoginSuccess
+    ↓ Then 1: Bind OnCharacterCreated
+    ↓ Then 2: Bind OnCharacterListReceived
+    ↓
+Delay 0.5s
+    ↓
+Login User
+```
+
+#### **OnLoginSuccess Handler**
+```
+Print: "Login success! Getting characters..."
+    ↓
+Get Characters (HTTP request)
+```
+
+#### **OnCharacterListReceived Handler**
+```
+Create Widget (WBP_CharacterSelect)
+    ↓
+Add to Viewport
+    ↓
+Get Player Controller → Set Show Mouse Cursor (true)
+    ↓
+Set Input Mode UI Only
+    ↓
+Focus: CharacterSelect widget
+```
+
+### **Flow Summary**
+```
+1. Login → OnLoginSuccess fires
+2. Get Characters → Server returns character list
+3. OnCharacterListReceived → Show WBP_CharacterSelect
+4. UI populates Scroll Box with WBP_CharacterEntry widgets
+5. User clicks character → SelectCharacter stores selection
+6. User clicks "Create Character" → Show WBP_CreateCharacter
+7. User clicks "Enter World" → Open Level (game map)
+```
+
+### **Database Integration**
+- Server stores characters in PostgreSQL `characters` table
+- JWT authentication required for all character endpoints
+- Character data includes: character_id, user_id, name, class, level
+
+---
 
 ## API Endpoints Overview
 
