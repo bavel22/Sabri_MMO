@@ -48,6 +48,7 @@ A class-based action MMORPG built with Unreal Engine 5, Node.js, and PostgreSQL.
 - Character selection and persistence
 
 ### UI Widgets
+- **WBP_LoginScreen**: Login screen with username/password input, error handling
 - **WBP_CharacterSelect**: Main selection screen with scrollable list
 - **WBP_CharacterEntry**: Individual character display row
 - **WBP_CreateCharacter**: Character creation dialog with name/class selection
@@ -67,6 +68,13 @@ A class-based action MMORPG built with Unreal Engine 5, Node.js, and PostgreSQL.
 - Fallback to Player Start for new characters (0,0,0 check)
 - Server endpoint: PUT /api/characters/:id/position
 - Database storage for X, Y, Z coordinates
+
+### Server Logging System
+- Comprehensive logging with DEBUG/INFO/WARN/ERROR levels
+- File output to server/logs/server.log
+- Timestamped log entries
+- HTTP request logging middleware
+- Configurable log level via environment variable
 
 ### Game World Integration
 - Enter World button functionality complete
@@ -311,6 +319,9 @@ For questions or support:
 - [x] Character spawn and possession working
 - [x] Save character position on exit
 - [x] Load character position on spawn
+- [x] Server logging system with levels
+- [x] Login screen widget (WBP_LoginScreen)
+- [x] Login widget blueprint integration
 - [ ] Implement top-down movement controls
 - [ ] Add basic camera follow system
 
@@ -320,6 +331,6 @@ For questions or support:
 
 ---
 
-**Last Updated**: 2026-02-02  
+**Last Updated**: 2026-02-03  
 **Version**: 0.2.0  
-**Status**: Phase 1 - Character System Complete
+**Status**: Phase 1 - Login System Complete
