@@ -195,15 +195,27 @@ void UHttpManager::OnLoginResponse(UObject* WorldContextObject, TSharedPtr<IHttp
         else if (ResponseCode == 401)
         {
             UE_LOG(LogTemp, Warning, TEXT("✗ Invalid credentials"));
+            if (UMMOGameInstance* GI = GetGameInstance(WorldContextObject))
+            {
+                GI->OnLoginFailed.Broadcast();
+            }
         }
         else
         {
             UE_LOG(LogTemp, Warning, TEXT("✗ Login failed: %s"), *ResponseContent);
+            if (UMMOGameInstance* GI = GetGameInstance(WorldContextObject))
+            {
+                GI->OnLoginFailed.Broadcast();
+            }
         }
     }
     else
     {
         UE_LOG(LogTemp, Error, TEXT("✗ Failed to connect to login server"));
+        if (UMMOGameInstance* GI = GetGameInstance(WorldContextObject))
+        {
+            GI->OnLoginFailed.Broadcast();
+        }
     }
 }
 
