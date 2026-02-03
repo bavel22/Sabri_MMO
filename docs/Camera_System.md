@@ -189,6 +189,12 @@ These settings ensure the camera stays fixed in the world while the character mo
 **Cause**: Camera Lag Speed too low
 **Solution**: Increase Camera Lag Speed (e.g., 10.0 for snappier follow)
 
+### Issue: Camera uses wrong pawn on first spawn
+**Cause**: Level Blueprint has multiple Spawn Actor nodes with different classes
+**Solution**: Change ALL Spawn Actor nodes to use BP_MMOCharacter (not BP_ThirdPersonCharacter)
+
+See [Bug Fix Notes](Bug_Fix_Notes.md) for detailed explanation.
+
 ## Performance Considerations
 
 - **Event Tick**: Camera rotation runs every frame while right-click held
