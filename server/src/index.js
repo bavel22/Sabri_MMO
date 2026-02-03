@@ -4,7 +4,59 @@ const { Pool } = require('pg');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
+const fs = require('fs');
+const path = require('path');
 require('dotenv').config();
+
+// Setup file logging
+const logsDir = path.join(__dirname, '..', 'logs');
+if (!fs.existsSync(logsDir)) {
+    fs.mkdirSync(logsDir, { recursive: true });
+}
+const logFile = fs.createWriteStream(path.join(logsDir, 'server.log'), { flags: 'a' });
+
+// Log levels: DEBUG, INFO, WARN, ERROR
+const LOG_LEVEL = process.env.LOG_LEVEL || 'INFO';
+const LOG_LEVELS = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3 };
+
+function shouldLog(level) {
+    return LOG_LEVELS[level] >= LOG_LEVELS[LOG_LEVEL];
+}
+
+function formatLog(level, message) {
+    return `[${new Date().toISOString()}] [${level}] ${message}`;
+}
+
+const logger = {
+    debug: (...args) => {
+        if (shouldLog('DEBUG')) {
+            const msg = formatLog('DEBUG', args.join(' '));
+            console.log(msg);
+            logFile.write(msg + '\n');
+        }
+    },
+    info: (...args) => {
+        if (shouldLog('INFO')) {
+            const msg = formatLog('INFO', args.join(' '));
+            console.log(msg);
+            logFile.write(msg + '\n');
+        }
+    },
+    warn: (...args) => {
+        if (shouldLog('WARN')) {
+            const msg = formatLog('WARN', args.join(' '));
+            console.warn(msg);
+            logFile.write(msg + '\n');
+        }
+    },
+    error: (...args) => {
+        if (shouldLog('ERROR')) {
+            const msg = formatLog('ERROR', args.join(' '));
+            console.error(msg);
+            logFile.write(msg + '\n');
+        }
+    }
+};
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -20,6 +72,12 @@ const limiter = rateLimit({
     message: 'Too many requests from this IP, please try again later.'
 });
 app.use('/api/', limiter);
+
+// Request logging middleware
+app.use((req, res, next) => {
+    logger.info(`${req.method} ${req.url} - ${req.ip}`);
+    next();
+});
 
 // Database connection
 const pool = new Pool({
@@ -79,13 +137,16 @@ function authenticateToken(req, res, next) {
 // Health check endpoint
 app.get('/health', async (req, res) => {
   try {
+    logger.debug('Health check requested');
     const result = await pool.query('SELECT NOW()');
+    logger.info('Health check passed');
     res.json({ 
       status: 'OK', 
       timestamp: result.rows[0].now,
       message: 'Server is running and connected to database'
     });
   } catch (err) {
+    logger.error('Health check failed:', err.message);
     res.status(500).json({ 
       status: 'ERROR', 
       message: 'Database connection failed',
@@ -98,6 +159,7 @@ app.get('/health', async (req, res) => {
 app.post('/api/auth/register', validateRegisterInput, async (req, res) => {
     try {
         const { username, email, password } = req.body;
+        logger.info(`Registration attempt for username: ${username}`);
         
         // Check if user already exists
         const existingUser = await pool.query(
@@ -106,6 +168,7 @@ app.post('/api/auth/register', validateRegisterInput, async (req, res) => {
         );
         
         if (existingUser.rows.length > 0) {
+            logger.warn(`Registration failed: Username or email already exists - ${username}`);
             return res.status(409).json({ error: 'Username or email already exists' });
         }
         
@@ -120,6 +183,7 @@ app.post('/api/auth/register', validateRegisterInput, async (req, res) => {
         );
         
         const user = result.rows[0];
+        logger.info(`User registered successfully: ${username} (ID: ${user.user_id})`);
         
         // Create JWT token
         const token = jwt.sign(
@@ -140,7 +204,7 @@ app.post('/api/auth/register', validateRegisterInput, async (req, res) => {
         });
         
     } catch (err) {
-        console.error('Registration error:', err);
+        logger.error('Registration error:', err.message);
         res.status(500).json({ error: 'Registration failed' });
     }
 });
@@ -148,9 +212,11 @@ app.post('/api/auth/register', validateRegisterInput, async (req, res) => {
 app.post('/api/auth/login', async (req, res) => {
     try {
         const { username, password } = req.body;
+        logger.info(`Login attempt for username: ${username}`);
         
         // Validate input
         if (!username || !password) {
+            logger.warn('Login failed: Missing username or password');
             return res.status(400).json({ error: 'Username and password are required' });
         }
         
@@ -161,6 +227,7 @@ app.post('/api/auth/login', async (req, res) => {
         );
         
         if (result.rows.length === 0) {
+            logger.warn(`Login failed: User not found - ${username}`);
             return res.status(401).json({ error: 'Invalid credentials' });
         }
         
@@ -170,6 +237,7 @@ app.post('/api/auth/login', async (req, res) => {
         const validPassword = await bcrypt.compare(password, user.password_hash);
         
         if (!validPassword) {
+            logger.warn(`Login failed: Invalid password - ${username}`);
             return res.status(401).json({ error: 'Invalid credentials' });
         }
         
@@ -186,6 +254,8 @@ app.post('/api/auth/login', async (req, res) => {
             { expiresIn: '24h' }
         );
         
+        logger.info(`Login successful: ${username} (ID: ${user.user_id})`);
+        
         res.json({
             message: 'Login successful',
             user: {
@@ -197,13 +267,14 @@ app.post('/api/auth/login', async (req, res) => {
         });
         
     } catch (err) {
-        console.error('Login error:', err);
+        logger.error('Login error:', err.message);
         res.status(500).json({ error: 'Login failed' });
     }
 });
 
 app.get('/api/auth/verify', authenticateToken, async (req, res) => {
     try {
+        logger.debug(`Token verification for user ID: ${req.user.user_id}`);
         // Token is valid, return user info
         const result = await pool.query(
             'SELECT user_id, username, email, created_at FROM users WHERE user_id = $1',
@@ -211,10 +282,12 @@ app.get('/api/auth/verify', authenticateToken, async (req, res) => {
         );
         
         if (result.rows.length === 0) {
+            logger.warn(`Token verification failed: User not found - ${req.user.user_id}`);
             return res.status(404).json({ error: 'User not found' });
         }
         
         const user = result.rows[0];
+        logger.debug(`Token verified for user: ${user.username}`);
         
         res.json({
             message: 'Token is valid',
@@ -227,7 +300,7 @@ app.get('/api/auth/verify', authenticateToken, async (req, res) => {
         });
         
     } catch (err) {
-        console.error('Token verification error:', err);
+        logger.error('Token verification error:', err.message);
         res.status(500).json({ error: 'Token verification failed' });
     }
 });
@@ -235,17 +308,19 @@ app.get('/api/auth/verify', authenticateToken, async (req, res) => {
 // Character endpoints
 app.get('/api/characters', authenticateToken, async (req, res) => {
     try {
+        logger.debug(`Fetching characters for user ID: ${req.user.user_id}`);
         const result = await pool.query(
             'SELECT character_id, name, class, level, x, y, z, health, mana, created_at FROM characters WHERE user_id = $1 ORDER BY created_at DESC',
             [req.user.user_id]
         );
         
+        logger.info(`Retrieved ${result.rows.length} characters for user ${req.user.user_id}`);
         res.json({
             message: 'Characters retrieved successfully',
             characters: result.rows
         });
     } catch (err) {
-        console.error('Get characters error:', err);
+        logger.error('Get characters error:', err.message);
         res.status(500).json({ error: 'Failed to retrieve characters' });
     }
 });
@@ -253,9 +328,11 @@ app.get('/api/characters', authenticateToken, async (req, res) => {
 app.post('/api/characters', authenticateToken, async (req, res) => {
     try {
         const { name, characterClass } = req.body;
+        logger.info(`Character creation attempt: ${name} (class: ${characterClass}) for user ${req.user.user_id}`);
         
         // Validation
         if (!name || name.length < 2 || name.length > 50) {
+            logger.warn(`Character creation failed: Invalid name length - ${name}`);
             return res.status(400).json({ error: 'Character name must be between 2 and 50 characters' });
         }
         
@@ -266,6 +343,7 @@ app.post('/api/characters', authenticateToken, async (req, res) => {
         );
         
         if (existingChar.rows.length > 0) {
+            logger.warn(`Character creation failed: Name already exists - ${name}`);
             return res.status(409).json({ error: 'You already have a character with this name' });
         }
         
@@ -284,6 +362,7 @@ app.post('/api/characters', authenticateToken, async (req, res) => {
         );
         
         const character = result.rows[0];
+        logger.info(`Character created successfully: ${name} (ID: ${character.character_id})`);
         
         res.status(201).json({
             message: 'Character created successfully',
@@ -291,7 +370,7 @@ app.post('/api/characters', authenticateToken, async (req, res) => {
         });
         
     } catch (err) {
-        console.error('Create character error:', err);
+        logger.error('Create character error:', err.message);
         res.status(500).json({ error: 'Failed to create character' });
     }
 });
@@ -299,6 +378,7 @@ app.post('/api/characters', authenticateToken, async (req, res) => {
 app.get('/api/characters/:id', authenticateToken, async (req, res) => {
     try {
         const characterId = req.params.id;
+        logger.debug(`Fetching character ${characterId} for user ${req.user.user_id}`);
         
         const result = await pool.query(
             'SELECT character_id, name, class, level, x, y, z, health, mana, created_at FROM characters WHERE character_id = $1 AND user_id = $2',
@@ -306,16 +386,18 @@ app.get('/api/characters/:id', authenticateToken, async (req, res) => {
         );
         
         if (result.rows.length === 0) {
+            logger.warn(`Character not found: ${characterId} for user ${req.user.user_id}`);
             return res.status(404).json({ error: 'Character not found' });
         }
         
+        logger.debug(`Character retrieved: ${result.rows[0].name}`);
         res.json({
             message: 'Character retrieved successfully',
             character: result.rows[0]
         });
         
     } catch (err) {
-        console.error('Get character error:', err);
+        logger.error('Get character error:', err.message);
         res.status(500).json({ error: 'Failed to retrieve character' });
     }
 });
@@ -325,9 +407,11 @@ app.put('/api/characters/:id/position', authenticateToken, async (req, res) => {
     try {
         const characterId = req.params.id;
         const { x, y, z } = req.body;
+        logger.debug(`Saving position for character ${characterId}: X=${x}, Y=${y}, Z=${z}`);
         
         // Validate coordinates
         if (typeof x !== 'number' || typeof y !== 'number' || typeof z !== 'number') {
+            logger.warn(`Invalid coordinates for character ${characterId}: x=${x}, y=${y}, z=${z}`);
             return res.status(400).json({ error: 'Invalid coordinates. x, y, z must be numbers' });
         }
         
@@ -338,6 +422,7 @@ app.put('/api/characters/:id/position', authenticateToken, async (req, res) => {
         );
         
         if (charCheck.rows.length === 0) {
+            logger.warn(`Position save failed: Character not found - ${characterId}`);
             return res.status(404).json({ error: 'Character not found' });
         }
         
@@ -347,24 +432,27 @@ app.put('/api/characters/:id/position', authenticateToken, async (req, res) => {
             [x, y, z, characterId]
         );
         
+        logger.info(`Position saved for character ${characterId}: X=${x}, Y=${y}, Z=${z}`);
         res.json({
             message: 'Position saved successfully',
             position: { x, y, z }
         });
         
     } catch (err) {
-        console.error('Save position error:', err);
+        logger.error('Save position error:', err.message);
         res.status(500).json({ error: 'Failed to save position' });
     }
 });
 
 // Test endpoint - will be replaced with auth later
 app.get('/api/test', (req, res) => {
+  logger.debug('Test endpoint accessed');
   res.json({ message: 'Hello from MMO Server!' });
 });
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`MMO Server running on port ${PORT}`);
-  console.log(`Database: ${process.env.DB_NAME}`);
+  logger.info(`MMO Server running on port ${PORT}`);
+  logger.info(`Database: ${process.env.DB_NAME}`);
+  logger.info(`Log level: ${LOG_LEVEL}`);
 });
