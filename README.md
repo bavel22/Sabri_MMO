@@ -76,6 +76,20 @@ A class-based action MMORPG built with Unreal Engine 5, Node.js, and PostgreSQL.
 - HTTP request logging middleware
 - Configurable log level via environment variable
 
+### Top-Down Movement System
+- **Click-to-Move**: Left-click on ground to move character
+- **WASD Movement**: Traditional keyboard controls
+- **Movement Cancel**: WASD input cancels click-to-move navigation
+- **Character Rotation**: Character smoothly faces movement direction
+- **NavMesh Pathfinding**: Automatic obstacle avoidance and pathfinding
+
+### Camera System
+- **Spring Arm Architecture**: Camera boom with independent rotation
+- **Right-Click Rotation**: Hold right-click to rotate camera around character
+- **Mouse Scroll Zoom**: Zoom in/out with scroll wheel (200-1500 units)
+- **Fixed Camera**: Camera stays stationary when player moves/turns
+- **Lag/Smoothing**: Camera follows with smooth interpolation
+
 ### Game World Integration
 - Enter World button functionality complete
 - Level loading with Open Level node
@@ -322,8 +336,13 @@ For questions or support:
 - [x] Server logging system with levels
 - [x] Login screen widget (WBP_LoginScreen)
 - [x] Login widget blueprint integration
-- [ ] Implement top-down movement controls
-- [ ] Add basic camera follow system
+- [x] Top-down click-to-move controls
+- [x] WASD movement with click-to-move cancel
+- [x] Spring Arm camera system
+- [x] Independent camera rotation (right-click)
+- [x] Mouse scroll zoom (min/max)
+- [x] Character faces movement direction
+- [x] NavMesh pathfinding
 
 ### Next Steps
 1. Implement top-down movement controls
