@@ -320,6 +320,44 @@ app.get('/api/characters/:id', authenticateToken, async (req, res) => {
     }
 });
 
+// Save character position
+app.put('/api/characters/:id/position', authenticateToken, async (req, res) => {
+    try {
+        const characterId = req.params.id;
+        const { x, y, z } = req.body;
+        
+        // Validate coordinates
+        if (typeof x !== 'number' || typeof y !== 'number' || typeof z !== 'number') {
+            return res.status(400).json({ error: 'Invalid coordinates. x, y, z must be numbers' });
+        }
+        
+        // Verify character belongs to user
+        const charCheck = await pool.query(
+            'SELECT character_id FROM characters WHERE character_id = $1 AND user_id = $2',
+            [characterId, req.user.user_id]
+        );
+        
+        if (charCheck.rows.length === 0) {
+            return res.status(404).json({ error: 'Character not found' });
+        }
+        
+        // Update position
+        await pool.query(
+            'UPDATE characters SET x = $1, y = $2, z = $3 WHERE character_id = $4',
+            [x, y, z, characterId]
+        );
+        
+        res.json({
+            message: 'Position saved successfully',
+            position: { x, y, z }
+        });
+        
+    } catch (err) {
+        console.error('Save position error:', err);
+        res.status(500).json({ error: 'Failed to save position' });
+    }
+});
+
 // Test endpoint - will be replaced with auth later
 app.get('/api/test', (req, res) => {
   res.json({ message: 'Hello from MMO Server!' });

@@ -331,6 +331,51 @@ void UHttpManager::OnGetCharactersResponse(UObject* WorldContextObject, TSharedP
                             CharData.Level = FCString::Atoi(*LevelStr);
                         }
                         
+                        // Parse X position
+                        FString XPrefix = TEXT("\"x\":");
+                        int32 XStart = CharObj.Find(XPrefix);
+                        if (XStart != INDEX_NONE)
+                        {
+                            XStart += XPrefix.Len();
+                            FString XStr = CharObj.Mid(XStart);
+                            int32 CommaPos = XStr.Find(TEXT(","));
+                            if (CommaPos != INDEX_NONE)
+                            {
+                                XStr = XStr.Left(CommaPos);
+                            }
+                            CharData.X = FCString::Atof(*XStr);
+                        }
+                        
+                        // Parse Y position
+                        FString YPrefix = TEXT("\"y\":");
+                        int32 YStart = CharObj.Find(YPrefix);
+                        if (YStart != INDEX_NONE)
+                        {
+                            YStart += YPrefix.Len();
+                            FString YStr = CharObj.Mid(YStart);
+                            int32 CommaPos = YStr.Find(TEXT(","));
+                            if (CommaPos != INDEX_NONE)
+                            {
+                                YStr = YStr.Left(CommaPos);
+                            }
+                            CharData.Y = FCString::Atof(*YStr);
+                        }
+                        
+                        // Parse Z position
+                        FString ZPrefix = TEXT("\"z\":");
+                        int32 ZStart = CharObj.Find(ZPrefix);
+                        if (ZStart != INDEX_NONE)
+                        {
+                            ZStart += ZPrefix.Len();
+                            FString ZStr = CharObj.Mid(ZStart);
+                            int32 CommaPos = ZStr.Find(TEXT(","));
+                            if (CommaPos != INDEX_NONE)
+                            {
+                                ZStr = ZStr.Left(CommaPos);
+                            }
+                            CharData.Z = FCString::Atof(*ZStr);
+                        }
+                        
                         CharacterList.Add(CharData);
                     }
                 }
@@ -424,5 +469,56 @@ void UHttpManager::OnCreateCharacterResponse(UObject* WorldContextObject, TShare
     else
     {
         UE_LOG(LogTemp, Error, TEXT("✗ Failed to connect to character creation server"));
+    }
+}
+
+void UHttpManager::SaveCharacterPosition(UObject* WorldContextObject, int32 CharacterId, float X, float Y, float Z)
+{
+    UE_LOG(LogTemp, Log, TEXT("Saving character %d position: X=%f, Y=%f, Z=%f"), CharacterId, X, Y, Z);
+
+    TSharedPtr<IHttpRequest> Request = FHttpModule::Get().CreateRequest();
+    Request->OnProcessRequestComplete().BindStatic(&UHttpManager::OnSavePositionResponse);
+    
+    FString Url = FString::Printf(TEXT("http://localhost:3001/api/characters/%d/position"), CharacterId);
+    Request->SetURL(Url);
+    Request->SetVerb(TEXT("PUT"));
+    Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+    
+    if (UMMOGameInstance* GI = GetGameInstance(WorldContextObject))
+    {
+        if (GI->IsAuthenticated())
+        {
+            Request->SetHeader(TEXT("Authorization"), GI->GetAuthHeader());
+        }
+    }
+
+    // Create JSON payload
+    FString JsonPayload = FString::Printf(TEXT("{\"x\":%f,\"y\":%f,\"z\":%f}"), X, Y, Z);
+    Request->SetContentAsString(JsonPayload);
+
+    Request->ProcessRequest();
+}
+
+void UHttpManager::OnSavePositionResponse(TSharedPtr<IHttpRequest> Request, TSharedPtr<IHttpResponse> Response, bool bWasSuccessful)
+{
+    if (bWasSuccessful && Response.IsValid())
+    {
+        int32 ResponseCode = Response->GetResponseCode();
+        FString ResponseContent = Response->GetContentAsString();
+
+        UE_LOG(LogTemp, Log, TEXT("Save Position Response Code: %d"), ResponseCode);
+
+        if (ResponseCode == 200)
+        {
+            UE_LOG(LogTemp, Display, TEXT("✓ Character position saved successfully!"));
+        }
+        else
+        {
+            UE_LOG(LogTemp, Warning, TEXT("✗ Failed to save position: %s"), *ResponseContent);
+        }
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("✗ Failed to connect to save position server"));
     }
 }

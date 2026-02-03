@@ -61,6 +61,13 @@ A class-based action MMORPG built with Unreal Engine 5, Node.js, and PostgreSQL.
 - IsAuthenticated check for level persistence
 - Event binding sequence for clean initialization
 
+### Character Position Persistence
+- Auto-save position every 5 seconds while playing
+- Load saved position on character spawn
+- Fallback to Player Start for new characters (0,0,0 check)
+- Server endpoint: PUT /api/characters/:id/position
+- Database storage for X, Y, Z coordinates
+
 ### Game World Integration
 - Enter World button functionality complete
 - Level loading with Open Level node
@@ -302,14 +309,14 @@ For questions or support:
 - [x] Enter World functionality complete
 - [x] Game world integration complete
 - [x] Character spawn and possession working
-- [ ] Save character position on exit
-- [ ] Load character position on spawn
+- [x] Save character position on exit
+- [x] Load character position on spawn
+- [ ] Implement top-down movement controls
+- [ ] Add basic camera follow system
 
 ### Next Steps
-1. Save character position on exit
-2. Load character position on spawn
-3. Implement top-down movement controls
-4. Add basic camera follow system
+1. Implement top-down movement controls
+2. Add basic camera follow system
 
 ---
 
