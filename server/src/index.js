@@ -348,7 +348,7 @@ app.post('/api/characters', authenticateToken, async (req, res) => {
         }
         
         // Validate class (optional field)
-        const validClasses = ['warrior', 'mage', 'archer', 'healer'];
+        const validClasses = ['warrior', 'mage', 'archer', 'healer', 'priest'];
         const charClass = characterClass && validClasses.includes(characterClass.toLowerCase()) 
             ? characterClass.toLowerCase() 
             : 'warrior';
