@@ -6,6 +6,7 @@ Quick start guide for running the development environment.
 
 - **Node.js** (v18+) - [Download](https://nodejs.org/)
 - **PostgreSQL** (v14+) - [Download](https://www.postgresql.org/download/)
+- **Redis** (v7+) - [Download](https://github.com/microsoftarchive/redis/releases)
 - **Unreal Engine 5.4+** - Epic Games Launcher
 - **Git** - [Download](https://git-scm.com/)
 
@@ -35,7 +36,45 @@ Default credentials (development only):
 
 ---
 
-## 2. Start the Server
+## 2. Start Redis (Cache)
+
+### Windows
+```bash
+# Start Redis server
+redis-server
+
+# Or with custom config
+redis-server redis.windows.conf
+```
+
+### Verify Connection
+```bash
+redis-cli ping
+```
+
+Expected response:
+```
+PONG
+```
+
+### Common Commands
+```bash
+# Check if running
+redis-cli ping
+
+# View all keys
+redis-cli KEYS '*'
+
+# Clear all data (careful!)
+redis-cli FLUSHALL
+
+# Stop Redis
+redis-cli shutdown
+```
+
+---
+
+## 3. Start the Server
 
 ### Option A: Batch File (Windows)
 ```bash
@@ -67,7 +106,7 @@ server/logs/server.log
 
 ---
 
-## 3. Open pgAdmin 4 (Database Admin)
+## 4. Open pgAdmin 4 (Database Admin)
 
 ### Launch
 - Start Menu → pgAdmin 4
@@ -101,7 +140,7 @@ JOIN users u ON c.user_id = u.user_id;
 
 ---
 
-## 4. Open Unreal Engine Project
+## 5. Open Unreal Engine Project
 
 1. Launch Epic Games Launcher
 2. Open Unreal Engine 5.4
@@ -129,6 +168,7 @@ JOIN users u ON c.user_id = u.user_id;
 | Game Server | http://localhost:3001 | API endpoints |
 | Health Check | http://localhost:3001/health | Verify server |
 | pgAdmin 4 | http://localhost:5050 (or app) | Database admin |
+| Redis CLI | `redis-cli` | Cache commands |
 
 ---
 
@@ -179,10 +219,11 @@ taskkill /F /IM node.exe
 ## Development Workflow
 
 1. **Start PostgreSQL** (if not running)
-2. **Start Server** (`server/start-server.bat`)
-3. **Open UE5** (load `SabriMMO.uproject`)
-4. **Click Play** to test
-5. **Use pgAdmin** to inspect data as needed
+2. **Start Redis** (`redis-server`)
+3. **Start Server** (`server/start-server.bat`)
+4. **Open UE5** (load `SabriMMO.uproject`)
+5. **Click Play** to test
+6. **Use pgAdmin** to inspect data as needed
 
 ---
 
