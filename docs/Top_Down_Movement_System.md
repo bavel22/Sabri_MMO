@@ -168,6 +168,27 @@ In **BP_MMOCharacter** → Class Defaults:
 - **NavMesh**: Large/complex NavMeshes impact pathfinding performance
 - **Input Polling**: Enhanced Input is more efficient than legacy input system
 
+## Acceleration Settings
+
+To enable smooth acceleration for click-to-move (NavMesh pathfinding):
+
+### CharacterMovement Configuration
+
+1. Select **CharacterMovement** component in BP_MMOCharacter
+2. **Details** panel → **Character Movement: Walking**
+   - **Max Acceleration**: 800 (or desired value)
+   - **Braking Deceleration Walking**: 800
+   - **Ground Friction**: 8.0
+
+3. **Details** panel → **Character Movement: Navigation**
+   - **Use Acceleration for Paths**: **TRUE** ✓
+   - This enables smooth acceleration for Simple Move to Location
+
+### Result
+- Click-to-move now ramps up speed gradually instead of snapping instantly
+- Character uses NavMesh pathfinding (avoids walls, uses ramps)
+- WASD and click-to-move share the same smooth acceleration feel
+
 ## References
 
 - Related: [Camera System](Camera_System.md)

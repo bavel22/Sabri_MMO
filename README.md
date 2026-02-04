@@ -343,10 +343,12 @@ For questions or support:
 - [x] Mouse scroll zoom (min/max)
 - [x] Character faces movement direction
 - [x] NavMesh pathfinding
+- [x] Movement acceleration for smooth animations
 
 ### Next Steps
-1. Implement top-down movement controls
-2. Add basic camera follow system
+1. ~~Implement top-down movement controls~~ ✓ Complete
+2. ~~Add basic camera follow system~~ ✓ Complete
+3. Begin Phase 2 - Multiplayer Networking
 
 ---
 
