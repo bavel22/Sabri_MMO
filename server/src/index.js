@@ -6,6 +6,8 @@ const jwt = require('jsonwebtoken');
 const rateLimit = require('express-rate-limit');
 const fs = require('fs');
 const path = require('path');
+const redis = require('redis');
+const { Server } = require('socket.io');
 require('dotenv').config();
 
 // Setup file logging
@@ -61,6 +63,69 @@ const logger = {
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Create HTTP server for Socket.io
+const http = require('http');
+const server = http.createServer(app);
+
+// Setup Socket.io
+const io = new Server(server, {
+    cors: {
+        origin: "*",
+        methods: ["GET", "POST"]
+    }
+});
+
+// Store connected players
+const connectedPlayers = new Map();
+
+// Socket.io connection handler
+io.on('connection', (socket) => {
+    logger.info(`Socket connected: ${socket.id}`);
+    
+    // Player authentication and join
+    socket.on('player:join', async (data) => {
+        const { characterId, token } = data;
+        
+        // Store player connection
+        connectedPlayers.set(characterId, {
+            socketId: socket.id,
+            characterId: characterId
+        });
+        
+        logger.info(`Player joined: Character ${characterId}`);
+        socket.emit('player:joined', { success: true });
+    });
+    
+    // Position update from client
+    socket.on('player:position', async (data) => {
+        const { characterId, x, y, z } = data;
+        
+        // Cache in Redis
+        await setPlayerPosition(characterId, x, y, z);
+        
+        // Broadcast to other players
+        socket.broadcast.emit('player:moved', {
+            characterId,
+            x, y, z,
+            timestamp: Date.now()
+        });
+    });
+    
+    // Disconnect
+    socket.on('disconnect', () => {
+        logger.info(`Socket disconnected: ${socket.id}`);
+        
+        // Remove from connected players
+        for (const [charId, player] of connectedPlayers.entries()) {
+            if (player.socketId === socket.id) {
+                connectedPlayers.delete(charId);
+                logger.info(`Player left: Character ${charId}`);
+                break;
+            }
+        }
+    });
+});
+
 // Middleware
 app.use(cors());
 app.use(express.json());
@@ -87,6 +152,23 @@ const pool = new Pool({
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
 });
+
+// Redis connection
+const redisClient = redis.createClient({
+    host: process.env.REDIS_HOST || 'localhost',
+    port: process.env.REDIS_PORT || 6379
+});
+
+redisClient.on('error', (err) => {
+    logger.error('Redis error:', err);
+});
+
+redisClient.on('connect', () => {
+    logger.info('Connected to Redis');
+});
+
+// Connect to Redis (required for redis v4+)
+redisClient.connect();
 
 // Input validation
 function validateRegisterInput(req, res, next) {
@@ -450,9 +532,54 @@ app.get('/api/test', (req, res) => {
   res.json({ message: 'Hello from MMO Server!' });
 });
 
+// Redis helper functions for player position cache
+async function setPlayerPosition(characterId, x, y, z, zone = 'default') {
+    const key = `player:${characterId}:position`;
+    const position = JSON.stringify({ x, y, z, zone, timestamp: Date.now() });
+    await redisClient.setEx(key, 300, position); // Expire after 5 minutes
+    logger.debug(`Cached position for character ${characterId}`);
+}
+
+async function getPlayerPosition(characterId) {
+    const key = `player:${characterId}:position`;
+    const data = await redisClient.get(key);
+    return data ? JSON.parse(data) : null;
+}
+
+async function removePlayerPosition(characterId) {
+    const key = `player:${characterId}:position`;
+    await redisClient.del(key);
+    logger.debug(`Removed position cache for character ${characterId}`);
+}
+
+async function getPlayersInZone(zone = 'default') {
+    const keys = await redisClient.keys('player:*:position');
+    const players = [];
+    for (const key of keys) {
+        const data = await redisClient.get(key);
+        if (data) {
+            const pos = JSON.parse(data);
+            if (pos.zone === zone) {
+                const characterId = key.split(':')[1];
+                players.push({ characterId: parseInt(characterId), ...pos });
+            }
+        }
+    }
+    return players;
+}
+
 // Start server
-app.listen(PORT, () => {
+server.listen(PORT, async () => {
   logger.info(`MMO Server running on port ${PORT}`);
+  logger.info(`Socket.io ready`);
   logger.info(`Database: ${process.env.DB_NAME}`);
   logger.info(`Log level: ${LOG_LEVEL}`);
+  
+  // Test Redis connection
+  try {
+    await redisClient.ping();
+    logger.info('Redis: Connected');
+  } catch (err) {
+    logger.error('Redis: Connection failed -', err.message);
+  }
 });
