@@ -455,18 +455,223 @@ Script: `database/create_test_users.js`
 - [ ] Client-side prediction (for local player responsiveness)
 - [ ] Server reconciliation (correct position drift)
 
+## Additional Session - Player Name Tags Complete
+
+### Overview
+Added player name tags above both local and remote player characters. Names are sent from server on join/move and displayed using WBP_PlayerNameTag widget in Screen space.
+
+### Server Changes
+
+#### server/src/index.js - Character Name Storage
+```javascript
+// Store player with name on join
+socket.on('player:join', async (data) => {
+    const { characterId, token, characterName } = data;
+    
+    connectedPlayers.set(characterId, {
+        socketId: socket.id,
+        characterId: characterId,
+        characterName: characterName || 'Unknown'
+    });
+    
+    logger.info(`Player joined: ${characterName || 'Unknown'} (Character ${characterId})`);
+    socket.emit('player:joined', { success: true });
+});
+
+// Include name in position broadcasts
+socket.on('player:position', async (data) => {
+    const { characterId, x, y, z } = data;
+    const player = connectedPlayers.get(characterId);
+    const characterName = player ? player.characterName : 'Unknown';
+    
+    // Broadcast to other players with name
+    socket.broadcast.emit('player:moved', {
+        characterId,
+        characterName,
+        x, y, z,
+        timestamp: Date.now()
+    });
+});
+
+// Include name in disconnect
+socket.on('disconnect', () => {
+    for (const [charId, player] of connectedPlayers.entries()) {
+        if (player.socketId === socket.id) {
+            connectedPlayers.delete(charId);
+            io.emit('player:left', { 
+                characterId: charId,
+                characterName: player.characterName || 'Unknown'
+            });
+            break;
+        }
+    }
+});
+```
+
+### Client Changes
+
+#### BP_SocketManager - Send Name on Join
+```
+OnSocketConnected
+    ↓
+Get Game Instance → Cast to MMOGameInstance
+    ↓
+Get SelectedCharacter → Break → Get Name
+    ↓
+Construct Json Object
+    ↓
+Set String Field ("characterId", ...)
+Set String Field ("token", ...)
+Set String Field ("characterName", Name)
+    ↓
+Emit("player:join", JsonValue)
+```
+
+#### BP_SocketManager - Parse Name on Move
+```
+Function OnPlayerMoved(Data: String)
+    ↓
+Value From Json String → As Object
+    ↓
+Try Get String Field ("characterId") → To Integer
+Try Get String Field ("characterName") → Store as String
+Try Get String Field ("x") → To Float
+Try Get String Field ("y") → To Float
+Try Get String Field ("z") → To Float
+    ↓
+Get BP_OtherPlayerManager → SpawnOrUpdatePlayer
+    Pass: characterId, x, y, z
+    Set PlayerName variable on spawned actor (via cast)
+```
+
+### WBP_PlayerNameTag Widget
+
+**Purpose**: Display player name above character head
+
+**Designer Layout:**
+```
+CanvasPanel (Root)
+└── TextBlock (Player Name Text)
+    - Anchors: Center
+    - Justification: Center
+    - Color: White with Shadow
+```
+
+**Function: SetPlayerName**
+```
+Input: NewName (Text)
+    ↓
+Get TextBlock (from Designer)
+    ↓
+Set Text → NewName
+```
+
+### BP_OtherPlayerCharacter - Name Tag Setup
+
+**Components:**
+| Component | Type | Settings |
+|-----------|------|----------|
+| NameTagWidget | Widget Component | Widget Class: WBP_PlayerNameTag, Space: Screen, Draw Size: 200x50, Location: Z=250 |
+
+**Variables:**
+| Variable | Type | Purpose |
+|----------|------|---------|
+| PlayerName | String | Character name to display |
+
+**Event BeginPlay:**
+```
+Event BeginPlay
+    ↓
+Delay (0.1 seconds)  ← Wait for PlayerName to be set
+    ↓
+Get NameTagWidget → Get User Widget Object
+    ↓
+Cast to WBP_PlayerNameTag
+    ↓
+Set Player Name → PlayerName variable
+```
+
+### BP_MMOCharacter - Local Player Name Tag
+
+**Same setup as BP_OtherPlayerCharacter:**
+- Widget Component: NameTagWidget (WBP_PlayerNameTag)
+- Space: Screen
+- Location: Z=250
+
+**Event BeginPlay:**
+```
+Event BeginPlay
+    ↓
+Get Game Instance → Cast to MMOGameInstance
+    ↓
+Get SelectedCharacter → Break → Get Name
+    ↓
+Set PlayerName variable (self)
+    ↓
+Delay (0.1 seconds)
+    ↓
+Get User Widget Object → Cast → Set Player Name
+```
+
+### Testing Results
+
+**Local Player Test:**
+- ✓ Name tag visible above local character
+- ✓ Name matches SelectedCharacter.Name
+
+**Two Player Test:**
+- ✓ Each player sees their own name
+- ✓ Each player sees other player's name
+- ✓ Names update correctly on spawn
+
+### Files Created/Modified
+
+**Client:**
+- `Content/Blueprints/Widgets/WBP_PlayerNameTag.uasset` - Name tag widget
+- `Content/Blueprints/BP_OtherPlayerCharacter.uasset` - Added WidgetComponent, PlayerName variable
+- `Content/Blueprints/BP_MMOCharacter.uasset` - Added name tag widget
+- `Content/Blueprints/BP_SocketManager.uasset` - Send/parse characterName
+
+**Server:**
+- `server/src/index.js` - Store and broadcast characterName
+
+**Documentation:**
+- `docs/WBP_PlayerNameTag.md` - Complete widget documentation
+- `docs/JSON_Communication_Protocol.md` - JSON event formats
+- `docs/SocketIO_RealTime_Multiplayer.md` - Updated with name tags
+
+---
+
+## Phase 2 Progress Update - Final
+
+### Completed
+- [x] Socket.io server integration
+- [x] Socket.io UE5 client
+- [x] Redis player position cache
+- [x] Server tick loop (30Hz via client emit)
+- [x] Player position broadcast system
+- [x] Spawn other players in world
+- [x] Smooth interpolation for remote players
+- [x] Player disconnect handling
+- [x] Multiplayer tested with 5 players
+- [x] Player name tags above characters
+
+### Remaining
+- [ ] Client-side prediction
+- [ ] Server reconciliation
+
 ---
 
 ## Next Steps
 
 1. **Client-side prediction** - Make local movement feel more responsive
 2. **Server reconciliation** - Correct drift from server authority
-3. **Player name tags** - Show usernames above characters
-4. **Chat system** - Global and zone-based messaging
+3. **Chat system** - Global and zone-based messaging
+4. **Basic combat** - Simple hit detection
 
 ---
 
-**Progress: Phase 2 Multiplayer Core Complete (95%)**
+**Progress: Phase 2 Multiplayer Core Complete (100%)**
 
 **Last Updated**: 2026-02-04
 

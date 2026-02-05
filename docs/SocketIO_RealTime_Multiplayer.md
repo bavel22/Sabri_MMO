@@ -29,6 +29,7 @@ The Socket.io system enables real-time bidirectional communication between the U
 - Redis position caching
 - Broadcast to all connected players
 - 5+ player scale tested
+- Player name tags above characters
 
 ### Technology Stack
 - **Server**: Node.js + Socket.io 4.7.4
@@ -122,31 +123,36 @@ io.on('connection', (socket) => {
     
     // Handle player join
     socket.on('player:join', async (data) => {
-        const { characterId, token } = data;
+        const { characterId, token, characterName } = data;
         
-        // Store in connected players map
+        // Store in connected players map with name
         connectedPlayers.set(characterId, {
             socketId: socket.id,
-            characterId: characterId
+            characterId: characterId,
+            characterName: characterName || 'Unknown'
         });
         
-        logger.info(`Player joined: Character ${characterId}`);
+        logger.info(`Player joined: ${characterName || 'Unknown'} (Character ${characterId})`);
         socket.emit('player:joined', { success: true });
     });
     
     // Handle position updates
     socket.on('player:position', async (data) => {
         const { characterId, x, y, z } = data;
+        const player = connectedPlayers.get(characterId);
+        const characterName = player ? player.characterName : 'Unknown';
         
         // Cache in Redis
         await setPlayerPosition(characterId, x, y, z);
         
-        // Broadcast to other players
+        // Broadcast to other players with name
         socket.broadcast.emit('player:moved', {
             characterId,
+            characterName,
             x, y, z,
             timestamp: Date.now()
         });
+        logger.info(`Broadcasted player:moved for ${characterName} (Character ${characterId})`);
     });
     
     // Handle disconnect
@@ -157,11 +163,13 @@ io.on('connection', (socket) => {
         for (const [charId, player] of connectedPlayers.entries()) {
             if (player.socketId === socket.id) {
                 connectedPlayers.delete(charId);
-                logger.info(`Player left: Character ${charId}`);
+                logger.info(`Player left: ${player.characterName || 'Unknown'} (Character ${charId})`);
                 
                 // Broadcast to other players using io (socket already disconnected)
-                io.emit('player:left', { characterId: charId });
-                logger.info(`Broadcasted player:left for Character ${charId}`);
+                io.emit('player:left', { 
+                    characterId: charId,
+                    characterName: player.characterName || 'Unknown'
+                });
                 break;
             }
         }
@@ -253,7 +261,7 @@ async function getPlayersInZone(zone = 'default') {
 
 | Event | Data | Description |
 |-------|------|-------------|
-| `player:join` | `{characterId, token}` | Player enters world |
+| `player:join` | `{characterId, token, characterName}` | Player enters world |
 | `player:position` | `{characterId, x, y, z}` | Position update (30Hz) |
 
 ### Server → Client Events
@@ -261,8 +269,8 @@ async function getPlayersInZone(zone = 'default') {
 | Event | Data | Description |
 |-------|------|-------------|
 | `player:joined` | `{success: true}` | Join acknowledged |
-| `player:moved` | `{characterId, x, y, z, timestamp}` | Other player moved |
-| `player:left` | `{characterId}` | Other player disconnected |
+| `player:moved` | `{characterId, characterName, x, y, z, timestamp}` | Other player moved |
+| `player:left` | `{characterId, characterName}` | Other player disconnected |
 
 ### Server Logs
 
@@ -314,6 +322,10 @@ Set String Field (FieldName: "characterId", StringValue: CharacterId → To Stri
     ↓
 Set String Field (FieldName: "token", StringValue: AuthToken)
     ↓
+Get Game Instance → Cast to MMOGameInstance → Get SelectedCharacter → Break → Get Name
+    ↓
+Set String Field (FieldName: "characterName", StringValue: Name)
+    ↓
 Construct Json Object Value (from Json Object)
     ↓
 Get SocketIO → Emit (Event Name: "player:join", Message: Json Value)
@@ -362,6 +374,7 @@ Value From Json String (Data)
 As Object
     ↓
 Try Get String Field ("characterId") → String → To Integer → MovedCharacterId
+Try Get String Field ("characterName") → String → Store as PlayerName
 Try Get String Field ("x") → String → To Float → X
 Try Get String Field ("y") → String → To Float → Y
 Try Get String Field ("z") → String → To Float → Z
@@ -379,6 +392,8 @@ Get Actor of Class (BP_OtherPlayerManager)
 Cast to BP_OtherPlayerManager
     ↓
 SpawnOrUpdatePlayer(MovedCharacterId, X, Y, Z)
+    ↓
+Set PlayerName variable on spawned actor
 ```
 
 ### Step 5: OnPlayerLeft - Remove Disconnected Players
@@ -529,9 +544,8 @@ RemovePlayer(DisconnectedId)
 
 1. **Client-Side Prediction**: Make local movement feel more responsive
 2. **Server Reconciliation**: Correct client position from server authority
-3. **Player Name Tags**: Show usernames above characters
-4. **Chat System**: Global and zone-based messaging
-5. **Zone System**: Group players by area for optimization
+3. **Chat System**: Global and zone-based messaging
+4. **Zone System**: Group players by area for optimization
 
 ---
 
@@ -542,9 +556,11 @@ RemovePlayer(DisconnectedId)
 - `server/package.json` - Added socket.io, redis dependencies
 
 ### Client
-- `Content/Blueprints/BP_SocketManager.uasset` - Socket manager with OnPlayerLeft
-- `Content/Blueprints/BP_OtherPlayerCharacter.uasset` - Remote player actor with interpolation
+- `Content/Blueprints/BP_SocketManager.uasset` - Socket manager with OnPlayerLeft and characterName handling
+- `Content/Blueprints/BP_OtherPlayerCharacter.uasset` - Remote player actor with interpolation and name tag widget
 - `Content/Blueprints/BP_OtherPlayerManager.uasset` - Player spawning/management singleton
+- `Content/Blueprints/BP_MMOCharacter.uasset` - Local player with name tag widget
+- `Content/Blueprints/Widgets/WBP_PlayerNameTag.uasset` - Name tag display widget
 - `Source/SabriMMO/MMOGameInstance.h/.cpp` - Auth token storage
 - `Plugins/SocketIOClient/` - Socket.io plugin
 
@@ -555,11 +571,13 @@ RemovePlayer(DisconnectedId)
 - `docs/SocketIO_RealTime_Multiplayer.md` - This file
 - `docs/BP_OtherPlayerCharacter.md` - Remote player character documentation
 - `docs/BP_OtherPlayerManager.md` - Player manager documentation
+- `docs/WBP_PlayerNameTag.md` - Name tag widget documentation
+- `docs/JSON_Communication_Protocol.md` - JSON event formats
 - `README.md` - Phase 2 progress update
 - `RUNNING.md` - Redis startup instructions
 
 ---
 
 **Last Updated**: 2026-02-04
-**Version**: 0.5.1
-**Status**: Socket.io with Player Spawning Complete
+**Version**: 0.6.0
+**Status**: Socket.io with Player Spawning and Name Tags Complete

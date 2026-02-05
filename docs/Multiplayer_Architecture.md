@@ -70,7 +70,7 @@ UE5 Client                                  Node.js Server
     │ ─────── Socket.io Connect ─────────────────> │
     │                                               │
     │ ─────── Emit player:join ──────────────────> │
-    │       {characterId, token}                    │
+    │       {characterId, token, characterName}     │
     │                                               │
     │ <────── Emit player:joined ───────────────── │
     │       {success: true}                         │
@@ -90,7 +90,7 @@ UE5 Client A                                Node.js Server                      
     │       {characterId, x, y, z}                  │                                           │
     │                                               │                                           │
     │                                               │ ─────── Broadcast player:moved ─────────> │
-    │                                               │       {characterId, x, y, z, timestamp}   │
+    │                                               │       {characterId, characterName, x, y, z} │
     │                                               │                                           │
     │                                               │ <────── Spawn/Update Actor ───────────── │
     │                                               │                                           │
@@ -105,7 +105,7 @@ UE5 Client A                                Node.js Server                      
     │ ─────── Disconnect ────────────────────────> │                                           │
     │                                               │                                           │
     │                                               │ ─────── Emit player:left ──────────────> │
-    │                                               │       {characterId}                       │
+    │                                               │       {characterId, characterName}        │
     │                                               │                                           │
     │                                               │ <────── Destroy Actor ────────────────── │
 ```
@@ -122,8 +122,9 @@ UE5 Client A                                Node.js Server                      
 | **Input** | Enhanced Input (WASD / Click to move) |
 | **Movement** | Direct control via CharacterMovement |
 | **Camera** | SpringArm + Camera (local view) |
-| **Network** | Emits position at 30Hz |
+| **Network** | Emits position at 30Hz, displays name tag |
 | **Possession** | PlayerController possessed |
+| **UI** | WBP_PlayerNameTag above head (Screen space) |
 
 **Components:**
 - CapsuleComponent (collision)
@@ -131,6 +132,7 @@ UE5 Client A                                Node.js Server                      
 - SpringArm (camera boom)
 - Camera (player view)
 - CharacterMovement
+- NameTagWidget (Widget Component, Screen space)
 
 ---
 
@@ -142,19 +144,22 @@ UE5 Client A                                Node.js Server                      
 | **Input** | None (server-controlled) |
 | **Movement** | Interpolation toward TargetPosition |
 | **Camera** | None |
-| **Network** | Receives position updates, interpolates |
+| **Network** | Receives position updates, interpolates, displays name tag |
 | **Possession** | None (unpossessed) |
+| **UI** | WBP_PlayerNameTag above head (Screen space) |
 
 **Components:**
 - CapsuleComponent (collision)
 - SkeletalMesh (visual)
 - CharacterMovement (minimal use)
+- NameTagWidget (Widget Component, Screen space)
 
 **Variables:**
 | Variable | Type | Purpose |
 |----------|------|---------|
 | `TargetPosition` | Vector | Last known server position |
 | `InterpolationSpeed` | Float | Smoothing factor (10.0) |
+| `PlayerName` | String | Character name for name tag |
 
 **Tick Logic:**
 ```
@@ -208,7 +213,7 @@ Set Actor Location(New)
 
 | Event | Frequency | Data | Purpose |
 |-------|-----------|------|---------|
-| `player:join` | Once | `{characterId, token}` | Authenticate and register |
+| `player:join` | Once | `{characterId, token, characterName}` | Authenticate and register |
 | `player:position` | 30Hz | `{characterId, x, y, z}` | Send position update |
 
 ### Server → Client
@@ -216,8 +221,8 @@ Set Actor Location(New)
 | Event | Trigger | Data | Purpose |
 |-------|---------|------|---------|
 | `player:joined` | On join | `{success: true}` | Join acknowledged |
-| `player:moved` | Broadcast | `{characterId, x, y, z, timestamp}` | Other player moved |
-| `player:left` | Disconnect | `{characterId}` | Other player left |
+| `player:moved` | Broadcast | `{characterId, characterName, x, y, z, timestamp}` | Other player moved |
+| `player:left` | Disconnect | `{characterId, characterName}` | Other player left |
 
 ---
 
@@ -249,7 +254,7 @@ Level BP (Enter World)
 
 ```
 Node.js Server
-├── connectedPlayers (Map: characterId → {socketId, characterId})
+├── connectedPlayers (Map: characterId → {socketId, characterId, characterName})
 └── Redis Cache
     └── player:{id}:position → {x, y, z, timestamp, zone}
 ```
@@ -345,11 +350,12 @@ World
 - `docs/SocketIO_RealTime_Multiplayer.md` - Socket.io implementation details
 - `docs/BP_OtherPlayerCharacter.md` - Remote player actor
 - `docs/BP_OtherPlayerManager.md` - Player manager
-- `docs/Daily Progress/MMO_Development_Progress_2026-02-04.md` - Daily progress
+- `docs/BP_MMOCharacter.md` - Local player character
+- `docs/WBP_PlayerNameTag.md` - Name tag widget documentation
 
 ---
 
 **Last Updated**: 2026-02-04
-**Version**: 1.1
-**Status**: Multiplayer Spawning Complete
+**Version**: 1.2
+**Status**: Multiplayer Spawning and Name Tags Complete
 
