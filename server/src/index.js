@@ -99,6 +99,7 @@ io.on('connection', (socket) => {
     // Position update from client
     socket.on('player:position', async (data) => {
         const { characterId, x, y, z } = data;
+        logger.info(`Position update received: Character ${characterId} at (${x}, ${y}, ${z})`);
         
         // Cache in Redis
         await setPlayerPosition(characterId, x, y, z);
@@ -109,17 +110,24 @@ io.on('connection', (socket) => {
             x, y, z,
             timestamp: Date.now()
         });
+        logger.info(`Broadcasted player:moved for Character ${characterId}`);
     });
     
     // Disconnect
     socket.on('disconnect', () => {
         logger.info(`Socket disconnected: ${socket.id}`);
+        logger.info(`Connected players count: ${connectedPlayers.size}`);
         
         // Remove from connected players
         for (const [charId, player] of connectedPlayers.entries()) {
+            logger.info(`Checking player ${charId} with socket ${player.socketId} against ${socket.id}`);
             if (player.socketId === socket.id) {
                 connectedPlayers.delete(charId);
                 logger.info(`Player left: Character ${charId}`);
+                
+                // Broadcast to other players using io (socket is already disconnected)
+                io.emit('player:left', { characterId: charId });
+                logger.info(`Broadcasted player:left for Character ${charId}`);
                 break;
             }
         }
