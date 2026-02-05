@@ -84,33 +84,38 @@ io.on('connection', (socket) => {
     
     // Player authentication and join
     socket.on('player:join', async (data) => {
-        const { characterId, token } = data;
+        const { characterId, token, characterName } = data;
         
-        // Store player connection
+        // Store player connection with name
         connectedPlayers.set(characterId, {
             socketId: socket.id,
-            characterId: characterId
+            characterId: characterId,
+            characterName: characterName || 'Unknown'
         });
         
-        logger.info(`Player joined: Character ${characterId}`);
+        logger.info(`Player joined: ${characterName || 'Unknown'} (Character ${characterId})`);
         socket.emit('player:joined', { success: true });
     });
     
     // Position update from client
     socket.on('player:position', async (data) => {
         const { characterId, x, y, z } = data;
-        logger.info(`Position update received: Character ${characterId} at (${x}, ${y}, ${z})`);
+        const player = connectedPlayers.get(characterId);
+        const characterName = player ? player.characterName : 'Unknown';
+        
+        logger.info(`Position update received: ${characterName} (Character ${characterId}) at (${x}, ${y}, ${z})`);
         
         // Cache in Redis
         await setPlayerPosition(characterId, x, y, z);
         
-        // Broadcast to other players
+        // Broadcast to other players with name
         socket.broadcast.emit('player:moved', {
             characterId,
+            characterName,
             x, y, z,
             timestamp: Date.now()
         });
-        logger.info(`Broadcasted player:moved for Character ${characterId}`);
+        logger.info(`Broadcasted player:moved for ${characterName} (Character ${characterId})`);
     });
     
     // Disconnect
@@ -126,8 +131,11 @@ io.on('connection', (socket) => {
                 logger.info(`Player left: Character ${charId}`);
                 
                 // Broadcast to other players using io (socket is already disconnected)
-                io.emit('player:left', { characterId: charId });
-                logger.info(`Broadcasted player:left for Character ${charId}`);
+                io.emit('player:left', { 
+                    characterId: charId,
+                    characterName: player.characterName || 'Unknown'
+                });
+                logger.info(`Broadcasted player:left for ${player.characterName || 'Unknown'} (Character ${charId})`);
                 break;
             }
         }

@@ -371,6 +371,9 @@ For questions or support:
 - Socket.io event binding in Blueprints
 - Tested with 5 concurrent players
 
+### Known Issues
+- **BP_OtherPlayerCharacter animations**: Remote players slide instead of playing walk/run animations. Needs velocity-based animation state machine in ABP_unarmed or CharacterMovement-based interpolation instead of direct location setting.
+
 ---
 
 **Last Updated**: 2026-02-04
