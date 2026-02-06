@@ -78,6 +78,26 @@ const io = new Server(server, {
 // Store connected players
 const connectedPlayers = new Map();
 
+// Combat constants
+const COMBAT = {
+    BASE_DAMAGE: 10,
+    DAMAGE_VARIANCE: 5,
+    ATTACK_RANGE: 500,
+    ATTACK_COOLDOWN_MS: 1000,
+    RESPAWN_DELAY_MS: 5000,
+    SPAWN_POSITION: { x: 0, y: 0, z: 90 }
+};
+
+// Helper: Find player entry by socket ID
+function findPlayerBySocketId(socketId) {
+    for (const [charId, player] of connectedPlayers.entries()) {
+        if (player.socketId === socketId) {
+            return { characterId: charId, player };
+        }
+    }
+    return null;
+}
+
 // Socket.io connection handler
 io.on('connection', (socket) => {
     logger.info(`Socket connected: ${socket.id}`);
@@ -86,15 +106,83 @@ io.on('connection', (socket) => {
     socket.on('player:join', async (data) => {
         const { characterId, token, characterName } = data;
         
-        // Store player connection with name
+        // Fetch character data from database (position + health/mana)
+        let health = 100, maxHealth = 100, mana = 100, maxMana = 100;
+        try {
+            const charResult = await pool.query(
+                'SELECT x, y, z, health, max_health, mana, max_mana FROM characters WHERE character_id = $1',
+                [characterId]
+            );
+            if (charResult.rows.length > 0) {
+                const row = charResult.rows[0];
+                health = row.health;
+                maxHealth = row.max_health;
+                mana = row.mana;
+                maxMana = row.max_mana;
+                
+                // Cache correct position in Redis
+                await setPlayerPosition(characterId, row.x, row.y, row.z);
+                // Broadcast correct position to other players immediately
+                socket.broadcast.emit('player:moved', {
+                    characterId,
+                    characterName,
+                    x: row.x,
+                    y: row.y,
+                    z: row.z,
+                    timestamp: Date.now()
+                });
+                logger.info(`Broadcasted initial position for ${characterName} (Character ${characterId}) at (${row.x}, ${row.y}, ${row.z})`);
+            }
+        } catch (err) {
+            logger.error(`Failed to fetch initial data for character ${characterId}:`, err.message);
+        }
+        
+        // Store player connection with combat data
         connectedPlayers.set(characterId, {
             socketId: socket.id,
             characterId: characterId,
-            characterName: characterName || 'Unknown'
+            characterName: characterName || 'Unknown',
+            health,
+            maxHealth,
+            mana,
+            maxMana,
+            isDead: false,
+            lastAttackTime: 0
         });
         
-        logger.info(`Player joined: ${characterName || 'Unknown'} (Character ${characterId})`);
+        logger.info(`Player joined: ${characterName || 'Unknown'} (Character ${characterId}) HP: ${health}/${maxHealth} MP: ${mana}/${maxMana}`);
         socket.emit('player:joined', { success: true });
+        
+        // Send initial health state to the joining player
+        socket.emit('combat:health_update', {
+            characterId,
+            health,
+            maxHealth,
+            mana,
+            maxMana
+        });
+        
+        // Broadcast this player's health to others so they can show HP bars
+        socket.broadcast.emit('combat:health_update', {
+            characterId,
+            health,
+            maxHealth,
+            mana,
+            maxMana
+        });
+        
+        // Send existing players' health to the joining player
+        for (const [existingCharId, existingPlayer] of connectedPlayers.entries()) {
+            if (existingCharId !== characterId) {
+                socket.emit('combat:health_update', {
+                    characterId: existingCharId,
+                    health: existingPlayer.health,
+                    maxHealth: existingPlayer.maxHealth,
+                    mana: existingPlayer.mana,
+                    maxMana: existingPlayer.maxMana
+                });
+            }
+        }
     });
     
     // Position update from client
@@ -138,6 +226,223 @@ io.on('connection', (socket) => {
                 logger.info(`Broadcasted player:left for ${player.characterName || 'Unknown'} (Character ${charId})`);
                 break;
             }
+        }
+    });
+    
+    // Combat: Attack handler
+    socket.on('combat:attack', async (data) => {
+        const { targetCharacterId } = data;
+        
+        // Find attacker by socket
+        const attackerInfo = findPlayerBySocketId(socket.id);
+        if (!attackerInfo) {
+            logger.warn(`Attack from unknown socket: ${socket.id}`);
+            return;
+        }
+        
+        const { characterId: attackerId, player: attacker } = attackerInfo;
+        
+        // Validate: attacker is not dead
+        if (attacker.isDead) {
+            socket.emit('combat:error', { message: 'You are dead' });
+            return;
+        }
+        
+        // Validate: cooldown check
+        const now = Date.now();
+        if (now - attacker.lastAttackTime < COMBAT.ATTACK_COOLDOWN_MS) {
+            socket.emit('combat:error', { message: 'Attack on cooldown' });
+            return;
+        }
+        
+        // Validate: target exists and is connected
+        const target = connectedPlayers.get(targetCharacterId);
+        if (!target) {
+            socket.emit('combat:error', { message: 'Target not found' });
+            return;
+        }
+        
+        // Validate: target is not dead
+        if (target.isDead) {
+            socket.emit('combat:error', { message: 'Target is already dead' });
+            return;
+        }
+        
+        // Validate: cannot attack self
+        if (attackerId === targetCharacterId) {
+            socket.emit('combat:error', { message: 'Cannot attack yourself' });
+            return;
+        }
+        
+        // Validate: range check using cached positions
+        try {
+            const attackerPos = await getPlayerPosition(attackerId);
+            const targetPos = await getPlayerPosition(targetCharacterId);
+            
+            if (attackerPos && targetPos) {
+                const dx = attackerPos.x - targetPos.x;
+                const dy = attackerPos.y - targetPos.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance > COMBAT.ATTACK_RANGE) {
+                    socket.emit('combat:error', { message: 'Target out of range' });
+                    logger.debug(`Attack rejected: ${attacker.characterName} -> ${target.characterName} distance=${distance.toFixed(0)} > ${COMBAT.ATTACK_RANGE}`);
+                    return;
+                }
+            }
+        } catch (err) {
+            logger.error('Range check error:', err.message);
+        }
+        
+        // Calculate damage
+        const damage = COMBAT.BASE_DAMAGE + Math.floor(Math.random() * COMBAT.DAMAGE_VARIANCE);
+        
+        // Apply damage
+        target.health = Math.max(0, target.health - damage);
+        attacker.lastAttackTime = now;
+        
+        logger.info(`[COMBAT] ${attacker.characterName} hit ${target.characterName} for ${damage} damage (HP: ${target.health}/${target.maxHealth})`);
+        
+        // Broadcast damage to all players
+        io.emit('combat:damage', {
+            attackerId,
+            attackerName: attacker.characterName,
+            targetId: targetCharacterId,
+            targetName: target.characterName,
+            damage,
+            targetHealth: target.health,
+            targetMaxHealth: target.maxHealth,
+            timestamp: now
+        });
+        
+        // Check for death
+        if (target.health <= 0) {
+            target.isDead = true;
+            
+            logger.info(`[COMBAT] ${target.characterName} was killed by ${attacker.characterName}`);
+            
+            // Broadcast death to all players
+            io.emit('combat:death', {
+                killedId: targetCharacterId,
+                killedName: target.characterName,
+                killerId: attackerId,
+                killerName: attacker.characterName,
+                timestamp: now
+            });
+            
+            // Send combat log to chat
+            io.emit('chat:receive', {
+                type: 'chat:receive',
+                channel: 'COMBAT',
+                senderId: 0,
+                senderName: 'SYSTEM',
+                message: `${attacker.characterName} has slain ${target.characterName}!`,
+                timestamp: now
+            });
+        }
+    });
+    
+    // Combat: Respawn handler
+    socket.on('combat:respawn', async () => {
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        
+        const { characterId, player } = playerInfo;
+        
+        if (!player.isDead) {
+            socket.emit('combat:error', { message: 'You are not dead' });
+            return;
+        }
+        
+        // Restore health to full
+        player.health = player.maxHealth;
+        player.mana = player.maxMana;
+        player.isDead = false;
+        
+        // Save health to database
+        try {
+            await pool.query(
+                'UPDATE characters SET health = $1, mana = $2 WHERE character_id = $3',
+                [player.health, player.mana, characterId]
+            );
+        } catch (err) {
+            logger.error(`Failed to save respawn health for character ${characterId}:`, err.message);
+        }
+        
+        // Update position cache to spawn point
+        await setPlayerPosition(characterId, COMBAT.SPAWN_POSITION.x, COMBAT.SPAWN_POSITION.y, COMBAT.SPAWN_POSITION.z);
+        
+        logger.info(`[COMBAT] ${player.characterName} respawned`);
+        
+        // Notify all players of respawn
+        io.emit('combat:respawn', {
+            characterId,
+            characterName: player.characterName,
+            health: player.health,
+            maxHealth: player.maxHealth,
+            mana: player.mana,
+            maxMana: player.maxMana,
+            x: COMBAT.SPAWN_POSITION.x,
+            y: COMBAT.SPAWN_POSITION.y,
+            z: COMBAT.SPAWN_POSITION.z,
+            timestamp: Date.now()
+        });
+    });
+    
+    // Chat message handler (expandable for multiple channels)
+    socket.on('chat:message', (data) => {
+        const { channel, message } = data;
+        
+        // Find the player by socket ID
+        const playerInfo = findPlayerBySocketId(socket.id);
+        let player = playerInfo ? playerInfo.player : null;
+        let characterId = playerInfo ? playerInfo.characterId : null;
+        
+        if (!player) {
+            logger.warn(`Chat message from unknown socket: ${socket.id}`);
+            return;
+        }
+        
+        // Validate message
+        if (!message || message.trim().length === 0) {
+            return;
+        }
+        
+        const chatMessage = {
+            type: 'chat:receive',
+            channel: channel || 'GLOBAL',
+            senderId: characterId,
+            senderName: player.characterName || 'Unknown',
+            message: message.trim(),
+            timestamp: Date.now()
+        };
+        
+        // Route based on channel
+        switch (chatMessage.channel) {
+            case 'GLOBAL':
+                // Broadcast to all connected players
+                io.emit('chat:receive', chatMessage);
+                logger.info(`[CHAT GLOBAL] ${chatMessage.senderName}: ${message}`);
+                break;
+            
+            // Future channels (expandable):
+            // case 'ZONE':
+            //     // Broadcast to players in same zone
+            //     break;
+            // case 'PARTY':
+            //     // Broadcast to party members
+            //     break;
+            // case 'GUILD':
+            //     // Broadcast to guild members
+            //     break;
+            // case 'TELL':
+            //     // Private message to specific player
+            //     break;
+            
+            default:
+                // Default to GLOBAL for unknown channels
+                io.emit('chat:receive', chatMessage);
+                logger.info(`[CHAT ${chatMessage.channel}] ${chatMessage.senderName}: ${message}`);
         }
     });
 });

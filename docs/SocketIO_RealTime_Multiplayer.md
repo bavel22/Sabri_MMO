@@ -23,13 +23,15 @@ The Socket.io system enables real-time bidirectional communication between the U
 ### Features
 - Real-time position updates (30Hz)
 - Player join/leave notifications
-- Remote player spawning with interpolation
+- Remote player spawning with CharacterMovement-based movement
+- Initial position broadcast from database on player join
 - Player disconnect cleanup
 - JWT token authentication
 - Redis position caching
 - Broadcast to all connected players
 - 5+ player scale tested
 - Player name tags above characters
+- Proper walk/run animations on remote players via CharacterMovement
 
 ### Technology Stack
 - **Server**: Node.js + Socket.io 4.7.4
@@ -70,11 +72,12 @@ The Socket.io system enables real-time bidirectional communication between the U
 ### Data Flow
 
 1. **Player Join**: Client emits `player:join` with characterId and token
-2. **Position Update**: Client emits `player:position` at 30Hz
-3. **Broadcast**: Server broadcasts `player:moved` to all other clients
-4. **Spawn/Update**: Client spawns or updates remote player actors
-5. **Disconnect**: Server broadcasts `player:left`, client destroys actor
-6. **Cache**: Server stores position in Redis with 5-minute TTL
+2. **Initial Position**: Server fetches player's DB position, broadcasts to other clients immediately
+3. **Position Update**: Client emits `player:position` at 30Hz
+4. **Broadcast**: Server broadcasts `player:moved` to all other clients
+5. **Spawn/Update**: Client spawns or updates remote player actors at correct position
+6. **Disconnect**: Server broadcasts `player:left`, client destroys actor
+7. **Cache**: Server stores position in Redis with 5-minute TTL
 
 ---
 
@@ -134,6 +137,26 @@ io.on('connection', (socket) => {
         
         logger.info(`Player joined: ${characterName || 'Unknown'} (Character ${characterId})`);
         socket.emit('player:joined', { success: true });
+        
+        // Fetch player's position from database and broadcast to others
+        try {
+            const charResult = await pool.query(
+                'SELECT x, y, z FROM characters WHERE character_id = $1',
+                [characterId]
+            );
+            if (charResult.rows.length > 0) {
+                const pos = charResult.rows[0];
+                await setPlayerPosition(characterId, pos.x, pos.y, pos.z);
+                socket.broadcast.emit('player:moved', {
+                    characterId, characterName,
+                    x: pos.x, y: pos.y, z: pos.z,
+                    timestamp: Date.now()
+                });
+                logger.info(`Broadcasted initial position for ${characterName} (Character ${characterId}) at (${pos.x}, ${pos.y}, ${pos.z})`);
+            }
+        } catch (err) {
+            logger.error(`Failed to fetch/broadcast initial position for character ${characterId}:`, err.message);
+        }
     });
     
     // Handle position updates
@@ -263,6 +286,9 @@ async function getPlayersInZone(zone = 'default') {
 |-------|------|-------------|
 | `player:join` | `{characterId, token, characterName}` | Player enters world |
 | `player:position` | `{characterId, x, y, z}` | Position update (30Hz) |
+| `chat:message` | `{channel, message}` | Chat message |
+| `combat:attack` | `{targetCharacterId}` | Attack another player |
+| `combat:respawn` | `{}` | Request respawn after death |
 
 ### Server → Client Events
 
@@ -271,15 +297,24 @@ async function getPlayersInZone(zone = 'default') {
 | `player:joined` | `{success: true}` | Join acknowledged |
 | `player:moved` | `{characterId, characterName, x, y, z, timestamp}` | Other player moved |
 | `player:left` | `{characterId, characterName}` | Other player disconnected |
+| `chat:receive` | `{type, channel, senderId, senderName, message, timestamp}` | Chat message received |
+| `combat:health_update` | `{characterId, health, maxHealth, mana, maxMana}` | Health/mana state sync |
+| `combat:damage` | `{attackerId, attackerName, targetId, targetName, damage, targetHealth, targetMaxHealth, timestamp}` | Damage dealt |
+| `combat:death` | `{killedId, killedName, killerId, killerName, timestamp}` | Player killed |
+| `combat:respawn` | `{characterId, characterName, health, maxHealth, mana, maxMana, x, y, z, timestamp}` | Player respawned |
+| `combat:error` | `{message}` | Combat validation error |
 
 ### Server Logs
 
 ```
 [INFO] Socket.io ready
 [INFO] Socket connected: [socket-id]
-[INFO] Player joined: Character [id]
-[INFO] Position update received: Character [id] at (x, y, z)
-[INFO] Broadcasted player:moved for Character [id]
+[INFO] Player joined: [name] (Character [id]) HP: [hp]/[max] MP: [mp]/[max]
+[INFO] Position update received: [name] (Character [id]) at (x, y, z)
+[INFO] Broadcasted player:moved for [name] (Character [id])
+[INFO] [COMBAT] [attacker] hit [target] for [damage] damage (HP: [remaining]/[max])
+[INFO] [COMBAT] [target] was killed by [attacker]
+[INFO] [COMBAT] [name] respawned
 [INFO] Player left: Character [id]
 ```
 
@@ -473,11 +508,22 @@ RemovePlayer(DisconnectedId)
 
 ---
 
-### Issue: Other player drifts away
+### Issue: Remote player slides without animating
 
-**Cause**: InterpolationSpeed is negative in BP_OtherPlayerCharacter
+**Cause**: Using SetActorLocation instead of CharacterMovement
 
-**Fix**: Set InterpolationSpeed to positive value (10.0)
+**Fix**: Use Add Movement Input in Event Tick so CharacterMovement drives velocity/acceleration for ABP_unarmed
+
+---
+
+### Issue: Remote player walks from origin on spawn
+
+**Cause**: SpawnActor not using correct (x,y,z) coordinates, or server not broadcasting initial position
+
+**Fix**: 
+1. Wire SpawnActor's Spawn Transform Location to incoming (x,y,z) in BP_OtherPlayerManager
+2. Initialize TargetPosition = GetActorLocation() in BP_OtherPlayerCharacter BeginPlay
+3. Server broadcasts DB position immediately on player:join
 
 ---
 
@@ -534,7 +580,7 @@ RemovePlayer(DisconnectedId)
 - **Redis TTL**: 5 minutes for position cache
 - **Broadcast**: `socket.broadcast.emit` excludes sender for position updates
 - **Disconnect**: `io.emit` used for player:left (socket already disconnected)
-- **Interpolation**: DeltaTime-based smoothing in BP_OtherPlayerCharacter
+- **Movement**: CharacterMovement-based Add Movement Input in BP_OtherPlayerCharacter
 - **Scale Tested**: 5+ concurrent players on localhost
 - **Connection**: WebSocket with automatic fallback
 
@@ -542,22 +588,23 @@ RemovePlayer(DisconnectedId)
 
 ## Next Steps
 
-1. **Client-Side Prediction**: Make local movement feel more responsive
-2. **Server Reconciliation**: Correct client position from server authority
-3. **Chat System**: Global and zone-based messaging
-4. **Zone System**: Group players by area for optimization
+1. **Basic Combat System**: Hit detection, damage, health sync, death/respawn
+2. **Game HUD**: HP bar, mana bar, ability bar
+3. **Client-Side Prediction**: Make local movement feel more responsive
+4. **Server Reconciliation**: Correct client position from server authority
+5. **Zone System**: Group players by area for optimization
 
 ---
 
 ## Files Modified
 
 ### Server
-- `server/src/index.js` - Socket.io events, player:left broadcast, Redis integration
+- `server/src/index.js` - Socket.io events, player:left broadcast, Redis integration, initial position broadcast on join
 - `server/package.json` - Added socket.io, redis dependencies
 
 ### Client
 - `Content/Blueprints/BP_SocketManager.uasset` - Socket manager with OnPlayerLeft and characterName handling
-- `Content/Blueprints/BP_OtherPlayerCharacter.uasset` - Remote player actor with interpolation and name tag widget
+- `Content/Blueprints/BP_OtherPlayerCharacter.uasset` - Remote player actor with CharacterMovement-based movement and name tag widget
 - `Content/Blueprints/BP_OtherPlayerManager.uasset` - Player spawning/management singleton
 - `Content/Blueprints/BP_MMOCharacter.uasset` - Local player with name tag widget
 - `Content/Blueprints/Widgets/WBP_PlayerNameTag.uasset` - Name tag display widget
@@ -578,6 +625,6 @@ RemovePlayer(DisconnectedId)
 
 ---
 
-**Last Updated**: 2026-02-04
-**Version**: 0.6.0
-**Status**: Socket.io with Player Spawning and Name Tags Complete
+**Last Updated**: 2026-02-05
+**Version**: 0.7.0
+**Status**: Remote Player Animations and Spawn Position Fixed

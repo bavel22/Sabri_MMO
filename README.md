@@ -345,7 +345,7 @@ For questions or support:
 - [x] NavMesh pathfinding
 - [x] Movement acceleration for smooth animations
 
-### Phase 2: Real-Time Multiplayer (In Progress)
+### Phase 2: Real-Time Multiplayer (Complete)
 - [x] Socket.io server integration
 - [x] Socket.io UE5 client
 - [x] Redis player position cache
@@ -353,9 +353,22 @@ For questions or support:
 - [x] Player position broadcast system
 - [x] Spawn other players in world
 - [x] Smooth interpolation for remote players
+- [x] Remote player walk/run animations (CharacterMovement-based)
+- [x] Correct initial spawn position from database
 - [x] Player disconnect handling
 - [ ] Client-side prediction
 - [ ] Server reconciliation
+
+### Phase 3: Basic Combat System (In Progress)
+- [x] Server-side combat events (combat:attack, combat:damage, combat:death, combat:respawn)
+- [x] Server attack validation (range, cooldown, dead-check, self-attack prevention)
+- [x] Health/mana tracking from database on join
+- [x] Health sync broadcast (combat:health_update) to all players
+- [x] Game HUD (WBP_GameHUD) with HP/MP bars and player name
+- [ ] Attack input (left-click targeting + combat:attack emit)
+- [ ] Combat feedback (damage numbers, HP bar updates on other players)
+- [ ] Death/respawn UI
+- [ ] Combat animations (attack montage, hit reaction)
 
 ### Socket.io Real-Time Multiplayer
 - Socket.io server with Node.js
@@ -365,17 +378,39 @@ For questions or support:
 - player:position event (30Hz position updates)
 - player:moved broadcast (other player updates)
 - player:left event (disconnect handling)
-- BP_OtherPlayerCharacter with interpolation
-- BP_OtherPlayerManager for player tracking
+- BP_OtherPlayerCharacter with CharacterMovement-based movement
+- BP_OtherPlayerManager for player tracking with correct spawn positions
 - Real-time position sync working
 - Socket.io event binding in Blueprints
 - Tested with 5 concurrent players
+- Player name tags above characters (WBP_PlayerNameTag)
+- Initial position broadcast from database on player:join
+- Remote players animate walk/run via CharacterMovement + ABP_unarmed
+
+### Chat System
+- Real-time global chat between all players
+- WBP_ChatWidget UI with scrollable message history
+- WBP_ChatMessageLine for individual messages
+- Enter key and Send button support
+- Player names displayed with messages
+- Expandable architecture for multiple channels (ZONE, PARTY, GUILD, TELL, COMBAT)
+- Server-side chat:message and chat:receive events
+- JSON communication protocol for chat data
+
+### Combat System (Server-Side Complete)
+- Server-authoritative combat with attack validation
+- combat:attack, combat:damage, combat:death, combat:respawn, combat:health_update events
+- Range check (500 units), cooldown (1s), damage calculation (10 + 0-5 variance)
+- Health/mana loaded from database, tracked in memory, synced to all clients
+- Death broadcast with kill message in COMBAT chat channel
+- Respawn restores full HP/MP, teleports to spawn point, saves to database
+- WBP_GameHUD with HP bar (red), MP bar (blue), player name display
 
 ### Known Issues
-- **BP_OtherPlayerCharacter animations**: Remote players slide instead of playing walk/run animations. Needs velocity-based animation state machine in ABP_unarmed or CharacterMovement-based interpolation instead of direct location setting.
+- None currently
 
 ---
 
-**Last Updated**: 2026-02-04
-**Version**: 0.5.0
-**Status**: Phase 2 Multiplayer Spawning Complete
+**Last Updated**: 2026-02-05
+**Version**: 0.8.0
+**Status**: Combat System In Progress (Server Complete, Client-Side Next)

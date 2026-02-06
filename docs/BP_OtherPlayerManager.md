@@ -55,13 +55,14 @@ Value: BP_OtherPlayerCharacter_C_0 (spawned actor reference)
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `characterId` | Integer | Unique ID of the remote player |
+| `characterName` | String | Display name of the remote player |
 | `x` | Float | Target X position from server |
 | `y` | Float | Target Y position from server |
 | `z` | Float | Target Z position from server |
 
 **Logic Flow:**
 ```
-SpawnOrUpdatePlayer(characterId, x, y, z)
+SpawnOrUpdatePlayer(characterId, characterName, x, y, z)
     ↓
 Find in Map (OtherPlayers, characterId)
     ↓
@@ -69,17 +70,22 @@ Branch: Was Found?
     ↓ (True - Player exists)
     Get Return Value → Actor
     Cast to BP_OtherPlayerCharacter
-    Set TargetPosition (x, y, z)
+    Set TargetPosition (Make Vector: x, y, z)
     ↓ (False - New player)
+    Make Vector (x, y, z) → Make Transform (Location)
     Spawn Actor from Class
         Class: OtherPlayerClass
-        Spawn Transform: Make Transform (Location: x,y,z)
+        Spawn Transform: Make Transform with (x, y, z) location
     Set Return Value Map
         Map: OtherPlayers
         Key: characterId
         Value: Spawned Actor
-    Set TargetPosition on spawned actor
+    Cast to BP_OtherPlayerCharacter
+    Set TargetPosition (Make Vector: x, y, z)
+    Set PlayerName on spawned actor
 ```
+
+**Important**: The Spawn Transform Location must use the incoming (x, y, z) coordinates so remote players appear at their correct position immediately, not at origin.
 
 **Called By:**
 - `BP_SocketManager.OnPlayerMoved` - When position update received
@@ -227,4 +233,4 @@ RemovePlayer(characterId: 25)
 
 ---
 
-**Last Updated**: 2026-02-04
+**Last Updated**: 2026-02-05
