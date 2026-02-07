@@ -287,7 +287,8 @@ async function getPlayersInZone(zone = 'default') {
 | `player:join` | `{characterId, token, characterName}` | Player enters world |
 | `player:position` | `{characterId, x, y, z}` | Position update (30Hz) |
 | `chat:message` | `{channel, message}` | Chat message |
-| `combat:attack` | `{targetCharacterId}` | Attack another player |
+| `combat:attack` | `{targetCharacterId}` | Start auto-attacking target |
+| `combat:stop_attack` | `{}` | Stop auto-attacking |
 | `combat:respawn` | `{}` | Request respawn after death |
 
 ### Server → Client Events
@@ -302,20 +303,37 @@ async function getPlayersInZone(zone = 'default') {
 | `combat:damage` | `{attackerId, attackerName, targetId, targetName, damage, targetHealth, targetMaxHealth, timestamp}` | Damage dealt |
 | `combat:death` | `{killedId, killedName, killerId, killerName, timestamp}` | Player killed |
 | `combat:respawn` | `{characterId, characterName, health, maxHealth, mana, maxMana, x, y, z, timestamp}` | Player respawned |
+| `combat:auto_attack_started` | `{targetId, targetName, attackRange, aspd, attackIntervalMs}` | Auto-attack confirmed |
+| `combat:auto_attack_stopped` | `{reason}` | Auto-attack ended |
+| `combat:target_lost` | `{reason}` | Target died or disconnected |
 | `combat:error` | `{message}` | Combat validation error |
 
 ### Server Logs
 
+All socket events are logged with directional prefixes:
+
+| Prefix | Meaning | Level |
+|--------|---------|-------|
+| `[RECV]` | Event received from client | INFO (combat/chat), DEBUG (position) |
+| `[SEND]` | Event sent to specific client | INFO |
+| `[BROADCAST]` | Event sent to all clients | INFO (combat), DEBUG (position) |
+| `[COMBAT]` | Combat system action | INFO |
+
 ```
-[INFO] Socket.io ready
 [INFO] Socket connected: [socket-id]
-[INFO] Player joined: [name] (Character [id]) HP: [hp]/[max] MP: [mp]/[max]
-[INFO] Position update received: [name] (Character [id]) at (x, y, z)
-[INFO] Broadcasted player:moved for [name] (Character [id])
+[INFO] [RECV] player:join from [socket-id]: {characterId, token, characterName}
+[INFO] [SEND] player:joined to [socket-id]: {success: true}
+[INFO] [SEND] combat:health_update to [socket-id]: {characterId, health, maxHealth, mana, maxMana}
+[DEBUG] [RECV] player:position from [socket-id]: {characterId, x, y, z}
+[DEBUG] [BROADCAST] player:moved for [name] (Character [id])
+[INFO] [RECV] combat:attack from [socket-id]: {targetCharacterId}
+[INFO] [SEND] combat:auto_attack_started to [socket-id]: {targetId, targetName, attackRange, aspd, attackIntervalMs}
 [INFO] [COMBAT] [attacker] hit [target] for [damage] damage (HP: [remaining]/[max])
-[INFO] [COMBAT] [target] was killed by [attacker]
-[INFO] [COMBAT] [name] respawned
-[INFO] Player left: Character [id]
+[INFO] [BROADCAST] combat:damage: {attackerId, targetId, damage, targetHealth, ...}
+[INFO] [SEND] combat:target_lost to [socket-id]: {reason}
+[INFO] [BROADCAST] combat:death: {killedId, killedName, killerId, killerName}
+[INFO] [BROADCAST] combat:respawn: {characterId, health, maxHealth, x, y, z}
+[INFO] [BROADCAST] player:left: {characterId, characterName}
 ```
 
 ---
@@ -588,11 +606,13 @@ RemovePlayer(DisconnectedId)
 
 ## Next Steps
 
-1. **Basic Combat System**: Hit detection, damage, health sync, death/respawn
-2. **Game HUD**: HP bar, mana bar, ability bar
-3. **Client-Side Prediction**: Make local movement feel more responsive
-4. **Server Reconciliation**: Correct client position from server authority
-5. **Zone System**: Group players by area for optimization
+1. **Death/Respawn UI**: Death overlay with "Return to Save Point" button
+2. **Damage Numbers**: Floating text above targets showing damage dealt
+3. **Target Frame on HUD**: Target name + HP bar panel
+4. **Attack Animations**: Attack montage during auto-attack cycle
+5. **Stat System**: STR/AGI/VIT/INT/DEX/LUK with RO damage formulas
+6. **Enemy AI/NPC System**: AI-controlled enemies
+7. **Client-Side Prediction**: Make local movement feel more responsive
 
 ---
 
@@ -625,6 +645,6 @@ RemovePlayer(DisconnectedId)
 
 ---
 
-**Last Updated**: 2026-02-05
-**Version**: 0.7.0
-**Status**: Remote Player Animations and Spawn Position Fixed
+**Last Updated**: 2026-02-06
+**Version**: 0.9.0
+**Status**: Combat System Tuning Complete, RO-Style Auto-Attack Active

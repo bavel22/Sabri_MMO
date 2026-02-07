@@ -399,18 +399,23 @@ For questions or support:
 
 ### Combat System (Server-Side Complete)
 - Server-authoritative combat with attack validation
-- combat:attack, combat:damage, combat:death, combat:respawn, combat:health_update events
-- Range check (500 units), cooldown (1s), damage calculation (10 + 0-5 variance)
+- RO-style auto-attack: click once → path → auto-attack loop at ASPD intervals
+- combat:attack, combat:stop_attack, combat:damage, combat:death, combat:respawn, combat:health_update events
+- combat:auto_attack_started, combat:auto_attack_stopped, combat:target_lost events
+- Range check (100 units melee), ASPD timing (default 180 = 1 hit/sec), damage (1 per hit)
+- Combat tick loop runs every 50ms, processes all active auto-attackers
 - Health/mana loaded from database, tracked in memory, synced to all clients
 - Death broadcast with kill message in COMBAT chat channel
-- Respawn restores full HP/MP, teleports to spawn point, saves to database
+- Respawn restores full HP/MP, teleports to spawn point (0,0,300), saves to database
 - WBP_GameHUD with HP bar (red), MP bar (blue), player name display
+- SizeBox overrides for consistent HP/MP bar sizing
+- Comprehensive logging: [RECV], [SEND], [BROADCAST] for all socket events
 
 ### Known Issues
-- None currently
+- `combat:target_lost` may not be reaching client (OnTargetLost binding under investigation)
 
 ---
 
-**Last Updated**: 2026-02-05
-**Version**: 0.8.0
-**Status**: Combat System In Progress (Server Complete, Client-Side Next)
+**Last Updated**: 2026-02-06
+**Version**: 0.9.0
+**Status**: Combat System Tuning Complete, Blueprint Instructions Next

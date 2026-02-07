@@ -78,15 +78,28 @@ const io = new Server(server, {
 // Store connected players
 const connectedPlayers = new Map();
 
-// Combat constants
+// Combat constants (Ragnarok Online-style)
 const COMBAT = {
-    BASE_DAMAGE: 10,
-    DAMAGE_VARIANCE: 5,
-    ATTACK_RANGE: 500,
-    ATTACK_COOLDOWN_MS: 1000,
+    BASE_DAMAGE: 1,             // Default damage per hit (before stat formulas)
+    DAMAGE_VARIANCE: 0,         // Random variance added to base damage
+    MELEE_RANGE: 100,           // Default melee attack range (Unreal units)
+    RANGED_RANGE: 800,          // Default ranged attack range
+    DEFAULT_ASPD: 180,          // Default attack speed (0-190 scale, higher = faster)
+    ASPD_CAP: 190,              // Maximum ASPD
+    COMBAT_TICK_MS: 50,         // Server combat tick interval (ms)
     RESPAWN_DELAY_MS: 5000,
-    SPAWN_POSITION: { x: 0, y: 0, z: 90 }
+    SPAWN_POSITION: { x: 0, y: 0, z: 300 }
 };
+
+// Calculate attack interval from ASPD (ms between attacks)
+// ASPD 180 = 1000ms (1 hit/sec), ASPD 190 = 500ms (2/sec), ASPD 170 = 1500ms (0.67/sec)
+function getAttackIntervalMs(aspd) {
+    const clamped = Math.min(aspd, COMBAT.ASPD_CAP);
+    return (200 - clamped) * 50; // e.g. ASPD 180 → 20 * 50 = 1000ms
+}
+
+// Auto-attack state tracking: Map<attackerCharId, { targetCharId, startTime }>
+const autoAttackState = new Map();
 
 // Helper: Find player entry by socket ID
 function findPlayerBySocketId(socketId) {
@@ -104,6 +117,7 @@ io.on('connection', (socket) => {
     
     // Player authentication and join
     socket.on('player:join', async (data) => {
+        logger.info(`[RECV] player:join from ${socket.id}: ${JSON.stringify(data)}`);
         const { characterId, token, characterName } = data;
         
         // Fetch character data from database (position + health/mana)
@@ -147,29 +161,25 @@ io.on('connection', (socket) => {
             mana,
             maxMana,
             isDead: false,
-            lastAttackTime: 0
+            lastAttackTime: 0,
+            aspd: COMBAT.DEFAULT_ASPD,
+            attackRange: COMBAT.MELEE_RANGE
         });
         
         logger.info(`Player joined: ${characterName || 'Unknown'} (Character ${characterId}) HP: ${health}/${maxHealth} MP: ${mana}/${maxMana}`);
-        socket.emit('player:joined', { success: true });
+        const joinedPayload = { success: true };
+        socket.emit('player:joined', joinedPayload);
+        logger.info(`[SEND] player:joined to ${socket.id}: ${JSON.stringify(joinedPayload)}`);
         
         // Send initial health state to the joining player
-        socket.emit('combat:health_update', {
-            characterId,
-            health,
-            maxHealth,
-            mana,
-            maxMana
-        });
+        const selfHealthPayload = { characterId, health, maxHealth, mana, maxMana };
+        socket.emit('combat:health_update', selfHealthPayload);
+        logger.info(`[SEND] combat:health_update to ${socket.id}: ${JSON.stringify(selfHealthPayload)}`);
         
         // Broadcast this player's health to others so they can show HP bars
-        socket.broadcast.emit('combat:health_update', {
-            characterId,
-            health,
-            maxHealth,
-            mana,
-            maxMana
-        });
+        const broadcastHealthPayload = { characterId, health, maxHealth, mana, maxMana };
+        socket.broadcast.emit('combat:health_update', broadcastHealthPayload);
+        logger.info(`[BROADCAST] combat:health_update (excl ${socket.id}): ${JSON.stringify(broadcastHealthPayload)}`);
         
         // Send existing players' health to the joining player
         for (const [existingCharId, existingPlayer] of connectedPlayers.entries()) {
@@ -187,11 +197,10 @@ io.on('connection', (socket) => {
     
     // Position update from client
     socket.on('player:position', async (data) => {
+        logger.debug(`[RECV] player:position from ${socket.id}: ${JSON.stringify(data)}`);
         const { characterId, x, y, z } = data;
         const player = connectedPlayers.get(characterId);
         const characterName = player ? player.characterName : 'Unknown';
-        
-        logger.info(`Position update received: ${characterName} (Character ${characterId}) at (${x}, ${y}, ${z})`);
         
         // Cache in Redis
         await setPlayerPosition(characterId, x, y, z);
@@ -203,37 +212,54 @@ io.on('connection', (socket) => {
             x, y, z,
             timestamp: Date.now()
         });
-        logger.info(`Broadcasted player:moved for ${characterName} (Character ${characterId})`);
+        logger.debug(`[BROADCAST] player:moved for ${characterName} (Character ${characterId})`);
     });
     
     // Disconnect
     socket.on('disconnect', () => {
-        logger.info(`Socket disconnected: ${socket.id}`);
+        logger.info(`[RECV] disconnect from ${socket.id}`);
         logger.info(`Connected players count: ${connectedPlayers.size}`);
         
         // Remove from connected players
         for (const [charId, player] of connectedPlayers.entries()) {
             logger.info(`Checking player ${charId} with socket ${player.socketId} against ${socket.id}`);
             if (player.socketId === socket.id) {
+                // Clear this player's auto-attack
+                autoAttackState.delete(charId);
+                
+                // Clear anyone auto-attacking this player
+                for (const [attackerId, atkState] of autoAttackState.entries()) {
+                    if (atkState.targetCharId === charId) {
+                        autoAttackState.delete(attackerId);
+                        const attackerPlayer = connectedPlayers.get(attackerId);
+                        if (attackerPlayer) {
+                            const attackerSocket = io.sockets.sockets.get(attackerPlayer.socketId);
+                            if (attackerSocket) {
+                                const lostPayload = { reason: 'Target disconnected' };
+                                attackerSocket.emit('combat:target_lost', lostPayload);
+                                logger.info(`[SEND] combat:target_lost to ${attackerPlayer.socketId}: ${JSON.stringify(lostPayload)}`);
+                            }
+                        }
+                    }
+                }
+                
                 connectedPlayers.delete(charId);
                 logger.info(`Player left: Character ${charId}`);
                 
                 // Broadcast to other players using io (socket is already disconnected)
-                io.emit('player:left', { 
-                    characterId: charId,
-                    characterName: player.characterName || 'Unknown'
-                });
-                logger.info(`Broadcasted player:left for ${player.characterName || 'Unknown'} (Character ${charId})`);
+                const leftPayload = { characterId: charId, characterName: player.characterName || 'Unknown' };
+                io.emit('player:left', leftPayload);
+                logger.info(`[BROADCAST] player:left: ${JSON.stringify(leftPayload)}`);
                 break;
             }
         }
     });
     
-    // Combat: Attack handler
-    socket.on('combat:attack', async (data) => {
+    // Combat: Start auto-attack (RO-style: click once → path → auto-attack loop)
+    socket.on('combat:attack', (data) => {
+        logger.info(`[RECV] combat:attack from ${socket.id}: ${JSON.stringify(data)}`);
         const { targetCharacterId } = data;
         
-        // Find attacker by socket
         const attackerInfo = findPlayerBySocketId(socket.id);
         if (!attackerInfo) {
             logger.warn(`Attack from unknown socket: ${socket.id}`);
@@ -242,108 +268,67 @@ io.on('connection', (socket) => {
         
         const { characterId: attackerId, player: attacker } = attackerInfo;
         
-        // Validate: attacker is not dead
         if (attacker.isDead) {
             socket.emit('combat:error', { message: 'You are dead' });
             return;
         }
         
-        // Validate: cooldown check
-        const now = Date.now();
-        if (now - attacker.lastAttackTime < COMBAT.ATTACK_COOLDOWN_MS) {
-            socket.emit('combat:error', { message: 'Attack on cooldown' });
+        if (attackerId === targetCharacterId) {
+            socket.emit('combat:error', { message: 'Cannot attack yourself' });
             return;
         }
         
-        // Validate: target exists and is connected
         const target = connectedPlayers.get(targetCharacterId);
         if (!target) {
             socket.emit('combat:error', { message: 'Target not found' });
             return;
         }
         
-        // Validate: target is not dead
         if (target.isDead) {
             socket.emit('combat:error', { message: 'Target is already dead' });
             return;
         }
         
-        // Validate: cannot attack self
-        if (attackerId === targetCharacterId) {
-            socket.emit('combat:error', { message: 'Cannot attack yourself' });
-            return;
-        }
-        
-        // Validate: range check using cached positions
-        try {
-            const attackerPos = await getPlayerPosition(attackerId);
-            const targetPos = await getPlayerPosition(targetCharacterId);
-            
-            if (attackerPos && targetPos) {
-                const dx = attackerPos.x - targetPos.x;
-                const dy = attackerPos.y - targetPos.y;
-                const distance = Math.sqrt(dx * dx + dy * dy);
-                
-                if (distance > COMBAT.ATTACK_RANGE) {
-                    socket.emit('combat:error', { message: 'Target out of range' });
-                    logger.debug(`Attack rejected: ${attacker.characterName} -> ${target.characterName} distance=${distance.toFixed(0)} > ${COMBAT.ATTACK_RANGE}`);
-                    return;
-                }
-            }
-        } catch (err) {
-            logger.error('Range check error:', err.message);
-        }
-        
-        // Calculate damage
-        const damage = COMBAT.BASE_DAMAGE + Math.floor(Math.random() * COMBAT.DAMAGE_VARIANCE);
-        
-        // Apply damage
-        target.health = Math.max(0, target.health - damage);
-        attacker.lastAttackTime = now;
-        
-        logger.info(`[COMBAT] ${attacker.characterName} hit ${target.characterName} for ${damage} damage (HP: ${target.health}/${target.maxHealth})`);
-        
-        // Broadcast damage to all players
-        io.emit('combat:damage', {
-            attackerId,
-            attackerName: attacker.characterName,
-            targetId: targetCharacterId,
-            targetName: target.characterName,
-            damage,
-            targetHealth: target.health,
-            targetMaxHealth: target.maxHealth,
-            timestamp: now
+        // Set auto-attack state (server handles attack timing via combat tick)
+        autoAttackState.set(attackerId, {
+            targetCharId: targetCharacterId,
+            startTime: Date.now()
         });
         
-        // Check for death
-        if (target.health <= 0) {
-            target.isDead = true;
-            
-            logger.info(`[COMBAT] ${target.characterName} was killed by ${attacker.characterName}`);
-            
-            // Broadcast death to all players
-            io.emit('combat:death', {
-                killedId: targetCharacterId,
-                killedName: target.characterName,
-                killerId: attackerId,
-                killerName: attacker.characterName,
-                timestamp: now
-            });
-            
-            // Send combat log to chat
-            io.emit('chat:receive', {
-                type: 'chat:receive',
-                channel: 'COMBAT',
-                senderId: 0,
-                senderName: 'SYSTEM',
-                message: `${attacker.characterName} has slain ${target.characterName}!`,
-                timestamp: now
-            });
+        // Confirm auto-attack started
+        const atkStartPayload = {
+            targetId: targetCharacterId,
+            targetName: target.characterName,
+            attackRange: attacker.attackRange,
+            aspd: attacker.aspd,
+            attackIntervalMs: getAttackIntervalMs(attacker.aspd)
+        };
+        socket.emit('combat:auto_attack_started', atkStartPayload);
+        logger.info(`[SEND] combat:auto_attack_started to ${socket.id}: ${JSON.stringify(atkStartPayload)}`);
+        
+        logger.info(`[COMBAT] ${attacker.characterName} started auto-attacking ${target.characterName} (ASPD: ${attacker.aspd}, Interval: ${getAttackIntervalMs(attacker.aspd)}ms, Range: ${attacker.attackRange})`);
+    });
+    
+    // Combat: Stop auto-attack
+    socket.on('combat:stop_attack', () => {
+        logger.info(`[RECV] combat:stop_attack from ${socket.id}`);
+        const attackerInfo = findPlayerBySocketId(socket.id);
+        if (!attackerInfo) return;
+        
+        const { characterId: attackerId, player: attacker } = attackerInfo;
+        
+        if (autoAttackState.has(attackerId)) {
+            autoAttackState.delete(attackerId);
+            const stopPayload = { reason: 'Player stopped' };
+            socket.emit('combat:auto_attack_stopped', stopPayload);
+            logger.info(`[SEND] combat:auto_attack_stopped to ${socket.id}: ${JSON.stringify(stopPayload)}`);
+            logger.info(`[COMBAT] ${attacker.characterName} stopped auto-attacking`);
         }
     });
     
     // Combat: Respawn handler
     socket.on('combat:respawn', async () => {
+        logger.info(`[RECV] combat:respawn from ${socket.id}`);
         const playerInfo = findPlayerBySocketId(socket.id);
         if (!playerInfo) return;
         
@@ -375,7 +360,7 @@ io.on('connection', (socket) => {
         logger.info(`[COMBAT] ${player.characterName} respawned`);
         
         // Notify all players of respawn
-        io.emit('combat:respawn', {
+        const respawnPayload = {
             characterId,
             characterName: player.characterName,
             health: player.health,
@@ -386,11 +371,14 @@ io.on('connection', (socket) => {
             y: COMBAT.SPAWN_POSITION.y,
             z: COMBAT.SPAWN_POSITION.z,
             timestamp: Date.now()
-        });
+        };
+        io.emit('combat:respawn', respawnPayload);
+        logger.info(`[BROADCAST] combat:respawn: ${JSON.stringify(respawnPayload)}`);
     });
     
     // Chat message handler (expandable for multiple channels)
     socket.on('chat:message', (data) => {
+        logger.info(`[RECV] chat:message from ${socket.id}: ${JSON.stringify(data)}`);
         const { channel, message } = data;
         
         // Find the player by socket ID
@@ -446,6 +434,152 @@ io.on('connection', (socket) => {
         }
     });
 });
+
+// ============================================================
+// Combat Tick Loop (RO-style auto-attack processing)
+// Runs every COMBAT_TICK_MS, checks all active auto-attackers
+// ============================================================
+setInterval(async () => {
+    const now = Date.now();
+    
+    for (const [attackerId, atkState] of autoAttackState.entries()) {
+        const attacker = connectedPlayers.get(attackerId);
+        if (!attacker) {
+            autoAttackState.delete(attackerId);
+            continue;
+        }
+        
+        // Skip if attacker is dead
+        if (attacker.isDead) {
+            autoAttackState.delete(attackerId);
+            const attackerSocket = io.sockets.sockets.get(attacker.socketId);
+            if (attackerSocket) {
+                const deadStopPayload = { reason: 'You died' };
+                attackerSocket.emit('combat:auto_attack_stopped', deadStopPayload);
+                logger.info(`[SEND] combat:auto_attack_stopped to ${attacker.socketId}: ${JSON.stringify(deadStopPayload)}`);
+            }
+            continue;
+        }
+        
+        const target = connectedPlayers.get(atkState.targetCharId);
+        
+        // Target gone or dead — stop auto-attack
+        if (!target || target.isDead) {
+            autoAttackState.delete(attackerId);
+            const attackerSocket = io.sockets.sockets.get(attacker.socketId);
+            if (attackerSocket) {
+                const targetLostPayload = { reason: target ? 'Target died' : 'Target disconnected' };
+                attackerSocket.emit('combat:target_lost', targetLostPayload);
+                logger.info(`[SEND] combat:target_lost to ${attacker.socketId}: ${JSON.stringify(targetLostPayload)}`);
+            }
+            continue;
+        }
+        
+        // Check ASPD timing — enough time since last attack?
+        const attackInterval = getAttackIntervalMs(attacker.aspd);
+        if (now - attacker.lastAttackTime < attackInterval) {
+            continue; // Not time to attack yet
+        }
+        
+        // Range check using cached Redis positions
+        try {
+            const attackerPos = await getPlayerPosition(attackerId);
+            const targetPos = await getPlayerPosition(atkState.targetCharId);
+            
+            if (!attackerPos || !targetPos) continue;
+            
+            const dx = attackerPos.x - targetPos.x;
+            const dy = attackerPos.y - targetPos.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            if (distance > attacker.attackRange) {
+                // Out of range — don't attack, but keep auto-attack active
+                // Client should be pathfinding toward target
+                continue;
+            }
+            
+            // === IN RANGE: Execute attack ===
+            const damage = COMBAT.BASE_DAMAGE + Math.floor(Math.random() * COMBAT.DAMAGE_VARIANCE);
+            target.health = Math.max(0, target.health - damage);
+            attacker.lastAttackTime = now;
+            
+            logger.info(`[COMBAT] ${attacker.characterName} hit ${target.characterName} for ${damage} damage (HP: ${target.health}/${target.maxHealth})`);
+            
+            // Broadcast damage to all players
+            const damagePayload = {
+                attackerId,
+                attackerName: attacker.characterName,
+                targetId: atkState.targetCharId,
+                targetName: target.characterName,
+                damage,
+                targetHealth: target.health,
+                targetMaxHealth: target.maxHealth,
+                timestamp: now
+            };
+            io.emit('combat:damage', damagePayload);
+            logger.info(`[BROADCAST] combat:damage: ${JSON.stringify(damagePayload)}`);
+            
+            // Check for death
+            if (target.health <= 0) {
+                target.isDead = true;
+                
+                logger.info(`[COMBAT] ${target.characterName} was killed by ${attacker.characterName}`);
+                
+                // Stop auto-attack on dead target
+                autoAttackState.delete(attackerId);
+                
+                // Stop anyone else auto-attacking the dead target
+                for (const [otherId, otherAtk] of autoAttackState.entries()) {
+                    if (otherAtk.targetCharId === atkState.targetCharId) {
+                        autoAttackState.delete(otherId);
+                        const otherPlayer = connectedPlayers.get(otherId);
+                        if (otherPlayer) {
+                            const otherSocket = io.sockets.sockets.get(otherPlayer.socketId);
+                            if (otherSocket) {
+                                const otherLostPayload = { reason: 'Target died' };
+                                otherSocket.emit('combat:target_lost', otherLostPayload);
+                                logger.info(`[SEND] combat:target_lost to ${otherPlayer.socketId}: ${JSON.stringify(otherLostPayload)}`);
+                            }
+                        }
+                    }
+                }
+                
+                // Broadcast death
+                const deathPayload = {
+                    killedId: atkState.targetCharId,
+                    killedName: target.characterName,
+                    killerId: attackerId,
+                    killerName: attacker.characterName,
+                    timestamp: now
+                };
+                io.emit('combat:death', deathPayload);
+                logger.info(`[BROADCAST] combat:death: ${JSON.stringify(deathPayload)}`);
+                
+                // Kill message in chat
+                io.emit('chat:receive', {
+                    type: 'chat:receive',
+                    channel: 'COMBAT',
+                    senderId: 0,
+                    senderName: 'SYSTEM',
+                    message: `${attacker.characterName} has slain ${target.characterName}!`,
+                    timestamp: now
+                });
+                
+                // Save target health to DB
+                try {
+                    await pool.query(
+                        'UPDATE characters SET health = $1 WHERE character_id = $2',
+                        [0, atkState.targetCharId]
+                    );
+                } catch (dbErr) {
+                    logger.error(`Failed to save death health for character ${atkState.targetCharId}:`, dbErr.message);
+                }
+            }
+        } catch (err) {
+            logger.error(`Combat tick error for attacker ${attackerId}:`, err.message);
+        }
+    }
+}, COMBAT.COMBAT_TICK_MS);
 
 // Middleware
 app.use(cors());
