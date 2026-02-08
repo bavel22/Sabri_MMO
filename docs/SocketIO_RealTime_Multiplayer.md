@@ -287,9 +287,10 @@ async function getPlayersInZone(zone = 'default') {
 | `player:join` | `{characterId, token, characterName}` | Player enters world |
 | `player:position` | `{characterId, x, y, z}` | Position update (30Hz) |
 | `chat:message` | `{channel, message}` | Chat message |
-| `combat:attack` | `{targetCharacterId}` | Start auto-attacking target |
+| `combat:attack` | `{targetCharacterId?, targetEnemyId?}` | Start auto-attacking player or enemy |
 | `combat:stop_attack` | `{}` | Stop auto-attacking |
-| `combat:respawn` | `{}` | Request respawn after death |
+| `combat:respawn` | `{}` (optional data) | Request respawn after death |
+| `player:allocate_stat` | `{statName, amount}` | Allocate stat points (str/agi/vit/int/dex/luk) |
 
 ### Server → Client Events
 
@@ -298,15 +299,20 @@ async function getPlayersInZone(zone = 'default') {
 | `player:joined` | `{success: true}` | Join acknowledged |
 | `player:moved` | `{characterId, characterName, x, y, z, timestamp}` | Other player moved |
 | `player:left` | `{characterId, characterName}` | Other player disconnected |
+| `player:stats` | `{characterId, stats, derived}` | Base stats + derived stats |
 | `chat:receive` | `{type, channel, senderId, senderName, message, timestamp}` | Chat message received |
 | `combat:health_update` | `{characterId, health, maxHealth, mana, maxMana}` | Health/mana state sync |
-| `combat:damage` | `{attackerId, attackerName, targetId, targetName, damage, targetHealth, targetMaxHealth, timestamp}` | Damage dealt |
-| `combat:death` | `{killedId, killedName, killerId, killerName, timestamp}` | Player killed |
-| `combat:respawn` | `{characterId, characterName, health, maxHealth, mana, maxMana, x, y, z, timestamp}` | Player respawned |
-| `combat:auto_attack_started` | `{targetId, targetName, attackRange, aspd, attackIntervalMs}` | Auto-attack confirmed |
+| `combat:damage` | `{attackerId, attackerName, targetId, targetName, isEnemy, damage, targetHealth, targetMaxHealth, timestamp}` | Damage dealt |
+| `combat:death` | `{killedId, killedName, killerId, killerName, isEnemy, timestamp}` | Player killed |
+| `combat:respawn` | `{characterId, characterName, health, maxHealth, mana, maxMana, x, y, z, teleport, timestamp}` | Player respawned (teleport=true) |
+| `combat:auto_attack_started` | `{targetId, targetName, isEnemy, attackRange, aspd, attackIntervalMs}` | Auto-attack confirmed |
 | `combat:auto_attack_stopped` | `{reason}` | Auto-attack ended |
-| `combat:target_lost` | `{reason}` | Target died or disconnected |
+| `combat:target_lost` | `{reason, isEnemy}` | Target died/disconnected/respawned |
+| `combat:out_of_range` | `{targetId, isEnemy, targetX, targetY, targetZ, distance, requiredRange}` | Attacker out of melee range |
 | `combat:error` | `{message}` | Combat validation error |
+| `enemy:spawn` | `{enemyId, templateId, name, level, health, maxHealth, x, y, z}` | Enemy spawned/respawned |
+| `enemy:death` | `{enemyId, enemyName, killerId, killerName, isEnemy, exp, timestamp}` | Enemy killed |
+| `enemy:health_update` | `{enemyId, health, maxHealth, inCombat}` | Enemy health changed |
 
 ### Server Logs
 

@@ -98,8 +98,140 @@ function getAttackIntervalMs(aspd) {
     return (200 - clamped) * 50; // e.g. ASPD 180 → 20 * 50 = 1000ms
 }
 
-// Auto-attack state tracking: Map<attackerCharId, { targetCharId, startTime }>
+// Auto-attack state tracking: Map<attackerCharId, { targetCharId, isEnemy, startTime }>
 const autoAttackState = new Map();
+
+// ============================================================
+// RO-Style Derived Stat Calculations
+// ============================================================
+function calculateDerivedStats(stats) {
+    const { str = 1, agi = 1, vit = 1, int: intStat = 1, dex = 1, luk = 1, level = 1 } = stats;
+    const statusATK = str + Math.floor(str / 10) ** 2 + Math.floor(dex / 5) + Math.floor(luk / 3);
+    const statusMATK = intStat + Math.floor(intStat / 7) ** 2;
+    const hit = level + dex;
+    const flee = level + agi;
+    const softDEF = Math.floor(vit * 0.5 + (vit ** 2) / 150);
+    const softMDEF = Math.floor(intStat * 0.5);
+    const critical = Math.floor(luk * 0.3);
+    const aspd = Math.min(COMBAT.ASPD_CAP, Math.floor(170 + agi * 0.4 + dex * 0.1));
+    const maxHP = 100 + vit * 8 + level * 10;
+    const maxSP = 50 + intStat * 5 + level * 5;
+    return { statusATK, statusMATK, hit, flee, softDEF, softMDEF, critical, aspd, maxHP, maxSP };
+}
+
+function calculatePhysicalDamage(attackerStats, targetStats) {
+    const atkDerived = calculateDerivedStats(attackerStats);
+    const defDerived = calculateDerivedStats(targetStats);
+    const weaponATK = attackerStats.weaponATK || 0;
+    const totalATK = atkDerived.statusATK + weaponATK;
+    const variance = 0.8 + Math.random() * 0.2;
+    const rawDamage = Math.floor(totalATK * variance);
+    const damage = Math.max(1, rawDamage - defDerived.softDEF);
+    const isCritical = Math.random() * 100 < atkDerived.critical;
+    const finalDamage = isCritical ? Math.floor(damage * 1.4) : damage;
+    return { damage: Math.max(1, finalDamage), isCritical };
+}
+
+// ============================================================
+// Enemy/NPC System
+// ============================================================
+const enemies = new Map();
+let nextEnemyId = 2000001;
+
+const ENEMY_TEMPLATES = {
+    blobby: {
+        name: 'Blobby', level: 1, maxHealth: 50, damage: 1,
+        attackRange: 80, aggroRange: 300, aspd: 175, exp: 10,
+        respawnMs: 10000, aiType: 'passive',
+        stats: { str: 1, agi: 1, vit: 1, int: 1, dex: 1, luk: 1, level: 1, weaponATK: 0 }
+    },
+    hoplet: {
+        name: 'Hoplet', level: 3, maxHealth: 100, damage: 3,
+        attackRange: 80, aggroRange: 400, aspd: 178, exp: 25,
+        respawnMs: 15000, aiType: 'passive',
+        stats: { str: 3, agi: 5, vit: 2, int: 1, dex: 3, luk: 5, level: 3, weaponATK: 2 }
+    },
+    crawlid: {
+        name: 'Crawlid', level: 2, maxHealth: 75, damage: 2,
+        attackRange: 80, aggroRange: 0, aspd: 176, exp: 15,
+        respawnMs: 12000, aiType: 'passive',
+        stats: { str: 2, agi: 2, vit: 3, int: 1, dex: 2, luk: 1, level: 2, weaponATK: 1 }
+    },
+    shroomkin: {
+        name: 'Shroomkin', level: 4, maxHealth: 120, damage: 4,
+        attackRange: 80, aggroRange: 350, aspd: 177, exp: 30,
+        respawnMs: 15000, aiType: 'passive',
+        stats: { str: 4, agi: 3, vit: 4, int: 2, dex: 3, luk: 2, level: 4, weaponATK: 3 }
+    },
+    buzzer: {
+        name: 'Buzzer', level: 5, maxHealth: 150, damage: 5,
+        attackRange: 80, aggroRange: 500, aspd: 179, exp: 40,
+        respawnMs: 18000, aiType: 'aggressive',
+        stats: { str: 5, agi: 7, vit: 3, int: 1, dex: 5, luk: 3, level: 5, weaponATK: 4 }
+    },
+    mosswort: {
+        name: 'Mosswort', level: 3, maxHealth: 90, damage: 2,
+        attackRange: 80, aggroRange: 0, aspd: 174, exp: 20,
+        respawnMs: 12000, aiType: 'passive',
+        stats: { str: 2, agi: 1, vit: 5, int: 3, dex: 2, luk: 1, level: 3, weaponATK: 1 }
+    }
+};
+
+const ENEMY_SPAWNS = [
+    { template: 'blobby',    x: 500,  y: 500,  z: 300, wanderRadius: 300 },
+    { template: 'blobby',    x: -500, y: 300,  z: 300, wanderRadius: 300 },
+    { template: 'blobby',    x: 200,  y: -400, z: 300, wanderRadius: 300 },
+    { template: 'hoplet',    x: 800,  y: -200, z: 300, wanderRadius: 400 },
+    { template: 'hoplet',    x: -700, y: -500, z: 300, wanderRadius: 400 },
+    { template: 'crawlid',   x: -300, y: 800,  z: 300, wanderRadius: 200 },
+    { template: 'crawlid',   x: 400,  y: 700,  z: 300, wanderRadius: 200 },
+    { template: 'shroomkin', x: 1000, y: 300,  z: 300, wanderRadius: 350 },
+    { template: 'shroomkin', x: -900, y: 100,  z: 300, wanderRadius: 350 },
+    { template: 'buzzer',    x: 1200, y: -600, z: 300, wanderRadius: 500 },
+    { template: 'mosswort',  x: 0,    y: -800, z: 300, wanderRadius: 200 },
+    { template: 'mosswort',  x: 600,  y: -900, z: 300, wanderRadius: 200 }
+];
+
+function spawnEnemy(spawnConfig) {
+    const template = ENEMY_TEMPLATES[spawnConfig.template];
+    if (!template) return null;
+    const enemyId = nextEnemyId++;
+    const enemy = {
+        enemyId, templateId: spawnConfig.template,
+        name: template.name, level: template.level,
+        health: template.maxHealth, maxHealth: template.maxHealth,
+        damage: template.damage, attackRange: template.attackRange,
+        aggroRange: template.aggroRange, aspd: template.aspd,
+        exp: template.exp, aiType: template.aiType,
+        stats: { ...template.stats }, isDead: false,
+        x: spawnConfig.x, y: spawnConfig.y, z: spawnConfig.z,
+        spawnX: spawnConfig.x, spawnY: spawnConfig.y, spawnZ: spawnConfig.z,
+        wanderRadius: spawnConfig.wanderRadius, respawnMs: template.respawnMs,
+        targetPlayerId: null, lastAttackTime: 0,
+        inCombatWith: new Set()
+    };
+    enemies.set(enemyId, enemy);
+    logger.info(`[ENEMY] Spawned ${enemy.name} (ID: ${enemyId}) at (${enemy.x}, ${enemy.y}, ${enemy.z})`);
+    io.emit('enemy:spawn', {
+        enemyId, templateId: spawnConfig.template, name: enemy.name,
+        level: enemy.level, health: enemy.health, maxHealth: enemy.maxHealth,
+        x: enemy.x, y: enemy.y, z: enemy.z
+    });
+    return enemy;
+}
+
+// Helper: Save player health/mana to database
+async function savePlayerHealthToDB(characterId, health, mana) {
+    try {
+        await pool.query(
+            'UPDATE characters SET health = $1, mana = $2 WHERE character_id = $3',
+            [health, mana, characterId]
+        );
+        logger.debug(`[DB] Saved health/mana for character ${characterId}: HP=${health}, MP=${mana}`);
+    } catch (err) {
+        logger.error(`[DB] Failed to save health for character ${characterId}:`, err.message);
+    }
+}
 
 // Helper: Find player entry by socket ID
 function findPlayerBySocketId(socketId) {
@@ -151,6 +283,32 @@ io.on('connection', (socket) => {
             logger.error(`Failed to fetch initial data for character ${characterId}:`, err.message);
         }
         
+        // Default base stats (RO-style)
+        const baseStats = { str: 1, agi: 1, vit: 1, int: 1, dex: 1, luk: 1, level: 1, weaponATK: 0, statPoints: 48 };
+        
+        // Load stats from DB if available
+        try {
+            const statsResult = await pool.query(
+                'SELECT str, agi, vit, int_stat, dex, luk, level, stat_points FROM characters WHERE character_id = $1',
+                [characterId]
+            );
+            if (statsResult.rows.length > 0) {
+                const s = statsResult.rows[0];
+                if (s.str != null) baseStats.str = s.str;
+                if (s.agi != null) baseStats.agi = s.agi;
+                if (s.vit != null) baseStats.vit = s.vit;
+                if (s.int_stat != null) baseStats.int = s.int_stat;
+                if (s.dex != null) baseStats.dex = s.dex;
+                if (s.luk != null) baseStats.luk = s.luk;
+                if (s.level != null) baseStats.level = s.level;
+                if (s.stat_points != null) baseStats.statPoints = s.stat_points;
+            }
+        } catch (err) {
+            logger.warn(`Could not load stats for character ${characterId}: ${err.message}`);
+        }
+        
+        const derived = calculateDerivedStats(baseStats);
+        
         // Store player connection with combat data
         connectedPlayers.set(characterId, {
             socketId: socket.id,
@@ -162,8 +320,9 @@ io.on('connection', (socket) => {
             maxMana,
             isDead: false,
             lastAttackTime: 0,
-            aspd: COMBAT.DEFAULT_ASPD,
-            attackRange: COMBAT.MELEE_RANGE
+            aspd: derived.aspd || COMBAT.DEFAULT_ASPD,
+            attackRange: COMBAT.MELEE_RANGE,
+            stats: baseStats
         });
         
         logger.info(`Player joined: ${characterName || 'Unknown'} (Character ${characterId}) HP: ${health}/${maxHealth} MP: ${mana}/${maxMana}`);
@@ -193,6 +352,26 @@ io.on('connection', (socket) => {
                 });
             }
         }
+        
+        // Send player stats
+        const statsPayload = {
+            characterId,
+            stats: baseStats,
+            derived
+        };
+        socket.emit('player:stats', statsPayload);
+        logger.info(`[SEND] player:stats to ${socket.id}: ${JSON.stringify(statsPayload)}`);
+        
+        // Send existing enemies to the joining player
+        for (const [eid, enemy] of enemies.entries()) {
+            if (!enemy.isDead) {
+                socket.emit('enemy:spawn', {
+                    enemyId: eid, templateId: enemy.templateId, name: enemy.name,
+                    level: enemy.level, health: enemy.health, maxHealth: enemy.maxHealth,
+                    x: enemy.x, y: enemy.y, z: enemy.z
+                });
+            }
+        }
     });
     
     // Position update from client
@@ -216,7 +395,7 @@ io.on('connection', (socket) => {
     });
     
     // Disconnect
-    socket.on('disconnect', () => {
+    socket.on('disconnect', async () => {
         logger.info(`[RECV] disconnect from ${socket.id}`);
         logger.info(`Connected players count: ${connectedPlayers.size}`);
         
@@ -224,12 +403,28 @@ io.on('connection', (socket) => {
         for (const [charId, player] of connectedPlayers.entries()) {
             logger.info(`Checking player ${charId} with socket ${player.socketId} against ${socket.id}`);
             if (player.socketId === socket.id) {
+                // Save health/mana to DB on disconnect
+                await savePlayerHealthToDB(charId, player.health, player.mana);
+                
+                // Save stats to DB on disconnect
+                if (player.stats) {
+                    try {
+                        await pool.query(
+                            `UPDATE characters SET str = $1, agi = $2, vit = $3, int_stat = $4, dex = $5, luk = $6, stat_points = $7 WHERE character_id = $8`,
+                            [player.stats.str, player.stats.agi, player.stats.vit, player.stats.int, player.stats.dex, player.stats.luk, player.stats.statPoints, charId]
+                        );
+                        logger.info(`[DB] Saved stats for character ${charId} on disconnect`);
+                    } catch (err) {
+                        logger.error(`[DB] Failed to save stats for character ${charId}:`, err.message);
+                    }
+                }
+                
                 // Clear this player's auto-attack
                 autoAttackState.delete(charId);
                 
                 // Clear anyone auto-attacking this player
                 for (const [attackerId, atkState] of autoAttackState.entries()) {
-                    if (atkState.targetCharId === charId) {
+                    if (atkState.targetCharId === charId && !atkState.isEnemy) {
                         autoAttackState.delete(attackerId);
                         const attackerPlayer = connectedPlayers.get(attackerId);
                         if (attackerPlayer) {
@@ -241,6 +436,11 @@ io.on('connection', (socket) => {
                             }
                         }
                     }
+                }
+                
+                // Remove this player from enemy combat sets
+                for (const [, enemy] of enemies.entries()) {
+                    enemy.inCombatWith.delete(charId);
                 }
                 
                 connectedPlayers.delete(charId);
@@ -256,9 +456,10 @@ io.on('connection', (socket) => {
     });
     
     // Combat: Start auto-attack (RO-style: click once → path → auto-attack loop)
+    // Supports both player targets (targetCharacterId) and enemy targets (targetEnemyId)
     socket.on('combat:attack', (data) => {
         logger.info(`[RECV] combat:attack from ${socket.id}: ${JSON.stringify(data)}`);
-        const { targetCharacterId } = data;
+        const { targetCharacterId, targetEnemyId } = data;
         
         const attackerInfo = findPlayerBySocketId(socket.id);
         if (!attackerInfo) {
@@ -273,6 +474,42 @@ io.on('connection', (socket) => {
             return;
         }
         
+        // --- Attacking an enemy (NPC/AI) ---
+        if (targetEnemyId != null) {
+            const enemy = enemies.get(targetEnemyId);
+            if (!enemy) {
+                socket.emit('combat:error', { message: 'Enemy not found' });
+                return;
+            }
+            if (enemy.isDead) {
+                socket.emit('combat:error', { message: 'Enemy is already dead' });
+                return;
+            }
+            
+            autoAttackState.set(attackerId, {
+                targetCharId: targetEnemyId,
+                isEnemy: true,
+                startTime: Date.now()
+            });
+            
+            // Mark enemy in combat with this player
+            enemy.inCombatWith.add(attackerId);
+            
+            const atkStartPayload = {
+                targetId: targetEnemyId,
+                targetName: enemy.name,
+                isEnemy: true,
+                attackRange: attacker.attackRange,
+                aspd: attacker.aspd,
+                attackIntervalMs: getAttackIntervalMs(attacker.aspd)
+            };
+            socket.emit('combat:auto_attack_started', atkStartPayload);
+            logger.info(`[SEND] combat:auto_attack_started to ${socket.id}: ${JSON.stringify(atkStartPayload)}`);
+            logger.info(`[COMBAT] ${attacker.characterName} started auto-attacking enemy ${enemy.name} (ID: ${targetEnemyId})`);
+            return;
+        }
+        
+        // --- Attacking a player ---
         if (attackerId === targetCharacterId) {
             socket.emit('combat:error', { message: 'Cannot attack yourself' });
             return;
@@ -292,6 +529,7 @@ io.on('connection', (socket) => {
         // Set auto-attack state (server handles attack timing via combat tick)
         autoAttackState.set(attackerId, {
             targetCharId: targetCharacterId,
+            isEnemy: false,
             startTime: Date.now()
         });
         
@@ -299,6 +537,7 @@ io.on('connection', (socket) => {
         const atkStartPayload = {
             targetId: targetCharacterId,
             targetName: target.characterName,
+            isEnemy: false,
             attackRange: attacker.attackRange,
             aspd: attacker.aspd,
             attackIntervalMs: getAttackIntervalMs(attacker.aspd)
@@ -318,6 +557,12 @@ io.on('connection', (socket) => {
         const { characterId: attackerId, player: attacker } = attackerInfo;
         
         if (autoAttackState.has(attackerId)) {
+            const atkState = autoAttackState.get(attackerId);
+            // Remove from enemy combat set if attacking an enemy
+            if (atkState.isEnemy) {
+                const enemy = enemies.get(atkState.targetCharId);
+                if (enemy) enemy.inCombatWith.delete(attackerId);
+            }
             autoAttackState.delete(attackerId);
             const stopPayload = { reason: 'Player stopped' };
             socket.emit('combat:auto_attack_stopped', stopPayload);
@@ -327,8 +572,8 @@ io.on('connection', (socket) => {
     });
     
     // Combat: Respawn handler
-    socket.on('combat:respawn', async () => {
-        logger.info(`[RECV] combat:respawn from ${socket.id}`);
+    socket.on('combat:respawn', async (data) => {
+        logger.info(`[RECV] combat:respawn from ${socket.id}: ${JSON.stringify(data || {})}`);
         const playerInfo = findPlayerBySocketId(socket.id);
         if (!playerInfo) return;
         
@@ -339,27 +584,36 @@ io.on('connection', (socket) => {
             return;
         }
         
+        // Stop all attackers targeting this dead player
+        for (const [attackerId, atkState] of autoAttackState.entries()) {
+            if (atkState.targetCharId === characterId && !atkState.isEnemy) {
+                autoAttackState.delete(attackerId);
+                const attackerPlayer = connectedPlayers.get(attackerId);
+                if (attackerPlayer) {
+                    const attackerSocket = io.sockets.sockets.get(attackerPlayer.socketId);
+                    if (attackerSocket) {
+                        const lostPayload = { reason: 'Target respawned' };
+                        attackerSocket.emit('combat:target_lost', lostPayload);
+                        logger.info(`[SEND] combat:target_lost to ${attackerPlayer.socketId}: ${JSON.stringify(lostPayload)}`);
+                    }
+                }
+            }
+        }
+        
         // Restore health to full
         player.health = player.maxHealth;
         player.mana = player.maxMana;
         player.isDead = false;
         
         // Save health to database
-        try {
-            await pool.query(
-                'UPDATE characters SET health = $1, mana = $2 WHERE character_id = $3',
-                [player.health, player.mana, characterId]
-            );
-        } catch (err) {
-            logger.error(`Failed to save respawn health for character ${characterId}:`, err.message);
-        }
+        await savePlayerHealthToDB(characterId, player.health, player.mana);
         
         // Update position cache to spawn point
         await setPlayerPosition(characterId, COMBAT.SPAWN_POSITION.x, COMBAT.SPAWN_POSITION.y, COMBAT.SPAWN_POSITION.z);
         
-        logger.info(`[COMBAT] ${player.characterName} respawned`);
+        logger.info(`[COMBAT] ${player.characterName} respawned at (${COMBAT.SPAWN_POSITION.x}, ${COMBAT.SPAWN_POSITION.y}, ${COMBAT.SPAWN_POSITION.z})`);
         
-        // Notify all players of respawn
+        // Notify all players of respawn with teleport flag
         const respawnPayload = {
             characterId,
             characterName: player.characterName,
@@ -370,10 +624,63 @@ io.on('connection', (socket) => {
             x: COMBAT.SPAWN_POSITION.x,
             y: COMBAT.SPAWN_POSITION.y,
             z: COMBAT.SPAWN_POSITION.z,
+            teleport: true,
             timestamp: Date.now()
         };
         io.emit('combat:respawn', respawnPayload);
         logger.info(`[BROADCAST] combat:respawn: ${JSON.stringify(respawnPayload)}`);
+    });
+    
+    // Stat allocation handler
+    socket.on('player:allocate_stat', async (data) => {
+        logger.info(`[RECV] player:allocate_stat from ${socket.id}: ${JSON.stringify(data)}`);
+        const { statName, amount } = data;
+        
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        
+        const { characterId, player } = playerInfo;
+        
+        const validStats = ['str', 'agi', 'vit', 'int', 'dex', 'luk'];
+        if (!validStats.includes(statName)) {
+            socket.emit('combat:error', { message: `Invalid stat: ${statName}` });
+            return;
+        }
+        
+        const pts = amount || 1;
+        const statKey = statName === 'int' ? 'int' : statName;
+        
+        if (!player.stats || player.stats.statPoints < pts) {
+            socket.emit('combat:error', { message: 'Not enough stat points' });
+            return;
+        }
+        
+        // RO-style cost: increasing stat costs more points (simplified: 1 point per increase for now)
+        player.stats[statKey] += pts;
+        player.stats.statPoints -= pts;
+        
+        // Recalculate derived stats
+        const derived = calculateDerivedStats(player.stats);
+        player.aspd = derived.aspd;
+        
+        // Save to DB
+        try {
+            const dbStatName = statName === 'int' ? 'int_stat' : statName;
+            await pool.query(
+                `UPDATE characters SET ${dbStatName} = $1, stat_points = $2 WHERE character_id = $3`,
+                [player.stats[statKey], player.stats.statPoints, characterId]
+            );
+        } catch (err) {
+            logger.error(`Failed to save stat allocation for character ${characterId}:`, err.message);
+        }
+        
+        const statsPayload = {
+            characterId,
+            stats: player.stats,
+            derived
+        };
+        socket.emit('player:stats', statsPayload);
+        logger.info(`[SEND] player:stats to ${socket.id}: ${JSON.stringify(statsPayload)}`);
     });
     
     // Chat message handler (expandable for multiple channels)
@@ -437,7 +744,8 @@ io.on('connection', (socket) => {
 
 // ============================================================
 // Combat Tick Loop (RO-style auto-attack processing)
-// Runs every COMBAT_TICK_MS, checks all active auto-attackers
+// Handles: player-vs-player, player-vs-enemy, enemy respawns
+// Runs every COMBAT_TICK_MS
 // ============================================================
 setInterval(async () => {
     const now = Date.now();
@@ -461,25 +769,158 @@ setInterval(async () => {
             continue;
         }
         
+        // ========== ENEMY TARGET ==========
+        if (atkState.isEnemy) {
+            const enemy = enemies.get(atkState.targetCharId);
+            
+            if (!enemy || enemy.isDead) {
+                autoAttackState.delete(attackerId);
+                const attackerSocket = io.sockets.sockets.get(attacker.socketId);
+                if (attackerSocket) {
+                    const lostPayload = { reason: enemy ? 'Enemy died' : 'Enemy gone', isEnemy: true };
+                    attackerSocket.emit('combat:target_lost', lostPayload);
+                    logger.info(`[SEND] combat:target_lost to ${attacker.socketId}: ${JSON.stringify(lostPayload)}`);
+                }
+                continue;
+            }
+            
+            // ASPD timing check
+            const attackInterval = getAttackIntervalMs(attacker.aspd);
+            if (now - attacker.lastAttackTime < attackInterval) continue;
+            
+            // Range check
+            try {
+                const attackerPos = await getPlayerPosition(attackerId);
+                if (!attackerPos) continue;
+                
+                const dx = attackerPos.x - enemy.x;
+                const dy = attackerPos.y - enemy.y;
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance > attacker.attackRange) {
+                    // Out of range — broadcast range status so client moves toward enemy
+                    const attackerSocket = io.sockets.sockets.get(attacker.socketId);
+                    if (attackerSocket) {
+                        attackerSocket.emit('combat:out_of_range', {
+                            targetId: atkState.targetCharId,
+                            isEnemy: true,
+                            targetX: enemy.x, targetY: enemy.y, targetZ: enemy.z,
+                            distance, requiredRange: attacker.attackRange
+                        });
+                    }
+                    continue;
+                }
+                
+                // IN RANGE: Execute attack on enemy
+                const damage = COMBAT.BASE_DAMAGE + Math.floor(Math.random() * (COMBAT.DAMAGE_VARIANCE + 1));
+                enemy.health = Math.max(0, enemy.health - damage);
+                attacker.lastAttackTime = now;
+                
+                logger.info(`[COMBAT] ${attacker.characterName} hit enemy ${enemy.name}(${enemy.enemyId}) for ${damage} (HP: ${enemy.health}/${enemy.maxHealth})`);
+                
+                // Broadcast enemy damage
+                const damagePayload = {
+                    attackerId,
+                    attackerName: attacker.characterName,
+                    targetId: enemy.enemyId,
+                    targetName: enemy.name,
+                    isEnemy: true,
+                    damage,
+                    targetHealth: enemy.health,
+                    targetMaxHealth: enemy.maxHealth,
+                    timestamp: now
+                };
+                io.emit('combat:damage', damagePayload);
+                logger.info(`[BROADCAST] combat:damage (enemy): ${JSON.stringify(damagePayload)}`);
+                
+                // Broadcast enemy health update to all (for health bar visibility)
+                io.emit('enemy:health_update', {
+                    enemyId: enemy.enemyId,
+                    health: enemy.health,
+                    maxHealth: enemy.maxHealth,
+                    inCombat: enemy.inCombatWith.size > 0
+                });
+                
+                // Enemy death
+                if (enemy.health <= 0) {
+                    enemy.isDead = true;
+                    
+                    logger.info(`[COMBAT] Enemy ${enemy.name}(${enemy.enemyId}) killed by ${attacker.characterName}`);
+                    
+                    // Stop all players auto-attacking this enemy
+                    for (const [otherId, otherAtk] of autoAttackState.entries()) {
+                        if (otherAtk.isEnemy && otherAtk.targetCharId === enemy.enemyId) {
+                            autoAttackState.delete(otherId);
+                            const otherPlayer = connectedPlayers.get(otherId);
+                            if (otherPlayer) {
+                                const otherSocket = io.sockets.sockets.get(otherPlayer.socketId);
+                                if (otherSocket) {
+                                    const lostPayload = { reason: 'Enemy died', isEnemy: true };
+                                    otherSocket.emit('combat:target_lost', lostPayload);
+                                    logger.info(`[SEND] combat:target_lost to ${otherPlayer.socketId}: ${JSON.stringify(lostPayload)}`);
+                                }
+                            }
+                        }
+                    }
+                    
+                    // Clear combat set
+                    enemy.inCombatWith.clear();
+                    
+                    // Broadcast enemy death
+                    const deathPayload = {
+                        enemyId: enemy.enemyId,
+                        enemyName: enemy.name,
+                        killerId: attackerId,
+                        killerName: attacker.characterName,
+                        isEnemy: true,
+                        exp: enemy.exp,
+                        timestamp: now
+                    };
+                    io.emit('enemy:death', deathPayload);
+                    logger.info(`[BROADCAST] enemy:death: ${JSON.stringify(deathPayload)}`);
+                    
+                    // Schedule enemy respawn
+                    setTimeout(() => {
+                        enemy.health = enemy.maxHealth;
+                        enemy.isDead = false;
+                        enemy.x = enemy.spawnX;
+                        enemy.y = enemy.spawnY;
+                        enemy.z = enemy.spawnZ;
+                        enemy.targetPlayerId = null;
+                        enemy.inCombatWith = new Set();
+                        
+                        logger.info(`[ENEMY] Respawned ${enemy.name} (ID: ${enemy.enemyId})`);
+                        io.emit('enemy:spawn', {
+                            enemyId: enemy.enemyId, templateId: enemy.templateId, name: enemy.name,
+                            level: enemy.level, health: enemy.health, maxHealth: enemy.maxHealth,
+                            x: enemy.x, y: enemy.y, z: enemy.z
+                        });
+                    }, enemy.respawnMs);
+                }
+            } catch (err) {
+                logger.error(`Combat tick error (enemy target) for attacker ${attackerId}:`, err.message);
+            }
+            continue;
+        }
+        
+        // ========== PLAYER TARGET ==========
         const target = connectedPlayers.get(atkState.targetCharId);
         
-        // Target gone or dead — stop auto-attack
+        // Target gone or dead — stop auto-attack, send target_lost
         if (!target || target.isDead) {
             autoAttackState.delete(attackerId);
             const attackerSocket = io.sockets.sockets.get(attacker.socketId);
             if (attackerSocket) {
-                const targetLostPayload = { reason: target ? 'Target died' : 'Target disconnected' };
+                const targetLostPayload = { reason: target ? 'Target died' : 'Target disconnected', isEnemy: false };
                 attackerSocket.emit('combat:target_lost', targetLostPayload);
                 logger.info(`[SEND] combat:target_lost to ${attacker.socketId}: ${JSON.stringify(targetLostPayload)}`);
             }
             continue;
         }
         
-        // Check ASPD timing — enough time since last attack?
+        // ASPD timing check
         const attackInterval = getAttackIntervalMs(attacker.aspd);
-        if (now - attacker.lastAttackTime < attackInterval) {
-            continue; // Not time to attack yet
-        }
+        if (now - attacker.lastAttackTime < attackInterval) continue;
         
         // Range check using cached Redis positions
         try {
@@ -493,13 +934,21 @@ setInterval(async () => {
             const distance = Math.sqrt(dx * dx + dy * dy);
             
             if (distance > attacker.attackRange) {
-                // Out of range — don't attack, but keep auto-attack active
-                // Client should be pathfinding toward target
+                // Out of range — broadcast so client knows to move
+                const attackerSocket = io.sockets.sockets.get(attacker.socketId);
+                if (attackerSocket) {
+                    attackerSocket.emit('combat:out_of_range', {
+                        targetId: atkState.targetCharId,
+                        isEnemy: false,
+                        targetX: targetPos.x, targetY: targetPos.y, targetZ: targetPos.z,
+                        distance, requiredRange: attacker.attackRange
+                    });
+                }
                 continue;
             }
             
             // === IN RANGE: Execute attack ===
-            const damage = COMBAT.BASE_DAMAGE + Math.floor(Math.random() * COMBAT.DAMAGE_VARIANCE);
+            const damage = COMBAT.BASE_DAMAGE + Math.floor(Math.random() * (COMBAT.DAMAGE_VARIANCE + 1));
             target.health = Math.max(0, target.health - damage);
             attacker.lastAttackTime = now;
             
@@ -511,6 +960,7 @@ setInterval(async () => {
                 attackerName: attacker.characterName,
                 targetId: atkState.targetCharId,
                 targetName: target.characterName,
+                isEnemy: false,
                 damage,
                 targetHealth: target.health,
                 targetMaxHealth: target.maxHealth,
@@ -519,24 +969,21 @@ setInterval(async () => {
             io.emit('combat:damage', damagePayload);
             logger.info(`[BROADCAST] combat:damage: ${JSON.stringify(damagePayload)}`);
             
-            // Check for death
+            // Check for player death
             if (target.health <= 0) {
                 target.isDead = true;
                 
                 logger.info(`[COMBAT] ${target.characterName} was killed by ${attacker.characterName}`);
                 
-                // Stop auto-attack on dead target
-                autoAttackState.delete(attackerId);
-                
-                // Stop anyone else auto-attacking the dead target
+                // Stop all attackers targeting this dead player
                 for (const [otherId, otherAtk] of autoAttackState.entries()) {
-                    if (otherAtk.targetCharId === atkState.targetCharId) {
+                    if (otherAtk.targetCharId === atkState.targetCharId && !otherAtk.isEnemy) {
                         autoAttackState.delete(otherId);
                         const otherPlayer = connectedPlayers.get(otherId);
                         if (otherPlayer) {
                             const otherSocket = io.sockets.sockets.get(otherPlayer.socketId);
                             if (otherSocket) {
-                                const otherLostPayload = { reason: 'Target died' };
+                                const otherLostPayload = { reason: 'Target died', isEnemy: false };
                                 otherSocket.emit('combat:target_lost', otherLostPayload);
                                 logger.info(`[SEND] combat:target_lost to ${otherPlayer.socketId}: ${JSON.stringify(otherLostPayload)}`);
                             }
@@ -550,6 +997,7 @@ setInterval(async () => {
                     killedName: target.characterName,
                     killerId: attackerId,
                     killerName: attacker.characterName,
+                    isEnemy: false,
                     timestamp: now
                 };
                 io.emit('combat:death', deathPayload);
@@ -566,14 +1014,7 @@ setInterval(async () => {
                 });
                 
                 // Save target health to DB
-                try {
-                    await pool.query(
-                        'UPDATE characters SET health = $1 WHERE character_id = $2',
-                        [0, atkState.targetCharId]
-                    );
-                } catch (dbErr) {
-                    logger.error(`Failed to save death health for character ${atkState.targetCharId}:`, dbErr.message);
-                }
+                await savePlayerHealthToDB(atkState.targetCharId, 0, target.mana);
             }
         } catch (err) {
             logger.error(`Combat tick error for attacker ${attackerId}:`, err.message);
@@ -1037,4 +1478,39 @@ server.listen(PORT, async () => {
   } catch (err) {
     logger.error('Redis: Connection failed -', err.message);
   }
+  
+  // Ensure stat columns exist in characters table
+  try {
+    await pool.query(`
+      ALTER TABLE characters 
+      ADD COLUMN IF NOT EXISTS str INTEGER DEFAULT 1,
+      ADD COLUMN IF NOT EXISTS agi INTEGER DEFAULT 1,
+      ADD COLUMN IF NOT EXISTS vit INTEGER DEFAULT 1,
+      ADD COLUMN IF NOT EXISTS int_stat INTEGER DEFAULT 1,
+      ADD COLUMN IF NOT EXISTS dex INTEGER DEFAULT 1,
+      ADD COLUMN IF NOT EXISTS luk INTEGER DEFAULT 1,
+      ADD COLUMN IF NOT EXISTS stat_points INTEGER DEFAULT 48,
+      ADD COLUMN IF NOT EXISTS max_health INTEGER DEFAULT 100,
+      ADD COLUMN IF NOT EXISTS max_mana INTEGER DEFAULT 100
+    `);
+    logger.info('[DB] Stat columns verified/created on characters table');
+  } catch (err) {
+    logger.warn(`[DB] Could not add stat columns (may already exist): ${err.message}`);
+  }
+  
+  // Spawn initial enemies
+  logger.info(`[ENEMY] Spawning ${ENEMY_SPAWNS.length} enemies...`);
+  for (const spawnConfig of ENEMY_SPAWNS) {
+    spawnEnemy(spawnConfig);
+  }
+  logger.info(`[ENEMY] ${enemies.size} enemies spawned. IDs: ${Array.from(enemies.keys()).join(', ')}`);
 });
+
+// Periodic health/mana save to DB (every 60 seconds)
+setInterval(async () => {
+  for (const [charId, player] of connectedPlayers.entries()) {
+    if (!player.isDead) {
+      await savePlayerHealthToDB(charId, player.health, player.mana);
+    }
+  }
+}, 60000);
