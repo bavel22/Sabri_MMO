@@ -5,7 +5,7 @@
 #include "CoreMinimal.h"
 #include "UObject/NoExportTypes.h"
 #include "CharacterData.h"
-#include "HttpManager.generated.h"
+#include "MMOHttpManager.generated.h"
 
 class IHttpRequest;
 class IHttpResponse;

@@ -24,6 +24,7 @@ public class SabriMMO : ModuleRules
 			"JsonUtilities"
 		});
 
+		// Exclude NetworkPrediction module due to UE 5.7 compiler bug
 		PrivateDependencyModuleNames.AddRange(new string[] { });
 
 		PublicIncludePaths.AddRange(new string[] {

@@ -86,6 +86,7 @@ const COMBAT = {
     RANGED_RANGE: 800,          // Default ranged attack range
     DEFAULT_ASPD: 180,          // Default attack speed (0-190 scale, higher = faster)
     ASPD_CAP: 190,              // Maximum ASPD
+    RANGE_TOLERANCE: 50,         // Extra units added to out_of_range check so client moves closer than max range
     COMBAT_TICK_MS: 50,         // Server combat tick interval (ms)
     RESPAWN_DELAY_MS: 5000,
     SPAWN_POSITION: { x: 0, y: 0, z: 300 }
@@ -275,6 +276,8 @@ io.on('connection', (socket) => {
                     x: row.x,
                     y: row.y,
                     z: row.z,
+                    health,
+                    maxHealth,
                     timestamp: Date.now()
                 });
                 logger.info(`Broadcasted initial position for ${characterName} (Character ${characterId}) at (${row.x}, ${row.y}, ${row.z})`);
@@ -389,6 +392,8 @@ io.on('connection', (socket) => {
             characterId,
             characterName,
             x, y, z,
+            health: player ? player.health : 100,
+            maxHealth: player ? player.maxHealth : 100,
             timestamp: Date.now()
         });
         logger.debug(`[BROADCAST] player:moved for ${characterName} (Character ${characterId})`);
@@ -647,7 +652,7 @@ io.on('connection', (socket) => {
             return;
         }
         
-        const pts = amount || 1;
+        const pts = parseInt(amount) || 1;
         const statKey = statName === 'int' ? 'int' : statName;
         
         if (!player.stats || player.stats.statPoints < pts) {
@@ -799,13 +804,14 @@ setInterval(async () => {
                 
                 if (distance > attacker.attackRange) {
                     // Out of range — broadcast range status so client moves toward enemy
+                    // Use padded range so client stops INSIDE the attack range (not at boundary)
                     const attackerSocket = io.sockets.sockets.get(attacker.socketId);
                     if (attackerSocket) {
                         attackerSocket.emit('combat:out_of_range', {
                             targetId: atkState.targetCharId,
                             isEnemy: true,
                             targetX: enemy.x, targetY: enemy.y, targetZ: enemy.z,
-                            distance, requiredRange: attacker.attackRange
+                            distance, requiredRange: Math.max(0, attacker.attackRange - COMBAT.RANGE_TOLERANCE)
                         });
                     }
                     continue;
@@ -818,7 +824,7 @@ setInterval(async () => {
                 
                 logger.info(`[COMBAT] ${attacker.characterName} hit enemy ${enemy.name}(${enemy.enemyId}) for ${damage} (HP: ${enemy.health}/${enemy.maxHealth})`);
                 
-                // Broadcast enemy damage
+                // Broadcast enemy damage (include positions for remote rotation)
                 const damagePayload = {
                     attackerId,
                     attackerName: attacker.characterName,
@@ -828,6 +834,8 @@ setInterval(async () => {
                     damage,
                     targetHealth: enemy.health,
                     targetMaxHealth: enemy.maxHealth,
+                    attackerX: attackerPos.x, attackerY: attackerPos.y, attackerZ: attackerPos.z,
+                    targetX: enemy.x, targetY: enemy.y, targetZ: enemy.z,
                     timestamp: now
                 };
                 io.emit('combat:damage', damagePayload);
@@ -935,13 +943,14 @@ setInterval(async () => {
             
             if (distance > attacker.attackRange) {
                 // Out of range — broadcast so client knows to move
+                // Use padded range so client stops INSIDE the attack range (not at boundary)
                 const attackerSocket = io.sockets.sockets.get(attacker.socketId);
                 if (attackerSocket) {
                     attackerSocket.emit('combat:out_of_range', {
                         targetId: atkState.targetCharId,
                         isEnemy: false,
                         targetX: targetPos.x, targetY: targetPos.y, targetZ: targetPos.z,
-                        distance, requiredRange: attacker.attackRange
+                        distance, requiredRange: Math.max(0, attacker.attackRange - COMBAT.RANGE_TOLERANCE)
                     });
                 }
                 continue;
@@ -954,7 +963,7 @@ setInterval(async () => {
             
             logger.info(`[COMBAT] ${attacker.characterName} hit ${target.characterName} for ${damage} damage (HP: ${target.health}/${target.maxHealth})`);
             
-            // Broadcast damage to all players
+            // Broadcast damage to all players (include positions for remote rotation)
             const damagePayload = {
                 attackerId,
                 attackerName: attacker.characterName,
@@ -964,6 +973,8 @@ setInterval(async () => {
                 damage,
                 targetHealth: target.health,
                 targetMaxHealth: target.maxHealth,
+                attackerX: attackerPos.x, attackerY: attackerPos.y, attackerZ: attackerPos.z,
+                targetX: targetPos.x, targetY: targetPos.y, targetZ: targetPos.z,
                 timestamp: now
             };
             io.emit('combat:damage', damagePayload);

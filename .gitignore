@@ -10,6 +10,19 @@ client/Binaries/
 client/Plugins/*/Intermediate/
 client/Plugins/*/Binaries/
 
+# UE5 Project Files (nested under SabriMMO/)
+client/SabriMMO/Binaries/
+client/SabriMMO/DerivedDataCache/
+client/SabriMMO/Intermediate/
+client/SabriMMO/Saved/
+client/SabriMMO/.vs/
+client/SabriMMO/.vsconfig
+client/SabriMMO/.diversion/
+client/SabriMMO/.dvignore
+client/SabriMMO/Config/
+client/SabriMMO/Content/
+client/SabriMMO/Plugins/
+
 # Node.js Files
 server/node_modules/
 server/dist/
