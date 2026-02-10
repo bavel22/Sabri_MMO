@@ -636,6 +636,24 @@ io.on('connection', (socket) => {
         logger.info(`[BROADCAST] combat:respawn: ${JSON.stringify(respawnPayload)}`);
     });
     
+    // Request current stats (used when opening stat window)
+    socket.on('player:request_stats', () => {
+        logger.info(`[RECV] player:request_stats from ${socket.id}`);
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        
+        const { characterId, player } = playerInfo;
+        const derived = calculateDerivedStats(player.stats);
+        
+        const statsPayload = {
+            characterId,
+            stats: player.stats,
+            derived
+        };
+        socket.emit('player:stats', statsPayload);
+        logger.info(`[SEND] player:stats to ${socket.id}: ${JSON.stringify(statsPayload)}`);
+    });
+    
     // Stat allocation handler
     socket.on('player:allocate_stat', async (data) => {
         logger.info(`[RECV] player:allocate_stat from ${socket.id}: ${JSON.stringify(data)}`);
@@ -986,29 +1004,34 @@ setInterval(async () => {
                 
                 logger.info(`[COMBAT] ${target.characterName} was killed by ${attacker.characterName}`);
                 
-                // Stop all attackers targeting this dead player
+                // Stop all OTHER attackers targeting this dead player (not the killer — they get combat:death)
                 for (const [otherId, otherAtk] of autoAttackState.entries()) {
                     if (otherAtk.targetCharId === atkState.targetCharId && !otherAtk.isEnemy) {
                         autoAttackState.delete(otherId);
-                        const otherPlayer = connectedPlayers.get(otherId);
-                        if (otherPlayer) {
-                            const otherSocket = io.sockets.sockets.get(otherPlayer.socketId);
-                            if (otherSocket) {
-                                const otherLostPayload = { reason: 'Target died', isEnemy: false };
-                                otherSocket.emit('combat:target_lost', otherLostPayload);
-                                logger.info(`[SEND] combat:target_lost to ${otherPlayer.socketId}: ${JSON.stringify(otherLostPayload)}`);
+                        // Only send target_lost to OTHER attackers, not the killer
+                        if (otherId !== attackerId) {
+                            const otherPlayer = connectedPlayers.get(otherId);
+                            if (otherPlayer) {
+                                const otherSocket = io.sockets.sockets.get(otherPlayer.socketId);
+                                if (otherSocket) {
+                                    const otherLostPayload = { reason: 'Target died', isEnemy: false };
+                                    otherSocket.emit('combat:target_lost', otherLostPayload);
+                                    logger.info(`[SEND] combat:target_lost to ${otherPlayer.socketId}: ${JSON.stringify(otherLostPayload)}`);
+                                }
                             }
                         }
                     }
                 }
                 
-                // Broadcast death
+                // Broadcast death (includes health data so client can update safely)
                 const deathPayload = {
                     killedId: atkState.targetCharId,
                     killedName: target.characterName,
                     killerId: attackerId,
                     killerName: attacker.characterName,
                     isEnemy: false,
+                    targetHealth: 0,
+                    targetMaxHealth: target.maxHealth,
                     timestamp: now
                 };
                 io.emit('combat:death', deathPayload);

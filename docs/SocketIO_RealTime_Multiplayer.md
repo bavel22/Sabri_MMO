@@ -291,24 +291,25 @@ async function getPlayersInZone(zone = 'default') {
 | `combat:stop_attack` | `{}` | Stop auto-attacking |
 | `combat:respawn` | `{}` (optional data) | Request respawn after death |
 | `player:allocate_stat` | `{statName, amount}` | Allocate stat points (str/agi/vit/int/dex/luk) |
+| `player:request_stats` | (none) | Request current stats (used when opening stat window) |
 
 ### Server → Client Events
 
 | Event | Data | Description |
 |-------|------|-------------|
 | `player:joined` | `{success: true}` | Join acknowledged |
-| `player:moved` | `{characterId, characterName, x, y, z, timestamp}` | Other player moved |
+| `player:moved` | `{characterId, characterName, x, y, z, health, maxHealth, timestamp}` | Other player moved (includes health) |
 | `player:left` | `{characterId, characterName}` | Other player disconnected |
 | `player:stats` | `{characterId, stats, derived}` | Base stats + derived stats |
 | `chat:receive` | `{type, channel, senderId, senderName, message, timestamp}` | Chat message received |
 | `combat:health_update` | `{characterId, health, maxHealth, mana, maxMana}` | Health/mana state sync |
-| `combat:damage` | `{attackerId, attackerName, targetId, targetName, isEnemy, damage, targetHealth, targetMaxHealth, timestamp}` | Damage dealt |
-| `combat:death` | `{killedId, killedName, killerId, killerName, isEnemy, timestamp}` | Player killed |
+| `combat:damage` | `{attackerId, attackerName, targetId, targetName, isEnemy, damage, targetHealth, targetMaxHealth, attackerX, attackerY, attackerZ, targetX, targetY, targetZ, timestamp}` | Damage dealt (includes positions for remote rotation) |
+| `combat:death` | `{killedId, killedName, killerId, killerName, isEnemy, targetHealth, targetMaxHealth, timestamp}` | Player killed (killer does NOT receive combat:target_lost) |
 | `combat:respawn` | `{characterId, characterName, health, maxHealth, mana, maxMana, x, y, z, teleport, timestamp}` | Player respawned (teleport=true) |
 | `combat:auto_attack_started` | `{targetId, targetName, isEnemy, attackRange, aspd, attackIntervalMs}` | Auto-attack confirmed |
 | `combat:auto_attack_stopped` | `{reason}` | Auto-attack ended |
 | `combat:target_lost` | `{reason, isEnemy}` | Target died/disconnected/respawned |
-| `combat:out_of_range` | `{targetId, isEnemy, targetX, targetY, targetZ, distance, requiredRange}` | Attacker out of melee range |
+| `combat:out_of_range` | `{targetId, isEnemy, targetX, targetY, targetZ, distance, requiredRange}` | Attacker out of range (requiredRange = attackRange - RANGE_TOLERANCE) |
 | `combat:error` | `{message}` | Combat validation error |
 | `enemy:spawn` | `{enemyId, templateId, name, level, health, maxHealth, x, y, z}` | Enemy spawned/respawned |
 | `enemy:death` | `{enemyId, enemyName, killerId, killerName, isEnemy, exp, timestamp}` | Enemy killed |
@@ -651,6 +652,6 @@ RemovePlayer(DisconnectedId)
 
 ---
 
-**Last Updated**: 2026-02-06
-**Version**: 0.9.0
-**Status**: Combat System Tuning Complete, RO-Style Auto-Attack Active
+**Last Updated**: 2026-02-10
+**Version**: 0.10.0
+**Status**: Combat System Refinement, Stats Request, Kill Crash Fix
