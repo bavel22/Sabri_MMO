@@ -874,33 +874,33 @@ Server → Client:
 
 ## Implementation Priority
 
-### Phase 1: Core Combat (Current)
+### Phase 1: Core Combat (Complete)
 1. ✅ Server combat events (basic)
 2. ✅ Game HUD (HP/MP bars)
-3. **→ RO-style targeting (click-to-target, auto-path, auto-attack)**
-4. **→ Attack speed system (ASPD)**
-5. **→ Hover effects (name + arrow)**
-6. **→ Fix HP bar updates**
-7. Death/respawn UI
+3. ✅ RO-style targeting (click-to-target, auto-path, auto-attack)
+4. ✅ Attack speed system (ASPD 0-190 scale)
+5. ✅ Hover effects (name tag + hover indicator)
+6. ✅ HP bar updates (local + remote players + enemies)
+7. ✅ Death/respawn (full HP restore, teleport to spawn, UI)
 
-### Phase 2: Stats & Damage
-1. 6 base stats (STR, AGI, VIT, INT, DEX, LUK)
-2. Derived stat calculations
-3. Proper damage formula
-4. Hit/miss/crit system
-5. Stat point allocation UI
+### Phase 2: Stats & Damage (Complete)
+1. ✅ 6 base stats (STR, AGI, VIT, INT, DEX, LUK)
+2. ✅ Derived stat calculations (statusATK, ASPD, maxHP, flee, hit, critical, etc.)
+3. ✅ Proper damage formula (RO-style with variance, crits)
+4. ✅ Hit/miss/crit system (basic — LUK-based critical)
+5. ✅ Stat point allocation UI (WBP_StatAllocation)
 
-### Phase 3: Equipment & Items
+### Phase 3: Equipment & Items (Next)
 1. Equipment slots
 2. Weapon types with different ASPD/range
 3. Basic item drops from monsters
 4. Inventory system
 5. Equipment UI
 
-### Phase 4: Monsters & NPCs
-1. Monster spawning system
-2. Monster AI (passive, aggressive)
-3. Monster stats + drop tables
+### Phase 4: Monsters & NPCs (Complete)
+1. ✅ Monster spawning system (6 templates, 12 spawn locations)
+2. ✅ Monster AI (passive wandering, combat stops wandering)
+3. ✅ Monster stats + drop tables (stats defined, drops next in Phase 3)
 4. NPC interaction system
 5. Shop NPC
 
@@ -946,6 +946,6 @@ Server → Client:
 
 ---
 
-**Last Updated**: 2026-02-06
+**Last Updated**: 2026-02-11
 **Reference Game**: Ragnarok Online (Gravity Co., 2002)
 **Our Adaptation**: Sabri_MMO — UE5 3D implementation of RO-style mechanics

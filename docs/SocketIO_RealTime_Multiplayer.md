@@ -613,13 +613,11 @@ RemovePlayer(DisconnectedId)
 
 ## Next Steps
 
-1. **Death/Respawn UI**: Death overlay with "Return to Save Point" button
-2. **Damage Numbers**: Floating text above targets showing damage dealt
-3. **Target Frame on HUD**: Target name + HP bar panel
-4. **Attack Animations**: Attack montage during auto-attack cycle
-5. **Stat System**: STR/AGI/VIT/INT/DEX/LUK with RO damage formulas
-6. **Enemy AI/NPC System**: AI-controlled enemies
-7. **Client-Side Prediction**: Make local movement feel more responsive
+1. **Equipment & Items**: Item drops from monsters, basic inventory system
+2. **Attack Animations**: Attack montage during auto-attack cycle
+3. **Skills System**: Skill data structure, target skills, skill hotbar
+4. **Client-Side Prediction**: Make local movement feel more responsive
+5. **Multiple Maps**: Zone transitions and warps
 
 ---
 
@@ -652,6 +650,6 @@ RemovePlayer(DisconnectedId)
 
 ---
 
-**Last Updated**: 2026-02-10
-**Version**: 0.10.0
-**Status**: Combat System Refinement, Stats Request, Kill Crash Fix
+**Last Updated**: 2026-02-11
+**Version**: 0.11.0
+**Status**: Enemy Combat System Complete, Wandering AI Added

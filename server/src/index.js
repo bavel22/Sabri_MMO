@@ -500,8 +500,9 @@ io.on('connection', (socket) => {
                 startTime: Date.now()
             });
             
-            // Mark enemy in combat with this player
+            // Mark enemy in combat with this player and stop wandering
             enemy.inCombatWith.add(attackerId);
+            enemy.isWandering = false;
             
             const atkStartPayload = {
                 targetId: targetEnemyId,
@@ -560,22 +561,30 @@ io.on('connection', (socket) => {
     socket.on('combat:stop_attack', () => {
         logger.info(`[RECV] combat:stop_attack from ${socket.id}`);
         const attackerInfo = findPlayerBySocketId(socket.id);
-        if (!attackerInfo) return;
+        if (!attackerInfo) {
+            logger.warn(`[COMBAT] combat:stop_attack from unknown socket ${socket.id} — no player found`);
+            return;
+        }
         
         const { characterId: attackerId, player: attacker } = attackerInfo;
         
         if (autoAttackState.has(attackerId)) {
             const atkState = autoAttackState.get(attackerId);
+            logger.info(`[COMBAT] ${attacker.characterName} stopping auto-attack (target: ${atkState.targetCharId}, isEnemy: ${atkState.isEnemy})`);
             // Remove from enemy combat set if attacking an enemy
             if (atkState.isEnemy) {
                 const enemy = enemies.get(atkState.targetCharId);
-                if (enemy) enemy.inCombatWith.delete(attackerId);
+                if (enemy) {
+                    enemy.inCombatWith.delete(attackerId);
+                    logger.info(`[COMBAT] Removed ${attacker.characterName} from enemy ${enemy.name}(${enemy.enemyId}) combat set`);
+                }
             }
             autoAttackState.delete(attackerId);
             const stopPayload = { reason: 'Player stopped' };
             socket.emit('combat:auto_attack_stopped', stopPayload);
             logger.info(`[SEND] combat:auto_attack_stopped to ${socket.id}: ${JSON.stringify(stopPayload)}`);
-            logger.info(`[COMBAT] ${attacker.characterName} stopped auto-attacking`);
+        } else {
+            logger.info(`[COMBAT] ${attacker.characterName} sent combat:stop_attack but had no active auto-attack state`);
         }
     });
     
@@ -877,35 +886,27 @@ setInterval(async () => {
                     logger.info(`[COMBAT] Enemy ${enemy.name}(${enemy.enemyId}) killed by ${attacker.characterName}`);
                     
                     // Stop all players auto-attacking this enemy
-                    // Skip the killer — they get enemy:death directly (prevents crash from double-processing)
+                    // DO NOT send combat:target_lost here — all attackers receive enemy:death broadcast instead
+                    // Sending both events causes Blueprint to process target_lost (nulls enemy ref) then
+                    // enemy:death tries to access the destroyed ref → EXCEPTION_ACCESS_VIOLATION crash
                     for (const [otherId, otherAtk] of autoAttackState.entries()) {
                         if (otherAtk.isEnemy && otherAtk.targetCharId === enemy.enemyId) {
                             autoAttackState.delete(otherId);
-                            // Only send target_lost to OTHER attackers, not the killer
-                            if (otherId !== attackerId) {
-                                const otherPlayer = connectedPlayers.get(otherId);
-                                if (otherPlayer) {
-                                    const otherSocket = io.sockets.sockets.get(otherPlayer.socketId);
-                                    if (otherSocket) {
-                                        const lostPayload = { reason: 'Enemy died', isEnemy: true };
-                                        otherSocket.emit('combat:target_lost', lostPayload);
-                                        logger.info(`[SEND] combat:target_lost to ${otherPlayer.socketId}: ${JSON.stringify(lostPayload)}`);
-                                    }
-                                }
-                            }
+                            logger.info(`[COMBAT] Cleared auto-attack for player ${otherId} (enemy ${enemy.enemyId} died)`);
                         }
                     }
                     
                     // Clear combat set
                     enemy.inCombatWith.clear();
                     
-                    // Broadcast enemy death
+                    // Broadcast enemy death (isDead flag tells client to disable collision + hide mesh)
                     const deathPayload = {
                         enemyId: enemy.enemyId,
                         enemyName: enemy.name,
                         killerId: attackerId,
                         killerName: attacker.characterName,
                         isEnemy: true,
+                        isDead: true,
                         exp: enemy.exp,
                         timestamp: now
                     };
@@ -921,6 +922,7 @@ setInterval(async () => {
                         enemy.z = enemy.spawnZ;
                         enemy.targetPlayerId = null;
                         enemy.inCombatWith = new Set();
+                        initEnemyWanderState(enemy);
                         
                         logger.info(`[ENEMY] Respawned ${enemy.name} (ID: ${enemy.enemyId})`);
                         io.emit('enemy:spawn', {
@@ -1062,6 +1064,94 @@ setInterval(async () => {
         }
     }
 }, COMBAT.COMBAT_TICK_MS);
+
+// ============================================================
+// Enemy AI Tick Loop (Ragnarok Online-style wandering)
+// Enemies wander randomly within their spawn radius when idle
+// ============================================================
+const ENEMY_AI = {
+    WANDER_TICK_MS: 500,        // AI tick interval (ms)
+    WANDER_PAUSE_MIN: 3000,     // Min pause before next wander (ms)
+    WANDER_PAUSE_MAX: 8000,     // Max pause before next wander (ms)
+    WANDER_SPEED: 60,           // Movement speed (units per second)
+    MOVE_BROADCAST_MS: 200      // How often to broadcast position updates (ms)
+};
+
+// Initialize wander state for all enemies
+function initEnemyWanderState(enemy) {
+    enemy.wanderTargetX = enemy.x;
+    enemy.wanderTargetY = enemy.y;
+    enemy.isWandering = false;
+    enemy.nextWanderTime = Date.now() + ENEMY_AI.WANDER_PAUSE_MIN + Math.random() * (ENEMY_AI.WANDER_PAUSE_MAX - ENEMY_AI.WANDER_PAUSE_MIN);
+    enemy.lastMoveBroadcast = 0;
+}
+
+function pickRandomWanderPoint(enemy) {
+    const angle = Math.random() * 2 * Math.PI;
+    const radius = Math.random() * (enemy.wanderRadius || 300);
+    return {
+        x: enemy.spawnX + Math.cos(angle) * radius,
+        y: enemy.spawnY + Math.sin(angle) * radius
+    };
+}
+
+setInterval(() => {
+    const now = Date.now();
+    
+    for (const [enemyId, enemy] of enemies.entries()) {
+        // Skip dead enemies or enemies in combat
+        if (enemy.isDead || enemy.inCombatWith.size > 0) continue;
+        
+        // Initialize wander state if missing
+        if (enemy.nextWanderTime === undefined) {
+            initEnemyWanderState(enemy);
+        }
+        
+        if (!enemy.isWandering) {
+            // Waiting to wander — check if it's time
+            if (now >= enemy.nextWanderTime) {
+                const target = pickRandomWanderPoint(enemy);
+                enemy.wanderTargetX = target.x;
+                enemy.wanderTargetY = target.y;
+                enemy.isWandering = true;
+                logger.debug(`[ENEMY AI] ${enemy.name}(${enemyId}) wandering to (${target.x.toFixed(0)}, ${target.y.toFixed(0)})`);
+            }
+        } else {
+            // Currently wandering — move toward target
+            const dx = enemy.wanderTargetX - enemy.x;
+            const dy = enemy.wanderTargetY - enemy.y;
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            
+            if (distance < 10) {
+                // Reached destination — stop and schedule next wander
+                enemy.isWandering = false;
+                enemy.nextWanderTime = now + ENEMY_AI.WANDER_PAUSE_MIN + Math.random() * (ENEMY_AI.WANDER_PAUSE_MAX - ENEMY_AI.WANDER_PAUSE_MIN);
+                
+                // Broadcast final position
+                io.emit('enemy:move', {
+                    enemyId, x: enemy.x, y: enemy.y, z: enemy.z, isMoving: false
+                });
+            } else {
+                // Move toward target
+                const stepSize = ENEMY_AI.WANDER_SPEED * (ENEMY_AI.WANDER_TICK_MS / 1000);
+                const moveRatio = Math.min(1, stepSize / distance);
+                enemy.x += dx * moveRatio;
+                enemy.y += dy * moveRatio;
+                
+                // Broadcast position at limited rate
+                if (now - (enemy.lastMoveBroadcast || 0) >= ENEMY_AI.MOVE_BROADCAST_MS) {
+                    enemy.lastMoveBroadcast = now;
+                    io.emit('enemy:move', {
+                        enemyId,
+                        x: enemy.x, y: enemy.y, z: enemy.z,
+                        targetX: enemy.wanderTargetX, targetY: enemy.wanderTargetY,
+                        isMoving: true
+                    });
+                }
+            }
+        }
+    }
+}, ENEMY_AI.WANDER_TICK_MS);
 
 // Middleware
 app.use(cors());

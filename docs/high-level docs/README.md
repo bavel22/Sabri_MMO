@@ -359,15 +359,19 @@ For questions or support:
 - [ ] Client-side prediction
 - [ ] Server reconciliation
 
-### Phase 3: Basic Combat System (In Progress)
+### Phase 3: Combat System (Complete)
 - [x] Server-side combat events (combat:attack, combat:damage, combat:death, combat:respawn)
 - [x] Server attack validation (range, cooldown, dead-check, self-attack prevention)
 - [x] Health/mana tracking from database on join
 - [x] Health sync broadcast (combat:health_update) to all players
 - [x] Game HUD (WBP_GameHUD) with HP/MP bars and player name
-- [ ] Attack input (left-click targeting + combat:attack emit)
-- [ ] Combat feedback (damage numbers, HP bar updates on other players)
-- [ ] Death/respawn UI
+- [x] RO-style auto-attack (click target → path → auto-attack at ASPD intervals)
+- [x] Attack speed system (ASPD 0-190 scale, derived from AGI+DEX)
+- [x] Range check with tolerance (MELEE_RANGE: 100, RANGE_TOLERANCE: 50)
+- [x] Combat damage with positions for remote player rotation
+- [x] Player kill crash fix (target_lost + death race condition resolved)
+- [x] Death/respawn with full HP restore and teleport to spawn
+- [x] Kill messages in COMBAT chat channel
 - [ ] Combat animations (attack montage, hit reaction)
 
 ### Socket.io Real-Time Multiplayer
@@ -397,25 +401,47 @@ For questions or support:
 - Server-side chat:message and chat:receive events
 - JSON communication protocol for chat data
 
-### Combat System (Server-Side Complete)
+### Stat System (RO-Style)
+- 6 base stats: STR, AGI, VIT, INT, DEX, LUK
+- Derived stat calculations (statusATK, ASPD, maxHP, flee, hit, critical, etc.)
+- Stat point allocation via WBP_StatAllocation widget
+- Stats loaded from database on join, saved on disconnect
+- player:request_stats event for on-demand stat loading
+- C++ USTRUCTs: FPlayerBaseStats, FPlayerDerivedStats in PlayerStats.h
+
+### Enemy Combat System (Complete)
+- 6 enemy templates: Blobby, Hoplet, Crawlid, Shroomkin, Buzzer, Mosswort
+- 12 enemy spawn locations with configurable wander radius
+- Server-side enemy spawning, health tracking, death, and respawn
+- Player vs enemy auto-attack with ASPD-based timing
+- Enemy health bars, name tags, hover indicators (Blueprint)
+- BP_EnemyCharacter actor + BP_EnemyManager singleton
+- Enemy death: collision disabled, mesh hidden, respawn timer
+- Multi-player enemy kill crash fix (no target_lost on death, only enemy:death)
+- Enemy wandering AI (RO-style): random wander within spawn radius, 3-8s pauses
+- enemy:spawn, enemy:move, enemy:death, enemy:health_update events
+
+### Combat System (Server-Side)
 - Server-authoritative combat with attack validation
 - RO-style auto-attack: click once → path → auto-attack loop at ASPD intervals
-- combat:attack, combat:stop_attack, combat:damage, combat:death, combat:respawn, combat:health_update events
+- Supports both player targets (targetCharacterId) and enemy targets (targetEnemyId)
+- combat:attack, combat:stop_attack, combat:damage, combat:death, combat:respawn events
 - combat:auto_attack_started, combat:auto_attack_stopped, combat:target_lost events
-- Range check (100 units melee), ASPD timing (default 180 = 1 hit/sec), damage (1 per hit)
+- Range check (100 units melee) with tolerance (50 units padding)
+- ASPD timing (default 180 = 1 hit/sec, cap 190 = 2/sec)
 - Combat tick loop runs every 50ms, processes all active auto-attackers
 - Health/mana loaded from database, tracked in memory, synced to all clients
 - Death broadcast with kill message in COMBAT chat channel
 - Respawn restores full HP/MP, teleports to spawn point (0,0,300), saves to database
 - WBP_GameHUD with HP bar (red), MP bar (blue), player name display
-- SizeBox overrides for consistent HP/MP bar sizing
-- Comprehensive logging: [RECV], [SEND], [BROADCAST] for all socket events
+- Comprehensive logging: [RECV], [SEND], [BROADCAST], [COMBAT] for all events
+- parseInt() fix for all client-supplied IDs (prevents type mismatch bugs)
 
 ### Known Issues
-- `combat:target_lost` may not be reaching client (OnTargetLost binding under investigation)
+- None currently — all critical bugs resolved (see docs/Bug_Fix_Notes.md)
 
 ---
 
-**Last Updated**: 2026-02-06
-**Version**: 0.9.0
-**Status**: Combat System Tuning Complete, Blueprint Instructions Next
+**Last Updated**: 2026-02-11
+**Version**: 1.0.0
+**Status**: Enemy Combat & Wandering Complete, Equipment & Items System Next
