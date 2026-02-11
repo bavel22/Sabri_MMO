@@ -171,7 +171,7 @@ const ENEMY_TEMPLATES = {
         stats: { str: 5, agi: 7, vit: 3, int: 1, dex: 5, luk: 3, level: 5, weaponATK: 4 }
     },
     mosswort: {
-        name: 'Mosswort', level: 3, maxHealth: 90, damage: 2,
+        name: 'Mosswort', level: 3, maxHealth: 5, damage: 2,
         attackRange: 80, aggroRange: 0, aspd: 174, exp: 20,
         respawnMs: 12000, aiType: 'passive',
         stats: { str: 2, agi: 1, vit: 5, int: 3, dex: 2, luk: 1, level: 3, weaponATK: 1 }
@@ -251,7 +251,8 @@ io.on('connection', (socket) => {
     // Player authentication and join
     socket.on('player:join', async (data) => {
         logger.info(`[RECV] player:join from ${socket.id}: ${JSON.stringify(data)}`);
-        const { characterId, token, characterName } = data;
+        const characterId = parseInt(data.characterId);
+        const { token, characterName } = data;
         
         // Fetch character data from database (position + health/mana)
         let health = 100, maxHealth = 100, mana = 100, maxMana = 100;
@@ -380,7 +381,8 @@ io.on('connection', (socket) => {
     // Position update from client
     socket.on('player:position', async (data) => {
         logger.debug(`[RECV] player:position from ${socket.id}: ${JSON.stringify(data)}`);
-        const { characterId, x, y, z } = data;
+        const characterId = parseInt(data.characterId);
+        const { x, y, z } = data;
         const player = connectedPlayers.get(characterId);
         const characterName = player ? player.characterName : 'Unknown';
         
@@ -435,7 +437,7 @@ io.on('connection', (socket) => {
                         if (attackerPlayer) {
                             const attackerSocket = io.sockets.sockets.get(attackerPlayer.socketId);
                             if (attackerSocket) {
-                                const lostPayload = { reason: 'Target disconnected' };
+                                const lostPayload = { reason: 'Target disconnected', isEnemy: false };
                                 attackerSocket.emit('combat:target_lost', lostPayload);
                                 logger.info(`[SEND] combat:target_lost to ${attackerPlayer.socketId}: ${JSON.stringify(lostPayload)}`);
                             }
@@ -464,7 +466,8 @@ io.on('connection', (socket) => {
     // Supports both player targets (targetCharacterId) and enemy targets (targetEnemyId)
     socket.on('combat:attack', (data) => {
         logger.info(`[RECV] combat:attack from ${socket.id}: ${JSON.stringify(data)}`);
-        const { targetCharacterId, targetEnemyId } = data;
+        const targetCharacterId = data.targetCharacterId != null ? parseInt(data.targetCharacterId) : undefined;
+        const targetEnemyId = data.targetEnemyId != null ? parseInt(data.targetEnemyId) : undefined;
         
         const attackerInfo = findPlayerBySocketId(socket.id);
         if (!attackerInfo) {
@@ -597,7 +600,7 @@ io.on('connection', (socket) => {
                 if (attackerPlayer) {
                     const attackerSocket = io.sockets.sockets.get(attackerPlayer.socketId);
                     if (attackerSocket) {
-                        const lostPayload = { reason: 'Target respawned' };
+                        const lostPayload = { reason: 'Target respawned', isEnemy: false };
                         attackerSocket.emit('combat:target_lost', lostPayload);
                         logger.info(`[SEND] combat:target_lost to ${attackerPlayer.socketId}: ${JSON.stringify(lostPayload)}`);
                     }
@@ -874,16 +877,20 @@ setInterval(async () => {
                     logger.info(`[COMBAT] Enemy ${enemy.name}(${enemy.enemyId}) killed by ${attacker.characterName}`);
                     
                     // Stop all players auto-attacking this enemy
+                    // Skip the killer — they get enemy:death directly (prevents crash from double-processing)
                     for (const [otherId, otherAtk] of autoAttackState.entries()) {
                         if (otherAtk.isEnemy && otherAtk.targetCharId === enemy.enemyId) {
                             autoAttackState.delete(otherId);
-                            const otherPlayer = connectedPlayers.get(otherId);
-                            if (otherPlayer) {
-                                const otherSocket = io.sockets.sockets.get(otherPlayer.socketId);
-                                if (otherSocket) {
-                                    const lostPayload = { reason: 'Enemy died', isEnemy: true };
-                                    otherSocket.emit('combat:target_lost', lostPayload);
-                                    logger.info(`[SEND] combat:target_lost to ${otherPlayer.socketId}: ${JSON.stringify(lostPayload)}`);
+                            // Only send target_lost to OTHER attackers, not the killer
+                            if (otherId !== attackerId) {
+                                const otherPlayer = connectedPlayers.get(otherId);
+                                if (otherPlayer) {
+                                    const otherSocket = io.sockets.sockets.get(otherPlayer.socketId);
+                                    if (otherSocket) {
+                                        const lostPayload = { reason: 'Enemy died', isEnemy: true };
+                                        otherSocket.emit('combat:target_lost', lostPayload);
+                                        logger.info(`[SEND] combat:target_lost to ${otherPlayer.socketId}: ${JSON.stringify(lostPayload)}`);
+                                    }
                                 }
                             }
                         }
