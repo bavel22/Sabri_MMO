@@ -437,11 +437,23 @@ For questions or support:
 - Comprehensive logging: [RECV], [SEND], [BROADCAST], [COMBAT] for all events
 - parseInt() fix for all client-supplied IDs (prevents type mismatch bugs)
 
+### Items & Inventory System (Server-Side Complete)
+- 16 base items: 5 consumables, 8 loot/etc, 5 weapons, 3 armor
+- PostgreSQL `items` table (definitions) + `character_inventory` table (per-character)
+- Auto-create tables and seed items on server startup
+- Enemy drop tables on all 6 enemy templates (chance-based rolling)
+- Loot goes to killer on enemy death via `loot:drop` event
+- Inventory Socket.io events: load, use consumable, equip/unequip, drop/discard
+- Consumable use: server-authoritative HP/SP restoration
+- Equipment: weapon ATK updates derived stats, armor DEF (future integration)
+- Equipped weapon ATK loaded from DB on player join
+- Stackable items with max stack limits
+
 ### Known Issues
 - None currently — all critical bugs resolved (see docs/Bug_Fix_Notes.md)
 
 ---
 
 **Last Updated**: 2026-02-11
-**Version**: 1.0.0
-**Status**: Enemy Combat & Wandering Complete, Equipment & Items System Next
+**Version**: 1.1.0
+**Status**: Items & Inventory Server-Side Complete, Blueprint UI Next

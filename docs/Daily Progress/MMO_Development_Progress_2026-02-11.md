@@ -99,4 +99,40 @@ Critical multi-player enemy kill crash fix, enhanced combat logging, enemy colli
 
 ---
 
-**Next Up**: Equipment & Items system (Phase 3 of RO reference — item drops from monsters, basic inventory)
+---
+
+## Items & Inventory System (NEW — Phase 3 of RO Reference)
+
+### Database
+- New `items` table: 16 seed items (5 consumables, 8 loot/etc, 5 weapons, 3 armor)
+- New `character_inventory` table: per-character item ownership, quantities, equipped state
+- Auto-creation on server startup if tables don't exist
+- Auto-seeding if items table is empty
+
+### Server-Side Implementation
+- **Item definitions cache**: Loaded from DB into memory Map on startup
+- **Drop tables**: All 6 enemy templates have drop tables with chance-based rolling
+- **On enemy death**: `rollEnemyDrops()` → `addItemToInventory()` → `loot:drop` event to killer
+- **Inventory events**: `inventory:load`, `inventory:use`, `inventory:equip`, `inventory:drop`
+- **Consumable use**: Server-authoritative HP/SP restoration with health broadcast
+- **Equipment**: Equip/unequip weapons + armor, updates weaponATK and recalculates derived stats
+- **Weapon ATK persistence**: Equipped weapon ATK loaded from DB on player join
+
+### New Socket.io Events
+| Event | Direction | Purpose |
+|-------|-----------|---------|
+| `inventory:load` | Client→Server | Request full inventory |
+| `inventory:data` | Server→Client | Full inventory with item details |
+| `inventory:use` | Client→Server | Use consumable |
+| `inventory:used` | Server→Client | Use result (healed, spRestored) |
+| `inventory:equip` | Client→Server | Equip/unequip item |
+| `inventory:equipped` | Server→Client | Equip confirmation |
+| `inventory:drop` | Client→Server | Discard item |
+| `inventory:dropped` | Server→Client | Drop confirmation |
+| `inventory:error` | Server→Client | Error message |
+| `loot:drop` | Server→Client | Items received from enemy kill |
+
+### New Documentation
+- `docs/Items_Inventory_System.md` — Complete item system documentation
+
+**Next Up**: Blueprint UI for inventory (WBP_InventoryWindow), loot popup (WBP_LootPopup), hotbar integration

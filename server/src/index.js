@@ -144,37 +144,75 @@ const ENEMY_TEMPLATES = {
         name: 'Blobby', level: 1, maxHealth: 50, damage: 1,
         attackRange: 80, aggroRange: 300, aspd: 175, exp: 10,
         respawnMs: 10000, aiType: 'passive',
-        stats: { str: 1, agi: 1, vit: 1, int: 1, dex: 1, luk: 1, level: 1, weaponATK: 0 }
+        stats: { str: 1, agi: 1, vit: 1, int: 1, dex: 1, luk: 1, level: 1, weaponATK: 0 },
+        drops: [
+            { itemId: 2001, chance: 0.70, minQty: 1, maxQty: 2 }, // Jellopy
+            { itemId: 2002, chance: 0.15 },                        // Sticky Mucus
+            { itemId: 1001, chance: 0.05 },                        // Red Potion
+            { itemId: 3001, chance: 0.01 }                         // Knife (rare)
+        ]
     },
     hoplet: {
         name: 'Hoplet', level: 3, maxHealth: 100, damage: 3,
         attackRange: 80, aggroRange: 400, aspd: 178, exp: 25,
         respawnMs: 15000, aiType: 'passive',
-        stats: { str: 3, agi: 5, vit: 2, int: 1, dex: 3, luk: 5, level: 3, weaponATK: 2 }
+        stats: { str: 3, agi: 5, vit: 2, int: 1, dex: 3, luk: 5, level: 3, weaponATK: 2 },
+        drops: [
+            { itemId: 2001, chance: 0.50 },                        // Jellopy
+            { itemId: 2004, chance: 0.30 },                        // Feather
+            { itemId: 2007, chance: 0.10 },                        // Green Herb
+            { itemId: 1001, chance: 0.08 },                        // Red Potion
+            { itemId: 3002, chance: 0.01 }                         // Cutter (rare)
+        ]
     },
     crawlid: {
         name: 'Crawlid', level: 2, maxHealth: 75, damage: 2,
         attackRange: 80, aggroRange: 0, aspd: 176, exp: 15,
         respawnMs: 12000, aiType: 'passive',
-        stats: { str: 2, agi: 2, vit: 3, int: 1, dex: 2, luk: 1, level: 2, weaponATK: 1 }
+        stats: { str: 2, agi: 2, vit: 3, int: 1, dex: 2, luk: 1, level: 2, weaponATK: 1 },
+        drops: [
+            { itemId: 2003, chance: 0.50 },                        // Shell
+            { itemId: 2006, chance: 0.25 },                        // Insect Leg
+            { itemId: 2001, chance: 0.40 },                        // Jellopy
+            { itemId: 1001, chance: 0.05 }                         // Red Potion
+        ]
     },
     shroomkin: {
         name: 'Shroomkin', level: 4, maxHealth: 120, damage: 4,
         attackRange: 80, aggroRange: 350, aspd: 177, exp: 30,
         respawnMs: 15000, aiType: 'passive',
-        stats: { str: 4, agi: 3, vit: 4, int: 2, dex: 3, luk: 2, level: 4, weaponATK: 3 }
+        stats: { str: 4, agi: 3, vit: 4, int: 2, dex: 3, luk: 2, level: 4, weaponATK: 3 },
+        drops: [
+            { itemId: 2005, chance: 0.55 },                        // Mushroom Spore
+            { itemId: 2007, chance: 0.20, minQty: 1, maxQty: 2 },  // Green Herb
+            { itemId: 1001, chance: 0.10 },                        // Red Potion
+            { itemId: 4001, chance: 0.02 }                         // Cotton Shirt (rare)
+        ]
     },
     buzzer: {
         name: 'Buzzer', level: 5, maxHealth: 150, damage: 5,
         attackRange: 80, aggroRange: 500, aspd: 179, exp: 40,
         respawnMs: 18000, aiType: 'aggressive',
-        stats: { str: 5, agi: 7, vit: 3, int: 1, dex: 5, luk: 3, level: 5, weaponATK: 4 }
+        stats: { str: 5, agi: 7, vit: 3, int: 1, dex: 5, luk: 3, level: 5, weaponATK: 4 },
+        drops: [
+            { itemId: 2006, chance: 0.45 },                        // Insect Leg
+            { itemId: 2004, chance: 0.30 },                        // Feather
+            { itemId: 1002, chance: 0.05 },                        // Orange Potion
+            { itemId: 3004, chance: 0.02 },                        // Sword (rare)
+            { itemId: 4002, chance: 0.01 }                         // Padded Armor (rare)
+        ]
     },
     mosswort: {
         name: 'Mosswort', level: 3, maxHealth: 5, damage: 2,
         attackRange: 80, aggroRange: 0, aspd: 174, exp: 20,
         respawnMs: 12000, aiType: 'passive',
-        stats: { str: 2, agi: 1, vit: 5, int: 3, dex: 2, luk: 1, level: 3, weaponATK: 1 }
+        stats: { str: 2, agi: 1, vit: 5, int: 3, dex: 2, luk: 1, level: 3, weaponATK: 1 },
+        drops: [
+            { itemId: 2008, chance: 0.60, minQty: 1, maxQty: 3 },  // Fluff
+            { itemId: 2007, chance: 0.25 },                        // Green Herb
+            { itemId: 2002, chance: 0.15 },                        // Sticky Mucus
+            { itemId: 1005, chance: 0.08 }                         // Meat
+        ]
     }
 };
 
@@ -231,6 +269,136 @@ async function savePlayerHealthToDB(characterId, health, mana) {
         logger.debug(`[DB] Saved health/mana for character ${characterId}: HP=${health}, MP=${mana}`);
     } catch (err) {
         logger.error(`[DB] Failed to save health for character ${characterId}:`, err.message);
+    }
+}
+
+// ============================================================
+// Item & Inventory System
+// ============================================================
+const INVENTORY = {
+    MAX_SLOTS: 100,           // Max inventory slots per character
+    MAX_WEIGHT: 2000          // Max carry weight (future use)
+};
+
+// Item definitions cache (loaded from DB on startup)
+const itemDefinitions = new Map();
+
+async function loadItemDefinitions() {
+    try {
+        const result = await pool.query('SELECT * FROM items');
+        for (const row of result.rows) {
+            itemDefinitions.set(row.item_id, row);
+        }
+        logger.info(`[ITEMS] Loaded ${itemDefinitions.size} item definitions from database`);
+    } catch (err) {
+        logger.error(`[ITEMS] Failed to load item definitions: ${err.message}`);
+    }
+}
+
+// Roll drops for a killed enemy — returns array of { itemId, quantity, itemName }
+function rollEnemyDrops(enemy) {
+    const template = ENEMY_TEMPLATES[enemy.templateId];
+    if (!template || !template.drops) return [];
+    
+    const droppedItems = [];
+    for (const drop of template.drops) {
+        if (Math.random() < drop.chance) {
+            const qty = drop.minQty && drop.maxQty
+                ? drop.minQty + Math.floor(Math.random() * (drop.maxQty - drop.minQty + 1))
+                : 1;
+            const itemDef = itemDefinitions.get(drop.itemId);
+            droppedItems.push({
+                itemId: drop.itemId,
+                quantity: qty,
+                itemName: itemDef ? itemDef.name : `Item#${drop.itemId}`
+            });
+        }
+    }
+    return droppedItems;
+}
+
+// Add item to character inventory (DB + return updated entry)
+async function addItemToInventory(characterId, itemId, quantity = 1) {
+    const itemDef = itemDefinitions.get(itemId);
+    if (!itemDef) {
+        logger.error(`[ITEMS] Cannot add unknown item ${itemId} to inventory`);
+        return null;
+    }
+    
+    try {
+        if (itemDef.stackable) {
+            // Check if player already has this item stacked
+            const existing = await pool.query(
+                'SELECT inventory_id, quantity FROM character_inventory WHERE character_id = $1 AND item_id = $2 AND is_equipped = false',
+                [characterId, itemId]
+            );
+            
+            if (existing.rows.length > 0) {
+                const newQty = Math.min(existing.rows[0].quantity + quantity, itemDef.max_stack);
+                await pool.query(
+                    'UPDATE character_inventory SET quantity = $1 WHERE inventory_id = $2',
+                    [newQty, existing.rows[0].inventory_id]
+                );
+                logger.info(`[ITEMS] Stacked ${quantity}x ${itemDef.name} for char ${characterId} (now ${newQty})`);
+                return { inventoryId: existing.rows[0].inventory_id, itemId, quantity: newQty, isEquipped: false };
+            }
+        }
+        
+        // Insert new inventory entry
+        const result = await pool.query(
+            'INSERT INTO character_inventory (character_id, item_id, quantity) VALUES ($1, $2, $3) RETURNING inventory_id',
+            [characterId, itemId, quantity]
+        );
+        logger.info(`[ITEMS] Added ${quantity}x ${itemDef.name} to char ${characterId} inventory`);
+        return { inventoryId: result.rows[0].inventory_id, itemId, quantity, isEquipped: false };
+    } catch (err) {
+        logger.error(`[ITEMS] Failed to add item ${itemId} to char ${characterId}: ${err.message}`);
+        return null;
+    }
+}
+
+// Get full inventory for a character
+async function getPlayerInventory(characterId) {
+    try {
+        const result = await pool.query(
+            `SELECT ci.inventory_id, ci.item_id, ci.quantity, ci.is_equipped, ci.slot_index,
+                    i.name, i.description, i.item_type, i.equip_slot, i.weight, i.price,
+                    i.atk, i.def, i.matk, i.mdef,
+                    i.str_bonus, i.agi_bonus, i.vit_bonus, i.int_bonus, i.dex_bonus, i.luk_bonus,
+                    i.max_hp_bonus, i.max_sp_bonus, i.required_level, i.stackable, i.icon
+             FROM character_inventory ci
+             JOIN items i ON ci.item_id = i.item_id
+             WHERE ci.character_id = $1
+             ORDER BY ci.slot_index ASC, ci.created_at ASC`,
+            [characterId]
+        );
+        return result.rows;
+    } catch (err) {
+        logger.error(`[ITEMS] Failed to load inventory for char ${characterId}: ${err.message}`);
+        return [];
+    }
+}
+
+// Remove item from inventory (by inventory_id, optionally partial quantity)
+async function removeItemFromInventory(inventoryId, quantity = null) {
+    try {
+        if (quantity !== null) {
+            // Partial removal for stackable items
+            const existing = await pool.query('SELECT quantity FROM character_inventory WHERE inventory_id = $1', [inventoryId]);
+            if (existing.rows.length === 0) return false;
+            const newQty = existing.rows[0].quantity - quantity;
+            if (newQty <= 0) {
+                await pool.query('DELETE FROM character_inventory WHERE inventory_id = $1', [inventoryId]);
+            } else {
+                await pool.query('UPDATE character_inventory SET quantity = $1 WHERE inventory_id = $2', [newQty, inventoryId]);
+            }
+        } else {
+            await pool.query('DELETE FROM character_inventory WHERE inventory_id = $1', [inventoryId]);
+        }
+        return true;
+    } catch (err) {
+        logger.error(`[ITEMS] Failed to remove inventory entry ${inventoryId}: ${err.message}`);
+        return false;
     }
 }
 
@@ -309,6 +477,23 @@ io.on('connection', (socket) => {
             }
         } catch (err) {
             logger.warn(`Could not load stats for character ${characterId}: ${err.message}`);
+        }
+        
+        // Load equipped weapon ATK
+        try {
+            const weaponResult = await pool.query(
+                `SELECT i.atk FROM character_inventory ci
+                 JOIN items i ON ci.item_id = i.item_id
+                 WHERE ci.character_id = $1 AND ci.is_equipped = true AND i.equip_slot = 'weapon'
+                 LIMIT 1`,
+                [characterId]
+            );
+            if (weaponResult.rows.length > 0) {
+                baseStats.weaponATK = weaponResult.rows[0].atk || 0;
+                logger.info(`[ITEMS] Loaded equipped weapon ATK=${baseStats.weaponATK} for char ${characterId}`);
+            }
+        } catch (err) {
+            logger.debug(`[ITEMS] No equipped weapon found for char ${characterId}`);
         }
         
         const derived = calculateDerivedStats(baseStats);
@@ -775,6 +960,240 @@ io.on('connection', (socket) => {
                 logger.info(`[CHAT ${chatMessage.channel}] ${chatMessage.senderName}: ${message}`);
         }
     });
+    
+    // ============================================================
+    // Inventory Events
+    // ============================================================
+    
+    // Load full inventory
+    socket.on('inventory:load', async () => {
+        logger.info(`[RECV] inventory:load from ${socket.id}`);
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        
+        const inventory = await getPlayerInventory(playerInfo.characterId);
+        socket.emit('inventory:data', { items: inventory });
+        logger.info(`[SEND] inventory:data to ${socket.id}: ${inventory.length} items`);
+    });
+    
+    // Use a consumable item
+    socket.on('inventory:use', async (data) => {
+        logger.info(`[RECV] inventory:use from ${socket.id}: ${JSON.stringify(data)}`);
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        
+        const { characterId, player } = playerInfo;
+        const inventoryId = parseInt(data.inventoryId);
+        if (!inventoryId) {
+            socket.emit('inventory:error', { message: 'Invalid inventory ID' });
+            return;
+        }
+        
+        // Verify ownership
+        try {
+            const result = await pool.query(
+                `SELECT ci.inventory_id, ci.item_id, ci.quantity, i.item_type, i.name,
+                        i.max_hp_bonus, i.max_sp_bonus
+                 FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
+                 WHERE ci.inventory_id = $1 AND ci.character_id = $2`,
+                [inventoryId, characterId]
+            );
+            
+            if (result.rows.length === 0) {
+                socket.emit('inventory:error', { message: 'Item not found in your inventory' });
+                return;
+            }
+            
+            const item = result.rows[0];
+            
+            if (item.item_type !== 'consumable') {
+                socket.emit('inventory:error', { message: 'This item cannot be used' });
+                return;
+            }
+            
+            // Apply consumable effect (HP/SP restoration)
+            let healed = 0, spRestored = 0;
+            if (item.max_hp_bonus > 0 || item.item_id === 1001) {
+                // Potions restore HP based on item_id
+                const hpRestore = { 1001: 50, 1002: 150, 1003: 350, 1005: 70 };
+                healed = hpRestore[item.item_id] || item.max_hp_bonus || 0;
+                player.health = Math.min(player.maxHealth, player.health + healed);
+            }
+            if (item.item_id === 1004) {
+                // Blue Potion restores SP
+                spRestored = 60;
+                player.mana = Math.min(player.maxMana, player.mana + spRestored);
+            }
+            
+            // Remove 1 from stack
+            await removeItemFromInventory(inventoryId, 1);
+            
+            // Save health/mana
+            await savePlayerHealthToDB(characterId, player.health, player.mana);
+            
+            // Send updated health to all
+            io.emit('combat:health_update', {
+                characterId, health: player.health, maxHealth: player.maxHealth,
+                mana: player.mana, maxMana: player.maxMana
+            });
+            
+            // Notify client of use result
+            socket.emit('inventory:used', {
+                inventoryId, itemId: item.item_id, itemName: item.name,
+                healed, spRestored,
+                health: player.health, maxHealth: player.maxHealth,
+                mana: player.mana, maxMana: player.maxMana
+            });
+            logger.info(`[ITEMS] ${player.characterName} used ${item.name}: +${healed}HP +${spRestored}SP`);
+            
+            // Refresh inventory
+            const inventory = await getPlayerInventory(characterId);
+            socket.emit('inventory:data', { items: inventory });
+            
+        } catch (err) {
+            logger.error(`[ITEMS] Use item error: ${err.message}`);
+            socket.emit('inventory:error', { message: 'Failed to use item' });
+        }
+    });
+    
+    // Equip or unequip an item
+    socket.on('inventory:equip', async (data) => {
+        logger.info(`[RECV] inventory:equip from ${socket.id}: ${JSON.stringify(data)}`);
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        
+        const { characterId, player } = playerInfo;
+        const inventoryId = parseInt(data.inventoryId);
+        const equip = data.equip !== false; // true = equip, false = unequip
+        
+        try {
+            const result = await pool.query(
+                `SELECT ci.inventory_id, ci.item_id, ci.is_equipped, i.item_type, i.equip_slot, i.name,
+                        i.atk, i.def, i.matk, i.mdef,
+                        i.str_bonus, i.agi_bonus, i.vit_bonus, i.int_bonus, i.dex_bonus, i.luk_bonus,
+                        i.required_level
+                 FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
+                 WHERE ci.inventory_id = $1 AND ci.character_id = $2`,
+                [inventoryId, characterId]
+            );
+            
+            if (result.rows.length === 0) {
+                socket.emit('inventory:error', { message: 'Item not found' });
+                return;
+            }
+            
+            const item = result.rows[0];
+            
+            if (!item.equip_slot) {
+                socket.emit('inventory:error', { message: 'This item cannot be equipped' });
+                return;
+            }
+            
+            if (equip && item.required_level > (player.stats.level || 1)) {
+                socket.emit('inventory:error', { message: `Requires level ${item.required_level}` });
+                return;
+            }
+            
+            if (equip) {
+                // Unequip any item currently in this slot
+                await pool.query(
+                    `UPDATE character_inventory SET is_equipped = false 
+                     WHERE character_id = $1 AND is_equipped = true 
+                     AND item_id IN (SELECT item_id FROM items WHERE equip_slot = $2)`,
+                    [characterId, item.equip_slot]
+                );
+                
+                // Equip the new item
+                await pool.query(
+                    'UPDATE character_inventory SET is_equipped = true WHERE inventory_id = $1',
+                    [inventoryId]
+                );
+                
+                // Update weaponATK if equipping a weapon
+                if (item.equip_slot === 'weapon') {
+                    player.stats.weaponATK = item.atk || 0;
+                }
+                
+                logger.info(`[ITEMS] ${player.characterName} equipped ${item.name} (slot: ${item.equip_slot})`);
+            } else {
+                // Unequip
+                await pool.query(
+                    'UPDATE character_inventory SET is_equipped = false WHERE inventory_id = $1',
+                    [inventoryId]
+                );
+                
+                if (item.equip_slot === 'weapon') {
+                    player.stats.weaponATK = 0;
+                }
+                
+                logger.info(`[ITEMS] ${player.characterName} unequipped ${item.name}`);
+            }
+            
+            // Recalculate derived stats
+            const derived = calculateDerivedStats(player.stats);
+            player.aspd = derived.aspd;
+            
+            // Send updated stats
+            socket.emit('player:stats', { characterId, stats: player.stats, derived });
+            
+            // Send updated inventory
+            const inventory = await getPlayerInventory(characterId);
+            socket.emit('inventory:data', { items: inventory });
+            
+            socket.emit('inventory:equipped', {
+                inventoryId, itemId: item.item_id, itemName: item.name,
+                equipped: equip, slot: item.equip_slot
+            });
+            
+        } catch (err) {
+            logger.error(`[ITEMS] Equip error: ${err.message}`);
+            socket.emit('inventory:error', { message: 'Failed to equip item' });
+        }
+    });
+    
+    // Drop/discard an item
+    socket.on('inventory:drop', async (data) => {
+        logger.info(`[RECV] inventory:drop from ${socket.id}: ${JSON.stringify(data)}`);
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        
+        const { characterId, player } = playerInfo;
+        const inventoryId = parseInt(data.inventoryId);
+        const quantity = parseInt(data.quantity) || null; // null = drop all
+        
+        try {
+            // Verify ownership
+            const result = await pool.query(
+                `SELECT ci.inventory_id, ci.item_id, ci.quantity, i.name
+                 FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
+                 WHERE ci.inventory_id = $1 AND ci.character_id = $2`,
+                [inventoryId, characterId]
+            );
+            
+            if (result.rows.length === 0) {
+                socket.emit('inventory:error', { message: 'Item not found' });
+                return;
+            }
+            
+            const item = result.rows[0];
+            const dropQty = quantity || item.quantity;
+            
+            await removeItemFromInventory(inventoryId, dropQty);
+            logger.info(`[ITEMS] ${player.characterName} dropped ${dropQty}x ${item.name}`);
+            
+            socket.emit('inventory:dropped', {
+                inventoryId, itemId: item.item_id, itemName: item.name, quantity: dropQty
+            });
+            
+            // Refresh inventory
+            const inventory = await getPlayerInventory(characterId);
+            socket.emit('inventory:data', { items: inventory });
+            
+        } catch (err) {
+            logger.error(`[ITEMS] Drop error: ${err.message}`);
+            socket.emit('inventory:error', { message: 'Failed to drop item' });
+        }
+    });
 });
 
 // ============================================================
@@ -912,6 +1331,37 @@ setInterval(async () => {
                     };
                     io.emit('enemy:death', deathPayload);
                     logger.info(`[BROADCAST] enemy:death: ${JSON.stringify(deathPayload)}`);
+                    
+                    // Roll item drops for the killer
+                    const droppedItems = rollEnemyDrops(enemy);
+                    if (droppedItems.length > 0) {
+                        const lootItems = [];
+                        for (const drop of droppedItems) {
+                            const added = await addItemToInventory(attackerId, drop.itemId, drop.quantity);
+                            if (added) {
+                                const itemDef = itemDefinitions.get(drop.itemId);
+                                lootItems.push({
+                                    itemId: drop.itemId,
+                                    itemName: drop.itemName,
+                                    quantity: drop.quantity,
+                                    icon: itemDef ? itemDef.icon : 'default_item',
+                                    itemType: itemDef ? itemDef.item_type : 'etc'
+                                });
+                            }
+                        }
+                        if (lootItems.length > 0) {
+                            const killerSocket = io.sockets.sockets.get(attacker.socketId);
+                            if (killerSocket) {
+                                const lootPayload = {
+                                    enemyId: enemy.enemyId,
+                                    enemyName: enemy.name,
+                                    items: lootItems
+                                };
+                                killerSocket.emit('loot:drop', lootPayload);
+                                logger.info(`[LOOT] ${attacker.characterName} received ${lootItems.length} items from ${enemy.name}: ${lootItems.map(i => `${i.quantity}x ${i.itemName}`).join(', ')}`);
+                            }
+                        }
+                    }
                     
                     // Schedule enemy respawn
                     setTimeout(() => {
@@ -1628,6 +2078,111 @@ server.listen(PORT, async () => {
   } catch (err) {
     logger.warn(`[DB] Could not add stat columns (may already exist): ${err.message}`);
   }
+  
+  // Ensure items table exists
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS items (
+        item_id SERIAL PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        description TEXT DEFAULT '',
+        item_type VARCHAR(20) NOT NULL DEFAULT 'etc',
+        equip_slot VARCHAR(20) DEFAULT NULL,
+        weight INTEGER DEFAULT 0,
+        price INTEGER DEFAULT 0,
+        atk INTEGER DEFAULT 0,
+        def INTEGER DEFAULT 0,
+        matk INTEGER DEFAULT 0,
+        mdef INTEGER DEFAULT 0,
+        str_bonus INTEGER DEFAULT 0,
+        agi_bonus INTEGER DEFAULT 0,
+        vit_bonus INTEGER DEFAULT 0,
+        int_bonus INTEGER DEFAULT 0,
+        dex_bonus INTEGER DEFAULT 0,
+        luk_bonus INTEGER DEFAULT 0,
+        max_hp_bonus INTEGER DEFAULT 0,
+        max_sp_bonus INTEGER DEFAULT 0,
+        required_level INTEGER DEFAULT 1,
+        stackable BOOLEAN DEFAULT false,
+        max_stack INTEGER DEFAULT 1,
+        icon VARCHAR(100) DEFAULT 'default_item'
+      )
+    `);
+    logger.info('[DB] Items table verified/created');
+  } catch (err) {
+    logger.warn(`[DB] Items table issue: ${err.message}`);
+  }
+  
+  // Ensure character_inventory table exists
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS character_inventory (
+        inventory_id SERIAL PRIMARY KEY,
+        character_id INTEGER REFERENCES characters(character_id) ON DELETE CASCADE,
+        item_id INTEGER REFERENCES items(item_id),
+        quantity INTEGER DEFAULT 1,
+        is_equipped BOOLEAN DEFAULT false,
+        slot_index INTEGER DEFAULT -1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_inventory_character ON character_inventory(character_id)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_inventory_item ON character_inventory(item_id)');
+    logger.info('[DB] Character inventory table verified/created');
+  } catch (err) {
+    logger.warn(`[DB] Inventory table issue: ${err.message}`);
+  }
+  
+  // Seed base items if items table is empty
+  try {
+    const itemCount = await pool.query('SELECT COUNT(*) FROM items');
+    if (parseInt(itemCount.rows[0].count) === 0) {
+      logger.info('[DB] Seeding base items...');
+      await pool.query(`
+        INSERT INTO items (item_id, name, description, item_type, weight, price, stackable, max_stack, icon) VALUES
+        (1001, 'Red Potion', 'Restores 50 HP.', 'consumable', 7, 25, true, 99, 'red_potion'),
+        (1002, 'Orange Potion', 'Restores 150 HP.', 'consumable', 10, 100, true, 99, 'orange_potion'),
+        (1003, 'Yellow Potion', 'Restores 350 HP.', 'consumable', 13, 275, true, 99, 'yellow_potion'),
+        (1004, 'Blue Potion', 'Restores 60 SP.', 'consumable', 15, 500, true, 99, 'blue_potion'),
+        (1005, 'Meat', 'Restores 70 HP. Looks delicious.', 'consumable', 15, 25, true, 99, 'meat')
+        ON CONFLICT (item_id) DO NOTHING
+      `);
+      await pool.query(`
+        INSERT INTO items (item_id, name, description, item_type, weight, price, stackable, max_stack, icon) VALUES
+        (2001, 'Jellopy', 'A small, squishy blob of unknown origin.', 'etc', 1, 3, true, 999, 'jellopy'),
+        (2002, 'Sticky Mucus', 'Thick, gooey substance secreted by monsters.', 'etc', 1, 7, true, 999, 'sticky_mucus'),
+        (2003, 'Shell', 'A hard, protective outer shell.', 'etc', 2, 14, true, 999, 'shell'),
+        (2004, 'Feather', 'A light, downy feather.', 'etc', 1, 5, true, 999, 'feather'),
+        (2005, 'Mushroom Spore', 'Tiny spores from a forest mushroom.', 'etc', 1, 10, true, 999, 'mushroom_spore'),
+        (2006, 'Insect Leg', 'A chitinous leg from a large insect.', 'etc', 1, 12, true, 999, 'insect_leg'),
+        (2007, 'Green Herb', 'A common medicinal herb.', 'etc', 3, 8, true, 99, 'green_herb'),
+        (2008, 'Fluff', 'Soft, fluffy material from a plant creature.', 'etc', 1, 4, true, 999, 'fluff')
+        ON CONFLICT (item_id) DO NOTHING
+      `);
+      await pool.query(`
+        INSERT INTO items (item_id, name, description, item_type, equip_slot, weight, price, atk, required_level, icon) VALUES
+        (3001, 'Knife', 'A basic knife. Better than bare fists.', 'weapon', 'weapon', 40, 50, 17, 1, 'knife'),
+        (3002, 'Cutter', 'A slightly sharper blade.', 'weapon', 'weapon', 40, 150, 30, 1, 'cutter'),
+        (3003, 'Main Gauche', 'An elegant parrying dagger.', 'weapon', 'weapon', 60, 500, 43, 12, 'main_gauche'),
+        (3004, 'Sword', 'A standard one-handed sword.', 'weapon', 'weapon', 80, 100, 25, 2, 'sword'),
+        (3005, 'Falchion', 'A curved, heavy cutting sword.', 'weapon', 'weapon', 60, 600, 49, 18, 'falchion')
+        ON CONFLICT (item_id) DO NOTHING
+      `);
+      await pool.query(`
+        INSERT INTO items (item_id, name, description, item_type, equip_slot, weight, price, def, required_level, icon) VALUES
+        (4001, 'Cotton Shirt', 'A basic cotton shirt offering minimal protection.', 'armor', 'armor', 10, 20, 1, 1, 'cotton_shirt'),
+        (4002, 'Padded Armor', 'Light padding for basic protection.', 'armor', 'armor', 80, 200, 4, 1, 'padded_armor'),
+        (4003, 'Chain Mail', 'Interlocking metal rings for decent defense.', 'armor', 'armor', 150, 800, 8, 20, 'chain_mail')
+        ON CONFLICT (item_id) DO NOTHING
+      `);
+      logger.info('[DB] Base items seeded successfully');
+    }
+  } catch (err) {
+    logger.warn(`[DB] Item seeding issue: ${err.message}`);
+  }
+  
+  // Load item definitions into memory cache
+  await loadItemDefinitions();
   
   // Spawn initial enemies
   logger.info(`[ENEMY] Spawning ${ENEMY_SPAWNS.length} enemies...`);
