@@ -70,11 +70,11 @@ Client (Blueprint)                    Server (index.js)                    Datab
 ## Item ID Ranges
 
 | Range | Type | Examples |
-|-------|------|---------|
-| 1001-1999 | Consumables | Red Potion, Orange Potion, Blue Potion, Meat |
-| 2001-2999 | Etc/Loot | Jellopy, Sticky Mucus, Shell, Feather, Mushroom Spore |
-| 3001-3999 | Weapons | Knife, Cutter, Main Gauche, Sword, Falchion |
-| 4001-4999 | Armor | Cotton Shirt, Padded Armor, Chain Mail |
+|-------|------|----------|
+| 1001-1999 | Consumables | Crimson Vial, Amber Elixir, Golden Salve, Roasted Haunch |
+| 2001-2999 | Etc/Loot | Gloopy Residue, Viscous Slime, Chitin Shard, Downy Plume |
+| 3001-3999 | Weapons | Rustic Shiv, Keen Edge, Iron Cleaver, Hunting Longbow |
+| 4001-4999 | Armor | Linen Tunic, Quilted Vest, Ringweave Hauberk |
 
 ---
 
@@ -83,39 +83,48 @@ Client (Blueprint)                    Server (index.js)                    Datab
 ### Consumables (1001-1005)
 | ID | Name | HP Restore | SP Restore | Weight | Price |
 |----|------|-----------|-----------|--------|-------|
-| 1001 | Red Potion | 50 | — | 7 | 25 |
-| 1002 | Orange Potion | 150 | — | 10 | 100 |
-| 1003 | Yellow Potion | 350 | — | 13 | 275 |
-| 1004 | Blue Potion | — | 60 | 15 | 500 |
-| 1005 | Meat | 70 | — | 15 | 25 |
+| 1001 | Crimson Vial | 50 | — | 7 | 25 |
+| 1002 | Amber Elixir | 150 | — | 10 | 100 |
+| 1003 | Golden Salve | 350 | — | 13 | 275 |
+| 1004 | Azure Philter | — | 60 | 15 | 500 |
+| 1005 | Roasted Haunch | 70 | — | 15 | 25 |
 
 ### Etc/Loot (2001-2008)
 | ID | Name | Weight | Price | Max Stack |
 |----|------|--------|-------|-----------|
-| 2001 | Jellopy | 1 | 3 | 999 |
-| 2002 | Sticky Mucus | 1 | 7 | 999 |
-| 2003 | Shell | 2 | 14 | 999 |
-| 2004 | Feather | 1 | 5 | 999 |
-| 2005 | Mushroom Spore | 1 | 10 | 999 |
-| 2006 | Insect Leg | 1 | 12 | 999 |
-| 2007 | Green Herb | 3 | 8 | 99 |
-| 2008 | Fluff | 1 | 4 | 999 |
+| 2001 | Gloopy Residue | 1 | 3 | 999 |
+| 2002 | Viscous Slime | 1 | 7 | 999 |
+| 2003 | Chitin Shard | 2 | 14 | 999 |
+| 2004 | Downy Plume | 1 | 5 | 999 |
+| 2005 | Spore Cluster | 1 | 10 | 999 |
+| 2006 | Barbed Limb | 1 | 12 | 999 |
+| 2007 | Verdant Leaf | 3 | 8 | 99 |
+| 2008 | Silken Tuft | 1 | 4 | 999 |
 
-### Weapons (3001-3005)
-| ID | Name | ATK | Req Level | Weight | Price |
-|----|------|-----|-----------|--------|-------|
-| 3001 | Knife | 17 | 1 | 40 | 50 |
-| 3002 | Cutter | 30 | 1 | 40 | 150 |
-| 3003 | Main Gauche | 43 | 12 | 60 | 500 |
-| 3004 | Sword | 25 | 2 | 80 | 100 |
-| 3005 | Falchion | 49 | 18 | 60 | 600 |
+### Weapons (3001-3006)
+| ID | Name | ATK | Type | ASPD Mod | Range | Req Level | Weight | Price |
+|----|------|-----|------|----------|-------|-----------|--------|-------|
+| 3001 | Rustic Shiv | 17 | dagger | +5 | 150 | 1 | 40 | 50 |
+| 3002 | Keen Edge | 30 | dagger | +5 | 150 | 1 | 40 | 150 |
+| 3003 | Stiletto Fang | 43 | dagger | +5 | 150 | 12 | 60 | 500 |
+| 3004 | Iron Cleaver | 25 | one_hand_sword | +0 | 150 | 2 | 80 | 100 |
+| 3005 | Crescent Saber | 49 | one_hand_sword | +0 | 150 | 18 | 60 | 600 |
+| 3006 | Hunting Longbow | 35 | bow | -3 | 800 | 4 | 50 | 400 |
+
+### Weapon Type Properties
+| weapon_type | ASPD Modifier | Range (UU) | Description |
+|-------------|--------------|------------|-------------|
+| dagger | +5 | 150 | Fast attack speed, standard melee range |
+| one_hand_sword | +0 | 150 | Standard speed and melee range |
+| bow | -3 | 800 | Slower attacks, significant ranged advantage |
+| *(unarmed)* | 0 | 150 | Default when no weapon equipped |
 
 ### Armor (4001-4003)
 | ID | Name | DEF | Req Level | Weight | Price |
 |----|------|-----|-----------|--------|-------|
-| 4001 | Cotton Shirt | 1 | 1 | 10 | 20 |
-| 4002 | Padded Armor | 4 | 1 | 80 | 200 |
-| 4003 | Chain Mail | 8 | 20 | 150 | 800 |
+| 4001 | Linen Tunic | 1 | 1 | 10 | 20 |
+| 4002 | Quilted Vest | 4 | 1 | 80 | 200 |
+| 4003 | Ringweave Hauberk | 8 | 20 | 150 | 800 |
 
 ---
 
@@ -123,12 +132,12 @@ Client (Blueprint)                    Server (index.js)                    Datab
 
 | Enemy | Drops (itemId @ chance) |
 |-------|------------------------|
-| **Blobby** (Lv1) | Jellopy@70% (1-2), Sticky Mucus@15%, Red Potion@5%, Knife@1% |
-| **Hoplet** (Lv3) | Jellopy@50%, Feather@30%, Green Herb@10%, Red Potion@8%, Cutter@1% |
-| **Crawlid** (Lv2) | Shell@50%, Insect Leg@25%, Jellopy@40%, Red Potion@5% |
-| **Shroomkin** (Lv4) | Mushroom Spore@55%, Green Herb@20% (1-2), Red Potion@10%, Cotton Shirt@2% |
-| **Buzzer** (Lv5) | Insect Leg@45%, Feather@30%, Orange Potion@5%, Sword@2%, Padded Armor@1% |
-| **Mosswort** (Lv3) | Fluff@60% (1-3), Green Herb@25%, Sticky Mucus@15%, Meat@8% |
+| **Blobby** (Lv1) | Gloopy Residue@70% (1-2), Viscous Slime@15%, Crimson Vial@5%, Rustic Shiv@1% |
+| **Hoplet** (Lv3) | Gloopy Residue@50%, Downy Plume@30%, Verdant Leaf@10%, Crimson Vial@8%, Keen Edge@1% |
+| **Crawlid** (Lv2) | Chitin Shard@50%, Barbed Limb@25%, Gloopy Residue@40%, Crimson Vial@5% |
+| **Shroomkin** (Lv4) | Spore Cluster@55%, Verdant Leaf@20% (1-2), Crimson Vial@10%, Linen Tunic@2% |
+| **Buzzer** (Lv5) | Barbed Limb@45%, Downy Plume@30%, Amber Elixir@5%, Iron Cleaver@2%, Quilted Vest@1%, Hunting Longbow@0.5% |
+| **Mosswort** (Lv3) | Silken Tuft@60% (1-3), Verdant Leaf@25%, Viscous Slime@15%, Roasted Haunch@8% |
 
 ---
 
@@ -149,7 +158,7 @@ Client (Blueprint)                    Server (index.js)                    Datab
 |-------|---------|-------------|
 | `inventory:data` | `{ items: [...] }` | Full inventory with item details |
 | `inventory:used` | `{ inventoryId, itemName, healed, spRestored, health, mana, ... }` | Consumable use result |
-| `inventory:equipped` | `{ inventoryId, itemName, equipped, slot }` | Equip/unequip confirmation |
+| `inventory:equipped` | `{ inventoryId, itemName, equipped, slot, weaponType, attackRange, aspd, attackIntervalMs }` | Equip/unequip confirmation with weapon stats |
 | `inventory:dropped` | `{ inventoryId, itemName, quantity }` | Item discard confirmation |
 | `inventory:error` | `{ message }` | Error message |
 | `loot:drop` | `{ enemyId, enemyName, items: [{itemId, itemName, quantity, icon, itemType}] }` | Items received from enemy kill |
@@ -175,34 +184,45 @@ Client (Blueprint)                    Server (index.js)                    Datab
 
 ### Combat Integration
 - On enemy death → `rollEnemyDrops()` → `addItemToInventory()` for killer → `loot:drop` event
-- On `inventory:equip` weapon → updates `player.stats.weaponATK` → recalculates derived stats
-- On player join → loads equipped weapon ATK from DB into `baseStats.weaponATK`
+- On `inventory:equip` weapon → updates `player.stats.weaponATK`, `player.attackRange`, `player.weaponAspdMod` → recalculates derived stats + ASPD
+- On player join → loads equipped weapon ATK, weapon_range, aspd_modifier from DB
+- Weapon range affects combat range check (all melee: 150, bow: 800, unarmed: 150)
+- Weapon ASPD modifier is added to stat-derived ASPD (daggers: +5, swords: +0, bow: -3)
+- Default MELEE_RANGE constant is 150 Unreal units
 
 ---
 
-## Client Implementation (Blueprint — TODO)
+## Client Implementation (Blueprint)
 
-### WBP_InventoryWindow (New Widget)
-- Grid of item slots (10 columns × 10 rows)
-- Each slot shows item icon, quantity badge, equipped indicator
-- Right-click context menu: Use, Equip, Drop
-- Drag-and-drop for slot reordering (future)
+### WBP_InventoryWindow
+- Equipment slots row (Weapon, Armor) with info text showing equipped item stats
+- ScrollBox with WrapBox (ItemGrid) holding WBP_InventorySlot children
+- Item count display, Close button
+- Functions: PopulateInventory(Data), UseItem(invId), EquipItem(invId), UnequipItem(invId), DropItem(invId)
+- Opened via I key → emits `inventory:load` → server responds with `inventory:data`
 
-### WBP_LootPopup (New Widget)
-- Shows items received on enemy kill
-- Auto-fades after 3 seconds
-- Stacks multiple kills
+### WBP_InventorySlot (Child Widget)
+- 56×56 button with item icon, quantity badge, equipped indicator (green dot)
+- Variables: InventoryId, ItemId, ItemName, ItemType, Quantity, IsEquipped, EquipSlot, ATK, DEF, WeaponType, WeaponRange, AspdModifier
+- Click: consumable → UseItem, equippable → EquipItem/UnequipItem toggle
+
+### WBP_LootPopup
+- Shows items received on enemy kill with enemy name header
+- Auto-fades after 3 seconds using Event Tick opacity reduction
+- Child widget: WBP_LootItemLine (icon + text per dropped item)
 
 ### BP_SocketManager Bindings
-- `inventory:data` → OnInventoryData
-- `inventory:used` → OnItemUsed
-- `inventory:equipped` → OnItemEquipped
-- `inventory:dropped` → OnItemDropped
-- `inventory:error` → OnInventoryError
-- `loot:drop` → OnLootDrop
+- `inventory:data` → OnInventoryData → calls PopulateInventory on WBP_InventoryWindow
+- `inventory:used` → OnItemUsed → debug print
+- `inventory:equipped` → OnItemEquipped → debug print with weapon stats
+- `inventory:dropped` → OnItemDropped → debug print
+- `inventory:error` → OnInventoryError → error print
+- `loot:drop` → OnLootDrop → creates WBP_LootPopup, calls ShowLoot
 
 ### Hotkey
-- **I** key or button → emit `inventory:load` → open WBP_InventoryWindow
+- **I** key (IA_ToggleInventory) → toggle WBP_InventoryWindow on/off
+- On open: emit `inventory:load`, set input mode Game and UI
+- On close: remove widget, set input mode Game Only
 
 ---
 
@@ -217,6 +237,14 @@ Client (Blueprint)                    Server (index.js)                    Datab
 
 ---
 
-**Last Updated**: 2026-02-11
-**Version**: 1.0
-**Status**: Server-side complete, Blueprint UI pending
+## Troubleshooting
+
+### Issue: "Accessed None trying to read property SocketIORef in WBP_InventoryWindow"
+**Cause:** The `SocketIORef` variable in WBP_InventoryWindow is not set before `UseItem`/`EquipItem`/`DropItem` try to emit Socket.io events.
+**Fix:** See Blueprint fix below — the parent that creates WBP_InventoryWindow (BP_MMOCharacter or BP_SocketManager) must pass the Socket.io component reference when creating the widget, either via **Expose on Spawn** or by calling a **Set SocketIORef** setter immediately after `Create Widget`.
+
+---
+
+**Last Updated**: 2026-02-12
+**Version**: 1.2
+**Status**: Items renamed to RO-inspired names, bow added, melee range standardized to 150 UU, ASPD modifiers updated, SocketIORef bug documented

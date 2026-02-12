@@ -130,12 +130,66 @@ Excluded the killer from receiving `combat:target_lost` during player death sequ
 
 ---
 
+## Bug: Hover Indicator Not Hiding When Switching Targets
+
+**Date Fixed**: 2026-02-11  
+**Severity**: Medium  
+**Status**: Fixed
+
+### Problem
+When a player switched from attacking one enemy to attacking a different enemy (or clicked the ground), the hover indicator on the old target would not hide. The `combat:auto_attack_stopped` event was never sent for the old target.
+
+### Root Cause
+The `combat:attack` handler overwrote the old `autoAttackState` entry when switching targets without cleaning up:
+1. Old enemy still had the player in its `inCombatWith` set (preventing wandering)
+2. No `combat:auto_attack_stopped` was emitted for the old target
+3. Client Blueprint never received the signal to hide the old hover indicator
+
+### Solution
+Added target-switch cleanup in `combat:attack` handler (before setting new auto-attack state):
+- Checks if player already has an active attack on a different target
+- Removes player from old enemy's `inCombatWith` set
+- Emits `combat:auto_attack_stopped` with `reason: 'Switched target'`, `oldTargetId`, and `oldIsEnemy`
+- Blueprint `OnAutoAttackStopped` handler receives this and hides the old hover indicator
+
+### Files Modified
+- `server/src/index.js` (combat:attack handler — added target-switch cleanup block)
+
+---
+
+## Bug: Enemy Wandering Not Visible / No enemy:move Logs
+
+**Date Fixed**: 2026-02-11  
+**Severity**: Medium  
+**Status**: Fixed
+
+### Problem
+Enemies appeared stationary. No `enemy:move` events visible in server logs. User could not confirm wandering was working.
+
+### Root Cause
+Two issues:
+1. Wandering debug messages used `logger.debug()` — invisible at default INFO log level
+2. `enemy:move` broadcast emissions had no logging at all
+3. `pickRandomWanderPoint()` used polar coordinates from spawn point — could generate very small movements
+
+### Solution
+1. Changed all wandering log calls from `logger.debug()` to `logger.info()`
+2. Added `logger.info()` after every `io.emit('enemy:move', ...)` call
+3. Rewrote `pickRandomWanderPoint()` to use current position + random 100-300 offset per axis (randomly +/-)
+4. Added `WANDER_DIST_MIN: 100` and `WANDER_DIST_MAX: 300` to `ENEMY_AI` constants
+5. Clamped wander destination to `wanderRadius` from spawn to prevent infinite drift
+
+### Files Modified
+- `server/src/index.js` (ENEMY_AI constants, pickRandomWanderPoint, AI tick loop logging)
+
+---
+
 ## Known Issues & Workarounds
 
-### Issue: combat:target_lost / combat:auto_attack_stopped may not trigger in logs
-Server logging has been enhanced (2026-02-11) to show detailed state when these events fire or don't fire. Check server console for `[COMBAT]` prefixed messages.
+### Issue: None currently
+All reported bugs have been resolved. Check server console for `[COMBAT]` and `[ENEMY AI]` prefixed messages for debugging.
 
 ---
 
 **Last Updated**: 2026-02-11  
-**Version**: 1.0.5
+**Version**: 1.0.6

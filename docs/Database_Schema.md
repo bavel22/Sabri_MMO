@@ -85,23 +85,101 @@ CREATE TABLE characters (
 
 ---
 
+### items
+
+Static item definitions — weapons, armor, consumables, loot materials.
+
+```sql
+CREATE TABLE items (
+    item_id SERIAL PRIMARY KEY,
+    name VARCHAR(100) NOT NULL,
+    description TEXT DEFAULT '',
+    item_type VARCHAR(20) NOT NULL DEFAULT 'etc',
+    equip_slot VARCHAR(20) DEFAULT NULL,
+    weight INTEGER DEFAULT 0,
+    price INTEGER DEFAULT 0,
+    atk INTEGER DEFAULT 0,
+    def INTEGER DEFAULT 0,
+    matk INTEGER DEFAULT 0,
+    mdef INTEGER DEFAULT 0,
+    str_bonus INTEGER DEFAULT 0,
+    agi_bonus INTEGER DEFAULT 0,
+    vit_bonus INTEGER DEFAULT 0,
+    int_bonus INTEGER DEFAULT 0,
+    dex_bonus INTEGER DEFAULT 0,
+    luk_bonus INTEGER DEFAULT 0,
+    max_hp_bonus INTEGER DEFAULT 0,
+    max_sp_bonus INTEGER DEFAULT 0,
+    required_level INTEGER DEFAULT 1,
+    stackable BOOLEAN DEFAULT false,
+    max_stack INTEGER DEFAULT 1,
+    icon VARCHAR(100) DEFAULT 'default_item',
+    weapon_type VARCHAR(20) DEFAULT NULL,
+    aspd_modifier INTEGER DEFAULT 0,
+    weapon_range INTEGER DEFAULT 0
+);
+```
+
+**item_type values:** weapon, armor, garment, footgear, accessory, consumable, etc
+**equip_slot values:** weapon, shield, armor, garment, footgear, accessory, head_top, head_mid, head_low
+**weapon_type values:** dagger (+5 ASPD, 150 range), one_hand_sword (+0 ASPD, 150 range), bow (-3 ASPD, 800 range)
+
+---
+
+### character_inventory
+
+Per-character item ownership, quantities, and equipped state.
+
+```sql
+CREATE TABLE character_inventory (
+    inventory_id SERIAL PRIMARY KEY,
+    character_id INTEGER REFERENCES characters(character_id) ON DELETE CASCADE,
+    item_id INTEGER REFERENCES items(item_id),
+    quantity INTEGER DEFAULT 1,
+    is_equipped BOOLEAN DEFAULT false,
+    slot_index INTEGER DEFAULT -1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+**Indexes:**
+- `idx_inventory_character` on character_id
+- `idx_inventory_item` on item_id
+
+---
+
 ## Entity Relationships
 
 ```
-┌───────────────┐         ┌──────────────────┐
-│     users     │         │    characters    │
-├───────────────┤         ├──────────────────┤
-│ PK user_id    │◄───────┼ FK user_id       │
-│    username   │    1:M │    character_id  │
-│    email      │         │    name          │
-│    password   │         │    class         │
-│    created_at │         │    level         │
-│    last_login │         │    x, y, z       │
-└───────────────┘         └──────────────────┘
+┌───────────────┐         ┌──────────────────┐         ┌──────────────────────┐
+│     users     │         │    characters    │         │ character_inventory  │
+├───────────────┤         ├──────────────────┤         ├──────────────────────┤
+│ PK user_id    │◄───────┼ FK user_id       │◄───────┼ FK character_id      │
+│    username   │    1:M │ PK character_id  │    1:M │ PK inventory_id      │
+│    email      │         │    name          │         │ FK item_id ──────────┼──┐
+│    password   │         │    class         │         │    quantity          │  │
+│    created_at │         │    level         │         │    is_equipped       │  │
+│    last_login │         │    x, y, z       │         │    slot_index        │  │
+└───────────────┘         │    stats...      │         └──────────────────────┘  │
+                          └──────────────────┘                                   │
+                                                        ┌───────────────┐        │
+                                                        │     items     │◄───────┘
+                                                        ├───────────────┤
+                                                        │ PK item_id    │
+                                                        │    name       │
+                                                        │    item_type  │
+                                                        │    equip_slot │
+                                                        │    atk/def    │
+                                                        │    weapon_type│
+                                                        │    weapon_range│
+                                                        │    aspd_mod   │
+                                                        └───────────────┘
 ```
 
 - **One-to-Many**: One user can have multiple characters
-- **Cascade Delete**: Deleting user deletes all their characters
+- **One-to-Many**: One character can have multiple inventory entries
+- **Many-to-One**: Many inventory entries reference one item definition
+- **Cascade Delete**: Deleting user deletes all their characters and inventory
 
 ## Common Queries
 

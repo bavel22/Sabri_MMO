@@ -86,37 +86,40 @@ CREATE INDEX IF NOT EXISTS idx_inventory_item ON character_inventory(item_id);
 
 -- Consumables
 INSERT INTO items (item_id, name, description, item_type, weight, price, stackable, max_stack, icon) VALUES
-(1001, 'Red Potion', 'Restores 50 HP.', 'consumable', 7, 25, true, 99, 'red_potion'),
-(1002, 'Orange Potion', 'Restores 150 HP.', 'consumable', 10, 100, true, 99, 'orange_potion'),
-(1003, 'Yellow Potion', 'Restores 350 HP.', 'consumable', 13, 275, true, 99, 'yellow_potion'),
-(1004, 'Blue Potion', 'Restores 60 SP.', 'consumable', 15, 500, true, 99, 'blue_potion'),
-(1005, 'Meat', 'Restores 70 HP. Looks delicious.', 'consumable', 15, 25, true, 99, 'meat')
+(1001, 'Crimson Vial', 'A small red tonic. Restores 50 HP.', 'consumable', 7, 25, true, 99, 'red_potion'),
+(1002, 'Amber Elixir', 'A warm orange draught. Restores 150 HP.', 'consumable', 10, 100, true, 99, 'orange_potion'),
+(1003, 'Golden Salve', 'A potent yellow remedy. Restores 350 HP.', 'consumable', 13, 275, true, 99, 'yellow_potion'),
+(1004, 'Azure Philter', 'A calming blue brew. Restores 60 SP.', 'consumable', 15, 500, true, 99, 'blue_potion'),
+(1005, 'Roasted Haunch', 'Tender roasted meat. Restores 70 HP.', 'consumable', 15, 25, true, 99, 'meat')
 ON CONFLICT (item_id) DO NOTHING;
 
 -- Etc / Loot items (dropped by monsters, sold to NPCs)
 INSERT INTO items (item_id, name, description, item_type, weight, price, stackable, max_stack, icon) VALUES
-(2001, 'Jellopy', 'A small, squishy blob of unknown origin.', 'etc', 1, 3, true, 999, 'jellopy'),
-(2002, 'Sticky Mucus', 'Thick, gooey substance secreted by monsters.', 'etc', 1, 7, true, 999, 'sticky_mucus'),
-(2003, 'Shell', 'A hard, protective outer shell.', 'etc', 2, 14, true, 999, 'shell'),
-(2004, 'Feather', 'A light, downy feather.', 'etc', 1, 5, true, 999, 'feather'),
-(2005, 'Mushroom Spore', 'Tiny spores from a forest mushroom.', 'etc', 1, 10, true, 999, 'mushroom_spore'),
-(2006, 'Insect Leg', 'A chitinous leg from a large insect.', 'etc', 1, 12, true, 999, 'insect_leg'),
-(2007, 'Green Herb', 'A common medicinal herb.', 'etc', 3, 8, true, 99, 'green_herb'),
-(2008, 'Fluff', 'Soft, fluffy material from a plant creature.', 'etc', 1, 4, true, 999, 'fluff')
+(2001, 'Gloopy Residue', 'A small, squishy blob of unknown origin.', 'etc', 1, 3, true, 999, 'jellopy'),
+(2002, 'Viscous Slime', 'Thick, gooey substance secreted by monsters.', 'etc', 1, 7, true, 999, 'sticky_mucus'),
+(2003, 'Chitin Shard', 'A hard, protective outer shell fragment.', 'etc', 2, 14, true, 999, 'shell'),
+(2004, 'Downy Plume', 'A light, downy feather.', 'etc', 1, 5, true, 999, 'feather'),
+(2005, 'Spore Cluster', 'Tiny spores from a forest mushroom.', 'etc', 1, 10, true, 999, 'mushroom_spore'),
+(2006, 'Barbed Limb', 'A chitinous leg from a large insect.', 'etc', 1, 12, true, 999, 'insect_leg'),
+(2007, 'Verdant Leaf', 'A common medicinal herb with healing properties.', 'etc', 3, 8, true, 99, 'green_herb'),
+(2008, 'Silken Tuft', 'Soft, fluffy material from a plant creature.', 'etc', 1, 4, true, 999, 'fluff')
 ON CONFLICT (item_id) DO NOTHING;
 
--- Weapons
-INSERT INTO items (item_id, name, description, item_type, equip_slot, weight, price, atk, required_level, icon) VALUES
-(3001, 'Knife', 'A basic knife. Better than bare fists.', 'weapon', 'weapon', 40, 50, 17, 1, 'knife'),
-(3002, 'Cutter', 'A slightly sharper blade.', 'weapon', 'weapon', 40, 150, 30, 1, 'cutter'),
-(3003, 'Main Gauche', 'An elegant parrying dagger.', 'weapon', 'weapon', 60, 500, 43, 12, 'main_gauche'),
-(3004, 'Sword', 'A standard one-handed sword.', 'weapon', 'weapon', 80, 100, 25, 2, 'sword'),
-(3005, 'Falchion', 'A curved, heavy cutting sword.', 'weapon', 'weapon', 60, 600, 49, 18, 'falchion')
+-- Weapons (weapon_type, aspd_modifier, weapon_range included)
+-- Melee range: 150 UU | Bow range: 800 UU
+-- ASPD modifiers: dagger +5, 1h_sword +0, bow -3
+INSERT INTO items (item_id, name, description, item_type, equip_slot, weight, price, atk, required_level, icon, weapon_type, aspd_modifier, weapon_range) VALUES
+(3001, 'Rustic Shiv', 'A crude but swift dagger. Better than bare fists.', 'weapon', 'weapon', 40, 50, 17, 1, 'knife', 'dagger', 5, 150),
+(3002, 'Keen Edge', 'A finely honed short blade.', 'weapon', 'weapon', 40, 150, 30, 1, 'cutter', 'dagger', 5, 150),
+(3003, 'Stiletto Fang', 'An elegant parrying dagger with a needle-thin tip.', 'weapon', 'weapon', 60, 500, 43, 12, 'main_gauche', 'dagger', 5, 150),
+(3004, 'Iron Cleaver', 'A standard one-handed sword with a broad blade.', 'weapon', 'weapon', 80, 100, 25, 2, 'sword', 'one_hand_sword', 0, 150),
+(3005, 'Crescent Saber', 'A curved, heavy cutting sword.', 'weapon', 'weapon', 60, 600, 49, 18, 'falchion', 'one_hand_sword', 0, 150),
+(3006, 'Hunting Longbow', 'A sturdy ranged bow with impressive reach.', 'weapon', 'weapon', 50, 400, 35, 4, 'bow', 'bow', -3, 800)
 ON CONFLICT (item_id) DO NOTHING;
 
 -- Armor
 INSERT INTO items (item_id, name, description, item_type, equip_slot, weight, price, def, required_level, icon) VALUES
-(4001, 'Cotton Shirt', 'A basic cotton shirt offering minimal protection.', 'armor', 'armor', 10, 20, 1, 1, 'cotton_shirt'),
-(4002, 'Padded Armor', 'Light padding for basic protection.', 'armor', 'armor', 80, 200, 4, 1, 'padded_armor'),
-(4003, 'Chain Mail', 'Interlocking metal rings for decent defense.', 'armor', 'armor', 150, 800, 8, 20, 'chain_mail')
+(4001, 'Linen Tunic', 'A simple linen shirt offering minimal protection.', 'armor', 'armor', 10, 20, 1, 1, 'cotton_shirt'),
+(4002, 'Quilted Vest', 'Light quilted padding for basic protection.', 'armor', 'armor', 80, 200, 4, 1, 'padded_armor'),
+(4003, 'Ringweave Hauberk', 'Interlocking metal rings forged into sturdy armor.', 'armor', 'armor', 150, 800, 8, 20, 'chain_mail')
 ON CONFLICT (item_id) DO NOTHING;

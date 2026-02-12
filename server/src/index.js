@@ -82,7 +82,7 @@ const connectedPlayers = new Map();
 const COMBAT = {
     BASE_DAMAGE: 1,             // Default damage per hit (before stat formulas)
     DAMAGE_VARIANCE: 0,         // Random variance added to base damage
-    MELEE_RANGE: 100,           // Default melee attack range (Unreal units)
+    MELEE_RANGE: 150,           // Default melee attack range (Unreal units)
     RANGED_RANGE: 800,          // Default ranged attack range
     DEFAULT_ASPD: 180,          // Default attack speed (0-190 scale, higher = faster)
     ASPD_CAP: 190,              // Maximum ASPD
@@ -146,10 +146,10 @@ const ENEMY_TEMPLATES = {
         respawnMs: 10000, aiType: 'passive',
         stats: { str: 1, agi: 1, vit: 1, int: 1, dex: 1, luk: 1, level: 1, weaponATK: 0 },
         drops: [
-            { itemId: 2001, chance: 0.70, minQty: 1, maxQty: 2 }, // Jellopy
-            { itemId: 2002, chance: 0.15 },                        // Sticky Mucus
-            { itemId: 1001, chance: 0.05 },                        // Red Potion
-            { itemId: 3001, chance: 0.01 }                         // Knife (rare)
+            { itemId: 2001, chance: 0.70, minQty: 1, maxQty: 2 }, // Gloopy Residue
+            { itemId: 2002, chance: 0.15 },                        // Viscous Slime
+            { itemId: 1001, chance: 0.05 },                        // Crimson Vial
+            { itemId: 3001, chance: 0.01 }                         // Rustic Shiv (rare)
         ]
     },
     hoplet: {
@@ -158,11 +158,11 @@ const ENEMY_TEMPLATES = {
         respawnMs: 15000, aiType: 'passive',
         stats: { str: 3, agi: 5, vit: 2, int: 1, dex: 3, luk: 5, level: 3, weaponATK: 2 },
         drops: [
-            { itemId: 2001, chance: 0.50 },                        // Jellopy
-            { itemId: 2004, chance: 0.30 },                        // Feather
-            { itemId: 2007, chance: 0.10 },                        // Green Herb
-            { itemId: 1001, chance: 0.08 },                        // Red Potion
-            { itemId: 3002, chance: 0.01 }                         // Cutter (rare)
+            { itemId: 2001, chance: 0.50 },                        // Gloopy Residue
+            { itemId: 2004, chance: 0.30 },                        // Downy Plume
+            { itemId: 2007, chance: 0.10 },                        // Verdant Leaf
+            { itemId: 1001, chance: 0.08 },                        // Crimson Vial
+            { itemId: 3002, chance: 0.01 }                         // Keen Edge (rare)
         ]
     },
     crawlid: {
@@ -171,10 +171,10 @@ const ENEMY_TEMPLATES = {
         respawnMs: 12000, aiType: 'passive',
         stats: { str: 2, agi: 2, vit: 3, int: 1, dex: 2, luk: 1, level: 2, weaponATK: 1 },
         drops: [
-            { itemId: 2003, chance: 0.50 },                        // Shell
-            { itemId: 2006, chance: 0.25 },                        // Insect Leg
-            { itemId: 2001, chance: 0.40 },                        // Jellopy
-            { itemId: 1001, chance: 0.05 }                         // Red Potion
+            { itemId: 2003, chance: 0.50 },                        // Chitin Shard
+            { itemId: 2006, chance: 0.25 },                        // Barbed Limb
+            { itemId: 2001, chance: 0.40 },                        // Gloopy Residue
+            { itemId: 1001, chance: 0.05 }                         // Crimson Vial
         ]
     },
     shroomkin: {
@@ -183,10 +183,10 @@ const ENEMY_TEMPLATES = {
         respawnMs: 15000, aiType: 'passive',
         stats: { str: 4, agi: 3, vit: 4, int: 2, dex: 3, luk: 2, level: 4, weaponATK: 3 },
         drops: [
-            { itemId: 2005, chance: 0.55 },                        // Mushroom Spore
-            { itemId: 2007, chance: 0.20, minQty: 1, maxQty: 2 },  // Green Herb
-            { itemId: 1001, chance: 0.10 },                        // Red Potion
-            { itemId: 4001, chance: 0.02 }                         // Cotton Shirt (rare)
+            { itemId: 2005, chance: 0.55 },                        // Spore Cluster
+            { itemId: 2007, chance: 0.20, minQty: 1, maxQty: 2 },  // Verdant Leaf
+            { itemId: 1001, chance: 0.10 },                        // Crimson Vial
+            { itemId: 4001, chance: 0.02 }                         // Linen Tunic (rare)
         ]
     },
     buzzer: {
@@ -195,11 +195,12 @@ const ENEMY_TEMPLATES = {
         respawnMs: 18000, aiType: 'aggressive',
         stats: { str: 5, agi: 7, vit: 3, int: 1, dex: 5, luk: 3, level: 5, weaponATK: 4 },
         drops: [
-            { itemId: 2006, chance: 0.45 },                        // Insect Leg
-            { itemId: 2004, chance: 0.30 },                        // Feather
-            { itemId: 1002, chance: 0.05 },                        // Orange Potion
-            { itemId: 3004, chance: 0.02 },                        // Sword (rare)
-            { itemId: 4002, chance: 0.01 }                         // Padded Armor (rare)
+            { itemId: 2006, chance: 0.45 },                        // Barbed Limb
+            { itemId: 2004, chance: 0.30 },                        // Downy Plume
+            { itemId: 1002, chance: 0.05 },                        // Amber Elixir
+            { itemId: 3004, chance: 0.02 },                        // Iron Cleaver (rare)
+            { itemId: 4002, chance: 0.01 },                        // Quilted Vest (rare)
+            { itemId: 3006, chance: 0.005 }                        // Hunting Longbow (very rare)
         ]
     },
     mosswort: {
@@ -208,10 +209,10 @@ const ENEMY_TEMPLATES = {
         respawnMs: 12000, aiType: 'passive',
         stats: { str: 2, agi: 1, vit: 5, int: 3, dex: 2, luk: 1, level: 3, weaponATK: 1 },
         drops: [
-            { itemId: 2008, chance: 0.60, minQty: 1, maxQty: 3 },  // Fluff
-            { itemId: 2007, chance: 0.25 },                        // Green Herb
-            { itemId: 2002, chance: 0.15 },                        // Sticky Mucus
-            { itemId: 1005, chance: 0.08 }                         // Meat
+            { itemId: 2008, chance: 0.60, minQty: 1, maxQty: 3 },  // Silken Tuft
+            { itemId: 2007, chance: 0.25 },                        // Verdant Leaf
+            { itemId: 2002, chance: 0.15 },                        // Viscous Slime
+            { itemId: 1005, chance: 0.08 }                         // Roasted Haunch
         ]
     }
 };
@@ -365,7 +366,8 @@ async function getPlayerInventory(characterId) {
                     i.name, i.description, i.item_type, i.equip_slot, i.weight, i.price,
                     i.atk, i.def, i.matk, i.mdef,
                     i.str_bonus, i.agi_bonus, i.vit_bonus, i.int_bonus, i.dex_bonus, i.luk_bonus,
-                    i.max_hp_bonus, i.max_sp_bonus, i.required_level, i.stackable, i.icon
+                    i.max_hp_bonus, i.max_sp_bonus, i.required_level, i.stackable, i.icon,
+                    i.weapon_type, i.aspd_modifier, i.weapon_range
              FROM character_inventory ci
              JOIN items i ON ci.item_id = i.item_id
              WHERE ci.character_id = $1
@@ -479,18 +481,23 @@ io.on('connection', (socket) => {
             logger.warn(`Could not load stats for character ${characterId}: ${err.message}`);
         }
         
-        // Load equipped weapon ATK
+        // Load equipped weapon ATK, range, and ASPD modifier
+        let weaponRange = COMBAT.MELEE_RANGE;
+        let weaponAspdMod = 0;
         try {
             const weaponResult = await pool.query(
-                `SELECT i.atk FROM character_inventory ci
+                `SELECT i.atk, i.weapon_type, i.aspd_modifier, i.weapon_range FROM character_inventory ci
                  JOIN items i ON ci.item_id = i.item_id
                  WHERE ci.character_id = $1 AND ci.is_equipped = true AND i.equip_slot = 'weapon'
                  LIMIT 1`,
                 [characterId]
             );
             if (weaponResult.rows.length > 0) {
-                baseStats.weaponATK = weaponResult.rows[0].atk || 0;
-                logger.info(`[ITEMS] Loaded equipped weapon ATK=${baseStats.weaponATK} for char ${characterId}`);
+                const w = weaponResult.rows[0];
+                baseStats.weaponATK = w.atk || 0;
+                weaponRange = w.weapon_range || COMBAT.MELEE_RANGE;
+                weaponAspdMod = w.aspd_modifier || 0;
+                logger.info(`[ITEMS] Loaded equipped weapon: ATK=${baseStats.weaponATK}, range=${weaponRange}, aspdMod=${weaponAspdMod}, type=${w.weapon_type} for char ${characterId}`);
             }
         } catch (err) {
             logger.debug(`[ITEMS] No equipped weapon found for char ${characterId}`);
@@ -509,8 +516,8 @@ io.on('connection', (socket) => {
             maxMana,
             isDead: false,
             lastAttackTime: 0,
-            aspd: derived.aspd || COMBAT.DEFAULT_ASPD,
-            attackRange: COMBAT.MELEE_RANGE,
+            aspd: Math.min(COMBAT.ASPD_CAP, (derived.aspd || COMBAT.DEFAULT_ASPD) + weaponAspdMod),
+            attackRange: weaponRange,
             stats: baseStats
         });
         
@@ -665,6 +672,31 @@ io.on('connection', (socket) => {
         if (attacker.isDead) {
             socket.emit('combat:error', { message: 'You are dead' });
             return;
+        }
+        
+        // --- Clean up previous auto-attack if switching targets ---
+        if (autoAttackState.has(attackerId)) {
+            const oldAtk = autoAttackState.get(attackerId);
+            const newTargetId = targetEnemyId != null ? targetEnemyId : targetCharacterId;
+            const newIsEnemy = targetEnemyId != null;
+            
+            // Only clean up if actually switching to a different target
+            if (oldAtk.targetCharId !== newTargetId || oldAtk.isEnemy !== newIsEnemy) {
+                // Remove from old enemy's combat set
+                if (oldAtk.isEnemy) {
+                    const oldEnemy = enemies.get(oldAtk.targetCharId);
+                    if (oldEnemy) {
+                        oldEnemy.inCombatWith.delete(attackerId);
+                        logger.info(`[COMBAT] ${attacker.characterName} switched targets — removed from enemy ${oldEnemy.name}(${oldEnemy.enemyId}) combat set`);
+                    }
+                }
+                autoAttackState.delete(attackerId);
+                
+                // Notify client to clean up old target (hide hover indicator, etc.)
+                const stopPayload = { reason: 'Switched target', oldTargetId: oldAtk.targetCharId, oldIsEnemy: oldAtk.isEnemy };
+                socket.emit('combat:auto_attack_stopped', stopPayload);
+                logger.info(`[SEND] combat:auto_attack_stopped to ${socket.id} (target switch): ${JSON.stringify(stopPayload)}`);
+            }
         }
         
         // --- Attacking an enemy (NPC/AI) ---
@@ -1071,7 +1103,7 @@ io.on('connection', (socket) => {
                 `SELECT ci.inventory_id, ci.item_id, ci.is_equipped, i.item_type, i.equip_slot, i.name,
                         i.atk, i.def, i.matk, i.mdef,
                         i.str_bonus, i.agi_bonus, i.vit_bonus, i.int_bonus, i.dex_bonus, i.luk_bonus,
-                        i.required_level
+                        i.required_level, i.weapon_type, i.aspd_modifier, i.weapon_range
                  FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
                  WHERE ci.inventory_id = $1 AND ci.character_id = $2`,
                 [inventoryId, characterId]
@@ -1109,12 +1141,14 @@ io.on('connection', (socket) => {
                     [inventoryId]
                 );
                 
-                // Update weaponATK if equipping a weapon
+                // Update weapon stats if equipping a weapon
                 if (item.equip_slot === 'weapon') {
                     player.stats.weaponATK = item.atk || 0;
+                    player.attackRange = item.weapon_range || COMBAT.MELEE_RANGE;
+                    player.weaponAspdMod = item.aspd_modifier || 0;
                 }
                 
-                logger.info(`[ITEMS] ${player.characterName} equipped ${item.name} (slot: ${item.equip_slot})`);
+                logger.info(`[ITEMS] ${player.characterName} equipped ${item.name} (slot: ${item.equip_slot}, type: ${item.weapon_type}, range: ${item.weapon_range}, aspdMod: ${item.aspd_modifier})`);
             } else {
                 // Unequip
                 await pool.query(
@@ -1124,14 +1158,16 @@ io.on('connection', (socket) => {
                 
                 if (item.equip_slot === 'weapon') {
                     player.stats.weaponATK = 0;
+                    player.attackRange = COMBAT.MELEE_RANGE;
+                    player.weaponAspdMod = 0;
                 }
                 
                 logger.info(`[ITEMS] ${player.characterName} unequipped ${item.name}`);
             }
             
-            // Recalculate derived stats
+            // Recalculate derived stats (include weapon ASPD modifier)
             const derived = calculateDerivedStats(player.stats);
-            player.aspd = derived.aspd;
+            player.aspd = Math.min(COMBAT.ASPD_CAP, derived.aspd + (player.weaponAspdMod || 0));
             
             // Send updated stats
             socket.emit('player:stats', { characterId, stats: player.stats, derived });
@@ -1142,7 +1178,9 @@ io.on('connection', (socket) => {
             
             socket.emit('inventory:equipped', {
                 inventoryId, itemId: item.item_id, itemName: item.name,
-                equipped: equip, slot: item.equip_slot
+                equipped: equip, slot: item.equip_slot,
+                weaponType: item.weapon_type, attackRange: player.attackRange,
+                aspd: player.aspd, attackIntervalMs: getAttackIntervalMs(player.aspd)
             });
             
         } catch (err) {
@@ -1524,6 +1562,8 @@ const ENEMY_AI = {
     WANDER_PAUSE_MIN: 3000,     // Min pause before next wander (ms)
     WANDER_PAUSE_MAX: 8000,     // Max pause before next wander (ms)
     WANDER_SPEED: 60,           // Movement speed (units per second)
+    WANDER_DIST_MIN: 100,       // Min wander distance per axis (units)
+    WANDER_DIST_MAX: 300,       // Max wander distance per axis (units)
     MOVE_BROADCAST_MS: 200      // How often to broadcast position updates (ms)
 };
 
@@ -1537,12 +1577,27 @@ function initEnemyWanderState(enemy) {
 }
 
 function pickRandomWanderPoint(enemy) {
-    const angle = Math.random() * 2 * Math.PI;
-    const radius = Math.random() * (enemy.wanderRadius || 300);
-    return {
-        x: enemy.spawnX + Math.cos(angle) * radius,
-        y: enemy.spawnY + Math.sin(angle) * radius
-    };
+    // Random offset from CURRENT position (100-300 units per axis, randomly +/-)
+    const range = ENEMY_AI.WANDER_DIST_MAX - ENEMY_AI.WANDER_DIST_MIN;
+    const offsetX = (ENEMY_AI.WANDER_DIST_MIN + Math.random() * range) * (Math.random() < 0.5 ? -1 : 1);
+    const offsetY = (ENEMY_AI.WANDER_DIST_MIN + Math.random() * range) * (Math.random() < 0.5 ? -1 : 1);
+    
+    let newX = enemy.x + offsetX;
+    let newY = enemy.y + offsetY;
+    
+    // Clamp to wander radius from spawn point so enemies don't drift infinitely
+    const wanderRadius = enemy.wanderRadius || 300;
+    const dxFromSpawn = newX - enemy.spawnX;
+    const dyFromSpawn = newY - enemy.spawnY;
+    const distFromSpawn = Math.sqrt(dxFromSpawn * dxFromSpawn + dyFromSpawn * dyFromSpawn);
+    if (distFromSpawn > wanderRadius) {
+        // Pull back toward spawn point
+        const ratio = wanderRadius / distFromSpawn;
+        newX = enemy.spawnX + dxFromSpawn * ratio;
+        newY = enemy.spawnY + dyFromSpawn * ratio;
+    }
+    
+    return { x: newX, y: newY };
 }
 
 setInterval(() => {
@@ -1564,7 +1619,7 @@ setInterval(() => {
                 enemy.wanderTargetX = target.x;
                 enemy.wanderTargetY = target.y;
                 enemy.isWandering = true;
-                logger.debug(`[ENEMY AI] ${enemy.name}(${enemyId}) wandering to (${target.x.toFixed(0)}, ${target.y.toFixed(0)})`);
+                logger.info(`[ENEMY AI] ${enemy.name}(${enemyId}) wandering from (${enemy.x.toFixed(0)}, ${enemy.y.toFixed(0)}) to (${target.x.toFixed(0)}, ${target.y.toFixed(0)})`);
             }
         } else {
             // Currently wandering — move toward target
@@ -1581,6 +1636,7 @@ setInterval(() => {
                 io.emit('enemy:move', {
                     enemyId, x: enemy.x, y: enemy.y, z: enemy.z, isMoving: false
                 });
+                logger.info(`[ENEMY AI] ${enemy.name}(${enemyId}) arrived at (${enemy.x.toFixed(0)}, ${enemy.y.toFixed(0)})`);
             } else {
                 // Move toward target
                 const stepSize = ENEMY_AI.WANDER_SPEED * (ENEMY_AI.WANDER_TICK_MS / 1000);
@@ -1597,6 +1653,7 @@ setInterval(() => {
                         targetX: enemy.wanderTargetX, targetY: enemy.wanderTargetY,
                         isMoving: true
                     });
+                    logger.info(`[ENEMY AI] ${enemy.name}(${enemyId}) moving — pos (${enemy.x.toFixed(0)}, ${enemy.y.toFixed(0)}) → target (${enemy.wanderTargetX.toFixed(0)}, ${enemy.wanderTargetY.toFixed(0)})`);
                 }
             }
         }
@@ -2105,12 +2162,28 @@ server.listen(PORT, async () => {
         required_level INTEGER DEFAULT 1,
         stackable BOOLEAN DEFAULT false,
         max_stack INTEGER DEFAULT 1,
-        icon VARCHAR(100) DEFAULT 'default_item'
+        icon VARCHAR(100) DEFAULT 'default_item',
+        weapon_type VARCHAR(20) DEFAULT NULL,
+        aspd_modifier INTEGER DEFAULT 0,
+        weapon_range INTEGER DEFAULT 0
       )
     `);
     logger.info('[DB] Items table verified/created');
   } catch (err) {
     logger.warn(`[DB] Items table issue: ${err.message}`);
+  }
+  
+  // Add weapon_type columns if missing (migration for existing DB)
+  try {
+    await pool.query(`
+      ALTER TABLE items
+      ADD COLUMN IF NOT EXISTS weapon_type VARCHAR(20) DEFAULT NULL,
+      ADD COLUMN IF NOT EXISTS aspd_modifier INTEGER DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS weapon_range INTEGER DEFAULT 0
+    `);
+    logger.info('[DB] Weapon type columns verified on items table');
+  } catch (err) {
+    logger.warn(`[DB] Weapon type columns issue: ${err.message}`);
   }
   
   // Ensure character_inventory table exists
@@ -2140,39 +2213,40 @@ server.listen(PORT, async () => {
       logger.info('[DB] Seeding base items...');
       await pool.query(`
         INSERT INTO items (item_id, name, description, item_type, weight, price, stackable, max_stack, icon) VALUES
-        (1001, 'Red Potion', 'Restores 50 HP.', 'consumable', 7, 25, true, 99, 'red_potion'),
-        (1002, 'Orange Potion', 'Restores 150 HP.', 'consumable', 10, 100, true, 99, 'orange_potion'),
-        (1003, 'Yellow Potion', 'Restores 350 HP.', 'consumable', 13, 275, true, 99, 'yellow_potion'),
-        (1004, 'Blue Potion', 'Restores 60 SP.', 'consumable', 15, 500, true, 99, 'blue_potion'),
-        (1005, 'Meat', 'Restores 70 HP. Looks delicious.', 'consumable', 15, 25, true, 99, 'meat')
+        (1001, 'Crimson Vial', 'A small red tonic. Restores 50 HP.', 'consumable', 7, 25, true, 99, 'red_potion'),
+        (1002, 'Amber Elixir', 'A warm orange draught. Restores 150 HP.', 'consumable', 10, 100, true, 99, 'orange_potion'),
+        (1003, 'Golden Salve', 'A potent yellow remedy. Restores 350 HP.', 'consumable', 13, 275, true, 99, 'yellow_potion'),
+        (1004, 'Azure Philter', 'A calming blue brew. Restores 60 SP.', 'consumable', 15, 500, true, 99, 'blue_potion'),
+        (1005, 'Roasted Haunch', 'Tender roasted meat. Restores 70 HP.', 'consumable', 15, 25, true, 99, 'meat')
         ON CONFLICT (item_id) DO NOTHING
       `);
       await pool.query(`
         INSERT INTO items (item_id, name, description, item_type, weight, price, stackable, max_stack, icon) VALUES
-        (2001, 'Jellopy', 'A small, squishy blob of unknown origin.', 'etc', 1, 3, true, 999, 'jellopy'),
-        (2002, 'Sticky Mucus', 'Thick, gooey substance secreted by monsters.', 'etc', 1, 7, true, 999, 'sticky_mucus'),
-        (2003, 'Shell', 'A hard, protective outer shell.', 'etc', 2, 14, true, 999, 'shell'),
-        (2004, 'Feather', 'A light, downy feather.', 'etc', 1, 5, true, 999, 'feather'),
-        (2005, 'Mushroom Spore', 'Tiny spores from a forest mushroom.', 'etc', 1, 10, true, 999, 'mushroom_spore'),
-        (2006, 'Insect Leg', 'A chitinous leg from a large insect.', 'etc', 1, 12, true, 999, 'insect_leg'),
-        (2007, 'Green Herb', 'A common medicinal herb.', 'etc', 3, 8, true, 99, 'green_herb'),
-        (2008, 'Fluff', 'Soft, fluffy material from a plant creature.', 'etc', 1, 4, true, 999, 'fluff')
+        (2001, 'Gloopy Residue', 'A small, squishy blob of unknown origin.', 'etc', 1, 3, true, 999, 'jellopy'),
+        (2002, 'Viscous Slime', 'Thick, gooey substance secreted by monsters.', 'etc', 1, 7, true, 999, 'sticky_mucus'),
+        (2003, 'Chitin Shard', 'A hard, protective outer shell fragment.', 'etc', 2, 14, true, 999, 'shell'),
+        (2004, 'Downy Plume', 'A light, downy feather.', 'etc', 1, 5, true, 999, 'feather'),
+        (2005, 'Spore Cluster', 'Tiny spores from a forest mushroom.', 'etc', 1, 10, true, 999, 'mushroom_spore'),
+        (2006, 'Barbed Limb', 'A chitinous leg from a large insect.', 'etc', 1, 12, true, 999, 'insect_leg'),
+        (2007, 'Verdant Leaf', 'A common medicinal herb with healing properties.', 'etc', 3, 8, true, 99, 'green_herb'),
+        (2008, 'Silken Tuft', 'Soft, fluffy material from a plant creature.', 'etc', 1, 4, true, 999, 'fluff')
         ON CONFLICT (item_id) DO NOTHING
       `);
       await pool.query(`
-        INSERT INTO items (item_id, name, description, item_type, equip_slot, weight, price, atk, required_level, icon) VALUES
-        (3001, 'Knife', 'A basic knife. Better than bare fists.', 'weapon', 'weapon', 40, 50, 17, 1, 'knife'),
-        (3002, 'Cutter', 'A slightly sharper blade.', 'weapon', 'weapon', 40, 150, 30, 1, 'cutter'),
-        (3003, 'Main Gauche', 'An elegant parrying dagger.', 'weapon', 'weapon', 60, 500, 43, 12, 'main_gauche'),
-        (3004, 'Sword', 'A standard one-handed sword.', 'weapon', 'weapon', 80, 100, 25, 2, 'sword'),
-        (3005, 'Falchion', 'A curved, heavy cutting sword.', 'weapon', 'weapon', 60, 600, 49, 18, 'falchion')
+        INSERT INTO items (item_id, name, description, item_type, equip_slot, weight, price, atk, required_level, icon, weapon_type, aspd_modifier, weapon_range) VALUES
+        (3001, 'Rustic Shiv', 'A crude but swift dagger. Better than bare fists.', 'weapon', 'weapon', 40, 50, 17, 1, 'knife', 'dagger', 5, 150),
+        (3002, 'Keen Edge', 'A finely honed short blade.', 'weapon', 'weapon', 40, 150, 30, 1, 'cutter', 'dagger', 5, 150),
+        (3003, 'Stiletto Fang', 'An elegant parrying dagger with a needle-thin tip.', 'weapon', 'weapon', 60, 500, 43, 12, 'main_gauche', 'dagger', 5, 150),
+        (3004, 'Iron Cleaver', 'A standard one-handed sword with a broad blade.', 'weapon', 'weapon', 80, 100, 25, 2, 'sword', 'one_hand_sword', 0, 150),
+        (3005, 'Crescent Saber', 'A curved, heavy cutting sword.', 'weapon', 'weapon', 60, 600, 49, 18, 'falchion', 'one_hand_sword', 0, 150),
+        (3006, 'Hunting Longbow', 'A sturdy ranged bow with impressive reach.', 'weapon', 'weapon', 50, 400, 35, 4, 'bow', 'bow', -3, 800)
         ON CONFLICT (item_id) DO NOTHING
       `);
       await pool.query(`
         INSERT INTO items (item_id, name, description, item_type, equip_slot, weight, price, def, required_level, icon) VALUES
-        (4001, 'Cotton Shirt', 'A basic cotton shirt offering minimal protection.', 'armor', 'armor', 10, 20, 1, 1, 'cotton_shirt'),
-        (4002, 'Padded Armor', 'Light padding for basic protection.', 'armor', 'armor', 80, 200, 4, 1, 'padded_armor'),
-        (4003, 'Chain Mail', 'Interlocking metal rings for decent defense.', 'armor', 'armor', 150, 800, 8, 20, 'chain_mail')
+        (4001, 'Linen Tunic', 'A simple linen shirt offering minimal protection.', 'armor', 'armor', 10, 20, 1, 1, 'cotton_shirt'),
+        (4002, 'Quilted Vest', 'Light quilted padding for basic protection.', 'armor', 'armor', 80, 200, 4, 1, 'padded_armor'),
+        (4003, 'Ringweave Hauberk', 'Interlocking metal rings forged into sturdy armor.', 'armor', 'armor', 150, 800, 8, 20, 'chain_mail')
         ON CONFLICT (item_id) DO NOTHING
       `);
       logger.info('[DB] Base items seeded successfully');
