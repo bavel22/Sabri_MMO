@@ -84,19 +84,38 @@ const COMBAT = {
     DAMAGE_VARIANCE: 0,         // Random variance added to base damage
     MELEE_RANGE: 150,           // Default melee attack range (Unreal units)
     RANGED_RANGE: 800,          // Default ranged attack range
-    DEFAULT_ASPD: 180,          // Default attack speed (0-190 scale, higher = faster)
-    ASPD_CAP: 190,              // Maximum ASPD
+    DEFAULT_ASPD: 175,          // Default attack speed (0-195 scale, higher = faster)
+    ASPD_CAP: 195,              // Hard cap — above this, diminishing returns apply up to 199
     RANGE_TOLERANCE: 50,         // Extra units added to out_of_range check so client moves closer than max range
     COMBAT_TICK_MS: 50,         // Server combat tick interval (ms)
     RESPAWN_DELAY_MS: 5000,
     SPAWN_POSITION: { x: 0, y: 0, z: 300 }
 };
 
+// ASPD potion/consumable definitions (temporary ASPD boosts)
+// Duration in ms, aspdBonus added directly to final ASPD before interval calc
+const SPEED_TONICS = {
+    'veil_draught':   { duration: 60000,  aspdBonus: 5 },  // Short burst, big bonus
+    'dusk_tincture':  { duration: 180000, aspdBonus: 3 },  // Sustained, smaller bonus
+    'ember_salve':    { duration: 30000,  aspdBonus: 8 },  // Very short, large bonus
+    'grey_catalyst':  { duration: 300000, aspdBonus: 2 },  // Long duration, minor bonus
+};
+
 // Calculate attack interval from ASPD (ms between attacks)
-// ASPD 180 = 1000ms (1 hit/sec), ASPD 190 = 500ms (2/sec), ASPD 170 = 1500ms (0.67/sec)
+// ASPD 175 = 1250ms, ASPD 185 = 750ms, ASPD 195 = 250ms
+// Above 195: exponential diminishing returns — max theoretical ~217ms at ASPD 199
 function getAttackIntervalMs(aspd) {
-    const clamped = Math.min(aspd, COMBAT.ASPD_CAP);
-    return (200 - clamped) * 50; // e.g. ASPD 180 → 20 * 50 = 1000ms
+    if (aspd <= COMBAT.ASPD_CAP) {
+        // Linear formula up to hard cap (195)
+        return (200 - aspd) * 50; // e.g. ASPD 195 → 5 * 50 = 250ms
+    } else {
+        // Diminishing returns above 195: exponential decay, bottoms out ~217ms at 199
+        const excessAspd = Math.min(aspd - COMBAT.ASPD_CAP, 9); // max 9 excess points (196-199 useful range)
+        const decayFactor = Math.exp(-excessAspd * 0.35);
+        const maxBonus = 130; // Maximum ms reduction above 195 (250ms → ~120ms floor)
+        const actualBonus = Math.floor(maxBonus * (1 - decayFactor));
+        return Math.max(217, 250 - actualBonus); // Floor ~217ms (~4.6 attacks/sec absolute max)
+    }
 }
 
 // Auto-attack state tracking: Map<attackerCharId, { targetCharId, isEnemy, startTime }>
@@ -106,31 +125,61 @@ const autoAttackState = new Map();
 // RO-Style Derived Stat Calculations
 // ============================================================
 function calculateDerivedStats(stats) {
-    const { str = 1, agi = 1, vit = 1, int: intStat = 1, dex = 1, luk = 1, level = 1 } = stats;
+    const {
+        str = 1, agi = 1, vit = 1, int: intStat = 1, dex = 1, luk = 1, level = 1,
+        bonusHit = 0, bonusFlee = 0, bonusCritical = 0, bonusMaxHp = 0, bonusMaxSp = 0
+    } = stats;
     const statusATK = str + Math.floor(str / 10) ** 2 + Math.floor(dex / 5) + Math.floor(luk / 3);
     const statusMATK = intStat + Math.floor(intStat / 7) ** 2;
-    const hit = level + dex;
-    const flee = level + agi;
+    const hit = level + dex + bonusHit;
+    const flee = level + agi + bonusFlee;
     const softDEF = Math.floor(vit * 0.5 + (vit ** 2) / 150);
     const softMDEF = Math.floor(intStat * 0.5);
-    const critical = Math.floor(luk * 0.3);
-    const aspd = Math.min(COMBAT.ASPD_CAP, Math.floor(170 + agi * 0.4 + dex * 0.1));
-    const maxHP = 100 + vit * 8 + level * 10;
-    const maxSP = 50 + intStat * 5 + level * 5;
+    const critical = Math.floor(luk * 0.3) + bonusCritical;
+    // Square root scaling: slow, consistent growth that makes 195 a true endgame goal
+    const agiContribution = Math.floor(Math.sqrt(agi) * 1.2);      // Slow sqrt growth
+    const dexContribution = Math.floor(Math.sqrt(dex) * 0.6);      // Half of AGI impact
+    const aspd = Math.min(COMBAT.ASPD_CAP, Math.floor(170 + agiContribution + dexContribution));
+    const maxHP = 100 + vit * 8 + level * 10 + bonusMaxHp;
+    const maxSP = 50 + intStat * 5 + level * 5 + bonusMaxSp;
     return { statusATK, statusMATK, hit, flee, softDEF, softMDEF, critical, aspd, maxHP, maxSP };
 }
 
-function calculatePhysicalDamage(attackerStats, targetStats) {
+function calculatePhysicalDamage(attackerStats, targetStats, targetHardDef = 0) {
     const atkDerived = calculateDerivedStats(attackerStats);
     const defDerived = calculateDerivedStats(targetStats);
     const weaponATK = attackerStats.weaponATK || 0;
     const totalATK = atkDerived.statusATK + weaponATK;
     const variance = 0.8 + Math.random() * 0.2;
     const rawDamage = Math.floor(totalATK * variance);
-    const damage = Math.max(1, rawDamage - defDerived.softDEF);
+    const afterSoftDef = Math.max(1, rawDamage - defDerived.softDEF);
+    const afterHardDef = targetHardDef > 0
+        ? Math.max(1, Math.floor(afterSoftDef * (1 - targetHardDef / 100)))
+        : afterSoftDef;
     const isCritical = Math.random() * 100 < atkDerived.critical;
-    const finalDamage = isCritical ? Math.floor(damage * 1.4) : damage;
+    const finalDamage = isCritical ? Math.floor(afterHardDef * 1.4) : afterHardDef;
     return { damage: Math.max(1, finalDamage), isCritical };
+}
+
+// Merge base stats with equipment bonuses for accurate derived stat calculation
+function getEffectiveStats(player) {
+    const bonuses = player.equipmentBonuses || {};
+    return {
+        str: (player.stats.str || 1) + (bonuses.str || 0),
+        agi: (player.stats.agi || 1) + (bonuses.agi || 0),
+        vit: (player.stats.vit || 1) + (bonuses.vit || 0),
+        int: (player.stats.int || 1) + (bonuses.int || 0),
+        dex: (player.stats.dex || 1) + (bonuses.dex || 0),
+        luk: (player.stats.luk || 1) + (bonuses.luk || 0),
+        level: player.stats.level || 1,
+        weaponATK: player.stats.weaponATK || 0,
+        statPoints: player.stats.statPoints || 0,
+        bonusHit: bonuses.hit || 0,
+        bonusFlee: bonuses.flee || 0,
+        bonusCritical: bonuses.critical || 0,
+        bonusMaxHp: bonuses.maxHp || 0,
+        bonusMaxSp: bonuses.maxSp || 0
+    };
 }
 
 // ============================================================
@@ -284,6 +333,19 @@ const INVENTORY = {
 // Item definitions cache (loaded from DB on startup)
 const itemDefinitions = new Map();
 
+// NPC Shop definitions (server-authoritative, shopId → shop config)
+// Buy price = item.price * 2  |  Sell price = item.price
+const NPC_SHOPS = {
+    1: {
+        name: 'General Store',
+        itemIds: [1001, 1002, 1003, 1004, 1005, 4001, 4002, 4003]
+    },
+    2: {
+        name: 'Weapon Shop',
+        itemIds: [3001, 3002, 3003, 3004, 3005, 3006]
+    }
+};
+
 async function loadItemDefinitions() {
     try {
         const result = await pool.query('SELECT * FROM items');
@@ -381,6 +443,25 @@ async function getPlayerInventory(characterId) {
     }
 }
 
+// Get hotbar slot assignments for a character (joined with current inventory quantities)
+async function getPlayerHotbar(characterId) {
+    try {
+        const result = await pool.query(
+            `SELECT ch.slot_index, ch.inventory_id, ch.item_id, ch.item_name,
+                    ci.quantity
+             FROM character_hotbar ch
+             JOIN character_inventory ci ON ch.inventory_id = ci.inventory_id
+             WHERE ch.character_id = $1
+             ORDER BY ch.slot_index ASC`,
+            [characterId]
+        );
+        return result.rows;
+    } catch (err) {
+        logger.error(`[HOTBAR] Failed to load hotbar for char ${characterId}: ${err.message}`);
+        return [];
+    }
+}
+
 // Remove item from inventory (by inventory_id, optionally partial quantity)
 async function removeItemFromInventory(inventoryId, quantity = null) {
     try {
@@ -424,11 +505,11 @@ io.on('connection', (socket) => {
         const characterId = parseInt(data.characterId);
         const { token, characterName } = data;
         
-        // Fetch character data from database (position + health/mana)
-        let health = 100, maxHealth = 100, mana = 100, maxMana = 100;
+        // Fetch character data from database (position + health/mana + zuzucoin)
+        let health = 100, maxHealth = 100, mana = 100, maxMana = 100, zuzucoin = 0;
         try {
             const charResult = await pool.query(
-                'SELECT x, y, z, health, max_health, mana, max_mana FROM characters WHERE character_id = $1',
+                'SELECT x, y, z, health, max_health, mana, max_mana, zuzucoin FROM characters WHERE character_id = $1',
                 [characterId]
             );
             if (charResult.rows.length > 0) {
@@ -437,6 +518,7 @@ io.on('connection', (socket) => {
                 maxHealth = row.max_health;
                 mana = row.mana;
                 maxMana = row.max_mana;
+                zuzucoin = row.zuzucoin || 0;
                 
                 // Cache correct position in Redis
                 await setPlayerPosition(characterId, row.x, row.y, row.z);
@@ -503,26 +585,68 @@ io.on('connection', (socket) => {
             logger.debug(`[ITEMS] No equipped weapon found for char ${characterId}`);
         }
         
-        const derived = calculateDerivedStats(baseStats);
+        // Load stat bonuses and hardDEF from ALL equipped items (armor, accessories, etc.)
+        const equipmentBonuses = { str: 0, agi: 0, vit: 0, int: 0, dex: 0, luk: 0, maxHp: 0, maxSp: 0, hit: 0, flee: 0, critical: 0 };
+        let hardDef = 0;
+        try {
+            const equipResult = await pool.query(
+                `SELECT i.def, i.str_bonus, i.agi_bonus, i.vit_bonus, i.int_bonus, i.dex_bonus, i.luk_bonus,
+                        i.max_hp_bonus, i.max_sp_bonus, i.hit_bonus, i.flee_bonus, i.critical_bonus
+                 FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
+                 WHERE ci.character_id = $1 AND ci.is_equipped = true`,
+                [characterId]
+            );
+            for (const row of equipResult.rows) {
+                equipmentBonuses.str += row.str_bonus || 0;
+                equipmentBonuses.agi += row.agi_bonus || 0;
+                equipmentBonuses.vit += row.vit_bonus || 0;
+                equipmentBonuses.int += row.int_bonus || 0;
+                equipmentBonuses.dex += row.dex_bonus || 0;
+                equipmentBonuses.luk += row.luk_bonus || 0;
+                equipmentBonuses.maxHp += row.max_hp_bonus || 0;
+                equipmentBonuses.maxSp += row.max_sp_bonus || 0;
+                equipmentBonuses.hit += row.hit_bonus || 0;
+                equipmentBonuses.flee += row.flee_bonus || 0;
+                equipmentBonuses.critical += row.critical_bonus || 0;
+                hardDef += row.def || 0;
+            }
+            if (hardDef > 0 || Object.values(equipmentBonuses).some(v => v > 0)) {
+                logger.info(`[ITEMS] Loaded equipment bonuses for char ${characterId}: bonuses=${JSON.stringify(equipmentBonuses)} hardDef=${hardDef}`);
+            }
+        } catch (err) {
+            logger.debug(`[ITEMS] Could not load equipment bonuses for char ${characterId}: ${err.message}`);
+        }
+        
+        // Build a temporary player object to use getEffectiveStats for derived calculation
+        const tempPlayer = { stats: baseStats, equipmentBonuses };
+        const effectiveStats = getEffectiveStats(tempPlayer);
+        const derived = calculateDerivedStats(effectiveStats);
+        // Use derived maxHP/maxSP as the authoritative max values
+        maxHealth = derived.maxHP;
+        maxMana = derived.maxSP;
         
         // Store player connection with combat data
         connectedPlayers.set(characterId, {
             socketId: socket.id,
             characterId: characterId,
             characterName: characterName || 'Unknown',
-            health,
+            health: Math.min(health, maxHealth),
             maxHealth,
-            mana,
+            mana: Math.min(mana, maxMana),
             maxMana,
             isDead: false,
             lastAttackTime: 0,
             aspd: Math.min(COMBAT.ASPD_CAP, (derived.aspd || COMBAT.DEFAULT_ASPD) + weaponAspdMod),
             attackRange: weaponRange,
-            stats: baseStats
+            weaponAspdMod,
+            equipmentBonuses,
+            hardDef,
+            stats: baseStats,
+            zuzucoin
         });
         
         logger.info(`Player joined: ${characterName || 'Unknown'} (Character ${characterId}) HP: ${health}/${maxHealth} MP: ${mana}/${maxMana}`);
-        const joinedPayload = { success: true };
+        const joinedPayload = { success: true, zuzucoin };
         socket.emit('player:joined', joinedPayload);
         logger.info(`[SEND] player:joined to ${socket.id}: ${JSON.stringify(joinedPayload)}`);
         
@@ -550,13 +674,27 @@ io.on('connection', (socket) => {
         }
         
         // Send player stats
+        const finalAspd = Math.min(COMBAT.ASPD_CAP, derived.aspd + weaponAspdMod);
         const statsPayload = {
             characterId,
-            stats: baseStats,
-            derived
+            stats: {
+                ...baseStats,
+                hardDef: hardDef || 0  // Include total hard DEF from armor
+            },
+            derived: {
+                ...derived,
+                aspd: finalAspd  // Send final ASPD including weapon modifier
+            }
         };
         socket.emit('player:stats', statsPayload);
         logger.info(`[SEND] player:stats to ${socket.id}: ${JSON.stringify(statsPayload)}`);
+        
+        // Send hotbar data after a short delay to ensure HUD is ready
+        setTimeout(async () => {
+            const hotbar = await getPlayerHotbar(characterId);
+            socket.emit('hotbar:data', { slots: hotbar });
+            logger.info(`[SEND] hotbar:data to ${socket.id}: ${hotbar.length} slots (on join, delayed)`);
+        }, 600); // 0.6 second delay
         
         // Send existing enemies to the joining player
         for (const [eid, enemy] of enemies.entries()) {
@@ -873,11 +1011,18 @@ io.on('connection', (socket) => {
         
         const { characterId, player } = playerInfo;
         const derived = calculateDerivedStats(player.stats);
+        const finalAspd = Math.min(COMBAT.ASPD_CAP, derived.aspd + (player.weaponAspdMod || 0));
         
         const statsPayload = {
             characterId,
-            stats: player.stats,
-            derived
+            stats: {
+                ...player.stats,
+                hardDef: player.hardDef || 0  // Include total hard DEF from armor
+            },
+            derived: {
+                ...derived,
+                aspd: finalAspd  // Send final ASPD including weapon modifier
+            }
         };
         socket.emit('player:stats', statsPayload);
         logger.info(`[SEND] player:stats to ${socket.id}: ${JSON.stringify(statsPayload)}`);
@@ -911,25 +1056,38 @@ io.on('connection', (socket) => {
         player.stats[statKey] += pts;
         player.stats.statPoints -= pts;
         
-        // Recalculate derived stats
-        const derived = calculateDerivedStats(player.stats);
-        player.aspd = derived.aspd;
+        // Recalculate derived stats using EFFECTIVE stats (base + equipment bonuses)
+        const effectiveStats = getEffectiveStats(player);
+        const derived = calculateDerivedStats(effectiveStats);
+        player.aspd = Math.min(COMBAT.ASPD_CAP, derived.aspd + (player.weaponAspdMod || 0));
+        player.maxHealth = derived.maxHP;
+        player.maxMana = derived.maxSP;
         
         // Save to DB
         try {
             const dbStatName = statName === 'int' ? 'int_stat' : statName;
             await pool.query(
-                `UPDATE characters SET ${dbStatName} = $1, stat_points = $2 WHERE character_id = $3`,
-                [player.stats[statKey], player.stats.statPoints, characterId]
+                `UPDATE characters SET ${dbStatName} = $1, stat_points = $2, max_health = $3, max_mana = $4 WHERE character_id = $5`,
+                [player.stats[statKey], player.stats.statPoints, player.maxHealth, player.maxMana, characterId]
             );
         } catch (err) {
             logger.error(`Failed to save stat allocation for character ${characterId}:`, err.message);
         }
         
+        // Send effective values so stat window shows total (base + equipment bonus)
+        const finalAspd = Math.min(COMBAT.ASPD_CAP, derived.aspd + (player.weaponAspdMod || 0));
         const statsPayload = {
             characterId,
-            stats: player.stats,
-            derived
+            stats: {
+                ...player.stats,
+                str: effectiveStats.str, agi: effectiveStats.agi, vit: effectiveStats.vit,
+                int: effectiveStats.int, dex: effectiveStats.dex, luk: effectiveStats.luk,
+                hardDef: player.hardDef || 0  // Include total hard DEF from armor
+            },
+            derived: {
+                ...derived,
+                aspd: finalAspd  // Send final ASPD including weapon modifier
+            }
         };
         socket.emit('player:stats', statsPayload);
         logger.info(`[SEND] player:stats to ${socket.id}: ${JSON.stringify(statsPayload)}`);
@@ -1004,10 +1162,66 @@ io.on('connection', (socket) => {
         if (!playerInfo) return;
         
         const inventory = await getPlayerInventory(playerInfo.characterId);
-        socket.emit('inventory:data', { items: inventory });
-        logger.info(`[SEND] inventory:data to ${socket.id}: ${inventory.length} items`);
+        socket.emit('inventory:data', { items: inventory, zuzucoin: playerInfo.player.zuzucoin });
+        logger.info(`[SEND] inventory:data to ${socket.id}: ${inventory.length} items, zuzucoin=${playerInfo.player.zuzucoin}`);
+
+        // Also send hotbar state so client can restore hotbar after reconnect
+        const hotbar = await getPlayerHotbar(playerInfo.characterId);
+        socket.emit('hotbar:data', { slots: hotbar });
+        logger.info(`[SEND] hotbar:data to ${socket.id}: ${hotbar.length} slots`);
     });
-    
+
+    // Save a single hotbar slot assignment (client → server, fired when item dragged to hotbar)
+    socket.on('hotbar:save', async (data) => {
+        logger.info(`[RECV] hotbar:save from ${socket.id}: ${JSON.stringify(data)}`);
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+
+        const { characterId } = playerInfo;
+        const slotIndex = parseInt(data.slotIndex);
+        const inventoryId = parseInt(data.inventoryId);
+        const itemId = parseInt(data.itemId);
+        const itemName = data.itemName || '';
+
+        if (isNaN(slotIndex) || slotIndex < 0 || slotIndex > 8) {
+            logger.warn(`[HOTBAR] Invalid slotIndex ${data.slotIndex} from char ${characterId}`);
+            return;
+        }
+
+        try {
+            if (!inventoryId || inventoryId <= 0) {
+                // Clear the slot
+                await pool.query(
+                    'DELETE FROM character_hotbar WHERE character_id = $1 AND slot_index = $2',
+                    [characterId, slotIndex]
+                );
+                logger.info(`[HOTBAR] Char ${characterId} cleared slot ${slotIndex}`);
+            } else {
+                // Verify this inventory item belongs to this character
+                const verify = await pool.query(
+                    'SELECT inventory_id FROM character_inventory WHERE inventory_id = $1 AND character_id = $2',
+                    [inventoryId, characterId]
+                );
+                if (verify.rows.length === 0) {
+                    logger.warn(`[HOTBAR] Char ${characterId} tried to save inv_id ${inventoryId} they don't own`);
+                    return;
+                }
+
+                // UPSERT: insert or update the slot
+                await pool.query(
+                    `INSERT INTO character_hotbar (character_id, slot_index, inventory_id, item_id, item_name)
+                     VALUES ($1, $2, $3, $4, $5)
+                     ON CONFLICT (character_id, slot_index)
+                     DO UPDATE SET inventory_id = $3, item_id = $4, item_name = $5`,
+                    [characterId, slotIndex, inventoryId, itemId, itemName]
+                );
+                logger.info(`[HOTBAR] Char ${characterId} saved slot ${slotIndex}: inv_id=${inventoryId} item=${itemName}`);
+            }
+        } catch (err) {
+            logger.error(`[HOTBAR] Save failed for char ${characterId}: ${err.message}`);
+        }
+    });
+
     // Use a consumable item
     socket.on('inventory:use', async (data) => {
         logger.info(`[RECV] inventory:use from ${socket.id}: ${JSON.stringify(data)}`);
@@ -1080,7 +1294,7 @@ io.on('connection', (socket) => {
             
             // Refresh inventory
             const inventory = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: inventory });
+            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin });
             
         } catch (err) {
             logger.error(`[ITEMS] Use item error: ${err.message}`);
@@ -1096,13 +1310,15 @@ io.on('connection', (socket) => {
         
         const { characterId, player } = playerInfo;
         const inventoryId = parseInt(data.inventoryId);
-        const equip = data.equip !== false; // true = equip, false = unequip
+        // Handle both boolean false and string "false" from Blueprint's string field emission
+        const equip = data.equip === true || data.equip === 'true';
         
         try {
             const result = await pool.query(
                 `SELECT ci.inventory_id, ci.item_id, ci.is_equipped, i.item_type, i.equip_slot, i.name,
                         i.atk, i.def, i.matk, i.mdef,
                         i.str_bonus, i.agi_bonus, i.vit_bonus, i.int_bonus, i.dex_bonus, i.luk_bonus,
+                        i.max_hp_bonus, i.max_sp_bonus, i.hit_bonus, i.flee_bonus, i.critical_bonus,
                         i.required_level, i.weapon_type, i.aspd_modifier, i.weapon_range
                  FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
                  WHERE ci.inventory_id = $1 AND ci.character_id = $2`,
@@ -1126,8 +1342,35 @@ io.on('connection', (socket) => {
                 return;
             }
             
+            // Ensure equipment tracking objects exist
+            if (!player.equipmentBonuses) player.equipmentBonuses = { str: 0, agi: 0, vit: 0, int: 0, dex: 0, luk: 0, maxHp: 0, maxSp: 0, hit: 0, flee: 0, critical: 0 };
+            if (player.hardDef === undefined) player.hardDef = 0;
+            
             if (equip) {
-                // Unequip any item currently in this slot
+                // First unequip any item currently in this slot (including its bonuses)
+                const oldEquipped = await pool.query(
+                    `SELECT i.def, i.str_bonus, i.agi_bonus, i.vit_bonus, i.int_bonus, i.dex_bonus, i.luk_bonus,
+                            i.max_hp_bonus, i.max_sp_bonus, i.hit_bonus, i.flee_bonus, i.critical_bonus,
+                            i.equip_slot, i.atk, i.aspd_modifier, i.weapon_range
+                     FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
+                     WHERE ci.character_id = $1 AND ci.is_equipped = true AND i.equip_slot = $2`,
+                    [characterId, item.equip_slot]
+                );
+                for (const old of oldEquipped.rows) {
+                    player.equipmentBonuses.str -= old.str_bonus || 0;
+                    player.equipmentBonuses.agi -= old.agi_bonus || 0;
+                    player.equipmentBonuses.vit -= old.vit_bonus || 0;
+                    player.equipmentBonuses.int -= old.int_bonus || 0;
+                    player.equipmentBonuses.dex -= old.dex_bonus || 0;
+                    player.equipmentBonuses.luk -= old.luk_bonus || 0;
+                    player.equipmentBonuses.maxHp -= old.max_hp_bonus || 0;
+                    player.equipmentBonuses.maxSp -= old.max_sp_bonus || 0;
+                    player.equipmentBonuses.hit -= old.hit_bonus || 0;
+                    player.equipmentBonuses.flee -= old.flee_bonus || 0;
+                    player.equipmentBonuses.critical -= old.critical_bonus || 0;
+                    player.hardDef -= old.def || 0;
+                }
+                
                 await pool.query(
                     `UPDATE character_inventory SET is_equipped = false 
                      WHERE character_id = $1 AND is_equipped = true 
@@ -1141,16 +1384,42 @@ io.on('connection', (socket) => {
                     [inventoryId]
                 );
                 
-                // Update weapon stats if equipping a weapon
+                // Apply this item's stat bonuses
+                player.equipmentBonuses.str += item.str_bonus || 0;
+                player.equipmentBonuses.agi += item.agi_bonus || 0;
+                player.equipmentBonuses.vit += item.vit_bonus || 0;
+                player.equipmentBonuses.int += item.int_bonus || 0;
+                player.equipmentBonuses.dex += item.dex_bonus || 0;
+                player.equipmentBonuses.luk += item.luk_bonus || 0;
+                player.equipmentBonuses.maxHp += item.max_hp_bonus || 0;
+                player.equipmentBonuses.maxSp += item.max_sp_bonus || 0;
+                player.equipmentBonuses.hit += item.hit_bonus || 0;
+                player.equipmentBonuses.flee += item.flee_bonus || 0;
+                player.equipmentBonuses.critical += item.critical_bonus || 0;
+                player.hardDef += item.def || 0;
+                
                 if (item.equip_slot === 'weapon') {
                     player.stats.weaponATK = item.atk || 0;
                     player.attackRange = item.weapon_range || COMBAT.MELEE_RANGE;
                     player.weaponAspdMod = item.aspd_modifier || 0;
                 }
                 
-                logger.info(`[ITEMS] ${player.characterName} equipped ${item.name} (slot: ${item.equip_slot}, type: ${item.weapon_type}, range: ${item.weapon_range}, aspdMod: ${item.aspd_modifier})`);
+                logger.info(`[ITEMS] ${player.characterName} equipped ${item.name} (slot: ${item.equip_slot}, bonuses: ${JSON.stringify(player.equipmentBonuses)}, hardDef: ${player.hardDef})`);
             } else {
-                // Unequip
+                // Remove this item's stat bonuses before unequipping
+                player.equipmentBonuses.str -= item.str_bonus || 0;
+                player.equipmentBonuses.agi -= item.agi_bonus || 0;
+                player.equipmentBonuses.vit -= item.vit_bonus || 0;
+                player.equipmentBonuses.int -= item.int_bonus || 0;
+                player.equipmentBonuses.dex -= item.dex_bonus || 0;
+                player.equipmentBonuses.luk -= item.luk_bonus || 0;
+                player.equipmentBonuses.maxHp -= item.max_hp_bonus || 0;
+                player.equipmentBonuses.maxSp -= item.max_sp_bonus || 0;
+                player.equipmentBonuses.hit -= item.hit_bonus || 0;
+                player.equipmentBonuses.flee -= item.flee_bonus || 0;
+                player.equipmentBonuses.critical -= item.critical_bonus || 0;
+                player.hardDef -= item.def || 0;
+                
                 await pool.query(
                     'UPDATE character_inventory SET is_equipped = false WHERE inventory_id = $1',
                     [inventoryId]
@@ -1165,22 +1434,57 @@ io.on('connection', (socket) => {
                 logger.info(`[ITEMS] ${player.characterName} unequipped ${item.name}`);
             }
             
-            // Recalculate derived stats (include weapon ASPD modifier)
-            const derived = calculateDerivedStats(player.stats);
+            // Recalculate derived stats using EFFECTIVE stats (base + equipment bonuses)
+            const effectiveStats = getEffectiveStats(player);
+            const derived = calculateDerivedStats(effectiveStats);
             player.aspd = Math.min(COMBAT.ASPD_CAP, derived.aspd + (player.weaponAspdMod || 0));
             
-            // Send updated stats
-            socket.emit('player:stats', { characterId, stats: player.stats, derived });
+            // Update maxHP/maxSP from derived stats and save to DB
+            player.maxHealth = derived.maxHP;
+            player.maxMana = derived.maxSP;
+            try {
+                await pool.query(
+                    'UPDATE characters SET max_health = $1, max_mana = $2 WHERE character_id = $3',
+                    [player.maxHealth, player.maxMana, characterId]
+                );
+            } catch (err) {
+                logger.warn(`[DB] Could not update max_health/max_mana for char ${characterId}: ${err.message}`);
+            }
+            
+            // Send updated stats (effective values so UI shows total stats including equipment)
+            const finalAspd = Math.min(COMBAT.ASPD_CAP, derived.aspd + (player.weaponAspdMod || 0));
+            const statsPayload = {
+                characterId,
+                stats: {
+                    ...player.stats,
+                    str: effectiveStats.str, agi: effectiveStats.agi, vit: effectiveStats.vit,
+                    int: effectiveStats.int, dex: effectiveStats.dex, luk: effectiveStats.luk,
+                    hardDef: player.hardDef || 0  // Include total hard DEF from armor
+                },
+                derived: {
+                    ...derived,
+                    aspd: finalAspd  // Send final ASPD including weapon modifier
+                }
+            };
+            socket.emit('player:stats', statsPayload);
+            
+            // Broadcast updated maxHealth so other clients show correct HP bars
+            io.emit('combat:health_update', {
+                characterId, health: player.health, maxHealth: player.maxHealth,
+                mana: player.mana, maxMana: player.maxMana
+            });
             
             // Send updated inventory
             const inventory = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: inventory });
+            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin });
             
             socket.emit('inventory:equipped', {
                 inventoryId, itemId: item.item_id, itemName: item.name,
                 equipped: equip, slot: item.equip_slot,
                 weaponType: item.weapon_type, attackRange: player.attackRange,
-                aspd: player.aspd, attackIntervalMs: getAttackIntervalMs(player.aspd)
+                aspd: player.aspd, attackIntervalMs: getAttackIntervalMs(player.aspd),
+                maxHealth: player.maxHealth, maxMana: player.maxMana,
+                critical: derived.critical, hit: derived.hit, flee: derived.flee
             });
             
         } catch (err) {
@@ -1225,11 +1529,240 @@ io.on('connection', (socket) => {
             
             // Refresh inventory
             const inventory = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: inventory });
+            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin });
             
         } catch (err) {
             logger.error(`[ITEMS] Drop error: ${err.message}`);
             socket.emit('inventory:error', { message: 'Failed to drop item' });
+        }
+    });
+
+    // ============================================================
+    // NPC Shop Events
+    // ============================================================
+
+    // Open shop — returns shop inventory and player's current zuzucoin
+    socket.on('shop:open', async (data) => {
+        logger.info(`[RECV] shop:open from ${socket.id}: ${JSON.stringify(data)}`);
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+
+        const shopId = parseInt(data.shopId);
+        const shop = NPC_SHOPS[shopId];
+        if (!shop) {
+            socket.emit('shop:error', { message: 'Shop not found' });
+            return;
+        }
+
+        const shopItems = shop.itemIds
+            .map(id => itemDefinitions.get(id))
+            .filter(Boolean)
+            .map(item => ({
+                itemId: item.item_id,
+                name: item.name,
+                description: item.description,
+                itemType: item.item_type,
+                buyPrice: item.price * 2,
+                sellPrice: item.price,
+                icon: item.icon,
+                atk: item.atk || 0,
+                def: item.def || 0,
+                weaponType: item.weapon_type || '',
+                weaponRange: item.weapon_range || 0,
+                aspdModifier: item.aspd_modifier || 0,
+                requiredLevel: item.required_level || 1,
+                stackable: item.stackable || false
+            }));
+
+        socket.emit('shop:data', {
+            shopId,
+            shopName: shop.name,
+            items: shopItems,
+            playerZuzucoin: playerInfo.player.zuzucoin
+        });
+        logger.info(`[SEND] shop:data to ${socket.id}: shop=${shop.name} items=${shopItems.length} zuzucoin=${playerInfo.player.zuzucoin}`);
+    });
+
+    // Buy item from shop
+    socket.on('shop:buy', async (data) => {
+        logger.info(`[RECV] shop:buy from ${socket.id}: ${JSON.stringify(data)}`);
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+
+        const { characterId, player } = playerInfo;
+        const shopId = parseInt(data.shopId);
+        const itemId = parseInt(data.itemId);
+        const quantity = Math.max(1, parseInt(data.quantity) || 1);
+
+        const shop = NPC_SHOPS[shopId];
+        if (!shop || !shop.itemIds.includes(itemId)) {
+            socket.emit('shop:error', { message: 'Item not available in this shop' });
+            return;
+        }
+
+        const itemDef = itemDefinitions.get(itemId);
+        if (!itemDef) {
+            socket.emit('shop:error', { message: 'Item not found' });
+            return;
+        }
+
+        if (itemDef.required_level > (player.stats.level || 1)) {
+            socket.emit('shop:error', { message: `Requires level ${itemDef.required_level}` });
+            return;
+        }
+
+        const totalCost = itemDef.price * 2 * quantity;
+        if (player.zuzucoin < totalCost) {
+            socket.emit('shop:error', { message: `Not enough Zuzucoin (need ${totalCost}, have ${player.zuzucoin})` });
+            return;
+        }
+
+        try {
+            const newZeny = player.zuzucoin - totalCost;
+            await pool.query('UPDATE characters SET zuzucoin = $1 WHERE character_id = $2', [newZeny, characterId]);
+            player.zuzucoin = newZeny;
+
+            const added = await addItemToInventory(characterId, itemId, quantity);
+            if (!added) {
+                // Rollback zuzucoin if item add failed
+                await pool.query('UPDATE characters SET zuzucoin = $1 WHERE character_id = $2', [player.zuzucoin + totalCost, characterId]);
+                player.zuzucoin += totalCost;
+                socket.emit('shop:error', { message: 'Failed to add item to inventory' });
+                return;
+            }
+
+            logger.info(`[SHOP] ${player.characterName} bought ${quantity}x ${itemDef.name} for ${totalCost}z (remaining: ${newZeny}z)`);
+
+            const inventory = await getPlayerInventory(characterId);
+            socket.emit('shop:bought', { itemId, itemName: itemDef.name, quantity, totalCost, newZuzucoin: newZeny });
+            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin });
+            logger.info(`[SEND] shop:bought + inventory:data to ${socket.id}`);
+        } catch (err) {
+            logger.error(`[SHOP] Buy error for char ${characterId}: ${err.message}`);
+            socket.emit('shop:error', { message: 'Purchase failed' });
+        }
+    });
+
+    // Sell item to shop
+    socket.on('shop:sell', async (data) => {
+        logger.info(`[RECV] shop:sell from ${socket.id}: ${JSON.stringify(data)}`);
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+
+        const { characterId, player } = playerInfo;
+        const inventoryId = parseInt(data.inventoryId);
+        const quantity = Math.max(1, parseInt(data.quantity) || 1);
+
+        if (!inventoryId || isNaN(inventoryId)) {
+            socket.emit('shop:error', { message: 'Invalid inventory ID' });
+            return;
+        }
+
+        try {
+            // Verify ownership + get item details
+            const itemResult = await pool.query(
+                `SELECT ci.inventory_id, ci.item_id, ci.quantity, ci.is_equipped,
+                        i.name, i.price, i.stackable
+                 FROM character_inventory ci
+                 JOIN items i ON ci.item_id = i.item_id
+                 WHERE ci.inventory_id = $1 AND ci.character_id = $2`,
+                [inventoryId, characterId]
+            );
+
+            if (itemResult.rows.length === 0) {
+                socket.emit('shop:error', { message: 'Item not found in your inventory' });
+                return;
+            }
+
+            const item = itemResult.rows[0];
+
+            if (item.is_equipped) {
+                socket.emit('shop:error', { message: 'Cannot sell an equipped item. Unequip it first.' });
+                return;
+            }
+
+            const sellQty = Math.min(quantity, item.quantity);
+            const sellPrice = (item.price || 0) * sellQty;
+            const newZeny = player.zuzucoin + sellPrice;
+
+            await pool.query('UPDATE characters SET zuzucoin = $1 WHERE character_id = $2', [newZeny, characterId]);
+            player.zuzucoin = newZeny;
+
+            await removeItemFromInventory(inventoryId, sellQty);
+
+            logger.info(`[SHOP] ${player.characterName} sold ${sellQty}x ${item.name} for ${sellPrice}z (total: ${newZeny}z)`);
+
+            const inventory = await getPlayerInventory(characterId);
+            socket.emit('shop:sold', { inventoryId, itemName: item.name, quantity: sellQty, sellPrice, newZuzucoin: newZeny });
+            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin });
+            logger.info(`[SEND] shop:sold + inventory:data to ${socket.id}`);
+        } catch (err) {
+            logger.error(`[SHOP] Sell error for char ${characterId}: ${err.message}`);
+            socket.emit('shop:error', { message: 'Sale failed' });
+        }
+    });
+
+    // Move/reorder inventory items (drag and drop)
+    socket.on('inventory:move', async (data) => {
+        logger.info(`[RECV] inventory:move from ${socket.id}: ${JSON.stringify(data)}`);
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+
+        const sourceInventoryId = parseInt(data.sourceInventoryId, 10);
+        const targetInventoryId = parseInt(data.targetInventoryId, 10);
+        const characterId = playerInfo.characterId;
+
+        if (isNaN(sourceInventoryId) || isNaN(targetInventoryId) || sourceInventoryId === targetInventoryId) {
+            socket.emit('inventory:error', { message: 'Invalid move request' });
+            return;
+        }
+
+        try {
+            // Normalize slot_indexes first (default is -1 = unassigned)
+            const allItems = await pool.query(
+                `SELECT inventory_id, slot_index FROM character_inventory WHERE character_id = $1 ORDER BY slot_index ASC, created_at ASC`,
+                [characterId]
+            );
+            if (allItems.rows.some(r => r.slot_index < 0)) {
+                for (let i = 0; i < allItems.rows.length; i++) {
+                    await pool.query(`UPDATE character_inventory SET slot_index = $1 WHERE inventory_id = $2`, [i, allItems.rows[i].inventory_id]);
+                }
+            }
+
+            // Verify both items belong to this character
+            const result = await pool.query(
+                `SELECT inventory_id, slot_index FROM character_inventory
+                 WHERE inventory_id = ANY($1) AND character_id = $2`,
+                [[sourceInventoryId, targetInventoryId], characterId]
+            );
+
+            if (result.rows.length !== 2) {
+                socket.emit('inventory:error', { message: 'Items not found in your inventory' });
+                return;
+            }
+
+            const sourceRow = result.rows.find(r => Number(r.inventory_id) === sourceInventoryId);
+            const targetRow = result.rows.find(r => Number(r.inventory_id) === targetInventoryId);
+
+            // Swap slot_index values
+            await pool.query(
+                `UPDATE character_inventory SET slot_index = $1 WHERE inventory_id = $2`,
+                [targetRow.slot_index, sourceInventoryId]
+            );
+            await pool.query(
+                `UPDATE character_inventory SET slot_index = $1 WHERE inventory_id = $2`,
+                [sourceRow.slot_index, targetInventoryId]
+            );
+
+            logger.info(`[ITEMS] ${playerInfo.characterName} swapped slots ${sourceInventoryId} <-> ${targetInventoryId}`);
+
+            // Refresh full inventory
+            const inventory = await getPlayerInventory(characterId);
+            socket.emit('inventory:data', { items: inventory, zuzucoin: playerInfo.player.zuzucoin });
+
+        } catch (err) {
+            logger.error(`[ITEMS] Move error: ${err.message}`);
+            socket.emit('inventory:error', { message: 'Failed to move item' });
         }
     });
 });
@@ -1304,12 +1837,16 @@ setInterval(async () => {
                     continue;
                 }
                 
-                // IN RANGE: Execute attack on enemy
-                const damage = COMBAT.BASE_DAMAGE + Math.floor(Math.random() * (COMBAT.DAMAGE_VARIANCE + 1));
+                // IN RANGE: Execute attack on enemy using full RO damage formula
+                const { damage, isCritical } = calculatePhysicalDamage(
+                    getEffectiveStats(attacker),
+                    enemy.stats,
+                    enemy.hardDef || 0
+                );
                 enemy.health = Math.max(0, enemy.health - damage);
                 attacker.lastAttackTime = now;
                 
-                logger.info(`[COMBAT] ${attacker.characterName} hit enemy ${enemy.name}(${enemy.enemyId}) for ${damage} (HP: ${enemy.health}/${enemy.maxHealth})`);
+                logger.info(`[COMBAT] ${attacker.characterName} hit enemy ${enemy.name}(${enemy.enemyId}) for ${damage}${isCritical ? ' CRIT' : ''} (HP: ${enemy.health}/${enemy.maxHealth})`);
                 
                 // Broadcast enemy damage (include positions for remote rotation)
                 const damagePayload = {
@@ -1319,6 +1856,7 @@ setInterval(async () => {
                     targetName: enemy.name,
                     isEnemy: true,
                     damage,
+                    isCritical,
                     targetHealth: enemy.health,
                     targetMaxHealth: enemy.maxHealth,
                     attackerX: attackerPos.x, attackerY: attackerPos.y, attackerZ: attackerPos.z,
@@ -1397,6 +1935,9 @@ setInterval(async () => {
                                 };
                                 killerSocket.emit('loot:drop', lootPayload);
                                 logger.info(`[LOOT] ${attacker.characterName} received ${lootItems.length} items from ${enemy.name}: ${lootItems.map(i => `${i.quantity}x ${i.itemName}`).join(', ')}`);
+                                // Refresh inventory so open inventory windows show new items immediately
+                                const killerInventory = await getPlayerInventory(attackerId);
+                                killerSocket.emit('inventory:data', { items: killerInventory, zuzucoin: attacker.zuzucoin });
                             }
                         }
                     }
@@ -1471,12 +2012,16 @@ setInterval(async () => {
                 continue;
             }
             
-            // === IN RANGE: Execute attack ===
-            const damage = COMBAT.BASE_DAMAGE + Math.floor(Math.random() * (COMBAT.DAMAGE_VARIANCE + 1));
+            // === IN RANGE: Execute attack using full RO damage formula ===
+            const { damage, isCritical } = calculatePhysicalDamage(
+                getEffectiveStats(attacker),
+                getEffectiveStats(target),
+                target.hardDef || 0
+            );
             target.health = Math.max(0, target.health - damage);
             attacker.lastAttackTime = now;
             
-            logger.info(`[COMBAT] ${attacker.characterName} hit ${target.characterName} for ${damage} damage (HP: ${target.health}/${target.maxHealth})`);
+            logger.info(`[COMBAT] ${attacker.characterName} hit ${target.characterName} for ${damage}${isCritical ? ' CRIT' : ''} (HP: ${target.health}/${target.maxHealth})`);
             
             // Broadcast damage to all players (include positions for remote rotation)
             const damagePayload = {
@@ -1486,6 +2031,7 @@ setInterval(async () => {
                 targetName: target.characterName,
                 isEnemy: false,
                 damage,
+                isCritical,
                 targetHealth: target.health,
                 targetMaxHealth: target.maxHealth,
                 attackerX: attackerPos.x, attackerY: attackerPos.y, attackerZ: attackerPos.z,
@@ -1501,22 +2047,14 @@ setInterval(async () => {
                 
                 logger.info(`[COMBAT] ${target.characterName} was killed by ${attacker.characterName}`);
                 
-                // Stop all OTHER attackers targeting this dead player (not the killer — they get combat:death)
+                // Stop all attackers targeting this dead player
+                // DO NOT send combat:target_lost here — all clients receive combat:death broadcast instead
+                // Sending both events causes Blueprint to process target_lost (nulls player ref) then
+                // combat:death tries to access the destroyed ref → EXCEPTION_ACCESS_VIOLATION crash
                 for (const [otherId, otherAtk] of autoAttackState.entries()) {
                     if (otherAtk.targetCharId === atkState.targetCharId && !otherAtk.isEnemy) {
                         autoAttackState.delete(otherId);
-                        // Only send target_lost to OTHER attackers, not the killer
-                        if (otherId !== attackerId) {
-                            const otherPlayer = connectedPlayers.get(otherId);
-                            if (otherPlayer) {
-                                const otherSocket = io.sockets.sockets.get(otherPlayer.socketId);
-                                if (otherSocket) {
-                                    const otherLostPayload = { reason: 'Target died', isEnemy: false };
-                                    otherSocket.emit('combat:target_lost', otherLostPayload);
-                                    logger.info(`[SEND] combat:target_lost to ${otherPlayer.socketId}: ${JSON.stringify(otherLostPayload)}`);
-                                }
-                            }
-                        }
+                        logger.info(`[COMBAT] Cleared auto-attack for player ${otherId} (target ${atkState.targetCharId} died)`);
                     }
                 }
                 
@@ -2129,7 +2667,8 @@ server.listen(PORT, async () => {
       ADD COLUMN IF NOT EXISTS luk INTEGER DEFAULT 1,
       ADD COLUMN IF NOT EXISTS stat_points INTEGER DEFAULT 48,
       ADD COLUMN IF NOT EXISTS max_health INTEGER DEFAULT 100,
-      ADD COLUMN IF NOT EXISTS max_mana INTEGER DEFAULT 100
+      ADD COLUMN IF NOT EXISTS max_mana INTEGER DEFAULT 100,
+      ADD COLUMN IF NOT EXISTS zuzucoin INTEGER DEFAULT 0
     `);
     logger.info('[DB] Stat columns verified/created on characters table');
   } catch (err) {
@@ -2184,6 +2723,19 @@ server.listen(PORT, async () => {
     logger.info('[DB] Weapon type columns verified on items table');
   } catch (err) {
     logger.warn(`[DB] Weapon type columns issue: ${err.message}`);
+  }
+
+  // Add derived stat bonus columns to items table (migration for existing DB)
+  try {
+    await pool.query(`
+      ALTER TABLE items
+      ADD COLUMN IF NOT EXISTS hit_bonus INTEGER DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS flee_bonus INTEGER DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS critical_bonus INTEGER DEFAULT 0
+    `);
+    logger.info('[DB] Derived stat bonus columns verified on items table');
+  } catch (err) {
+    logger.warn(`[DB] Derived stat bonus columns issue: ${err.message}`);
   }
   
   // Ensure character_inventory table exists

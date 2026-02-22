@@ -73,6 +73,17 @@ CREATE TABLE IF NOT EXISTS character_inventory (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Hotbar slot assignments (persisted per character)
+-- ON DELETE CASCADE: when inventory item is deleted (consumed/dropped), hotbar slot auto-clears
+CREATE TABLE IF NOT EXISTS character_hotbar (
+    character_id INTEGER NOT NULL REFERENCES characters(character_id) ON DELETE CASCADE,
+    slot_index INTEGER NOT NULL CHECK (slot_index >= 0 AND slot_index <= 8),
+    inventory_id INTEGER NOT NULL REFERENCES character_inventory(inventory_id) ON DELETE CASCADE,
+    item_id INTEGER NOT NULL,
+    item_name VARCHAR(100) NOT NULL DEFAULT '',
+    PRIMARY KEY (character_id, slot_index)
+);
+
 -- Simple indexes
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
