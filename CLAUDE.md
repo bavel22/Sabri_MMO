@@ -121,5 +121,6 @@ Invoke with `/skill-name`. Located at `C:/Users/pladr/.claude/skills/`.
 | `/agent-architect` | Enemy AI, stat formulas, RO game systems |
 | `/planner` | Feature planning, development phases |
 | `/sabrimmo-ui` | Project-specific UI guidance |
+| `/sabrimmo-target-skill` | Set up RO-style click-to-cast targeting for a skill |
 | `/project-docs` | Load full project documentation context |
 | `/opus-45-thinking` | Complex multi-system architecture decisions |
