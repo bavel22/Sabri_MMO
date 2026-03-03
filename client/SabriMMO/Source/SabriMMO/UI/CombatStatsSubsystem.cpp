@@ -1,0 +1,295 @@
+// CombatStatsSubsystem.cpp — Tracks RO pre-renewal derived combat stats
+// and manages the SCombatStatsWidget overlay.
+// F8 key toggle is handled by SabriMMOPlayerController via Enhanced Input.
+
+#include "CombatStatsSubsystem.h"
+#include "SCombatStatsWidget.h"
+#include "MMOGameInstance.h"
+#include "SocketIOClientComponent.h"
+#include "SocketIONative.h"
+#include "Engine/World.h"
+#include "Engine/Engine.h"
+#include "EngineUtils.h"
+#include "Kismet/GameplayStatics.h"
+#include "TimerManager.h"
+#include "Widgets/SWeakWidget.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogCombatStats, Log, All);
+
+// ============================================================
+// Lifecycle
+// ============================================================
+
+bool UCombatStatsSubsystem::ShouldCreateSubsystem(UObject* Outer) const
+{
+	UWorld* World = Cast<UWorld>(Outer);
+	if (!World) return false;
+	return World->IsGameWorld();
+}
+
+void UCombatStatsSubsystem::OnWorldBeginPlay(UWorld& InWorld)
+{
+	Super::OnWorldBeginPlay(InWorld);
+
+	if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(InWorld.GetGameInstance()))
+	{
+		FCharacterData SelChar = GI->GetSelectedCharacter();
+		LocalCharacterId = SelChar.CharacterId;
+	}
+
+	// Poll for SocketIO bindings
+	InWorld.GetTimerManager().SetTimer(
+		BindCheckTimer,
+		FTimerDelegate::CreateUObject(this, &UCombatStatsSubsystem::TryWrapSocketEvents),
+		0.5f, true
+	);
+
+	UE_LOG(LogCombatStats, Log, TEXT("CombatStatsSubsystem started — F8 bound via Enhanced Input, waiting for SocketIO bindings..."));
+}
+
+void UCombatStatsSubsystem::Deinitialize()
+{
+	if (bWidgetVisible)
+	{
+		ToggleWidget(); // Remove widget
+	}
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(BindCheckTimer);
+	}
+
+	bEventsWrapped = false;
+	CachedSIOComponent = nullptr;
+	Super::Deinitialize();
+}
+
+// ============================================================
+// Find SocketIO component
+// ============================================================
+
+USocketIOClientComponent* UCombatStatsSubsystem::FindSocketIOComponent() const
+{
+	UWorld* World = GetWorld();
+	if (!World) return nullptr;
+
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		if (USocketIOClientComponent* Comp = It->FindComponentByClass<USocketIOClientComponent>())
+		{
+			return Comp;
+		}
+	}
+	return nullptr;
+}
+
+// ============================================================
+// Timer callback — wrap events when ready
+// ============================================================
+
+void UCombatStatsSubsystem::TryWrapSocketEvents()
+{
+	if (bEventsWrapped) return;
+
+	USocketIOClientComponent* SIOComp = FindSocketIOComponent();
+	if (!SIOComp) return;
+
+	TSharedPtr<FSocketIONative> NativeClient = SIOComp->GetNativeClient();
+	if (!NativeClient.IsValid() || !NativeClient->bIsConnected) return;
+
+	if (!NativeClient->EventFunctionMap.Contains(TEXT("combat:health_update"))) return;
+
+	CachedSIOComponent = SIOComp;
+
+	if (LocalCharacterId == 0)
+	{
+		if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance()))
+		{
+			FCharacterData SelChar = GI->GetSelectedCharacter();
+			LocalCharacterId = SelChar.CharacterId;
+		}
+	}
+
+	WrapSingleEvent(TEXT("player:stats"),
+		[this](const TSharedPtr<FJsonValue>& D) { HandlePlayerStats(D); });
+
+	bEventsWrapped = true;
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(BindCheckTimer);
+	}
+
+	UE_LOG(LogCombatStats, Log, TEXT("CombatStatsSubsystem — player:stats wrapped. LocalCharId=%d"), LocalCharacterId);
+}
+
+// ============================================================
+// Wrap a single event (same pattern as other subsystems)
+// ============================================================
+
+void UCombatStatsSubsystem::WrapSingleEvent(
+	const FString& EventName,
+	TFunction<void(const TSharedPtr<FJsonValue>&)> OurHandler)
+{
+	if (!CachedSIOComponent.IsValid()) return;
+
+	TSharedPtr<FSocketIONative> NativeClient = CachedSIOComponent->GetNativeClient();
+	if (!NativeClient.IsValid()) return;
+
+	TFunction<void(const FString&, const TSharedPtr<FJsonValue>&)> OriginalCallback;
+	FSIOBoundEvent* Existing = NativeClient->EventFunctionMap.Find(EventName);
+	if (Existing)
+	{
+		OriginalCallback = Existing->Function;
+	}
+
+	NativeClient->OnEvent(EventName,
+		[OriginalCallback, OurHandler](const FString& Event, const TSharedPtr<FJsonValue>& Message)
+		{
+			if (OriginalCallback) OriginalCallback(Event, Message);
+			if (OurHandler) OurHandler(Message);
+		},
+		TEXT("/"),
+		ESIOThreadOverrideOption::USE_GAME_THREAD
+	);
+}
+
+// ============================================================
+// Handle player:stats event — extract base + derived stats
+// ============================================================
+
+void UCombatStatsSubsystem::HandlePlayerStats(const TSharedPtr<FJsonValue>& Data)
+{
+	if (!Data.IsValid()) return;
+
+	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
+	const TSharedPtr<FJsonObject>& Obj = *ObjPtr;
+
+	// Check if this is for our character
+	double CharIdD = 0;
+	Obj->TryGetNumberField(TEXT("characterId"), CharIdD);
+	if ((int32)CharIdD != LocalCharacterId && LocalCharacterId != 0) return;
+
+	// ── Parse effective stats (base + equipment) ──
+	const TSharedPtr<FJsonObject>* StatsObj = nullptr;
+	if (Obj->TryGetObjectField(TEXT("stats"), StatsObj) && StatsObj)
+	{
+		double Val = 0;
+		if ((*StatsObj)->TryGetNumberField(TEXT("str"), Val)) STR = (int32)Val;
+		if ((*StatsObj)->TryGetNumberField(TEXT("agi"), Val)) AGI = (int32)Val;
+		if ((*StatsObj)->TryGetNumberField(TEXT("vit"), Val)) VIT = (int32)Val;
+		if ((*StatsObj)->TryGetNumberField(TEXT("int"), Val)) INT_Stat = (int32)Val;
+		if ((*StatsObj)->TryGetNumberField(TEXT("dex"), Val)) DEX = (int32)Val;
+		if ((*StatsObj)->TryGetNumberField(TEXT("luk"), Val)) LUK = (int32)Val;
+		if ((*StatsObj)->TryGetNumberField(TEXT("level"), Val)) BaseLevel = (int32)Val;
+		if ((*StatsObj)->TryGetNumberField(TEXT("weaponATK"), Val)) WeaponATK = (int32)Val;
+		if ((*StatsObj)->TryGetNumberField(TEXT("hardDef"), Val)) HardDEF = (int32)Val;
+		if ((*StatsObj)->TryGetNumberField(TEXT("statPoints"), Val)) StatPoints = (int32)Val;
+	}
+
+	// ── Parse base stats (without equipment bonuses) ──
+	const TSharedPtr<FJsonObject>* BaseStatsObj = nullptr;
+	if (Obj->TryGetObjectField(TEXT("baseStats"), BaseStatsObj) && BaseStatsObj)
+	{
+		double Val = 0;
+		if ((*BaseStatsObj)->TryGetNumberField(TEXT("str"), Val)) BaseSTR = (int32)Val;
+		if ((*BaseStatsObj)->TryGetNumberField(TEXT("agi"), Val)) BaseAGI = (int32)Val;
+		if ((*BaseStatsObj)->TryGetNumberField(TEXT("vit"), Val)) BaseVIT = (int32)Val;
+		if ((*BaseStatsObj)->TryGetNumberField(TEXT("int"), Val)) BaseINT = (int32)Val;
+		if ((*BaseStatsObj)->TryGetNumberField(TEXT("dex"), Val)) BaseDEX = (int32)Val;
+		if ((*BaseStatsObj)->TryGetNumberField(TEXT("luk"), Val)) BaseLUK = (int32)Val;
+	}
+
+	// ── Parse stat allocation costs ──
+	const TSharedPtr<FJsonObject>* CostsObj = nullptr;
+	if (Obj->TryGetObjectField(TEXT("statCosts"), CostsObj) && CostsObj)
+	{
+		double Val = 0;
+		if ((*CostsObj)->TryGetNumberField(TEXT("str"), Val)) CostSTR = (int32)Val;
+		if ((*CostsObj)->TryGetNumberField(TEXT("agi"), Val)) CostAGI = (int32)Val;
+		if ((*CostsObj)->TryGetNumberField(TEXT("vit"), Val)) CostVIT = (int32)Val;
+		if ((*CostsObj)->TryGetNumberField(TEXT("int"), Val)) CostINT = (int32)Val;
+		if ((*CostsObj)->TryGetNumberField(TEXT("dex"), Val)) CostDEX = (int32)Val;
+		if ((*CostsObj)->TryGetNumberField(TEXT("luk"), Val)) CostLUK = (int32)Val;
+	}
+
+	// ── Parse derived stats ──
+	const TSharedPtr<FJsonObject>* DerivedObj = nullptr;
+	if (Obj->TryGetObjectField(TEXT("derived"), DerivedObj) && DerivedObj)
+	{
+		double Val = 0;
+		if ((*DerivedObj)->TryGetNumberField(TEXT("statusATK"), Val)) StatusATK = (int32)Val;
+		if ((*DerivedObj)->TryGetNumberField(TEXT("statusMATK"), Val)) StatusMATK = (int32)Val;
+		if ((*DerivedObj)->TryGetNumberField(TEXT("hit"), Val)) HIT = (int32)Val;
+		if ((*DerivedObj)->TryGetNumberField(TEXT("flee"), Val)) FLEE = (int32)Val;
+		if ((*DerivedObj)->TryGetNumberField(TEXT("critical"), Val)) Critical = (int32)Val;
+		if ((*DerivedObj)->TryGetNumberField(TEXT("perfectDodge"), Val)) PerfectDodge = (int32)Val;
+		if ((*DerivedObj)->TryGetNumberField(TEXT("softDEF"), Val)) SoftDEF = (int32)Val;
+		if ((*DerivedObj)->TryGetNumberField(TEXT("softMDEF"), Val)) SoftMDEF = (int32)Val;
+		if ((*DerivedObj)->TryGetNumberField(TEXT("aspd"), Val)) ASPD = (int32)Val;
+	}
+
+	UE_LOG(LogCombatStats, Log, TEXT("Stats updated: ATK=%d+%d MATK=%d HIT=%d FLEE=%d CRI=%d PD=%d DEF=%d+%d MDEF=%d ASPD=%d StatPts=%d"),
+		StatusATK, WeaponATK, StatusMATK, HIT, FLEE, Critical, PerfectDodge, HardDEF, SoftDEF, SoftMDEF, ASPD, StatPoints);
+}
+
+// ============================================================
+// Widget toggle
+// ============================================================
+
+void UCombatStatsSubsystem::ToggleWidget()
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+	UGameViewportClient* ViewportClient = World->GetGameViewport();
+	if (!ViewportClient) return;
+
+	if (bWidgetVisible)
+	{
+		// Hide
+		if (ViewportOverlay.IsValid())
+		{
+			ViewportClient->RemoveViewportWidgetContent(ViewportOverlay.ToSharedRef());
+		}
+		StatsWidget.Reset();
+		ViewportOverlay.Reset();
+		bWidgetVisible = false;
+		UE_LOG(LogCombatStats, Log, TEXT("Combat stats widget hidden."));
+	}
+	else
+	{
+		// Show
+		StatsWidget = SNew(SCombatStatsWidget).Subsystem(this);
+
+		ViewportOverlay =
+			SNew(SWeakWidget)
+			.PossiblyNullContent(StatsWidget);
+
+		// Z-order 12 = between BasicInfo (10) and SkillTree (15)
+		ViewportClient->AddViewportWidgetContent(ViewportOverlay.ToSharedRef(), 12);
+		bWidgetVisible = true;
+		UE_LOG(LogCombatStats, Log, TEXT("Combat stats widget shown (Z=12)."));
+	}
+}
+
+bool UCombatStatsSubsystem::IsWidgetVisible() const
+{
+	return bWidgetVisible;
+}
+
+// ============================================================
+// Allocate a stat point via SocketIO (sends player:allocate_stat)
+// ============================================================
+
+void UCombatStatsSubsystem::AllocateStat(const FString& StatName)
+{
+	USocketIOClientComponent* SIOComp = CachedSIOComponent.IsValid() ? CachedSIOComponent.Get() : FindSocketIOComponent();
+	if (!SIOComp) return;
+
+	TSharedPtr<FJsonObject> Payload = MakeShareable(new FJsonObject());
+	Payload->SetStringField(TEXT("statName"), StatName);
+
+	SIOComp->EmitNative(TEXT("player:allocate_stat"), Payload);
+	UE_LOG(LogCombatStats, Log, TEXT("Sent player:allocate_stat for %s"), *StatName);
+}
