@@ -1,5 +1,3 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
 #pragma once
 
 #include "CoreMinimal.h"
@@ -18,48 +16,46 @@ class SABRIMMO_API UHttpManager : public UBlueprintFunctionLibrary
 
 private:
     static UMMOGameInstance* GetGameInstance(UObject* WorldContextObject);
+    static FString GetServerBaseUrl(UObject* WorldContextObject);
+    static FString ExtractErrorMessage(const FString& ResponseContent, const FString& DefaultMessage);
 
 public:
+    // ---- Connection Test ----
     UFUNCTION(BlueprintCallable, Category = "Network", meta = (WorldContext = "WorldContextObject"))
     static void TestServerConnection(UObject* WorldContextObject);
 
     UFUNCTION(BlueprintCallable, Category = "Network", meta = (WorldContext = "WorldContextObject"))
     static void HealthCheck(UObject* WorldContextObject);
 
+    // ---- Auth ----
     UFUNCTION(BlueprintCallable, Category = "Network", meta = (WorldContext = "WorldContextObject"))
     static void RegisterUser(UObject* WorldContextObject, const FString& Username, const FString& Email, const FString& Password);
 
     UFUNCTION(BlueprintCallable, Category = "Network", meta = (WorldContext = "WorldContextObject"))
     static void LoginUser(UObject* WorldContextObject, const FString& Username, const FString& Password);
 
-    static void OnRegisterResponse(TSharedPtr<IHttpRequest> Request, TSharedPtr<IHttpResponse> Response, bool bWasSuccessful);
-    static void OnLoginResponse(UObject* WorldContextObject, TSharedPtr<IHttpRequest> Request, TSharedPtr<IHttpResponse> Response, bool bWasSuccessful);
+    // ---- Server List ----
+    UFUNCTION(BlueprintCallable, Category = "Network", meta = (WorldContext = "WorldContextObject"))
+    static void GetServerList(UObject* WorldContextObject);
 
+    // ---- Characters ----
     UFUNCTION(BlueprintCallable, Category = "Network", meta = (WorldContext = "WorldContextObject"))
     static void GetCharacters(UObject* WorldContextObject);
 
     UFUNCTION(BlueprintCallable, Category = "Network", meta = (WorldContext = "WorldContextObject"))
-    static void CreateCharacter(UObject* WorldContextObject, const FString& CharacterName, const FString& CharacterClass);
+    static void CreateCharacter(UObject* WorldContextObject, const FString& CharacterName, const FString& CharacterClass,
+        int32 HairStyle = 1, int32 HairColor = 0, const FString& Gender = TEXT("male"));
+
+    UFUNCTION(BlueprintCallable, Category = "Network", meta = (WorldContext = "WorldContextObject"))
+    static void DeleteCharacter(UObject* WorldContextObject, int32 CharacterId, const FString& Password);
 
     UFUNCTION(BlueprintCallable, Category = "Network", meta = (WorldContext = "WorldContextObject"))
     static void SaveCharacterPosition(UObject* WorldContextObject, int32 CharacterId, float X, float Y, float Z);
 
-    static void OnGetCharactersResponse(UObject* WorldContextObject, TSharedPtr<IHttpRequest> Request, TSharedPtr<IHttpResponse> Response, bool bWasSuccessful);
-    static void OnCreateCharacterResponse(UObject* WorldContextObject, TSharedPtr<IHttpRequest> Request, TSharedPtr<IHttpResponse> Response, bool bWasSuccessful);
-    static void OnSavePositionResponse(TSharedPtr<IHttpRequest> Request, TSharedPtr<IHttpResponse> Response, bool bWasSuccessful);
-
-    static void OnHealthCheckResponse(TSharedPtr<IHttpRequest> Request, TSharedPtr<IHttpResponse> Response, bool bWasSuccessful);
-
-    // ---- Skill targeting bridge (called by Blueprint hotbar to route through C++ targeting system) ----
-
-    /** Use a skill through the SkillTreeSubsystem targeting system.
-     *  For Bash/Magnum Break etc., this enters targeting mode (cursor changes, click to cast).
-     *  For self/passive skills, executes immediately. */
+    // ---- Skill/UI Bridges ----
     UFUNCTION(BlueprintCallable, Category = "Skills", meta = (WorldContext = "WorldContextObject"))
     static void UseSkillWithTargeting(UObject* WorldContextObject, int32 SkillId);
 
-    /** Toggle the Combat Stats window (shows ATK, MATK, HIT, FLEE, CRI, DEF, MDEF, ASPD, base stats).
-     *  Also bound to F8 key in C++. */
     UFUNCTION(BlueprintCallable, Category = "UI", meta = (WorldContext = "WorldContextObject"))
     static void ToggleCombatStatsWidget(UObject* WorldContextObject);
 };

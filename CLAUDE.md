@@ -45,27 +45,35 @@ UnrealBuildTool SabriMMO Win64 Development "C:/Sabri_MMO/client/SabriMMO/SabriMM
 ## Architecture
 
 ### Server (`server/src/index.js`)
-Single monolithic file (~2269 lines). Key sections:
-- **REST API** (`/api/auth/*`, `/api/characters/*`) — JWT-based auth, character CRUD
+Single monolithic file (~2400 lines). Key sections:
+- **REST API** (`/api/auth/*`, `/api/characters/*`, `/api/servers`) — JWT-based auth, character CRUD, server list
 - **Socket.io events** — `player:join/position/moved/left`, `combat:*`, `inventory:*`, `chat:*`, `enemy:*`, `stats:*`, `skills:*`
 - **Combat tick loop** — 50ms interval, ASPD-based attack timing
 - **Enemy AI loop** — 509 RO monster templates, 46 active spawn points (zones 1-3 only, zones 4-9 disabled)
 - **Data modules** imported at top: `ro_monster_templates`, `ro_item_mapping`, `ro_exp_tables`, `ro_skill_data`
+- **JWT validation** on `player:join` socket event (character ownership check)
 
 ### Client C++ (`client/SabriMMO/Source/SabriMMO/`)
 | File | Role |
 |------|------|
-| `MMOGameInstance.*` | Persists auth token, character list, selected character across levels |
-| `MMOHttpManager.*` | BlueprintFunctionLibrary for REST API calls |
+| `CharacterData.h` | `FCharacterData` (30+ fields), `FServerInfo`, `FInventoryItem`, drag-drop structs |
+| `MMOGameInstance.*` | Auth state, server selection, character list, remembered username, configurable URL |
+| `MMOHttpManager.*` | BlueprintFunctionLibrary — REST: login, register, servers, characters CRUD, position save |
 | `SabriMMOCharacter.*` | Base player pawn — movement, socket events, stats |
 | `SabriMMOPlayerController.*` | Input mapping (click-to-move + WASD) |
 | `OtherCharacterMovementComponent.*` | Remote player interpolation |
+| `UI/LoginFlowSubsystem.*` | Login flow state machine (Login→Server→CharSelect→Create→EnterWorld) |
+| `UI/SLoginWidget.*` | Login screen (username/password, remember me, error display) |
+| `UI/SServerSelectWidget.*` | Server list with population/status, selection highlighting |
+| `UI/SCharacterSelectWidget.*` | 3x3 character card grid + detail panel + delete confirmation |
+| `UI/SCharacterCreateWidget.*` | Name, gender, hair style/color pickers |
+| `UI/SLoadingOverlayWidget.*` | "Please Wait" fullscreen overlay with progress bar |
 | `UI/SBasicInfoWidget.*` | Slate HUD panel (HP/SP/EXP bars, draggable) |
 | `UI/BasicInfoSubsystem.*` | UWorldSubsystem bridging server data → Slate widget |
 
 ### Database (PostgreSQL)
 4 core tables: `users`, `characters`, `items` (static definitions), `character_inventory` (per-character).
-Stat columns (`str`, `agi`, `vit`, `int_stat`, `dex`, `luk`, etc.) are added dynamically by the server.
+Character columns include: hair_style, hair_color, gender, delete_date, plus stats added dynamically by the server.
 
 ---
 

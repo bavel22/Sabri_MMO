@@ -13,6 +13,7 @@
 #include "InputAction.h"
 #include "InputMappingContext.h"
 #include "SabriMMO.h"
+#include "GameFramework/PlayerController.h"
 #include "UI/CombatStatsSubsystem.h"
 #include "UI/InventorySubsystem.h"
 #include "UI/EquipmentSubsystem.h"
@@ -55,6 +56,22 @@ ASabriMMOCharacter::ASabriMMOCharacter()
 
 	// Note: The skeletal mesh and anim blueprint references on the Mesh component (inherited from Character) 
 	// are set in the derived blueprint asset named ThirdPersonCharacter (to avoid direct content references in C++)
+}
+
+void ASabriMMOCharacter::BeginPlay()
+{
+	Super::BeginPlay();
+
+	// Ensure Game+UI input mode so Slate widgets receive mouse events
+	// and Enhanced Input keyboard actions (F5, F6, etc.) work properly.
+	// BP_MMOCharacter Blueprint also sets this, but C++ ensures it as a safety net.
+	if (APlayerController* PC = Cast<APlayerController>(GetController()))
+	{
+		FInputModeGameAndUI InputMode;
+		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		PC->SetInputMode(InputMode);
+		PC->SetShowMouseCursor(true);
+	}
 }
 
 void ASabriMMOCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)

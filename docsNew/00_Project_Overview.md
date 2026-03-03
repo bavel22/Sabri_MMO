@@ -35,9 +35,14 @@
 
 ### Authentication & Characters
 - JWT-based login/register via REST API
-- Character CRUD (create, list, select, delete)
-- `FCharacterData` C++ struct for client-side data
-- `UMMOGameInstance` persists auth state across level loads
+- Character CRUD (create, list, select, delete with password confirmation)
+- Server list endpoint (`GET /api/servers`) with population tracking
+- Character customization: hair style (1-19), hair color (0-8), gender
+- 9 character slots per account, globally unique names (case-insensitive)
+- JWT validation on `player:join` socket event (character ownership check)
+- `FCharacterData` C++ struct (30+ fields) + `FServerInfo` struct
+- `UMMOGameInstance` persists auth state, server selection, remembered username across levels
+- Configurable server URL (no hardcoded localhost)
 
 ### Real-Time Multiplayer
 - Socket.io bidirectional communication
@@ -95,9 +100,17 @@
 - Mouse scroll zoom (200–1500 units)
 - Character faces movement direction
 
-### UI System — 18 Blueprint Widgets + 1 Slate Widget
-- `WBP_LoginScreen` — Login/register
-- `WBP_CharacterSelect` / `WBP_CharacterEntry` / `WBP_CreateCharacter` — Character management
+### UI System — 18 Blueprint Widgets + 14 Slate Widgets
+
+#### Login Flow (Pure C++ Slate — replaces BP_GameFlow)
+- `ULoginFlowSubsystem` — UWorldSubsystem state machine: Login → ServerSelect → CharacterSelect → CharacterCreate → EnteringWorld
+- `SLoginWidget` — Username/password, remember username, error display, Enter/Tab keyboard shortcuts
+- `SServerSelectWidget` — Scrollable server list with population/status, selection highlighting
+- `SCharacterSelectWidget` — 3x3 card grid + detail panel (HP/SP bars, 6 stats, EXP), delete confirmation with password
+- `SCharacterCreateWidget` — Name field, gender toggle, hair style/color pickers (arrow buttons), locked Novice class
+- `SLoadingOverlayWidget` — Dimmed fullscreen overlay with "Please Wait" dialog and progress bar
+
+#### Game HUD (Blueprint)
 - `WBP_GameHUD` — HP/MP bars, target frame
 - `WBP_PlayerNameTag` — Floating name above characters
 - `WBP_ChatWidget` / `WBP_ChatMessageLine` — Chat interface
@@ -109,8 +122,9 @@
 - `WBP_ItemTooltip` — Hover tooltip for inventory slots
 - `WBP_DeathOverlay` — Death screen with respawn button
 - `WBP_LootPopup` — Loot notification popup with auto-fade
-- `WBP_DamageNumber` — Floating damage numbers
-- `SBasicInfoWidget` — **NEW**: Slate HUD panel showing player name, job, HP/SP bars, base/job EXP bars, weight, zuzucoin (draggable)
+
+#### Game HUD (Pure C++ Slate)
+- `SBasicInfoWidget` — Draggable HUD panel: player name, job, HP/SP bars, base/job EXP bars, weight, zuzucoin
 
 ### Automated UI Testing
 - `ASabriMMOUITests` — C++ test runner for automated UI validation
@@ -134,9 +148,16 @@ C:/Sabri_MMO/
 │   │   ├── OtherCharacterMovementComponent.*  # Remote player movement
 │   │   ├── SabriMMO.*            # Module definition + log category
 │   │   ├── SabriMMO.Build.cs     # Build config (17 module dependencies)
-│   │   ├── UI/                    # NEW: Slate UI subsystem (4 files)
+│   │   ├── UI/                    # Slate UI subsystems + widgets (30+ files)
+│   │   │   ├── LoginFlowSubsystem.*  # Login flow state machine (replaces BP_GameFlow)
+│   │   │   ├── SLoginWidget.*      # Login screen
+│   │   │   ├── SServerSelectWidget.* # Server selection screen
+│   │   │   ├── SCharacterSelectWidget.* # Character selection + delete confirmation
+│   │   │   ├── SCharacterCreateWidget.* # Character creation screen
+│   │   │   ├── SLoadingOverlayWidget.*  # "Please Wait" overlay
 │   │   │   ├── SBasicInfoWidget.*  # Draggable Slate HUD panel
-│   │   │   └── BasicInfoSubsystem.* # UWorldSubsystem for data + socket wrapping
+│   │   │   ├── BasicInfoSubsystem.* # UWorldSubsystem for data + socket wrapping
+│   │   │   └── ... (12 more Slate widgets + subsystems)
 │   │   ├── Variant_Combat/       # Combat system (42 files)
 │   │   ├── Variant_Platforming/  # Platforming variant (8 files)
 │   │   └── Variant_SideScrolling/ # Side-scrolling variant (26 files)
@@ -150,7 +171,10 @@ C:/Sabri_MMO/
 ├── database/
 │   ├── init.sql                  # Schema: users, characters, items, character_inventory
 │   ├── migrations/                # Database migrations
-│   │   └── add_ro_drop_items.sql   # 126 RO drop items migration
+│   │   ├── add_ro_drop_items.sql   # 126 RO drop items migration
+│   │   ├── add_character_customization.sql  # hair_style, hair_color, gender, delete_date
+│   │   ├── add_equipped_position.sql  # Dual-accessory support
+│   │   └── add_hotbar_multirow.sql    # 4-row hotbar storage
 │   ├── create_test_users.*       # Test user scripts
 │   └── insert_test_user.sql
 ├── scripts/                      # Utility scripts

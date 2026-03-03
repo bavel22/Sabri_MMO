@@ -1236,7 +1236,31 @@ io.on('connection', (socket) => {
         logger.info(`[RECV] player:join from ${socket.id}: ${JSON.stringify(data)}`);
         const characterId = parseInt(data.characterId);
         const { token, characterName } = data;
-        
+
+        // SECURITY: Verify JWT token
+        // BP_SocketManager sends GetAuthHeader() which includes "Bearer " prefix — strip it
+        const rawToken = token && token.startsWith('Bearer ') ? token.slice(7) : token;
+        if (rawToken) {
+            try {
+                const decoded = jwt.verify(rawToken, process.env.JWT_SECRET);
+                // Verify character belongs to authenticated user
+                const ownerCheck = await pool.query(
+                    'SELECT 1 FROM characters WHERE character_id = $1 AND user_id = $2',
+                    [characterId, decoded.user_id]
+                );
+                if (ownerCheck.rows.length === 0) {
+                    logger.warn(`[SECURITY] Character ${characterId} does not belong to user ${decoded.user_id}`);
+                    socket.emit('player:join_error', { error: 'Character does not belong to this account' });
+                    return;
+                }
+                logger.info(`[AUTH] JWT verified for user ${decoded.user_id}, character ${characterId}`);
+            } catch (err) {
+                logger.warn(`[SECURITY] Invalid JWT on player:join: ${err.message}`);
+                socket.emit('player:join_error', { error: 'Invalid or expired token' });
+                return;
+            }
+        }
+
         // Fetch character data from database (position + health/mana + zuzucoin)
         let health = 100, maxHealth = 100, mana = 100, maxMana = 100, zuzucoin = 0;
         try {
@@ -1306,8 +1330,9 @@ io.on('connection', (socket) => {
         // Load equipped weapon ATK, range, and ASPD modifier
         let weaponRange = COMBAT.MELEE_RANGE;
         let weaponAspdMod = 0;
+        let weaponResult = null;
         try {
-            const weaponResult = await pool.query(
+            weaponResult = await pool.query(
                 `SELECT i.atk, i.weapon_type, i.aspd_modifier, i.weapon_range FROM character_inventory ci
                  JOIN items i ON ci.item_id = i.item_id
                  WHERE ci.character_id = $1 AND ci.is_equipped = true AND i.equip_slot = 'weapon'
@@ -1325,16 +1350,11 @@ io.on('connection', (socket) => {
             logger.debug(`[ITEMS] No equipped weapon found for char ${characterId}`);
         }
 
-        // Track weapon type for passive mastery skills
+        // Track weapon type for passive mastery skills (reuse weapon query result above)
         let weaponType = null;
-        try {
-            const wtResult = await pool.query(
-                `SELECT i.weapon_type FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
-                 WHERE ci.character_id = $1 AND ci.is_equipped = true AND i.equip_slot = 'weapon' LIMIT 1`,
-                [characterId]
-            );
-            if (wtResult.rows.length > 0) weaponType = wtResult.rows[0].weapon_type;
-        } catch (err) { /* ignore */ }
+        if (weaponResult && weaponResult.rows.length > 0) {
+            weaponType = weaponResult.rows[0].weapon_type;
+        }
 
         // Load learned skills for passive bonuses and skill usage
         const learnedSkills = {};
@@ -1880,13 +1900,15 @@ io.on('connection', (socket) => {
         player.aspd = Math.min(COMBAT.ASPD_CAP, derived.aspd + (player.weaponAspdMod || 0));
         player.maxHealth = derived.maxHP;
         player.maxMana = derived.maxSP;
+        player.health = Math.min(player.health, player.maxHealth);
+        player.mana = Math.min(player.mana, player.maxMana);
 
         // Save to DB
         try {
             const dbStatName = statName === 'int' ? 'int_stat' : statName;
             await pool.query(
-                `UPDATE characters SET ${dbStatName} = $1, stat_points = $2, max_health = $3, max_mana = $4 WHERE character_id = $5`,
-                [player.stats[statKey], player.stats.statPoints, player.maxHealth, player.maxMana, characterId]
+                `UPDATE characters SET ${dbStatName} = $1, stat_points = $2, max_health = $3, max_mana = $4, health = $5, mana = $6 WHERE character_id = $7`,
+                [player.stats[statKey], player.stats.statPoints, player.maxHealth, player.maxMana, player.health, player.mana, characterId]
             );
         } catch (err) {
             logger.error(`Failed to save stat allocation for character ${characterId}:`, err.message);
@@ -4270,13 +4292,15 @@ io.on('connection', (socket) => {
             const derived = calculateDerivedStats(effectiveStats);
             player.aspd = Math.min(COMBAT.ASPD_CAP, derived.aspd + (player.weaponAspdMod || 0));
             
-            // Update maxHP/maxSP from derived stats and save to DB
+            // Update maxHP/maxSP from derived stats and cap current values
             player.maxHealth = derived.maxHP;
             player.maxMana = derived.maxSP;
+            player.health = Math.min(player.health, player.maxHealth);
+            player.mana = Math.min(player.mana, player.maxMana);
             try {
                 await pool.query(
-                    'UPDATE characters SET max_health = $1, max_mana = $2 WHERE character_id = $3',
-                    [player.maxHealth, player.maxMana, characterId]
+                    'UPDATE characters SET max_health = $1, max_mana = $2, health = $3, mana = $4 WHERE character_id = $5',
+                    [player.maxHealth, player.maxMana, player.health, player.mana, characterId]
                 );
             } catch (err) {
                 logger.warn(`[DB] Could not update max_health/max_mana for char ${characterId}: ${err.message}`);
@@ -5928,12 +5952,39 @@ app.get('/api/auth/verify', authenticateToken, async (req, res) => {
     }
 });
 
+// Server list endpoint
+app.get('/api/servers', (req, res) => {
+    const servers = [
+        {
+            id: 1,
+            name: 'Sabri',
+            host: process.env.SERVER_HOST || 'localhost',
+            port: parseInt(process.env.PORT) || 3001,
+            status: 'online',
+            population: connectedPlayers.size,
+            maxPopulation: 1000,
+            region: 'Local'
+        }
+    ];
+    res.json({ servers });
+});
+
 // Character endpoints
 app.get('/api/characters', authenticateToken, async (req, res) => {
     try {
         logger.debug(`Fetching characters for user ID: ${req.user.user_id}`);
         const result = await pool.query(
-            'SELECT character_id, name, class, level, x, y, z, health, mana, created_at FROM characters WHERE user_id = $1 ORDER BY created_at DESC',
+            `SELECT character_id, name, class, level, x, y, z,
+                    health, max_health, mana, max_mana,
+                    str, agi, vit, int_stat, dex, luk,
+                    stat_points, zuzucoin,
+                    job_level, base_exp, job_exp, job_class, skill_points,
+                    hair_style, hair_color, gender,
+                    delete_date, created_at, last_played
+             FROM characters
+             WHERE user_id = $1 AND delete_date IS NULL
+             ORDER BY character_id ASC
+             LIMIT 9`,
             [req.user.user_id]
         );
         
@@ -5950,50 +6001,75 @@ app.get('/api/characters', authenticateToken, async (req, res) => {
 
 app.post('/api/characters', authenticateToken, async (req, res) => {
     try {
-        const { name, characterClass } = req.body;
-        logger.info(`Character creation attempt: ${name} (class: ${characterClass}) for user ${req.user.user_id}`);
-        
-        // Validation
-        if (!name || name.length < 2 || name.length > 50) {
-            logger.warn(`Character creation failed: Invalid name length - ${name}`);
-            return res.status(400).json({ error: 'Character name must be between 2 and 50 characters' });
+        const { name, characterClass, hairStyle, hairColor, gender } = req.body;
+        logger.info(`Character creation attempt: ${name} for user ${req.user.user_id}`);
+
+        // Validate name
+        if (!name || name.trim().length < 2 || name.trim().length > 24) {
+            return res.status(400).json({ error: 'Character name must be 2-24 characters' });
         }
-        
-        // Check if character name already exists for this user
-        const existingChar = await pool.query(
-            'SELECT character_id FROM characters WHERE user_id = $1 AND name = $2',
-            [req.user.user_id, name]
+
+        // Validate name format (alphanumeric + spaces only)
+        if (!/^[a-zA-Z0-9 ]+$/.test(name.trim())) {
+            return res.status(400).json({ error: 'Name can only contain letters, numbers, and spaces' });
+        }
+
+        // Check character limit (9 per account)
+        const countResult = await pool.query(
+            'SELECT COUNT(*) FROM characters WHERE user_id = $1 AND delete_date IS NULL',
+            [req.user.user_id]
         );
-        
-        if (existingChar.rows.length > 0) {
-            logger.warn(`Character creation failed: Name already exists - ${name}`);
-            return res.status(409).json({ error: 'You already have a character with this name' });
+        if (parseInt(countResult.rows[0].count) >= 9) {
+            return res.status(400).json({ error: 'Maximum 9 characters per account' });
         }
-        
-        // Validate class (optional field)
-        const validClasses = ['warrior', 'mage', 'archer', 'healer', 'priest'];
-        const charClass = characterClass && validClasses.includes(characterClass.toLowerCase()) 
-            ? characterClass.toLowerCase() 
-            : 'warrior';
-        
-        // Create character (all new characters start as Novice with RO-style defaults)
+
+        // Check global name uniqueness (case-insensitive)
+        const nameCheck = await pool.query(
+            'SELECT 1 FROM characters WHERE LOWER(name) = LOWER($1)',
+            [name.trim()]
+        );
+        if (nameCheck.rows.length > 0) {
+            return res.status(409).json({ error: 'Character name is already taken' });
+        }
+
+        // Validate customization
+        const validHairStyle = Math.max(1, Math.min(19, parseInt(hairStyle) || 1));
+        const validHairColor = Math.max(0, Math.min(8, parseInt(hairColor) || 0));
+        const validGender = (gender === 'female') ? 'female' : 'male';
+
+        // All characters start as Novice (RO classic)
+        const charClass = 'novice';
+
         const result = await pool.query(
-            `INSERT INTO characters (user_id, name, class, level, x, y, z, health, mana, job_level, base_exp, job_exp, job_class, skill_points, stat_points) 
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) 
-             RETURNING character_id, name, class, level, x, y, z, health, mana, job_level, job_class, created_at`,
-            [req.user.user_id, name, charClass, 1, 0, 0, 0, 100, 100, 1, 0, 0, 'novice', 0, 48]
+            `INSERT INTO characters
+             (user_id, name, class, level, x, y, z, health, mana,
+              max_health, max_mana, job_level, base_exp, job_exp,
+              job_class, skill_points, stat_points,
+              hair_style, hair_color, gender)
+             VALUES ($1, $2, $3, 1, 0, 0, 0, 100, 100,
+                     100, 100, 1, 0, 0,
+                     'novice', 0, 48,
+                     $4, $5, $6)
+             RETURNING character_id, name, class, level, job_level, job_class,
+                       hair_style, hair_color, gender, health, max_health,
+                       mana, max_mana, stat_points, created_at`,
+            [req.user.user_id, name.trim(), charClass,
+             validHairStyle, validHairColor, validGender]
         );
-        
+
         const character = result.rows[0];
-        logger.info(`Character created successfully: ${name} (ID: ${character.character_id})`);
-        
+        logger.info(`Character created: ${name} (ID: ${character.character_id})`);
+
         res.status(201).json({
             message: 'Character created successfully',
             character
         });
-        
+
     } catch (err) {
         logger.error('Create character error:', err.message);
+        if (err.code === '23505') {
+            return res.status(409).json({ error: 'Character name is already taken' });
+        }
         res.status(500).json({ error: 'Failed to create character' });
     }
 });
@@ -6022,6 +6098,61 @@ app.get('/api/characters/:id', authenticateToken, async (req, res) => {
     } catch (err) {
         logger.error('Get character error:', err.message);
         res.status(500).json({ error: 'Failed to retrieve character' });
+    }
+});
+
+// Delete character (requires password confirmation)
+app.delete('/api/characters/:id', authenticateToken, async (req, res) => {
+    try {
+        const characterId = parseInt(req.params.id);
+        const { password } = req.body;
+
+        if (!password) {
+            return res.status(400).json({ error: 'Password required to delete character' });
+        }
+
+        // Verify password
+        const userResult = await pool.query(
+            'SELECT password_hash FROM users WHERE user_id = $1',
+            [req.user.user_id]
+        );
+        if (userResult.rows.length === 0) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        const validPassword = await bcrypt.compare(password, userResult.rows[0].password_hash);
+        if (!validPassword) {
+            return res.status(401).json({ error: 'Incorrect password' });
+        }
+
+        // Verify character belongs to user
+        const charResult = await pool.query(
+            'SELECT character_id, name FROM characters WHERE character_id = $1 AND user_id = $2',
+            [characterId, req.user.user_id]
+        );
+        if (charResult.rows.length === 0) {
+            return res.status(404).json({ error: 'Character not found' });
+        }
+
+        // Check if character is currently online
+        if (connectedPlayers.has(characterId)) {
+            return res.status(409).json({ error: 'Character is currently online. Log out first.' });
+        }
+
+        const charName = charResult.rows[0].name;
+
+        // Delete character and all related data
+        await pool.query('DELETE FROM character_hotbar WHERE character_id = $1', [characterId]);
+        await pool.query('DELETE FROM character_inventory WHERE character_id = $1', [characterId]);
+        await pool.query('DELETE FROM characters WHERE character_id = $1', [characterId]);
+
+        logger.info(`Character deleted: ${charName} (ID: ${characterId}) by user ${req.user.user_id}`);
+
+        res.json({ message: 'Character deleted successfully', characterName: charName });
+
+    } catch (err) {
+        logger.error('Delete character error:', err.message);
+        res.status(500).json({ error: 'Failed to delete character' });
     }
 });
 
@@ -6137,7 +6268,11 @@ server.listen(PORT, async () => {
       ADD COLUMN IF NOT EXISTS stat_points INTEGER DEFAULT 48,
       ADD COLUMN IF NOT EXISTS max_health INTEGER DEFAULT 100,
       ADD COLUMN IF NOT EXISTS max_mana INTEGER DEFAULT 100,
-      ADD COLUMN IF NOT EXISTS zuzucoin INTEGER DEFAULT 0
+      ADD COLUMN IF NOT EXISTS zuzucoin INTEGER DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS hair_style INTEGER DEFAULT 1,
+      ADD COLUMN IF NOT EXISTS hair_color INTEGER DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS gender VARCHAR(10) DEFAULT 'male',
+      ADD COLUMN IF NOT EXISTS delete_date TIMESTAMP DEFAULT NULL
     `);
     logger.info('[DB] Stat columns verified/created on characters table');
   } catch (err) {

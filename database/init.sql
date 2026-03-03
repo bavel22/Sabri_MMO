@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS characters (
     character_id SERIAL PRIMARY KEY,
     user_id INTEGER REFERENCES users(user_id) ON DELETE CASCADE,
-    name VARCHAR(50) NOT NULL,
+    name VARCHAR(50) NOT NULL UNIQUE,
     class VARCHAR(20) DEFAULT 'warrior',
     level INTEGER DEFAULT 1,
     experience INTEGER DEFAULT 0,
@@ -28,6 +28,10 @@ CREATE TABLE IF NOT EXISTS characters (
     max_health INTEGER DEFAULT 100,
     mana INTEGER DEFAULT 100,
     max_mana INTEGER DEFAULT 100,
+    hair_style INTEGER DEFAULT 1,
+    hair_color INTEGER DEFAULT 0,
+    gender VARCHAR(10) DEFAULT 'male',
+    delete_date TIMESTAMP DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_played TIMESTAMP
 );
