@@ -17,7 +17,7 @@ UCLASS(abstract)
 class ASabriMMOPlayerController : public APlayerController
 {
 	GENERATED_BODY()
-	
+
 protected:
 
 	/** Input Mapping Contexts */

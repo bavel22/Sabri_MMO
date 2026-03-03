@@ -49,4 +49,17 @@ public:
     static void OnSavePositionResponse(TSharedPtr<IHttpRequest> Request, TSharedPtr<IHttpResponse> Response, bool bWasSuccessful);
 
     static void OnHealthCheckResponse(TSharedPtr<IHttpRequest> Request, TSharedPtr<IHttpResponse> Response, bool bWasSuccessful);
+
+    // ---- Skill targeting bridge (called by Blueprint hotbar to route through C++ targeting system) ----
+
+    /** Use a skill through the SkillTreeSubsystem targeting system.
+     *  For Bash/Magnum Break etc., this enters targeting mode (cursor changes, click to cast).
+     *  For self/passive skills, executes immediately. */
+    UFUNCTION(BlueprintCallable, Category = "Skills", meta = (WorldContext = "WorldContextObject"))
+    static void UseSkillWithTargeting(UObject* WorldContextObject, int32 SkillId);
+
+    /** Toggle the Combat Stats window (shows ATK, MATK, HIT, FLEE, CRI, DEF, MDEF, ASPD, base stats).
+     *  Also bound to F8 key in C++. */
+    UFUNCTION(BlueprintCallable, Category = "UI", meta = (WorldContext = "WorldContextObject"))
+    static void ToggleCombatStatsWidget(UObject* WorldContextObject);
 };

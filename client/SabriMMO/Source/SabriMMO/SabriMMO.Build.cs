@@ -19,6 +19,9 @@ public class SabriMMO : ModuleRules
 			"GameplayStateTreeModule",
 			"UMG",
 			"Slate",
+			"SlateCore",
+			"SocketIOClient",
+			"SIOJson",
 			"HTTP",
 			"Json",
 			"JsonUtilities"
@@ -41,11 +44,9 @@ public class SabriMMO : ModuleRules
 			"SabriMMO/Variant_SideScrolling/AI",
 			"SabriMMO/Variant_SideScrolling/Gameplay",
 			"SabriMMO/Variant_SideScrolling/Interfaces",
-			"SabriMMO/Variant_SideScrolling/UI"
+			"SabriMMO/Variant_SideScrolling/UI",
+			"SabriMMO/UI"
 		});
-
-		// Uncomment if you are using Slate UI
-		// PrivateDependencyModuleNames.AddRange(new string[] { "Slate", "SlateCore" });
 
 		// Uncomment if you are using online features
 		// PrivateDependencyModuleNames.Add("OnlineSubsystem");

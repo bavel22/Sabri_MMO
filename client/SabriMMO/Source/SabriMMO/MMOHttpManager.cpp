@@ -7,6 +7,8 @@
 #include "Http.h"
 #include "Kismet/GameplayStatics.h"
 #include "MMOGameInstance.h"
+#include "UI/SkillTreeSubsystem.h"
+#include "UI/CombatStatsSubsystem.h"
 
 UMMOGameInstance* UHttpManager::GetGameInstance(UObject* WorldContextObject)
 {
@@ -532,5 +534,53 @@ void UHttpManager::OnSavePositionResponse(TSharedPtr<IHttpRequest> Request, TSha
     else
     {
         UE_LOG(LogTemp, Error, TEXT("✗ Failed to connect to save position server"));
+    }
+}
+
+// ============================================================
+// UseSkillWithTargeting — Bridge from Blueprint hotbar to C++ skill targeting system.
+// Called from AC_HUDManager.UseHotbarSlot when a skill slot is activated.
+// Routes through SkillTreeSubsystem::UseSkill() which handles RO-style
+// targeting mode for Bash, Magnum Break, etc.
+// ============================================================
+
+void UHttpManager::UseSkillWithTargeting(UObject* WorldContextObject, int32 SkillId)
+{
+    if (!WorldContextObject || SkillId <= 0) return;
+
+    UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull);
+    if (!World) return;
+
+    USkillTreeSubsystem* Sub = World->GetSubsystem<USkillTreeSubsystem>();
+    if (Sub)
+    {
+        Sub->UseSkill(SkillId);
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("UseSkillWithTargeting: SkillTreeSubsystem not found in world"));
+    }
+}
+
+// ============================================================
+// ToggleCombatStatsWidget — Toggle RO-style combat stats panel.
+// Also bound to F8 key via PlayerController::InputKey.
+// ============================================================
+
+void UHttpManager::ToggleCombatStatsWidget(UObject* WorldContextObject)
+{
+    if (!WorldContextObject) return;
+
+    UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull);
+    if (!World) return;
+
+    UCombatStatsSubsystem* Sub = World->GetSubsystem<UCombatStatsSubsystem>();
+    if (Sub)
+    {
+        Sub->ToggleWidget();
+    }
+    else
+    {
+        UE_LOG(LogTemp, Warning, TEXT("ToggleCombatStatsWidget: CombatStatsSubsystem not found in world"));
     }
 }
