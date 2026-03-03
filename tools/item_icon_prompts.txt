@@ -1,0 +1,34 @@
+# Iron Sword (WEAPON - common)
+Filename: iron_sword.png
+Prompt: chibi Ragnarok Online style Iron Sword icon, wood axe, detailed texture, fantasy design, 64x64 pixel art, transparent background, game asset, vibrant colors, clean lines, simple design, muted colors, RPG game asset, isometric view
+---
+
+# Fire Staff (WEAPON - rare)
+Filename: fire_staff.png
+Prompt: chibi Ragnarok Online style Fire Staff icon, crystal bow, detailed texture, fantasy design, 64x64 pixel art, transparent background, game asset, vibrant colors, clean lines, ornate design, glowing effects, metallic shine, RPG game asset, isometric view
+---
+
+# Steel Armor (ARMOR - uncommon)
+Filename: steel_armor.png
+Prompt: chibi Ragnarok Online style Steel Armor icon, leather shield, protective design, intricate details, 64x64 pixel art, transparent background, game asset, vibrant colors, clean lines, detailed design, bright colors, RPG game asset, isometric view
+---
+
+# Health Potion (CONSUMABLE - common)
+Filename: health_potion.png
+Prompt: chibi Ragnarok Online style Health Potion icon, elixir of strength, magical glow, distinctive shape, 64x64 pixel art, transparent background, game asset, vibrant colors, clean lines, simple design, muted colors, RPG game asset, isometric view
+---
+
+# Mana Elixir (CONSUMABLE - rare)
+Filename: mana_elixir.png
+Prompt: chibi Ragnarok Online style Mana Elixir icon, elixir of speed, magical glow, distinctive shape, 64x64 pixel art, transparent background, game asset, vibrant colors, clean lines, ornate design, glowing effects, metallic shine, RPG game asset, isometric view
+---
+
+# Ruby Ring (ACCESSORY - uncommon)
+Filename: ruby_ring.png
+Prompt: chibi Ragnarok Online style Ruby Ring icon, diamond belt, ornate design, precious metal setting, 64x64 pixel art, transparent background, game asset, vibrant colors, clean lines, detailed design, bright colors, RPG game asset, isometric view
+---
+
+# Diamond Necklace (ACCESSORY - epic)
+Filename: diamond_necklace.png
+Prompt: chibi Ragnarok Online style Diamond Necklace icon, sapphire bracelet, ornate design, precious metal setting, 64x64 pixel art, transparent background, game asset, vibrant colors, clean lines, elaborate design, strong glow, particle effects, RPG game asset, isometric view
+---
