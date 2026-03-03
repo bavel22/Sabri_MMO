@@ -30,7 +30,7 @@ Loaded once on server startup after seeding base items. Used for drop name looku
 
 ## Item Categories
 
-### Consumables (1001–1005)
+### Consumables (1001–1033)
 
 | ID | Name | Effect | Price | Stack |
 |----|------|--------|-------|-------|
@@ -39,34 +39,142 @@ Loaded once on server startup after seeding base items. Used for drop name looku
 | 1003 | Golden Salve | +350 HP | 275 | 99 |
 | 1004 | Azure Philter | +60 SP | 500 | 99 |
 | 1005 | Roasted Haunch | +70 HP | 25 | 99 |
+| **RO Consumables (1006–1033)** | | | | |
+| 1006 | Red Herb | +18 HP | 18 | 99 |
+| 1007 | Yellow Herb | +38 HP | 25 | 99 |
+| 1008 | Green Herb | Cure poison | 10 | 99 |
+| 1009 | Blue Herb | +15 SP | 30 | 99 |
+| 1010 | Hinalle | +25 HP | 50 | 99 |
+| 1011-1033 | Various fruits, potions, scrolls | Various | 7-350 | 99 |
+
+**Total**: 28 consumables (5 original + 23 RO)
 
 HP restoration values are hardcoded in the `inventory:use` handler:
 ```javascript
 const hpRestore = { 1001: 50, 1002: 150, 1003: 350, 1005: 70 };
+// RO items will be implemented with proper effect system
 ```
 
-### Loot/Etc Items (2001–2008)
+### Loot/Etc Items (2001–2058)
 
-Dropped by enemies, sold to NPCs. All stackable (max 999, except Verdant Leaf at 99).
+**Original items (2001–2008)**: Dropped by enemies, sold to NPCs. All stackable (max 999, except Verdant Leaf at 99).
 
-### Weapons (3001–3006)
+**RO Etc Items (2009–2058)**: 50 new RO loot items including crafting materials, gems, and dolls:
+
+| ID | Name | Type | Price | Stack |
+|----|------|------|-------|-------|
+| 2009 | Jellopy | Common loot | 2 | 999 |
+| 2010 | Fluff | Common loot | 3 | 999 |
+| 2011 | Shell | Common loot | 14 | 999 |
+| 2012 | Feather | Common loot | 5 | 999 |
+| 2013 | Mushroom Spore | Common loot | 10 | 999 |
+| 2014-2058 | Various materials, gems, dolls | Crafting/Rare | 5-3000 | 99/999 |
+
+**Notable RO items**:
+- **Iron Ore (2040)** / **Iron (2041)**: Smithing materials
+- **Oridecon Stone (2043)**: Weapon upgrade material
+- **Yellow Gemstone (2045)**: Magic reagent
+- **Azure/Bluish Green/Cardinal/White Jewel (2046-2049)**: High-value gems
+- **Arrow (2053)**: Ammunition for bows
+- **Dolls (2054-2058)**: Collectible items
+
+**Total**: 58 etc items (8 original + 50 RO)
+
+### Weapons (3001–3020)
 
 | ID | Name | Type | ATK | Range | ASPD Mod | Req Lvl |
 |----|------|------|-----|-------|----------|---------|
+| **Original Weapons** | | | | | | |
 | 3001 | Rustic Shiv | dagger | 17 | 150 | +5 | 1 |
 | 3002 | Keen Edge | dagger | 30 | 150 | +5 | 1 |
 | 3003 | Stiletto Fang | dagger | 43 | 150 | +5 | 12 |
 | 3004 | Iron Cleaver | 1h_sword | 25 | 150 | 0 | 2 |
 | 3005 | Crescent Saber | 1h_sword | 49 | 150 | 0 | 18 |
 | 3006 | Hunting Longbow | bow | 35 | 800 | -3 | 4 |
+| **RO Weapons (3007–3020)** | | | | | | |
+| 3007 | Knife | dagger | 17 | 150 | +5 | 1 |
+| 3008 | Cutter | dagger | 30 | 150 | +5 | 1 |
+| 3009 | Main Gauche | dagger | 43 | 150 | +5 | 12 |
+| 3010 | Falchion | 1h_sword | 49 | 150 | 0 | 18 |
+| 3011 | Mace | mace | 37 | 150 | -2 | 2 |
+| 3012 | Rod | staff | 15 MATK | 150 | -3 | 1 |
+| 3013 | Bow | bow | 15 | 800 | -3 | 4 |
+| 3014 | Javelin | spear | 28 | 150 | -3 | 1 |
+| 3015 | Spear | spear | 44 | 150 | -3 | 4 |
+| 3016 | Axe | axe | 38 | 150 | -2 | 3 |
+| 3017 | Club | mace | 23 | 150 | -2 | 1 |
+| 3018 | Wand | staff | 25 MATK | 150 | -3 | 1 |
+| 3019 | Guitar Of Vast Land | instrument | 50 | 150 | -3 | 27 |
+| 3020 | Whip Of Earth | whip | 55 | 150 | -3 | 27 |
 
-### Armor (4001–4003)
+**Total**: 20 weapons (6 original + 14 RO)
 
-| ID | Name | DEF | Req Lvl |
-|----|------|-----|---------|
-| 4001 | Linen Tunic | 1 | 1 |
-| 4002 | Quilted Vest | 4 | 1 |
-| 4003 | Ringweave Hauberk | 8 | 20 |
+**Weapon Types Available**:
+- Dagger (3001, 3002, 3003, 3007, 3008, 3009)
+- One-hand Sword (3004, 3005, 3010)
+- Mace (3011, 3017)
+- Staff/Magic (3012, 3018)
+- Bow (3006, 3013)
+- Spear (3014, 3015)
+- Axe (3016)
+- Instrument/Whip (3019, 3020)
+
+### Armor (4001–4014)
+
+| ID | Name | Type | DEF | Req Lvl | Slot |
+|----|------|------|-----|---------|------|
+| **Original Armor** | | | | | |
+| 4001 | Linen Tunic | armor | 1 | 1 | armor |
+| 4002 | Quilted Vest | armor | 4 | 1 | armor |
+| 4003 | Ringweave Hauberk | armor | 8 | 20 | armor |
+| **RO Armor/Headgear/Accessories (4004–4014)** | | | | | |
+| 4004 | Guard | shield | 3 | 1 | shield |
+| 4005 | Hat | head_top | 2 | 1 | head_top |
+| 4006 | Sandals | footgear | 1 | 1 | footgear |
+| 4007 | Silk Robe | armor | 3 | 1 | armor |
+| 4008 | Ribbon | head_top | 1 | 1 | head_top |
+| 4009 | Cat Hairband | head_top | 1 | 1 | head_top |
+| 4010 | Skul Ring | accessory | 0 | 1 | accessory |
+| 4011 | Green Feeler | head_top | 1 | 1 | head_top |
+| 4012 | Pierrot Nose | head_low | 0 | 1 | head_low |
+| 4013 | Horrendous Mouth | head_low | 0 | 1 | head_low |
+| 4014 | Fancy Flower | head_top | 1 | 1 | head_top |
+
+**Total**: 14 armor items (3 original + 11 RO)
+
+**New Equip Slots Introduced**:
+- **shield**: Guard (4004)
+- **head_top**: Hat, Ribbon, Cat Hairband, Green Feeler, Fancy Flower
+- **head_low**: Pierrot Nose, Horrendous Mouth
+- **footgear**: Sandals
+- **accessory**: Skul Ring
+
+### Monster Cards (5001–5023)
+
+23 monster cards providing stat bonuses and special effects:
+
+| ID | Name | Effect | Price |
+|----|------|--------|-------|
+| 5001 | Poring Card | LUK +2, Perfect Dodge +1 | 4500 |
+| 5002 | Lunatic Card | LUK +1, Critical +1, Flee +1 | 4500 |
+| 5003 | Fabre Card | VIT +1, Max HP +100 | 4500 |
+| 5004 | Pupa Card | Max HP +700 | 4500 |
+| 5005 | Drops Card | DEX +1, HIT +3 | 4500 |
+| 5006 | Chonchon Card | AGI +1, Flee +2 | 4500 |
+| 5007 | Condor Card | Flee +5 | 4500 |
+| 5008 | Wilow Card | Max SP +80 | 4500 |
+| 5009 | Roda Frog Card | Max HP +400, Max SP +50 | 4500 |
+| 5010 | Hornet Card | STR +1, ATK +3 | 4500 |
+| 5011 | Rocker Card | DEX +1, ATK +5 | 4500 |
+| 5012-5023 | Various cards | Stat bonuses, special effects | 4500 |
+
+**Card Effects Include**:
+- Stat bonuses (STR, AGI, VIT, INT, DEX, LUK)
+- HP/SP bonuses
+- Combat bonuses (ATK, HIT, Flee, Critical)
+- Special abilities (Teleport, Hiding, Detoxify)
+
+**Note**: Card system implemented but effects not yet applied to character stats (future enhancement).
 
 ## Core Functions
 
@@ -117,10 +225,10 @@ Joins `character_inventory` with `items` to return full item details including a
 Client: emit('inventory:load')
 Server:
     1. getPlayerInventory(characterId) → emit('inventory:data', {items})
-    2. getPlayerHotbar(characterId)   → emit('hotbar:data', {slots})
+    2. getPlayerHotbar(characterId)   → emit('hotbar:alldata', {slots})
 ```
 
-Both events are sent together. The client uses `inventory:data` to populate the inventory UI (if open) and sync hotbar quantities, and `hotbar:data` to restore hotbar slot assignments on login/reconnect.
+Both events are sent together. The client uses `inventory:data` to populate the inventory UI (if open) and sync hotbar quantities, and `hotbar:alldata` to restore hotbar slot assignments on login/reconnect.
 
 ### inventory:use
 
@@ -324,13 +432,13 @@ Server:
 
 Emitted from `WBP_HotbarSlot.OnDrop` via `AC_HUDManager.SendSaveHotbarSlotRequest` whenever the player drags an item to a hotbar slot.
 
-### hotbar:data
+### hotbar:alldata
 
 ```
-Server: emit('hotbar:data', {slots: [{slot_index, inventory_id, item_id, item_name, quantity}]})
+Server: emit('hotbar:alldata', {slots: [{slot_index, inventory_id, item_id, item_name, quantity, slot_type, skill_id, skill_name}]})
 ```
 
-Sent automatically after every `inventory:load` response, and 0.6s after `player:join` (delayed to allow HUD initialization). The client's `BP_SocketManager.OnHotbarData` calls `AC_HUDManager.PopulateHotbarFromServer(Data)` to restore each slot.
+Sent automatically after every `inventory:load` response, 0.6s after `player:join`, on `hotbar:request`, and after `hotbar:save_skill`. The client's `BP_SocketManager.OnHotbarAllData` calls `AC_HUDManager.PopulateHotbarFromServer(Data)` to restore each slot. Renamed from `hotbar:data` to avoid C++ SocketIO event binding conflicts.
 
 ### Slot Lifecycle
 
@@ -339,7 +447,8 @@ Sent automatically after every `inventory:load` response, and 0.6s after `player
 | Drag item to hotbar | INSERT or UPDATE row (via `hotbar:save`) |
 | Item stack depleted | Row auto-deleted (ON DELETE CASCADE FK) |
 | Item dropped/sold | Row auto-deleted (ON DELETE CASCADE FK) |
-| Player reconnects | Rows loaded and sent via `hotbar:data` |
+| Player reconnects | Rows loaded and sent via `hotbar:alldata` |
+| Skill assigned from skill tree | UPSERT with `slot_type='skill'` (via `hotbar:save_skill`) |
 
 ## NPC Shop System
 
@@ -456,4 +565,4 @@ All inventory operations return `inventory:error` on failure:
 
 ---
 
-**Last Updated**: 2026-02-21 — Fully renamed database column from zeny to zuzucoin
+**Last Updated**: 2026-02-24 — Added 126 RO items (28 consumables, 50 etc items, 14 weapons, 11 armor, 23 cards). Total items: 148.

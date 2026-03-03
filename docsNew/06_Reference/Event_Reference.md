@@ -403,23 +403,49 @@ _(Empty payload)_
 **Emitted by**: `AC_HUDManager.SendSaveHotbarSlotRequest` (called from `WBP_HotbarSlot.OnDrop`)
 **Handler**: Validates slot (0–8), verifies ownership, UPSERTs `character_hotbar`. Pass `inventoryId: 0` to clear a slot.
 
-### hotbar:data (Server → Client)
+### hotbar:alldata (Server → Client)
+_(Renamed from `hotbar:data` to avoid C++ SocketIO `NativeClient->OnEvent` overwriting BP handler)_
 ```json
 {
     "slots": [
         {
-            "slot_index": 0,
+            "slot_index": 1,
             "inventory_id": 123,
             "item_id": 1001,
             "item_name": "Crimson Vial",
-            "quantity": 5
+            "quantity": 5,
+            "slot_type": "item",
+            "skill_id": 0,
+            "skill_name": ""
+        },
+        {
+            "slot_index": 3,
+            "inventory_id": null,
+            "item_id": null,
+            "item_name": "",
+            "quantity": 0,
+            "slot_type": "skill",
+            "skill_id": 2,
+            "skill_name": "First Aid"
         }
     ]
 }
 ```
-**Sent by**: Server automatically after every `inventory:load` response, and 0.6s after `player:join` (delayed to allow HUD initialization).
-**Handler**: `BP_SocketManager.OnHotbarData` → `AC_HUDManager.PopulateHotbarFromServer(Data)`
-**Note**: Only occupied slots are included. Missing slot indices are treated as empty.
+**Sent by**: Server automatically after every `inventory:load` response, 0.6s after `player:join`, on `hotbar:request`, and after `hotbar:save_skill`.
+**Handler**: `BP_SocketManager.OnHotbarAllData` → `AC_HUDManager.PopulateHotbarFromServer(Data)`
+**Note**: Only occupied slots are included. Slot indices are 1-9. `slot_type` is `"item"` or `"skill"`.
+
+### hotbar:save_skill (Client → Server)
+```json
+{ "slotIndex": 1, "skillId": 2, "skillName": "First Aid" }
+```
+**Emitted by**: `USkillTreeSubsystem::AssignSkillToHotbar` (from Slate quick-assign buttons)
+**Handler**: Validates slot (1–9), verifies skill learned, UPSERTs `character_hotbar` with `slot_type='skill'`, NULLs item fields. Emits `hotbar:alldata`.
+
+### hotbar:request (Client → Server)
+_(Empty payload)_
+**Emitted by**: `USkillTreeSubsystem` 3s after socket events are wrapped (ensures HUD is initialized)
+**Handler**: Re-fetches hotbar from DB and emits `hotbar:alldata`.
 
 ### inventory:error (Server → Client)
 ```json
@@ -515,8 +541,102 @@ _(Empty payload)_
 }
 ```
 
+## Skill Events
+
+### skill:data (Client → Server → Client)
+**Request**: `{}` (empty payload)
+**Response**:
+```json
+{
+    "characterId": 1,
+    "jobClass": "swordsman",
+    "skillPoints": 5,
+    "skillTree": {
+        "novice": [
+            {
+                "skillId": 1, "name": "basic_skill", "displayName": "Basic Skill",
+                "maxLevel": 9, "currentLevel": 9, "type": "passive",
+                "targetType": "none", "element": "neutral", "range": 0,
+                "description": "Enables basic commands.", "icon": "basic_skill",
+                "treeRow": 0, "treeCol": 0, "prerequisites": [],
+                "spCost": 0, "nextSpCost": 0, "castTime": 0, "cooldown": 0,
+                "effectValue": 0, "canLearn": false
+            }
+        ],
+        "swordsman": [
+            {
+                "skillId": 103, "name": "bash", "displayName": "Bash",
+                "maxLevel": 10, "currentLevel": 3, "type": "active",
+                "targetType": "single", "element": "neutral", "range": 150,
+                "description": "Smash a target for increased damage.",
+                "icon": "bash", "treeRow": 0, "treeCol": 1,
+                "prerequisites": [], "spCost": 8, "nextSpCost": 8,
+                "castTime": 0, "cooldown": 700, "effectValue": 190, "canLearn": true
+            }
+        ]
+    },
+    "learnedSkills": { "1": 9, "103": 3 }
+}
+```
+**Server Action**: Load character skills from DB, build skill tree grouped by class, compute `canLearn` per skill.
+**Client Action**: `SkillTreeSubsystem` parses into `SkillGroups` array, broadcasts `OnSkillDataUpdated`.
+
+### skill:learn (Client → Server)
+```json
+{ "skillId": 103 }
+```
+**Server Action**: Validate class access, prerequisites, skill points > 0, not max level. On success: upsert `character_skills`, deduct 1 skill point, emit `skill:learned`.
+
+### skill:learned (Server → Client)
+```json
+{
+    "skillId": 103, "skillName": "Bash",
+    "newLevel": 4, "maxLevel": 10, "skillPoints": 4
+}
+```
+**Client Action**: Update `LearnedSkills` map, request full `skill:data` refresh.
+
+### skill:refresh (Server → Client)
+```json
+{ "skillPoints": 4 }
+```
+**Client Action**: Update `SkillPoints`, request full `skill:data` refresh.
+
+### skill:reset (Client → Server)
+**Payload**: `{}` (empty)
+**Server Action**: Sum all invested skill point levels, delete all `character_skills` rows, refund points.
+
+### skill:reset_complete (Server → Client)
+```json
+{ "skillPoints": 15, "refundedPoints": 10 }
+```
+
+### skill:use (Client → Server)
+```json
+{ "skillId": 2 }
+```
+**Server Action**: Validate skill exists/learned/SP available. Deduct SP. Apply effect (First Aid heals `effectValue` HP). Emit `skill:used` + `combat:health_update`.
+
+### skill:used (Server → Client)
+```json
+{
+    "skillId": 2,
+    "skillName": "First Aid",
+    "level": 1,
+    "spCost": 3,
+    "remainingMana": 97,
+    "maxMana": 100
+}
+```
+
+### skill:error (Server → Client)
+```json
+{ "message": "Requires Bash level 5 (current: 0)" }
+```
+**Messages**: "Invalid skill ID", "Unknown skill", "Skill not learned", "Not enough SP (need X, have Y)", "Requires [Skill] level X (current: Y)"
+
 ---
 
-**Last Updated**: 2026-02-22 (Added shop events: shop:open, shop:data, shop:bought, shop:sold, shop:error; updated player:joined to include zuzucoin field)
+**Last Updated**: 2026-02-25 (Added skill:use/skill:used, hotbar:alldata rename, hotbar:save_skill, hotbar:request)
 
-**Previous**: 2026-02-18
+**Previous**: 2026-02-23

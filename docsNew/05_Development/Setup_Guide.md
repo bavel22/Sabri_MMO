@@ -160,7 +160,43 @@ cd C:\Sabri_MMO
 node database/create_test_users.js
 ```
 
-## Step 6: Create Test Users (Optional)
+## Step 6: Automated UI Testing Setup
+
+### UI Testing Framework
+The project includes a comprehensive automated UI testing system:
+
+#### C++ Test Runner
+- **`ASabriMMOUITests`** - C++ Actor that runs automated tests
+- Located in `Source/SabriMMO/SabriMMOUITests.cpp`
+- Tests: GameInstance, PlayerCharacter, HUDManager, Inventory, Zuzucoin updates
+- Auto-executes 5 seconds after BeginPlay
+- Results displayed on-screen and in Output Log
+
+#### Blueprint Test Library  
+- **`BP_AutomationTestLibrary`** - Blueprint Function Library
+- Located in `Content/SabriMMO/Test/BP_AutomationTestLibrary.uasset`
+- Functions: Test_Shop_OpenWindow, Test_Inventory_Toggle, Test_Widget_TextDisplay, etc.
+- Integration with UE5 Automation system
+
+#### Quick Test Setup
+1. **Compile project**: Run `C:/Sabri_MMO/compile_with_tests.bat`
+2. **Open AutomationTestMap**: `Content/SabriMMO/Levels/L_AutomationTestMap.umap`
+3. **Place ASabriMMOUITests**: Drag from C++ Classes into level
+4. **Press Play**: Tests auto-run after 5 seconds
+5. **Check results**: Output Log shows PASS/FAIL status
+
+#### Test Coverage Tracking
+- **Coverage document**: `tests/client/UI_TEST_COVERAGE.md`
+- **Current coverage**: 5 core tests (100% pass rate)
+- **Planned**: Shop operations, equipment management, combat UI, chat system
+
+#### Maintenance Requirements
+- **When adding UI features**: Add corresponding test functions
+- **When modifying UI**: Update test expectations immediately  
+- **Weekly**: Run full test suite and update coverage document
+- **Pre-commit**: Run `compile_with_tests.bat` to verify no regressions
+
+## Step 7: Create Test Users (Optional)
 
 ### Via SQL
 ```bash

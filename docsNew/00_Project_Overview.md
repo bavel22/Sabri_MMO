@@ -61,18 +61,26 @@
 - Stats loaded from DB on join, saved on disconnect
 
 ### Enemy/NPC System
-- 6 enemy templates: Blobby, Hoplet, Crawlid, Shroomkin, Buzzer, Mosswort
-- 12 spawn points with configurable wander radius
+- **509 Ragnarok Online monsters** from rAthena pre-renewal database (auto-generated)
+- **46 spawn points** active (zones 1-3 only) — zones 4-9 disabled pending higher-level content
 - RO-style wandering AI (random movement within spawn radius)
 - Server-side health tracking, death, and timed respawn
-- Drop tables with chance-based loot rolling
+- **126 RO drop items** integrated with inventory system (consumables, weapons, armor, cards, etc.)
+- **15 existing game items** added as extra drops on appropriate monsters
+- Drop tables with chance-based loot rolling using pre-resolved itemIds
 
 ### Items & Inventory
-- 16 base items: 5 consumables, 8 loot/etc, 6 weapons, 3 armor
+- **148 total items**: 22 original + 126 RO items from monster drops
+  - **28 consumables** (5 original + 23 RO): Herbs, fruits, potions, scrolls
+  - **58 etc items** (8 original + 50 RO): Materials, gems, dolls, ammo
+  - **20 weapons** (6 original + 14 RO): Daggers, swords, maces, staves, bows, spears, axes, instruments
+  - **14 armor** (3 original + 11 RO): Body armor, shields, headgear, accessories
+  - **23 monster cards**: Stat bonuses and special effects
 - PostgreSQL `items` (definitions) + `character_inventory` (per-character)
 - Socket.io events: load, use consumable, equip/unequip, drop/discard
 - Equipped weapon modifies ATK, range, and ASPD
 - Stackable items with max stack limits
+- **RO item name → ID mapping** for efficient drop processing
 
 ### Chat System
 - Global chat channel via Socket.io
@@ -87,7 +95,7 @@
 - Mouse scroll zoom (200–1500 units)
 - Character faces movement direction
 
-### UI Widgets (Blueprint) — 18 Total
+### UI System — 18 Blueprint Widgets + 1 Slate Widget
 - `WBP_LoginScreen` — Login/register
 - `WBP_CharacterSelect` / `WBP_CharacterEntry` / `WBP_CreateCharacter` — Character management
 - `WBP_GameHUD` — HP/MP bars, target frame
@@ -102,13 +110,21 @@
 - `WBP_DeathOverlay` — Death screen with respawn button
 - `WBP_LootPopup` — Loot notification popup with auto-fade
 - `WBP_DamageNumber` — Floating damage numbers
+- `SBasicInfoWidget` — **NEW**: Slate HUD panel showing player name, job, HP/SP bars, base/job EXP bars, weight, zuzucoin (draggable)
+
+### Automated UI Testing
+- `ASabriMMOUITests` — C++ test runner for automated UI validation
+- `BP_AutomationTestLibrary` — Blueprint function library for UI testing
+- Tests cover: GameInstance, PlayerCharacter, HUDManager, Inventory, Zuzucoin updates
+- Auto-executes on BeginPlay with 5-second delay, results in Output Log and on-screen
+- Integration with UE5 Automation system for CI/CD pipeline support
 
 ## Project Directory Structure
 
 ```
 C:/Sabri_MMO/
 ├── client/SabriMMO/              # UE5 project
-│   ├── Source/SabriMMO/          # C++ source (19 core files + 76 variant files)
+│   ├── Source/SabriMMO/          # C++ source (23 core files + 76 variant files)
 │   │   ├── CharacterData.h       # FCharacterData struct
 │   │   ├── MMOGameInstance.*     # Auth state, character list, events
 │   │   ├── MMOHttpManager.*      # REST API client (BlueprintFunctionLibrary)
@@ -117,7 +133,10 @@ C:/Sabri_MMO/
 │   │   ├── SabriMMOGameMode.*    # Game mode stub
 │   │   ├── OtherCharacterMovementComponent.*  # Remote player movement
 │   │   ├── SabriMMO.*            # Module definition + log category
-│   │   ├── SabriMMO.Build.cs     # Build config (14 module dependencies)
+│   │   ├── SabriMMO.Build.cs     # Build config (17 module dependencies)
+│   │   ├── UI/                    # NEW: Slate UI subsystem (4 files)
+│   │   │   ├── SBasicInfoWidget.*  # Draggable Slate HUD panel
+│   │   │   └── BasicInfoSubsystem.* # UWorldSubsystem for data + socket wrapping
 │   │   ├── Variant_Combat/       # Combat system (42 files)
 │   │   ├── Variant_Platforming/  # Platforming variant (8 files)
 │   │   └── Variant_SideScrolling/ # Side-scrolling variant (26 files)
@@ -130,9 +149,13 @@ C:/Sabri_MMO/
 │   └── logs/                     # Runtime logs
 ├── database/
 │   ├── init.sql                  # Schema: users, characters, items, character_inventory
+│   ├── migrations/                # Database migrations
+│   │   └── add_ro_drop_items.sql   # 126 RO drop items migration
 │   ├── create_test_users.*       # Test user scripts
 │   └── insert_test_user.sql
 ├── scripts/                      # Utility scripts
+│   ├── extract_ro_monsters_v2.js # RO monster extraction (rAthena → JS)
+│   └── generate_ro_items_migration.js # RO items SQL + mapping generator
 ├── docs/                         # Legacy documentation (31 files)
 ├── docsNew/                      # This comprehensive documentation
 └── .gitignore
@@ -174,12 +197,15 @@ UMG, Slate, HTTP, Json, JsonUtilities
 
 ## Current Status
 
-- **Phase**: Foundation + Multiplayer + Combat + Inventory (server-side complete)
-- **Next**: Blueprint UI for inventory, equipment, and loot display
+- **Phase**: Foundation + Multiplayer + Combat + Inventory + RO Integration (server-side complete)
+- **Monsters**: 509 RO templates loaded, 46 spawns active (zones 1-3)
+- **Items**: 148 items in database (22 original + 126 RO drops)
+- **Drops**: 846 drops resolved for active zones, all items go to inventory
+- **Next**: Blueprint UI for equipment display, card system implementation
 - **Known Issues**: None critical — all resolved (see `docs/Bug_Fix_Notes.md`)
 
 ---
 
-**Last Updated**: 2026-02-17
+**Last Updated**: 2026-02-24 — Added 126 RO items, disabled zones 4-9, integrated existing items as extra drops
 **Engine**: Unreal Engine 5.7
 **Server**: Node.js 18+ LTS

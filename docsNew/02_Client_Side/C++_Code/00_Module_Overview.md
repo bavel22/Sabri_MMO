@@ -21,6 +21,9 @@
 | `GameplayStateTreeModule` | Gameplay-specific StateTree tasks |
 | `UMG` | Unreal Motion Graphics (UI) |
 | `Slate` | Low-level UI framework |
+| `SlateCore` | Core Slate widgets and rendering |
+| `SocketIOClient` | Socket.io client plugin |
+| `SIOJson` | JSON utilities for Socket.io |
 | `HTTP` | HTTP request module |
 | `Json` | JSON parsing/serialization |
 | `JsonUtilities` | JSON utility functions |
@@ -42,11 +45,12 @@ SabriMMO/Variant_SideScrolling/AI/
 SabriMMO/Variant_SideScrolling/Gameplay/
 SabriMMO/Variant_SideScrolling/Interfaces/
 SabriMMO/Variant_SideScrolling/UI/
+SabriMMO/UI/
 ```
 
 ## File Inventory
 
-### Core Module (19 files)
+### Core Module (23 files)
 
 | File | Lines | Purpose |
 |------|-------|---------|
@@ -68,6 +72,27 @@ SabriMMO/Variant_SideScrolling/UI/
 | `SabriMMOGameMode.cpp` | 9 | Game mode stub |
 | `OtherCharacterMovementComponent.h` | 18 | Empty CharacterMovementComponent subclass |
 | `OtherCharacterMovementComponent.cpp` | 6 | Empty implementation |
+
+### UI Subsystems (12 files)
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `UI/SBasicInfoWidget.h` | 74 | Slate widget header (draggable HUD panel) |
+| `UI/SBasicInfoWidget.cpp` | 560 | Slate widget implementation |
+| `UI/BasicInfoSubsystem.h` | 90 | UWorldSubsystem header (data + socket wrapping) |
+| `UI/BasicInfoSubsystem.cpp` | 613 | Subsystem implementation |
+| `UI/SDamageNumberOverlay.h` | 95 | Slate overlay header (RO-style damage numbers) |
+| `UI/SDamageNumberOverlay.cpp` | 349 | Custom OnPaint rendering with per-digit fan-out |
+| `UI/DamageNumberSubsystem.h` | 65 | UWorldSubsystem header (combat events + projection) |
+| `UI/DamageNumberSubsystem.cpp` | 346 | Subsystem implementation |
+| `UI/SSkillTreeWidget.h` | — | Slate skill tree widget header |
+| `UI/SSkillTreeWidget.cpp` | — | Slate skill tree widget implementation |
+| `UI/SkillTreeSubsystem.h` | 303 | UWorldSubsystem header (skill data + targeting) |
+| `UI/SkillTreeSubsystem.cpp` | — | Subsystem implementation |
+| `UI/SSkillTargetingOverlay.h` | — | Slate targeting cursor overlay header |
+| `UI/SSkillTargetingOverlay.cpp` | — | Targeting overlay implementation |
+| `UI/SkillDragDropOperation.h` | — | Skill drag-drop operation header |
+| `UI/SkillDragDropOperation.cpp` | — | Skill drag-drop implementation |
 
 ### Variant_Combat (42 files)
 
@@ -105,6 +130,10 @@ UObject
 │   └── UMMOGameInstance              # Auth state, character data, delegates
 ├── UBlueprintFunctionLibrary
 │   └── UHttpManager                  # Static REST API functions
+├── UWorldSubsystem
+│   ├── UBasicInfoSubsystem          # Basic Info Slate HUD manager
+│   ├── UDamageNumberSubsystem       # RO-style floating damage numbers
+│   └── USkillTreeSubsystem          # Skill tree panel + targeting
 ├── UUserWidget
 │   └── UCombatLifeBar                # Life bar widget (abstract)
 ├── UCharacterMovementComponent
@@ -140,4 +169,4 @@ AAIController
 
 ---
 
-**Last Updated**: 2026-02-17
+**Last Updated**: 2026-02-26

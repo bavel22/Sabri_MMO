@@ -124,7 +124,7 @@ IsValid(SocketManagerRef)
 | `InitializeHotbar` | 17 | Creates WBP_Hotbar widget, stores in `HotBarRef`, adds to viewport. Called by `InitializeHUD` during HUD setup. Passes self reference to WBP_Hotbar |
 | `SyncHotbarWithInventory` | 6 | Triggers a hotbar sync pass — calls `WBP_Hotbar.SyncWithInventory` to refresh quantities after inventory changes. **Guarded**: IsValid(HotBarRef) check |
 | `SendSaveHotbarSlotRequest` | 28 | Emits `hotbar:save` with `{slotIndex, inventoryId, itemId, itemName}`. Called from `WBP_HotbarSlot.OnDrop`. **Guarded**: IsValid(SocketManagerRef) check |
-| `PopulateHotbarFromServer` | 60 | Parses `hotbar:data` JSON array. For each slot entry: calls `GetSlotAtIndex` on WBP_Hotbar → calls `SetSlotData` on the matching WBP_HotbarSlot (slotIndex, inventoryId, itemId, itemName, quantity). **Guarded**: IsValid(HotBarRef) check |
+| `PopulateHotbarFromServer` | 60 | Parses `hotbar:alldata` JSON array. For each slot entry: calls `GetSlotAtIndex` on WBP_Hotbar → calls `SetSlotData` on the matching WBP_HotbarSlot (slotIndex, inventoryId, itemId, itemName, quantity). Supports both item and skill slots via `slot_type` field. **Guarded**: IsValid(HotBarRef) check |
 | `UseHotbarSlot` | 39 | Called by BP_MMOCharacter when `IA_Hotbar_1`–`IA_Hotbar_9` are pressed (passes slot index 0–8). Calls `GetSlotAtIndex` on WBP_Hotbar → checks if slot has valid `HotbarInventoryId` → calls `SendUseItemRequest(HotbarInventoryId)`. **Guarded**: IsValid(HotBarRef) + IsValid slot ref + HotbarInventoryId > 0 |
 
 ### PopulateInventory — Detailed Flow (111 nodes)

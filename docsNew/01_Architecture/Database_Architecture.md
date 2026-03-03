@@ -154,17 +154,20 @@ await redisClient.connect(); // Required for redis v4+
 
 ### `character_hotbar`
 
-Persists hotbar slot assignments per character. The FK to `character_inventory` uses **ON DELETE CASCADE** — when an inventory item is deleted (fully consumed, dropped), the hotbar row auto-clears. No server-side cleanup code needed.
+Persists hotbar slot assignments per character. Supports both **item** and **skill** slots via `slot_type`. Item slots use `inventory_id`/`item_id`; skill slots NULL those fields and use `skill_id`/`skill_name`. The FK to `character_inventory` uses **ON DELETE CASCADE** — when an inventory item is deleted (fully consumed, dropped), the hotbar row auto-clears.
 
 | Column | Type | Constraints | Default | Description |
 |--------|------|-------------|---------|-------------|
 | `character_id` | INTEGER | PK, FK → characters ON DELETE CASCADE | — | Owner character |
-| `slot_index` | INTEGER | PK, CHECK (0–8) | — | Hotbar slot position (0-indexed) |
-| `inventory_id` | INTEGER | NOT NULL, FK → character_inventory ON DELETE CASCADE | — | Inventory entry in this slot |
-| `item_id` | INTEGER | NOT NULL | — | Item ID (denormalized for display) |
-| `item_name` | VARCHAR(100) | NOT NULL | '' | Item name (denormalized for display) |
+| `slot_index` | INTEGER | PK, CHECK (1–9) | — | Hotbar slot position (1-indexed) |
+| `inventory_id` | INTEGER | NULLABLE, FK → character_inventory ON DELETE CASCADE | NULL | Inventory entry (NULL for skill slots) |
+| `item_id` | INTEGER | NULLABLE | NULL | Item ID (NULL for skill slots) |
+| `item_name` | VARCHAR(100) | NOT NULL | '' | Item name (empty for skill slots) |
+| `slot_type` | VARCHAR(10) | NOT NULL | 'item' | `'item'` or `'skill'` |
+| `skill_id` | INTEGER | NULLABLE | 0 | Skill ID (0/NULL for item slots) |
+| `skill_name` | VARCHAR(100) | NULLABLE | '' | Skill display name (empty for item slots) |
 
-**Migration:** `database/migrations/add_character_hotbar.sql`
+**Migration:** `database/migrations/add_character_hotbar.sql` + runtime `ALTER TABLE` in `index.js` startup (adds `slot_type`, `skill_id`, `skill_name` columns; makes `inventory_id`/`item_id` nullable).
 
 ## Indexes
 
@@ -179,43 +182,72 @@ CREATE INDEX IF NOT EXISTS idx_hotbar_character ON character_hotbar(character_id
 
 ## Seed Data
 
-### Consumables (item_id 1001–1005)
-| ID | Name | HP Restore | SP Restore | Price |
-|----|------|-----------|-----------|-------|
-| 1001 | Crimson Vial | 50 HP | — | 25 |
-| 1002 | Amber Elixir | 150 HP | — | 100 |
-| 1003 | Golden Salve | 350 HP | — | 275 |
-| 1004 | Azure Philter | — | 60 SP | 500 |
-| 1005 | Roasted Haunch | 70 HP | — | 25 |
+### Consumables (item_id 1001–1033)
+| ID | Name | HP Restore | SP Restore | Price | Type |
+|----|------|-----------|-----------|-------|------|
+| **Original Consumables** | | | | | |
+| 1001 | Crimson Vial | 50 HP | — | 25 | consumable |
+| 1002 | Amber Elixir | 150 HP | — | 100 | consumable |
+| 1003 | Golden Salve | 350 HP | — | 275 | consumable |
+| 1004 | Azure Philter | — | 60 SP | 500 | consumable |
+| 1005 | Roasted Haunch | 70 HP | — | 25 | consumable |
+| **RO Consumables (1006–1033)** | | | | | |
+| 1006-1033 | Herbs, fruits, potions, scrolls | Various | Various | 7-350 | consumable |
 
-### Loot/Etc Items (item_id 2001–2008)
-| ID | Name | Weight | Price | Max Stack |
-|----|------|--------|-------|-----------|
-| 2001 | Gloopy Residue | 1 | 3 | 999 |
-| 2002 | Viscous Slime | 1 | 7 | 999 |
-| 2003 | Chitin Shard | 2 | 14 | 999 |
-| 2004 | Downy Plume | 1 | 5 | 999 |
-| 2005 | Spore Cluster | 1 | 10 | 999 |
-| 2006 | Barbed Limb | 1 | 12 | 999 |
-| 2007 | Verdant Leaf | 3 | 8 | 99 |
-| 2008 | Silken Tuft | 1 | 4 | 999 |
+**Total**: 28 consumables (5 original + 23 RO)
 
-### Weapons (item_id 3001–3006)
+### Loot/Etc Items (item_id 2001–2058)
+| ID | Name | Weight | Price | Max Stack | Type |
+|----|------|--------|-------|-----------|------|
+| **Original Items (2001–2008)** | | | | | |
+| 2001 | Gloopy Residue | 1 | 3 | 999 | etc |
+| 2002 | Viscous Slime | 1 | 7 | 999 | etc |
+| 2003 | Chitin Shard | 2 | 14 | 999 | etc |
+| 2004 | Downy Plume | 1 | 5 | 999 | etc |
+| 2005 | Spore Cluster | 1 | 10 | 999 | etc |
+| 2006 | Barbed Limb | 1 | 12 | 999 | etc |
+| 2007 | Verdant Leaf | 3 | 8 | 99 | etc |
+| 2008 | Silken Tuft | 1 | 4 | 999 | etc |
+| **RO Etc Items (2009–2058)** | | | | | |
+| 2009-2058 | Materials, gems, dolls, ammo | 0-30 | 2-3000 | 99/999 | etc |
+
+**Total**: 58 etc items (8 original + 50 RO)
+
+### Weapons (item_id 3001–3020)
 | ID | Name | Type | ATK | Range | ASPD Mod | Req Lvl |
 |----|------|------|-----|-------|----------|---------|
+| **Original Weapons (3001–3006)** | | | | | | |
 | 3001 | Rustic Shiv | dagger | 17 | 150 | +5 | 1 |
 | 3002 | Keen Edge | dagger | 30 | 150 | +5 | 1 |
 | 3003 | Stiletto Fang | dagger | 43 | 150 | +5 | 12 |
 | 3004 | Iron Cleaver | one_hand_sword | 25 | 150 | 0 | 2 |
 | 3005 | Crescent Saber | one_hand_sword | 49 | 150 | 0 | 18 |
 | 3006 | Hunting Longbow | bow | 35 | 800 | -3 | 4 |
+| **RO Weapons (3007–3020)** | | | | | | |
+| 3007-3020 | Daggers, swords, maces, staves, bows, spears, axes, instruments | 15-55 | 150-800 | -3 to +5 | 1-27 |
 
-### Armor (item_id 4001–4003)
-| ID | Name | DEF | Weight | Req Lvl |
-|----|------|-----|--------|---------|
-| 4001 | Linen Tunic | 1 | 10 | 1 |
-| 4002 | Quilted Vest | 4 | 80 | 1 |
-| 4003 | Ringweave Hauberk | 8 | 150 | 20 |
+**Total**: 20 weapons (6 original + 14 RO)
+
+### Armor (item_id 4001–4014)
+| ID | Name | Type | DEF | Weight | Req Lvl | Slot |
+|----|------|------|-----|--------|---------|------|
+| **Original Armor (4001–4003)** | | | | | | |
+| 4001 | Linen Tunic | armor | 1 | 10 | 1 | armor |
+| 4002 | Quilted Vest | armor | 4 | 80 | 1 | armor |
+| 4003 | Ringweave Hauberk | armor | 8 | 150 | 20 | armor |
+| **RO Armor/Headgear/Accessories (4004–4014)** | | | | | | |
+| 4004-4014 | Shield, hats, sandals, robes, accessories | 0-3 | 10-4000 | 1 | shield/head_top/footgear/accessory |
+
+**Total**: 14 armor items (3 original + 11 RO)
+
+### Monster Cards (item_id 5001–5023)
+| ID | Name | Effect | Price | Type |
+|----|------|--------|-------|------|
+| 5001-5023 | Stat bonuses and special effects | Various | 4500 | card |
+
+**Total**: 23 cards
+
+**Grand Total**: 148 items (22 original + 126 RO)
 
 ## Redis Cache Schema
 
@@ -233,7 +265,8 @@ The server automatically ensures schema completeness on startup:
 4a. **Derived bonus columns**: `ALTER TABLE items ADD COLUMN IF NOT EXISTS hit_bonus/flee_bonus/critical_bonus`
 4. **Inventory table**: `CREATE TABLE IF NOT EXISTS character_inventory (...)`
 5. **Indexes**: `CREATE INDEX IF NOT EXISTS ...`
-6. **Seed data**: If `items` table is empty, insert all 16 base items
+6. **Seed data**: If `items` table is empty, insert all 148 base items (22 original + 126 RO items)
+7. **RO items migration**: Apply `database/migrations/add_ro_drop_items.sql` for RO drop items
 
 ## Key Queries Used by Server
 
