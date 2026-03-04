@@ -240,7 +240,17 @@ Server broadcasts:
     "isMoving": true
 }
 ```
-**Broadcast rate**: Every 200ms during wander movement. `isMoving: false` sent when arrived at destination.
+**Broadcast rate**: Every 200ms during wander/chase movement. `isMoving: false` sent when stopped (arrived at destination, entered attack state, or gave up chase). Optional `knockback: true` on Fire Wall pushback.
+
+### enemy:attack (Server → All)
+```json
+{
+    "enemyId": 2000001,
+    "targetId": 1,
+    "attackMotion": 672
+}
+```
+**Trigger**: Enemy AI ATTACK state deals damage to a player. `targetId` is the player character ID. `attackMotion` is the animation duration in ms (from RO template). Client can use this for enemy attack animation playback.
 
 ### enemy:death (Server → All)
 ```json
@@ -637,6 +647,6 @@ _(Empty payload)_
 
 ---
 
-**Last Updated**: 2026-02-25 (Added skill:use/skill:used, hotbar:alldata rename, hotbar:save_skill, hotbar:request)
+**Last Updated**: 2026-03-04 (Added enemy:attack event, updated enemy:move description for chase/knockback)
 
 **Previous**: 2026-02-23

@@ -152,7 +152,25 @@ Each RO template contains:
     respawnMs: 5500,
     targetPlayerId: null,
     lastAttackTime: 0,
-    inCombatWith: new Set()
+    inCombatWith: new Set(),
+    // --- RO Classic AI fields (added 2026-03-04) ---
+    aiCode: 2,                     // rAthena AI type code (1-27)
+    modeFlags: {                   // Parsed from AI_TYPE_MODES[aiCode]
+        canMove: true, looter: true, aggressive: false, assist: false,
+        castSensorIdle: false, noRandomWalk: false, noCast: false, canAttack: true,
+        castSensorChase: false, changeChase: false, angry: false,
+        changeTargetMelee: false, changeTargetChase: false,
+        targetWeak: false, randomTarget: false,
+        mvp: false, knockbackImmune: false, detector: false, statusImmune: false
+    },
+    moveSpeed: 125,                // UE units/sec: (50 / walkSpeed) * 1000
+    chaseRange: 600,               // Max chase distance from aggroOrigin
+    aiState: 'idle',               // AI_STATE: 'idle', 'chase', 'attack', 'dead'
+    aggroOriginX: null,            // Position when aggro started (for chase range check)
+    aggroOriginY: null,
+    lastDamageTime: 0,             // For hit stun (damageMotion ms of inaction)
+    lastAggroScan: 0,              // Throttle aggressive mob scans (every 500ms)
+    pendingTargetSwitch: null      // { charId, hitType } — consumed by AI tick
 }
 ```
 
@@ -165,77 +183,247 @@ let nextEnemyId = 2000001;  // Starting ID
 
 Enemy IDs start at 2,000,001 to avoid collision with player character IDs.
 
-## Wandering AI
+## RO Classic AI System
+
+### AI Code Lookup
+
+Each monster is assigned an rAthena AI type code (1-27) that determines its behavior. Codes are loaded from `server/src/ro_monster_ai_codes.js` (1,004 monster ID → AI code mappings). Monsters not in the lookup table fall back to a default based on their `aiType` field: passive→1, aggressive→5, reactive→3.
+
+```javascript
+const aiCode = (MONSTER_AI_CODES && MONSTER_AI_CODES[roId]) || getDefaultAiCode(template.aiType);
+const hexMode = AI_TYPE_MODES[aiCode] || 0x0081;
+const modeFlags = parseModeFlags(hexMode);
+```
+
+### Mode Flags (MD Bitmask)
+
+Each AI code maps to a hex bitmask in `AI_TYPE_MODES`. The bitmask is parsed into boolean flags:
+
+| Flag | Hex | Effect |
+|------|-----|--------|
+| `canMove` | 0x0001 | Monster can move (false = plant/immobile) |
+| `looter` | 0x0002 | Picks up items from ground |
+| `aggressive` | 0x0004 | Attacks players on sight within aggroRange |
+| `assist` | 0x0008 | Joins combat when same-type ally is attacked nearby |
+| `castSensorIdle` | 0x0010 | Detects skill casting while idle |
+| `noRandomWalk` | 0x0020 | Never wanders (stays at spawn) |
+| `canAttack` | 0x0080 | Can perform attacks (false = cannot fight back) |
+| `changeChase` | 0x0400 | Switches to closer target while chasing |
+| `angry` | 0x0800 | Uses Angry skill behavior (KE/Lex Aeterna triggers) |
+| `changeTargetMelee` | 0x1000 | Switches target when hit in ATTACK state |
+| `changeTargetChase` | 0x2000 | Switches target when hit in CHASE state |
+| `targetWeak` | 0x4000 | Only aggros players 5+ levels below monster |
+| `randomTarget` | 0x8000 | Picks random attacker each swing |
+| `mvp` | 0x80000 | MVP-class monster (special drops, announcements) |
+| `knockbackImmune` | 0x200000 | Immune to knockback effects |
+| `detector` | 0x2000000 | Can see hidden/cloaked players |
+| `statusImmune` | 0x4000000 | Immune to status effects |
+
+### AI Type Code Reference
+
+| Code | Hex Mode | Behavior | Example Monsters |
+|------|----------|----------|-----------------|
+| 1 | 0x0081 | Passive, can move+attack | Fabre, Lunatic, Willow |
+| 2 | 0x0083 | Passive, looter | Poring, Drops, Poporing |
+| 3 | 0x1089 | Passive, assist, changeTargetMelee | Hornet, Condor, Wolf |
+| 4 | 0x3885 | Aggressive melee | Zombie, Orc Warrior, Ghoul |
+| 5 | 0x2085 | Aggressive ranged | Archer Skeleton, Goblin Archer |
+| 6 | 0x0000 | Immobile (no flags) | Plants, Eggs, Treasure Chests |
+| 7 | 0x108B | Passive, looter, assist | Thief Bug, Andre, Yoyo |
+| 9 | 0x3095 | Aggressive, assist, castSensor | Isis, Mantis, Raydric |
+| 13 | 0x308D | Aggressive, assist | Kobold, Desert Wolf, Goblin |
+| 21 | 0x3695 | Boss/MVP AI | Baphomet, Osiris, Drake |
+| 25 | 0x0001 | Crystal (move only) | Wind/Earth/Fire/Water Crystal |
+| 26 | 0xB695 | Aggressive ranged, special | Ragged Zombie, Fire Imp |
 
 ### Constants
+
 ```javascript
 const ENEMY_AI = {
-    WANDER_TICK_MS: 500,        // AI loop runs every 500ms
+    TICK_MS: 200,               // AI loop runs every 200ms (5× per second)
     WANDER_PAUSE_MIN: 3000,     // 3s minimum idle pause
     WANDER_PAUSE_MAX: 8000,     // 8s maximum idle pause
-    WANDER_SPEED: 60,           // 60 units per second
-    WANDER_DIST_MIN: 100,       // Min offset per axis
-    WANDER_DIST_MAX: 300,       // Max offset per axis
-    MOVE_BROADCAST_MS: 200      // Broadcast position every 200ms
+    WANDER_DIST_MIN: 100,       // Min wander offset per axis (UE units)
+    WANDER_DIST_MAX: 300,       // Max wander offset per axis (UE units)
+    MOVE_BROADCAST_MS: 200,     // Broadcast position every 200ms during movement
+    AGGRO_SCAN_MS: 500,         // Aggressive mobs scan for players every 500ms
+    ASSIST_RANGE: 550,          // Assist detection range (11 RO cells × 50 UE units)
+    CHASE_GIVE_UP_EXTRA: 200,   // Extra UE units beyond chaseRange before giving up
+    IDLE_AFTER_CHASE_MS: 2000   // Delay before resuming wander after losing target
 };
 ```
 
-### Wander Algorithm
+### Movement Speed
 
-```
-Every 500ms:
-    For each enemy:
-        Skip if dead or inCombatWith.size > 0
-        
-        If NOT wandering:
-            If now >= nextWanderTime:
-                Pick random target point:
-                    offset = WANDER_DIST_MIN + random * (DIST_MAX - DIST_MIN)
-                    newX = enemy.x + offset * randomSign
-                    newY = enemy.y + offset * randomSign
-                    Clamp to wanderRadius from spawn point
-                Set isWandering = true
-        
-        If wandering:
-            Move toward target at WANDER_SPEED * (TICK_MS / 1000) per tick
-            distance = sqrt(dx² + dy²)
-            
-            If distance < 10:
-                Stop, set isWandering = false
-                Schedule next wander (3-8s random pause)
-                Broadcast final position (isMoving: false)
-            Else:
-                Move by stepSize = min(1, speed*dt / distance) ratio
-                Broadcast position every 200ms (isMoving: true)
-```
-
-### Wander Clamping
-
-Enemies are clamped to their `wanderRadius` from spawn point to prevent infinite drift:
+Per-monster speed calculated from the RO `walkSpeed` template field:
 
 ```javascript
-const distFromSpawn = Math.sqrt(dxFromSpawn² + dyFromSpawn²);
-if (distFromSpawn > wanderRadius) {
-    const ratio = wanderRadius / distFromSpawn;
-    newX = spawnX + dxFromSpawn * ratio;
-    newY = spawnY + dyFromSpawn * ratio;
-}
+const moveSpeed = (50 / walkSpeedMs) * 1000;  // UE units per second
+// Example: walkSpeed 400 → moveSpeed 125 u/s
+// Example: walkSpeed 200 → moveSpeed 250 u/s (fast monster)
 ```
 
-## Combat Interaction
+- **Chase**: Full `moveSpeed`
+- **Wander**: 60% of `moveSpeed` (slower, relaxed movement)
 
-When a player attacks an enemy:
-1. Enemy is added to `autoAttackState` with `isEnemy: true`
-2. Enemy's `inCombatWith` set gets the attacker's character ID
-3. Enemy's `isWandering` is set to `false` (stops wandering immediately)
-4. Combat tick processes attacks at attacker's ASPD interval
+### AI State Machine
 
-When combat ends:
-- On player `combat:stop_attack`: remove from `inCombatWith`
-- On player disconnect: remove from `inCombatWith`
-- On enemy death: clear entire `inCombatWith` set, clear all auto-attack states
+```
+┌────────────────────────────────────────────────────────────┐
+│                    AI Tick (every 200ms)                    │
+├────────────────────────────────────────────────────────────┤
+│                                                            │
+│  ┌──────────┐   aggro scan    ┌──────────┐  in range     ┌──────────┐
+│  │          │ ──────────────► │          │ ────────────► │          │
+│  │   IDLE   │   or attacked   │  CHASE   │               │  ATTACK  │
+│  │          │ ◄────────────── │          │ ◄──────────── │          │
+│  └──────────┘   chase too far └──────────┘  out of range └──────────┘
+│       │              │                           │
+│       │              │         target dies        │
+│       ▼              └───────────────────────────┘
+│   (wander)                       │
+│                                  ▼
+│                            ┌──────────┐
+│                            │   DEAD   │  → respawn → IDLE
+│                            └──────────┘
+└────────────────────────────────────────────────────────────┘
+```
 
-While `inCombatWith.size > 0`, the enemy AI tick skips this enemy (no wandering during combat).
+#### IDLE State
+
+- **Aggressive mobs** (`modeFlags.aggressive`): Scan for players within `aggroRange` every 500ms via `findAggroTarget()`. Closest player becomes target → transition to CHASE.
+- **TargetWeak** (`modeFlags.targetWeak`): Only aggro players 5+ levels below monster level.
+- **Passive mobs**: Wander randomly at 60% moveSpeed. Clamp to `wanderRadius` from spawn.
+- **Hit stun**: If `damageMotion` ms haven't elapsed since last damage, skip movement.
+- **noRandomWalk**: Never wanders (stays at spawn point).
+
+#### CHASE State
+
+1. **Validate target**: If target disconnected/dead, `pickNextTarget()` from `inCombatWith` or go IDLE.
+2. **Process pending target switch**: If `pendingTargetSwitch` was set by a damage hook, apply it.
+3. **Chase range check**: If distance from `aggroOrigin` exceeds `chaseRange + 200`, give up → IDLE, clear combat.
+4. **Attack range check**: If within `attackRange + RANGE_TOLERANCE` → transition to ATTACK.
+5. **Move toward target**: At full `moveSpeed`, broadcast position every 200ms.
+6. **ChangeChase** (`modeFlags.changeChase`): While chasing, if any combatant is within attack range, switch to them.
+
+#### ATTACK State
+
+1. **Validate target**: Dead/disconnected → pick next or IDLE.
+2. **Process pending target switch**: Apply if present.
+3. **RandomTarget** (`modeFlags.randomTarget`): Pick random alive combatant each attack cycle.
+4. **Range check**: If target moved out of range → CHASE.
+5. **Attack delay**: Wait `attackDelay` ms between attacks.
+6. **Calculate damage**: Uses `calculateEnemyDamage()` which calls existing `roPhysicalDamage()`.
+7. **Broadcast**: `combat:damage` + `enemy:attack` + `combat:health_update`.
+8. **Player death**: Set `isDead`, stop auto-attacks, emit `combat:death`, save HP to DB, pick next target or IDLE.
+
+### Aggro System
+
+**No threat table** — RO Classic uses first-hit priority with mode-flag-based switching.
+
+#### `setEnemyAggro(enemy, attackerCharId, hitType)`
+
+Called from all damage paths (auto-attack, all skills, AOE, Fire Wall):
+
+1. Skip if enemy is dead or can't attack (plant-type).
+2. Add attacker to `inCombatWith`, stop wandering, record `lastDamageTime`.
+3. If no current target, or in IDLE state, or `shouldSwitchTarget()` returns true: set new target.
+4. If entering aggro from IDLE: record `aggroOriginX/Y`.
+5. Mobile mobs → CHASE state. Immobile mobs → ATTACK state directly.
+6. Call `triggerAssist()` to alert nearby same-type mobs.
+
+#### Target Switching Rules — `shouldSwitchTarget()`
+
+| Mode Flag | State | Behavior |
+|-----------|-------|----------|
+| `changeTargetMelee` | ATTACK | Switch to new attacker on each hit |
+| `changeTargetChase` | CHASE | Switch to new attacker on each hit |
+| `randomTarget` | ATTACK | Random combatant each swing (handled in ATTACK state) |
+
+#### Assist System — `triggerAssist()`
+
+When an enemy is attacked, all nearby same-type monsters with the `assist` flag join in:
+
+```
+For each enemy in enemies:
+    Skip if same enemy, dead, not IDLE, different templateId, no assist flag
+    Check distance: sqrt((other.x - attacked.x)² + (other.y - attacked.y)²)
+    If distance <= ASSIST_RANGE (550 UE units / 11 RO cells):
+        Set other.targetPlayerId = attacker
+        Set other.aiState = CHASE
+        Record aggroOrigin, add to inCombatWith
+```
+
+### Hit Stun (damageMotion)
+
+When an enemy takes damage, `lastDamageTime` is recorded. For `damageMotion` milliseconds after damage, the enemy cannot move or attack (the AI tick skips movement/attack but still validates state).
+
+### Enemy → Player Damage
+
+`calculateEnemyDamage()` reuses the existing `roPhysicalDamage()` formula:
+
+```javascript
+const attackerStats = {
+    str, agi, vit, int, dex, luk,     // From enemy.stats
+    level: enemy.level,
+    weaponATK: enemy.damage,
+    passiveATK: 0
+};
+const attackerInfo = {
+    weaponType: (enemy.attackRange > MELEE_RANGE) ? 'bow' : 'bare_hand',
+    weaponElement: enemy.element.type || 'neutral',
+    weaponLevel: 1,
+    buffMods: getBuffStatModifiers(enemy)
+};
+return calculatePhysicalDamage(attackerStats, getEffectiveStats(player), ...);
+```
+
+### Boss Protocol
+
+Monsters with `monsterClass: 'boss'` or `'mvp'` automatically get:
+- `knockbackImmune: true` — Immune to Fire Wall knockback and other displacement
+- `statusImmune: true` — Immune to Freeze, Stone Curse, etc.
+- `detector: true` — Can detect hidden/cloaked players
+
+### Combat Interaction Hooks
+
+Aggro is triggered from **all** damage paths:
+
+| Damage Source | Hook Location | hitType |
+|---------------|--------------|---------|
+| `combat:attack` handler | Player clicks enemy | `'melee'` |
+| Combat tick auto-attack | Each ASPD-interval hit | `'melee'` |
+| Bash | Single-target skill | `'melee'` |
+| Bolt skills (Fire/Cold/Lightning) | Multi-hit skill | `'skill'` |
+| Soul Strike | Multi-hit ghost skill | `'skill'` |
+| Frost Diver | Single-target water skill | `'skill'` |
+| Meteor Storm | AOE fire skill | `'skill'` |
+| Thunderstorm | AOE wind skill | `'skill'` |
+| Napalm Beat | AOE ghost skill | `'skill'` |
+| Fire Ball | AOE fire skill | `'skill'` |
+| Fire Wall | Persistent fire damage | `'skill'` |
+
+### Player Disconnect Cleanup
+
+When a player disconnects:
+1. Remove from all enemies' `inCombatWith` sets.
+2. For each enemy targeting the disconnected player: `pickNextTarget()` from remaining combatants, or go IDLE if none.
+
+### Wander Algorithm (IDLE State)
+
+Wander behavior is extracted into `processWander()`:
+
+```
+If NOT wandering AND now >= nextWanderTime:
+    Pick random target: spawnX ± (100-300), spawnY ± (100-300)
+    Clamp to wanderRadius from spawn
+    Set isWandering = true
+
+If wandering:
+    Move toward target at 60% moveSpeed
+    If distance < 10: stop, schedule next wander (3-8s)
+    Else: move by stepSize, broadcast every 200ms
+```
 
 ## Drop Tables
 
@@ -330,13 +518,14 @@ These extra drops are configured in `EXISTING_ITEM_EXTRA_DROPS` and injected int
 
 ### Death
 ```
-1. enemy.isDead = true
+1. enemy.isDead = true, enemy.aiState = AI_STATE.DEAD, enemy.targetPlayerId = null
 2. Clear all auto-attackers (delete from autoAttackState)
    — Do NOT send combat:target_lost (causes crash)
 3. enemy.inCombatWith.clear()
 4. Broadcast enemy:death to all
-5. Roll drops → addItemToInventory for killer → emit loot:drop
-6. setTimeout(respawn, enemy.respawnMs)
+5. Award EXP to killer (base + job), process level ups
+6. Roll drops → addItemToInventory for killer → emit loot:drop
+7. setTimeout(respawn, enemy.respawnMs)
 ```
 
 ### Respawn
@@ -347,7 +536,7 @@ After respawnMs timer fires:
 3. Reset position to spawn point
 4. enemy.targetPlayerId = null
 5. enemy.inCombatWith = new Set()
-6. initEnemyWanderState(enemy)
+6. initEnemyWanderState(enemy) — resets aiState to IDLE, clears all AI fields
 7. Broadcast enemy:spawn to all
 ```
 
@@ -356,7 +545,8 @@ After respawnMs timer fires:
 | Event | Direction | When | Payload |
 |-------|-----------|------|---------|
 | `enemy:spawn` | S→All | Server startup, respawn, player join | `{ enemyId, templateId, name, level, health, maxHealth, monsterClass, size, race, element, x, y, z }` |
-| `enemy:move` | S→All | During wander movement (every 200ms) | `{ enemyId, x, y, z, targetX, targetY, isMoving }` |
+| `enemy:move` | S→All | During wander/chase movement (every 200ms) | `{ enemyId, x, y, z, targetX, targetY, isMoving }` |
+| `enemy:attack` | S→All | Enemy attacks a player (AI ATTACK state) | `{ enemyId, targetId, attackMotion }` |
 | `enemy:death` | S→All | Enemy HP reaches 0 | `{ enemyId, enemyName, killerId, killerName, isEnemy, isDead, exp, timestamp }` |
 | `enemy:health_update` | S→All | After each hit on enemy | `{ enemyId, health, maxHealth, inCombat }` |
 | `loot:drop` | S→Killer | After enemy death, drops rolled | `{ enemyId, enemyName, items: [{ itemId, itemName, quantity, icon, itemType, isMvpDrop }] }` |
@@ -371,22 +561,27 @@ New fields added to support RO monster data on client:
 
 ## Design Patterns Used
 
-- **Manager Pattern** — `enemies` Map centralizes all enemy state server-side
-- **State Machine Pattern** — Enemy AI uses `isDead` + `inCombatWith.size` + `isWandering` states
-- **Event-Driven Architecture** — Socket.io broadcasts for all state changes
-- **Single Responsibility** — `rollEnemyDrops()` handles only drop logic, `spawnEnemy()` only spawning
-- **Dependency Injection** — Templates loaded from external `ro_monster_templates.js`, not hardcoded
+| Pattern | How Applied |
+|---------|-------------|
+| Manager | `enemies` Map centralizes all enemy state server-side |
+| State Machine | Formal `AI_STATE` enum (IDLE/CHASE/ATTACK/DEAD) with clean transitions |
+| Event-Driven | Socket.io broadcasts for all state changes (move, attack, death, health) |
+| Single Responsibility | `setEnemyAggro()`, `triggerAssist()`, `calculateEnemyDamage()` each do one thing |
+| Dependency Injection | Templates from `ro_monster_templates.js`, AI codes from `ro_monster_ai_codes.js` |
+| Data-Driven Design | Mode flags parsed from bitmask per AI code — no hardcoded per-monster behavior |
+| Strategy Pattern | `shouldSwitchTarget()` evaluates mode flags to determine target switching rules |
 
 ## Files
 
 | File | Purpose |
 |------|---------|
 | `server/src/ro_monster_templates.js` | 509 RO monster templates (auto-generated, 610KB) |
+| `server/src/ro_monster_ai_codes.js` | 1,004 monster ID → rAthena AI type code mappings |
 | `server/src/ro_monsters_summary.json` | Summary JSON for verification |
 | `server/src/ro_item_mapping.js` | RO item name → ID mapping + existing item extra drops config |
 | `scripts/extract_ro_monsters_v2.js` | Extraction script (rAthena YAML → JS templates) |
 | `scripts/generate_ro_items_migration.js` | Generates SQL migration + item mapping from drops |
 | `database/migrations/add_ro_drop_items.sql` | 126 RO drop items migration (consumables, etc, weapons, armor, cards) |
-| `server/src/index.js` | Enemy system runtime (adapter, spawn, AI, combat, drops) |
+| `server/src/index.js` | Enemy system runtime (adapter, spawn, AI state machine, combat, drops) |
 
-**Last Updated**: 2026-02-24 — Added 126 RO drop items, disabled zones 4-9, integrated existing items as extra drops
+**Last Updated**: 2026-03-04 — RO Classic AI system: state machine, aggro, assist, target switching, enemy attacks, per-monster AI codes

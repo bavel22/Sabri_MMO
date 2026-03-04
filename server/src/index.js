@@ -30,6 +30,8 @@ const {
     ALL_SKILLS, SKILL_MAP, CLASS_SKILLS, CLASS_PROGRESSION,
     getAvailableSkills, canLearnSkill
 } = require('./ro_skill_data');
+// Import RO monster AI codes (rAthena pre-renewal — maps monster ID → AI type code)
+const { MONSTER_AI_CODES } = require('./ro_monster_ai_codes');
 // Import RO pre-renewal damage formulas (element table, size penalty, HIT/FLEE, critical, DEF)
 const {
     ELEMENT_TABLE, SIZE_PENALTY,
@@ -124,6 +126,99 @@ const COMBAT = {
     RESPAWN_DELAY_MS: 5000,
     SPAWN_POSITION: { x: 0, y: 0, z: 300 }
 };
+
+// ============================================================
+// RO Monster Mode Flags (bitmask) — from rAthena doc/mob_db_mode_list.txt
+// Combined with AI type codes to determine per-monster behavior
+// ============================================================
+const MD = {
+    CANMOVE:            0x0001,
+    LOOTER:             0x0002,
+    AGGRESSIVE:         0x0004,
+    ASSIST:             0x0008,
+    CASTSENSORIDLE:     0x0010,
+    NORANDOMWALK:       0x0020,
+    NOCAST:             0x0040,
+    CANATTACK:          0x0080,
+    CASTSENSORCHASE:    0x0200,
+    CHANGECHASE:        0x0400,
+    ANGRY:              0x0800,
+    CHANGETARGETMELEE:  0x1000,
+    CHANGETARGETCHASE:  0x2000,
+    TARGETWEAK:         0x4000,
+    RANDOMTARGET:       0x8000,
+    MVP:                0x80000,
+    KNOCKBACKIMMUNE:    0x200000,
+    DETECTOR:           0x2000000,
+    STATUSIMMUNE:       0x4000000,
+};
+
+// rAthena AI Type → hex mode bitmask (from rAthena Issue #926)
+const AI_TYPE_MODES = {
+    1:  0x0081,  // Passive: CanMove + CanAttack
+    2:  0x0083,  // Passive + Looter
+    3:  0x1089,  // Passive + Assist + ChangeTargetMelee + CanAttack
+    4:  0x3885,  // Angry: Aggressive + Assist + ChangeTargetMelee/Chase + Angry
+    5:  0x2085,  // Aggressive + ChangeTargetChase + CanAttack
+    6:  0x0000,  // Plant/Immobile: no flags
+    7:  0x108B,  // Passive + Looter + Assist + ChangeTargetMelee + CanAttack
+    8:  0x7085,  // Aggressive + ChangeTarget(All) + TargetWeak + CanAttack
+    9:  0x3095,  // Aggressive + ChangeTarget(Melee/Chase) + CastSensorIdle + CanAttack
+    10: 0x0084,  // Aggressive + Immobile (no CanMove)
+    11: 0x0084,  // Guardian: Aggressive + Immobile
+    12: 0x2085,  // Guardian: Aggressive + ChangeTargetChase
+    13: 0x308D,  // Aggressive + Assist + ChangeTarget(Melee/Chase) + CanAttack
+    17: 0x0091,  // Passive + CastSensorIdle + CanAttack
+    19: 0x3095,  // Aggressive + ChangeTarget(Melee/Chase) + CastSensorIdle
+    20: 0x3295,  // Aggressive + ChangeTarget(Melee/Chase) + CastSensor(Idle/Chase)
+    21: 0x3695,  // Like 20 + ChangeChase
+    24: 0x00A1,  // Slave: Passive + NoRandomWalk + CanAttack
+    25: 0x0001,  // Pet: CanMove only (no CanAttack)
+    26: 0xB695,  // Aggressive + all ChangeTarget + CastSensor + RandomTarget
+    27: 0x8084,  // Aggressive + Immobile + RandomTarget
+};
+
+// Enemy AI States (server-side state machine)
+const AI_STATE = {
+    IDLE:    'idle',     // Wandering or standing (scans for aggro if aggressive)
+    CHASE:   'chase',    // Moving toward target player
+    ATTACK:  'attack',   // In attack range, auto-attacking target
+    DEAD:    'dead',     // Dead, awaiting respawn
+};
+
+// Parse hex mode bitmask into boolean flags for fast runtime checks
+function parseModeFlags(hexMode) {
+    return {
+        canMove:            !!(hexMode & MD.CANMOVE),
+        looter:             !!(hexMode & MD.LOOTER),
+        aggressive:         !!(hexMode & MD.AGGRESSIVE),
+        assist:             !!(hexMode & MD.ASSIST),
+        castSensorIdle:     !!(hexMode & MD.CASTSENSORIDLE),
+        noRandomWalk:       !!(hexMode & MD.NORANDOMWALK),
+        canAttack:          !!(hexMode & MD.CANATTACK),
+        castSensorChase:    !!(hexMode & MD.CASTSENSORCHASE),
+        changeChase:        !!(hexMode & MD.CHANGECHASE),
+        angry:              !!(hexMode & MD.ANGRY),
+        changeTargetMelee:  !!(hexMode & MD.CHANGETARGETMELEE),
+        changeTargetChase:  !!(hexMode & MD.CHANGETARGETCHASE),
+        targetWeak:         !!(hexMode & MD.TARGETWEAK),
+        randomTarget:       !!(hexMode & MD.RANDOMTARGET),
+        mvp:                !!(hexMode & MD.MVP),
+        knockbackImmune:    !!(hexMode & MD.KNOCKBACKIMMUNE),
+        detector:           !!(hexMode & MD.DETECTOR),
+        statusImmune:       !!(hexMode & MD.STATUSIMMUNE),
+    };
+}
+
+// Get default AI code from simplified aiType string
+function getDefaultAiCode(aiType) {
+    switch (aiType) {
+        case 'passive':    return 1;
+        case 'aggressive': return 5;
+        case 'reactive':   return 3;
+        default:           return 1;
+    }
+}
 
 // ASPD potion/consumable definitions (temporary ASPD boosts)
 // Duration in ms, aspdBonus added directly to final ASPD before interval calc
@@ -376,6 +471,8 @@ function calculateMagicSkillDamage(attackerStats, targetStats, targetHardMdef, s
 // Helper: process enemy death from skill kill (shares logic with auto-attack kill)
 async function processEnemyDeathFromSkill(enemy, attacker, attackerId, io) {
     enemy.isDead = true;
+    enemy.aiState = AI_STATE.DEAD;
+    enemy.targetPlayerId = null;
     logger.info(`[SKILL-COMBAT] Enemy ${enemy.name}(${enemy.enemyId}) killed by ${attacker.characterName} (skill)`);
 
     // Stop all auto-attackers targeting this enemy
@@ -955,12 +1052,32 @@ function spawnEnemy(spawnConfig) {
         return null;
     }
     const enemyId = nextEnemyId++;
+    // Compute RO Classic mode flags from AI code lookup
+    const roId = template.id || 0;
+    const aiCode = (MONSTER_AI_CODES && MONSTER_AI_CODES[roId]) || getDefaultAiCode(template.aiType);
+    const hexMode = AI_TYPE_MODES[aiCode] || 0x0081;
+    const modeFlags = parseModeFlags(hexMode);
+
+    // Boss/MVP protocol: add knockback immunity, status immunity, detector
+    if (template.monsterClass === 'boss' || template.monsterClass === 'mvp') {
+        modeFlags.knockbackImmune = true;
+        modeFlags.statusImmune = true;
+        modeFlags.detector = true;
+        if (template.monsterClass === 'mvp') modeFlags.mvp = true;
+    }
+
+    // Movement speed: walkSpeed = ms per RO cell. 50 UE units = 1 cell.
+    // Formula: moveSpeed = (50 / walkSpeed) * 1000 UE units/sec
+    const walkSpeedMs = template.walkSpeed || 200;
+    const moveSpeed = (50 / walkSpeedMs) * 1000;
+
     const enemy = {
         enemyId, templateId: spawnConfig.template,
         name: template.name, level: template.level,
         health: template.maxHealth, maxHealth: template.maxHealth,
         damage: template.damage, attackRange: template.attackRange,
         aggroRange: template.aggroRange, aspd: template.aspd,
+        chaseRange: template.chaseRange || 600,
         exp: template.exp, baseExp: template.baseExp || 0, jobExp: template.jobExp || 0,
         mvpExp: template.mvpExp || 0,
         aiType: template.aiType,
@@ -971,7 +1088,7 @@ function spawnEnemy(spawnConfig) {
         attack2: template.attack2 || template.damage,
         hardDef: template.defense || 0,
         magicDefense: template.magicDefense || 0,
-        walkSpeed: template.walkSpeed || 200,
+        walkSpeed: walkSpeedMs,
         attackDelay: template.attackDelay || 1500,
         attackMotion: template.attackMotion || 500,
         damageMotion: template.damageMotion || 300,
@@ -981,11 +1098,34 @@ function spawnEnemy(spawnConfig) {
         x: spawnConfig.x, y: spawnConfig.y, z: spawnConfig.z,
         spawnX: spawnConfig.x, spawnY: spawnConfig.y, spawnZ: spawnConfig.z,
         wanderRadius: spawnConfig.wanderRadius, respawnMs: template.respawnMs,
-        targetPlayerId: null, lastAttackTime: 0,
+        // AI state machine fields
+        aiCode,
+        modeFlags,
+        moveSpeed,                      // UE units per second
+        aiState: AI_STATE.IDLE,
+        targetPlayerId: null,
+        aggroOriginX: null,
+        aggroOriginY: null,
+        lastAttackTime: 0,
+        lastDamageTime: 0,
+        lastAggroScan: 0,
+        lastMoveBroadcast: 0,
+        pendingTargetSwitch: null,
         inCombatWith: new Set()
     };
+    // Initialize wander state
+    initEnemyWanderState(enemy);
     enemies.set(enemyId, enemy);
-    logger.info(`[ENEMY] Spawned ${enemy.name} (ID: ${enemyId}) Lv${enemy.level} [${enemy.monsterClass}] at (${enemy.x}, ${enemy.y}, ${enemy.z})`);
+    const flagSummary = [];
+    if (modeFlags.aggressive) flagSummary.push('AGG');
+    if (modeFlags.assist) flagSummary.push('AST');
+    if (modeFlags.changeTargetMelee) flagSummary.push('CTM');
+    if (modeFlags.changeTargetChase) flagSummary.push('CTC');
+    if (modeFlags.castSensorIdle) flagSummary.push('CSI');
+    if (modeFlags.looter) flagSummary.push('LOT');
+    if (!modeFlags.canMove) flagSummary.push('IMMOB');
+    if (!modeFlags.canAttack) flagSummary.push('NOATK');
+    logger.info(`[ENEMY] Spawned ${enemy.name} (ID: ${enemyId}) Lv${enemy.level} [${enemy.monsterClass}] AI${aiCode} [${flagSummary.join(',')||'passive'}] speed=${moveSpeed.toFixed(0)}u/s at (${enemy.x}, ${enemy.y}, ${enemy.z})`);
     io.emit('enemy:spawn', {
         enemyId, templateId: spawnConfig.template, name: enemy.name,
         level: enemy.level, health: enemy.health, maxHealth: enemy.maxHealth,
@@ -1263,6 +1403,7 @@ io.on('connection', (socket) => {
 
         // Fetch character data from database (position + health/mana + zuzucoin)
         let health = 100, maxHealth = 100, mana = 100, maxMana = 100, zuzucoin = 0;
+        let initialX, initialY, initialZ;
         try {
             const charResult = await pool.query(
                 'SELECT x, y, z, health, max_health, mana, max_mana, zuzucoin FROM characters WHERE character_id = $1',
@@ -1275,7 +1416,10 @@ io.on('connection', (socket) => {
                 mana = row.mana;
                 maxMana = row.max_mana;
                 zuzucoin = row.zuzucoin || 0;
-                
+                initialX = row.x;
+                initialY = row.y;
+                initialZ = row.z;
+
                 // Cache correct position in Redis
                 await setPlayerPosition(characterId, row.x, row.y, row.z);
                 // Broadcast correct position to other players immediately
@@ -1446,7 +1590,11 @@ io.on('connection', (socket) => {
             weaponElement: 'neutral',  // Default; updated when weapon has element
             weaponLevel: 1,            // Default; updated from item data
             armorElement: { type: 'neutral', level: 1 }, // Default; updated from armor
-            cardMods: null             // Card % bonuses (race/element/size)
+            cardMods: null,            // Card % bonuses (race/element/size)
+            // Position tracking for enemy AI aggro detection (updated by player:position)
+            lastX: initialX,
+            lastY: initialY,
+            lastZ: initialZ
         });
         
         logger.info(`Player joined: ${characterName || 'Unknown'} (Character ${characterId}) HP: ${health}/${maxHealth} MP: ${mana}/${maxMana}`);
@@ -1599,9 +1747,26 @@ io.on('connection', (socket) => {
                     }
                 }
                 
-                // Remove this player from enemy combat sets
+                // Remove this player from enemy combat sets and clear AI targets
                 for (const [, enemy] of enemies.entries()) {
                     enemy.inCombatWith.delete(charId);
+                    // If this enemy was targeting the disconnected player, find new target or go idle
+                    if (enemy.targetPlayerId === charId) {
+                        enemy.targetPlayerId = null;
+                        // Try to pick next target from remaining combatants
+                        if (typeof pickNextTarget === 'function') {
+                            const nextTarget = pickNextTarget(enemy);
+                            if (nextTarget) {
+                                enemy.targetPlayerId = nextTarget;
+                            } else {
+                                enemy.aiState = AI_STATE.IDLE;
+                                enemy.isWandering = false;
+                            }
+                        } else {
+                            enemy.aiState = AI_STATE.IDLE;
+                            enemy.isWandering = false;
+                        }
+                    }
                 }
                 
                 connectedPlayers.delete(charId);
@@ -1682,6 +1847,11 @@ io.on('connection', (socket) => {
             // Mark enemy in combat with this player and stop wandering
             enemy.inCombatWith.add(attackerId);
             enemy.isWandering = false;
+
+            // RO AI: Set enemy aggro on this attacker (passive mobs fight back, assist nearby)
+            if (typeof setEnemyAggro === 'function') {
+                setEnemyAggro(enemy, attackerId, 'melee');
+            }
             
             const atkStartPayload = {
                 targetId: targetEnemyId,
@@ -2750,6 +2920,11 @@ io.on('connection', (socket) => {
             target.health = Math.max(0, target.health - damage);
             // Cast interruption: skill damage interrupts casting on player targets
             if (!isEnemy && activeCasts.has(targetId)) interruptCast(targetId, 'damage');
+            // RO AI: trigger aggro + assist on enemy skill hit
+            if (isEnemy) {
+                target.lastDamageTime = Date.now();
+                if (typeof setEnemyAggro === 'function') setEnemyAggro(target, characterId, 'melee');
+            }
             logger.info(`[SKILL-COMBAT] ${player.characterName} BASH Lv${learnedLevel} → ${targetName} for ${damage}${isCritical ? ' CRIT' : ''} [${bashHitType}] (HP: ${target.health}/${target.maxHealth})`);
 
             // Broadcast skill damage to all
@@ -2910,6 +3085,10 @@ io.on('connection', (socket) => {
                 enemy.health = Math.max(0, enemy.health - damage);
                 totalDamageDealt += damage;
                 enemiesHit++;
+
+                // RO AI: AOE aggro — each hit enemy aggros the caster
+                enemy.lastDamageTime = Date.now();
+                if (typeof setEnemyAggro === 'function') setEnemyAggro(enemy, characterId, 'skill');
 
                 // Broadcast damage for each enemy hit
                 io.emit('skill:effect_damage', {
@@ -3128,6 +3307,11 @@ io.on('connection', (socket) => {
             // Apply total damage all at once (gameplay)
             target.health = Math.max(0, target.health - totalDamage);
             if (!isEnemy && activeCasts.has(targetId)) interruptCast(targetId, 'damage');
+            // RO AI: trigger aggro + assist on enemy skill hit
+            if (isEnemy) {
+                target.lastDamageTime = Date.now();
+                if (typeof setEnemyAggro === 'function') setEnemyAggro(target, characterId, 'skill');
+            }
             logger.info(`[SKILL-COMBAT] ${player.characterName} ${skill.displayName} Lv${learnedLevel} → ${targetName} for ${totalDamage} (${numHits} hits) [${skill.element}] (HP: ${target.health}/${target.maxHealth})`);
 
             // Fire damage breaks Frozen status
@@ -3246,6 +3430,11 @@ io.on('connection', (socket) => {
 
             target.health = Math.max(0, target.health - totalDamage);
             if (!isEnemy && activeCasts.has(targetId)) interruptCast(targetId, 'damage');
+            // RO AI: trigger aggro + assist on enemy skill hit
+            if (isEnemy) {
+                target.lastDamageTime = Date.now();
+                if (typeof setEnemyAggro === 'function') setEnemyAggro(target, characterId, 'skill');
+            }
             logger.info(`[SKILL-COMBAT] ${player.characterName} Soul Strike Lv${learnedLevel} → ${targetName} for ${totalDamage} (${numHits} hits, ghost${undeadBonus > 1 ? '+undead' : ''}) (HP: ${target.health}/${target.maxHealth})`);
 
             io.emit('skill:effect_damage', {
@@ -3386,6 +3575,11 @@ io.on('connection', (socket) => {
                 const dmg = Math.max(1, Math.floor(perTargetResult.damage / splashTargets.length));
                 st.target.health = Math.max(0, st.target.health - dmg);
                 if (!st.isEnemy && activeCasts.has(st.id)) interruptCast(st.id, 'damage');
+                // RO AI: AOE aggro
+                if (st.isEnemy) {
+                    st.target.lastDamageTime = Date.now();
+                    if (typeof setEnemyAggro === 'function') setEnemyAggro(st.target, characterId, 'skill');
+                }
                 totalDamageDealt += dmg;
 
                 io.emit('skill:effect_damage', {
@@ -3479,6 +3673,11 @@ io.on('connection', (socket) => {
                 const dmg = Math.floor(fbResult.damage * edgeMult);
                 tgt.health = Math.max(0, tgt.health - dmg);
                 if (!tIsEnemy && activeCasts.has(tId)) interruptCast(tId, 'damage');
+                // RO AI: AOE aggro
+                if (tIsEnemy) {
+                    tgt.lastDamageTime = Date.now();
+                    if (typeof setEnemyAggro === 'function') setEnemyAggro(tgt, characterId, 'skill');
+                }
                 totalDamageDealt += dmg;
                 targetsHit++;
 
@@ -3615,6 +3814,10 @@ io.on('connection', (socket) => {
                 enemy.health = Math.max(0, enemy.health - dmg);
                 totalDamageDealt += dmg;
                 targetsHit++;
+
+                // RO AI: AOE aggro — each hit enemy aggros the caster
+                enemy.lastDamageTime = Date.now();
+                if (typeof setEnemyAggro === 'function') setEnemyAggro(enemy, characterId, 'skill');
 
                 io.emit('skill:effect_damage', {
                     attackerId: characterId, attackerName: player.characterName,
@@ -3764,6 +3967,11 @@ io.on('connection', (socket) => {
 
             target.health = Math.max(0, target.health - damage);
             if (!isEnemy && activeCasts.has(targetId)) interruptCast(targetId, 'damage');
+            // RO AI: trigger aggro + assist on enemy skill hit
+            if (isEnemy) {
+                target.lastDamageTime = Date.now();
+                if (typeof setEnemyAggro === 'function') setEnemyAggro(target, characterId, 'skill');
+            }
             logger.info(`[SKILL-COMBAT] ${player.characterName} Frost Diver Lv${learnedLevel} → ${targetName} for ${damage} [water] (HP: ${target.health}/${target.maxHealth})`);
 
             io.emit('skill:effect_damage', {
@@ -4879,6 +5087,12 @@ setInterval(async () => {
                 enemy.health = Math.max(0, enemy.health - damage);
                 damagePayload.targetHealth = enemy.health;
 
+                // RO AI: Record hit stun time and trigger aggro/assist
+                enemy.lastDamageTime = now;
+                if (typeof setEnemyAggro === 'function') {
+                    setEnemyAggro(enemy, attackerId, 'melee');
+                }
+
                 logger.info(`[COMBAT] ${attacker.characterName} hit enemy ${enemy.name}(${enemy.enemyId}) for ${damage}${isCritical ? ' CRIT' : ''} [${atkElement}→${(enemy.element||{}).type||'neutral'}] (HP: ${enemy.health}/${enemy.maxHealth})`);
 
                 io.emit('combat:damage', damagePayload);
@@ -4904,9 +5118,11 @@ setInterval(async () => {
                 // Enemy death
                 if (enemy.health <= 0) {
                     enemy.isDead = true;
-                    
+                    enemy.aiState = AI_STATE.DEAD;
+                    enemy.targetPlayerId = null;
+
                     logger.info(`[COMBAT] Enemy ${enemy.name}(${enemy.enemyId}) killed by ${attacker.characterName}`);
-                    
+
                     // Stop all players auto-attacking this enemy
                     // DO NOT send combat:target_lost here — all attackers receive enemy:death broadcast instead
                     // Sending both events causes Blueprint to process target_lost (nulls enemy ref) then
@@ -5497,6 +5713,10 @@ setInterval(async () => {
                 enemy.health = Math.max(0, enemy.health - finalDmg);
                 effect.hitsRemaining--;
 
+                // RO AI: Fire Wall aggro — enemy aggros the caster
+                enemy.lastDamageTime = now;
+                if (typeof setEnemyAggro === 'function') setEnemyAggro(enemy, effect.casterId, 'skill');
+
                 logger.info(`[SKILL-COMBAT] Fire Wall hit ${enemy.name} for ${finalDmg} fire [${effect.hitsRemaining} hits left]`);
 
                 // Fire damage breaks Frozen
@@ -5619,25 +5839,37 @@ setInterval(async () => {
 
 // ============================================================
 // Enemy AI Tick Loop (Ragnarok Online-style wandering)
-// Enemies wander randomly within their spawn radius when idle
+// Enemy AI — Full RO Classic State Machine
 // ============================================================
 const ENEMY_AI = {
-    WANDER_TICK_MS: 500,        // AI tick interval (ms)
+    TICK_MS: 200,               // AI tick interval (ms) — 5x per second
     WANDER_PAUSE_MIN: 3000,     // Min pause before next wander (ms)
     WANDER_PAUSE_MAX: 8000,     // Max pause before next wander (ms)
-    WANDER_SPEED: 60,           // Movement speed (units per second)
     WANDER_DIST_MIN: 100,       // Min wander distance per axis (units)
     WANDER_DIST_MAX: 300,       // Max wander distance per axis (units)
-    MOVE_BROADCAST_MS: 200      // How often to broadcast position updates (ms)
+    MOVE_BROADCAST_MS: 200,     // How often to broadcast position updates (ms)
+    AGGRO_SCAN_MS: 500,         // How often aggressive mobs scan for players (ms)
+    ASSIST_RANGE: 550,          // Assist detection range (11 RO cells × 50 UE units)
+    CHASE_GIVE_UP_EXTRA: 200,   // Extra UE units beyond chaseRange before giving up
+    IDLE_AFTER_CHASE_MS: 2000,  // ms before returning to wander after losing target (mob_unlock_time)
 };
 
-// Initialize wander state for all enemies
+// Initialize wander + AI state for enemies (called on spawn and respawn)
 function initEnemyWanderState(enemy) {
     enemy.wanderTargetX = enemy.x;
     enemy.wanderTargetY = enemy.y;
     enemy.isWandering = false;
     enemy.nextWanderTime = Date.now() + ENEMY_AI.WANDER_PAUSE_MIN + Math.random() * (ENEMY_AI.WANDER_PAUSE_MAX - ENEMY_AI.WANDER_PAUSE_MIN);
     enemy.lastMoveBroadcast = 0;
+    // Reset AI state machine
+    enemy.aiState = AI_STATE.IDLE;
+    enemy.targetPlayerId = null;
+    enemy.aggroOriginX = null;
+    enemy.aggroOriginY = null;
+    enemy.lastAttackTime = 0;
+    enemy.lastDamageTime = 0;
+    enemy.lastAggroScan = 0;
+    enemy.pendingTargetSwitch = null;  // { charId, hitType } — set by damage hooks, consumed by AI tick
 }
 
 function pickRandomWanderPoint(enemy) {
@@ -5664,65 +5896,540 @@ function pickRandomWanderPoint(enemy) {
     return { x: newX, y: newY };
 }
 
-setInterval(() => {
-    const now = Date.now();
-    
-    for (const [enemyId, enemy] of enemies.entries()) {
-        // Skip dead enemies or enemies in combat
-        if (enemy.isDead || enemy.inCombatWith.size > 0) continue;
-        
-        // Initialize wander state if missing
-        if (enemy.nextWanderTime === undefined) {
-            initEnemyWanderState(enemy);
-        }
-        
-        if (!enemy.isWandering) {
-            // Waiting to wander — check if it's time
-            if (now >= enemy.nextWanderTime) {
-                const target = pickRandomWanderPoint(enemy);
-                enemy.wanderTargetX = target.x;
-                enemy.wanderTargetY = target.y;
-                enemy.isWandering = true;
-                logger.debug(`[ENEMY AI] ${enemy.name}(${enemyId}) wandering from (${enemy.x.toFixed(0)}, ${enemy.y.toFixed(0)}) to (${target.x.toFixed(0)}, ${target.y.toFixed(0)})`);
-            }
-        } else {
-            // Currently wandering — move toward target
-            const dx = enemy.wanderTargetX - enemy.x;
-            const dy = enemy.wanderTargetY - enemy.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
-            
-            if (distance < 10) {
-                // Reached destination — stop and schedule next wander
-                enemy.isWandering = false;
-                enemy.nextWanderTime = now + ENEMY_AI.WANDER_PAUSE_MIN + Math.random() * (ENEMY_AI.WANDER_PAUSE_MAX - ENEMY_AI.WANDER_PAUSE_MIN);
-                
-                // Broadcast final position
-                io.emit('enemy:move', {
-                    enemyId, x: enemy.x, y: enemy.y, z: enemy.z, isMoving: false
-                });
-                logger.debug(`[ENEMY AI] ${enemy.name}(${enemyId}) arrived at (${enemy.x.toFixed(0)}, ${enemy.y.toFixed(0)})`);
-            } else {
-                // Move toward target
-                const stepSize = ENEMY_AI.WANDER_SPEED * (ENEMY_AI.WANDER_TICK_MS / 1000);
-                const moveRatio = Math.min(1, stepSize / distance);
-                enemy.x += dx * moveRatio;
-                enemy.y += dy * moveRatio;
-                
-                // Broadcast position at limited rate
-                if (now - (enemy.lastMoveBroadcast || 0) >= ENEMY_AI.MOVE_BROADCAST_MS) {
-                    enemy.lastMoveBroadcast = now;
-                    io.emit('enemy:move', {
-                        enemyId,
-                        x: enemy.x, y: enemy.y, z: enemy.z,
-                        targetX: enemy.wanderTargetX, targetY: enemy.wanderTargetY,
-                        isMoving: true
-                    });
-                    logger.debug(`[ENEMY AI] ${enemy.name}(${enemyId}) moving — pos (${enemy.x.toFixed(0)}, ${enemy.y.toFixed(0)}) → target (${enemy.wanderTargetX.toFixed(0)}, ${enemy.wanderTargetY.toFixed(0)})`);
-                }
-            }
+// ============================================================
+// Enemy AI Helper Functions
+// ============================================================
+
+// Check if enemy should switch targets (RO Classic rules)
+function shouldSwitchTarget(enemy, newAttackerCharId, hitType) {
+    if (!enemy.targetPlayerId) return true;               // No current target
+    if (enemy.targetPlayerId === newAttackerCharId) return false;  // Same target
+    if (enemy.modeFlags.randomTarget) return true;        // Random target every swing
+
+    if (enemy.aiState === AI_STATE.ATTACK || enemy.aiState === AI_STATE.IDLE) {
+        if (enemy.modeFlags.changeTargetMelee && hitType === 'melee') return true;
+    }
+    if (enemy.aiState === AI_STATE.CHASE) {
+        if (enemy.modeFlags.changeTargetChase) return true;
+    }
+    return false;
+}
+
+// Trigger assist: when an enemy is attacked, nearby same-type mobs with ASSIST flag join in
+function triggerAssist(attackedEnemy, attackerCharId) {
+    for (const [, other] of enemies.entries()) {
+        if (other === attackedEnemy) continue;
+        if (other.isDead || other.aiState !== AI_STATE.IDLE) continue;
+        if (other.templateId !== attackedEnemy.templateId) continue;  // Same type only
+        if (!other.modeFlags.assist) continue;
+        if (!other.modeFlags.canAttack || !other.modeFlags.canMove) continue;
+
+        const dx = other.x - attackedEnemy.x;
+        const dy = other.y - attackedEnemy.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist <= ENEMY_AI.ASSIST_RANGE) {
+            other.targetPlayerId = attackerCharId;
+            other.aiState = AI_STATE.CHASE;
+            other.aggroOriginX = other.x;
+            other.aggroOriginY = other.y;
+            other.isWandering = false;
+            other.inCombatWith.add(attackerCharId);
+            logger.info(`[ENEMY AI] ${other.name}(${other.enemyId}) ASSIST → chasing player ${attackerCharId} (triggered by ${attackedEnemy.name})`);
         }
     }
-}, ENEMY_AI.WANDER_TICK_MS);
+}
+
+// Set aggro on an enemy when damaged by a player
+function setEnemyAggro(enemy, attackerCharId, hitType) {
+    if (enemy.isDead) return;
+    if (!enemy.modeFlags.canAttack) return;  // Plant-type: can't fight back
+
+    enemy.inCombatWith.add(attackerCharId);
+    enemy.isWandering = false;
+    enemy.lastDamageTime = Date.now();
+
+    // If no current target or should switch: take new target
+    if (!enemy.targetPlayerId || enemy.aiState === AI_STATE.IDLE || shouldSwitchTarget(enemy, attackerCharId, hitType)) {
+        enemy.targetPlayerId = attackerCharId;
+        if (enemy.aiState === AI_STATE.IDLE) {
+            enemy.aggroOriginX = enemy.x;
+            enemy.aggroOriginY = enemy.y;
+        }
+        if (enemy.modeFlags.canMove) {
+            enemy.aiState = AI_STATE.CHASE;
+        } else {
+            enemy.aiState = AI_STATE.ATTACK;  // Immobile mobs go straight to attack
+        }
+    }
+
+    // Trigger assist for nearby same-type mobs
+    triggerAssist(enemy, attackerCharId);
+}
+
+// Find closest player for aggressive aggro scan
+function findAggroTarget(enemy) {
+    let closestDist = Infinity;
+    let closestCharId = null;
+
+    for (const [charId, player] of connectedPlayers.entries()) {
+        if (player.isDead) continue;
+
+        // Use last known position from player object (updated on player:position events)
+        const px = player.lastX;
+        const py = player.lastY;
+        if (px === undefined || py === undefined) continue;
+
+        const dx = enemy.x - px;
+        const dy = enemy.y - py;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        if (dist > enemy.aggroRange) continue;
+
+        // TargetWeak: only aggro players 5+ levels below monster
+        if (enemy.modeFlags.targetWeak) {
+            const playerLevel = (player.stats && player.stats.level) || 1;
+            if (playerLevel >= enemy.level - 5) continue;
+        }
+
+        if (dist < closestDist) {
+            closestDist = dist;
+            closestCharId = charId;
+        }
+    }
+
+    return closestCharId;
+}
+
+// Calculate enemy → player physical damage (reuses existing RO damage formula)
+function calculateEnemyDamage(enemy, targetCharId) {
+    const player = connectedPlayers.get(targetCharId);
+    if (!player) return null;
+
+    const attackerStats = {
+        str: (enemy.stats && enemy.stats.str) || 1,
+        agi: (enemy.stats && enemy.stats.agi) || 1,
+        vit: (enemy.stats && enemy.stats.vit) || 0,
+        int: (enemy.stats && enemy.stats.int) || 0,
+        dex: (enemy.stats && enemy.stats.dex) || 1,
+        luk: (enemy.stats && enemy.stats.luk) || 1,
+        level: enemy.level,
+        weaponATK: enemy.damage || 1,
+        passiveATK: 0,
+    };
+
+    const targetInfo = getPlayerTargetInfo(player, targetCharId);
+    const attackerInfo = {
+        weaponType: (enemy.attackRange > COMBAT.MELEE_RANGE + COMBAT.RANGE_TOLERANCE) ? 'bow' : 'bare_hand',
+        weaponElement: (enemy.element && enemy.element.type) || 'neutral',
+        weaponLevel: 1,
+        buffMods: getBuffStatModifiers(enemy),
+        cardMods: null,
+    };
+
+    return calculatePhysicalDamage(
+        attackerStats,
+        getEffectiveStats(player),
+        player.hardDef || 0,
+        targetInfo,
+        attackerInfo
+    );
+}
+
+// Process an enemy AI tick — move toward target and broadcast position
+function enemyMoveToward(enemy, targetX, targetY, now, speed) {
+    if (!enemy.modeFlags.canMove) return;
+
+    const dx = targetX - enemy.x;
+    const dy = targetY - enemy.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    if (distance < 5) return;
+
+    const stepSize = speed * (ENEMY_AI.TICK_MS / 1000);
+    const moveRatio = Math.min(1, stepSize / distance);
+    enemy.x += dx * moveRatio;
+    enemy.y += dy * moveRatio;
+
+    // Broadcast position at limited rate
+    if (now - (enemy.lastMoveBroadcast || 0) >= ENEMY_AI.MOVE_BROADCAST_MS) {
+        enemy.lastMoveBroadcast = now;
+        io.emit('enemy:move', {
+            enemyId: enemy.enemyId,
+            x: enemy.x, y: enemy.y, z: enemy.z,
+            targetX, targetY,
+            isMoving: true
+        });
+    }
+}
+
+// Broadcast enemy stopped moving
+function enemyStopMoving(enemy) {
+    io.emit('enemy:move', {
+        enemyId: enemy.enemyId,
+        x: enemy.x, y: enemy.y, z: enemy.z,
+        isMoving: false
+    });
+}
+
+// Wander subroutine (extracted from old loop for reuse in IDLE state)
+function processWander(enemy, now) {
+    // Plant/immobile: never wander
+    if (!enemy.modeFlags.canMove || enemy.modeFlags.noRandomWalk) return;
+
+    if (enemy.nextWanderTime === undefined) {
+        enemy.nextWanderTime = now + ENEMY_AI.WANDER_PAUSE_MIN + Math.random() * (ENEMY_AI.WANDER_PAUSE_MAX - ENEMY_AI.WANDER_PAUSE_MIN);
+        enemy.isWandering = false;
+    }
+
+    if (!enemy.isWandering) {
+        if (now >= enemy.nextWanderTime) {
+            const target = pickRandomWanderPoint(enemy);
+            enemy.wanderTargetX = target.x;
+            enemy.wanderTargetY = target.y;
+            enemy.isWandering = true;
+        }
+    } else {
+        const dx = enemy.wanderTargetX - enemy.x;
+        const dy = enemy.wanderTargetY - enemy.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+
+        if (distance < 10) {
+            enemy.isWandering = false;
+            enemy.nextWanderTime = now + ENEMY_AI.WANDER_PAUSE_MIN + Math.random() * (ENEMY_AI.WANDER_PAUSE_MAX - ENEMY_AI.WANDER_PAUSE_MIN);
+            enemyStopMoving(enemy);
+        } else {
+            // Wander at 60% of chase speed (slower, relaxed movement)
+            const wanderSpeed = enemy.moveSpeed * 0.6;
+            enemyMoveToward(enemy, enemy.wanderTargetX, enemy.wanderTargetY, now, wanderSpeed);
+        }
+    }
+}
+
+// Get player position from connectedPlayers (synchronous, no Redis needed)
+function getPlayerPosSync(charId) {
+    const p = connectedPlayers.get(charId);
+    if (!p || p.lastX === undefined) return null;
+    return { x: p.lastX, y: p.lastY, z: p.lastZ || 300 };
+}
+
+// ============================================================
+// Enemy AI Tick Loop — RO Classic State Machine
+// States: IDLE → CHASE → ATTACK → DEAD
+// Runs every TICK_MS (200ms = 5x per second)
+// ============================================================
+setInterval(async () => {
+    const now = Date.now();
+
+    for (const [enemyId, enemy] of enemies.entries()) {
+        if (enemy.isDead || enemy.aiState === AI_STATE.DEAD) continue;
+
+        // Hit stun: if recently damaged, skip movement/attack (but allow state checks)
+        const inHitStun = (now - (enemy.lastDamageTime || 0)) < (enemy.damageMotion || 300);
+
+        switch (enemy.aiState) {
+
+        // ═══════════════════════════════════════════════════════
+        // IDLE — Wander randomly. Aggressive mobs scan for players.
+        // ═══════════════════════════════════════════════════════
+        case AI_STATE.IDLE: {
+            // Aggressive mobs: scan for players to aggro
+            if (enemy.modeFlags.aggressive && enemy.aggroRange > 0) {
+                if (now - (enemy.lastAggroScan || 0) >= ENEMY_AI.AGGRO_SCAN_MS) {
+                    enemy.lastAggroScan = now;
+                    const targetCharId = findAggroTarget(enemy);
+                    if (targetCharId) {
+                        enemy.targetPlayerId = targetCharId;
+                        enemy.aggroOriginX = enemy.x;
+                        enemy.aggroOriginY = enemy.y;
+                        enemy.isWandering = false;
+                        enemy.inCombatWith.add(targetCharId);
+                        if (enemy.modeFlags.canMove) {
+                            enemy.aiState = AI_STATE.CHASE;
+                        } else {
+                            enemy.aiState = AI_STATE.ATTACK;
+                        }
+                        logger.info(`[ENEMY AI] ${enemy.name}(${enemyId}) AGGRO → player ${targetCharId}`);
+                        break;
+                    }
+                }
+            }
+
+            // No aggro target: wander normally
+            if (!inHitStun) {
+                processWander(enemy, now);
+            }
+            break;
+        }
+
+        // ═══════════════════════════════════════════════════════
+        // CHASE — Move toward target player until in attack range
+        // ═══════════════════════════════════════════════════════
+        case AI_STATE.CHASE: {
+            // Validate target still exists
+            const target = connectedPlayers.get(enemy.targetPlayerId);
+            if (!target || target.isDead) {
+                // Target gone — check if any other attackers remain
+                enemy.inCombatWith.delete(enemy.targetPlayerId);
+                const nextTarget = pickNextTarget(enemy);
+                if (nextTarget) {
+                    enemy.targetPlayerId = nextTarget;
+                } else {
+                    // No targets left — return to idle
+                    enemy.targetPlayerId = null;
+                    enemy.aiState = AI_STATE.IDLE;
+                    enemy.isWandering = false;
+                    enemy.nextWanderTime = now + ENEMY_AI.IDLE_AFTER_CHASE_MS;
+                    enemyStopMoving(enemy);
+                    logger.debug(`[ENEMY AI] ${enemy.name}(${enemyId}) target lost → IDLE`);
+                }
+                break;
+            }
+
+            // Process pending target switch (set by damage hooks)
+            if (enemy.pendingTargetSwitch) {
+                enemy.targetPlayerId = enemy.pendingTargetSwitch.charId;
+                enemy.pendingTargetSwitch = null;
+            }
+
+            const targetPos = getPlayerPosSync(enemy.targetPlayerId);
+            if (!targetPos) {
+                enemy.targetPlayerId = null;
+                enemy.aiState = AI_STATE.IDLE;
+                enemy.nextWanderTime = now + ENEMY_AI.IDLE_AFTER_CHASE_MS;
+                enemyStopMoving(enemy);
+                break;
+            }
+
+            // Chase range check — give up if too far from aggro origin
+            const dxFromOrigin = enemy.x - (enemy.aggroOriginX || enemy.spawnX);
+            const dyFromOrigin = enemy.y - (enemy.aggroOriginY || enemy.spawnY);
+            const distFromOrigin = Math.sqrt(dxFromOrigin * dxFromOrigin + dyFromOrigin * dyFromOrigin);
+            if (distFromOrigin > (enemy.chaseRange || 600) + ENEMY_AI.CHASE_GIVE_UP_EXTRA) {
+                // Too far — give up chase
+                enemy.targetPlayerId = null;
+                enemy.aiState = AI_STATE.IDLE;
+                enemy.inCombatWith.clear();
+                enemy.isWandering = false;
+                enemy.nextWanderTime = now + ENEMY_AI.IDLE_AFTER_CHASE_MS;
+                enemyStopMoving(enemy);
+                logger.info(`[ENEMY AI] ${enemy.name}(${enemyId}) gave up chase (dist from origin: ${distFromOrigin.toFixed(0)})`);
+                break;
+            }
+
+            // Distance to target
+            const dxToTarget = targetPos.x - enemy.x;
+            const dyToTarget = targetPos.y - enemy.y;
+            const distToTarget = Math.sqrt(dxToTarget * dxToTarget + dyToTarget * dyToTarget);
+
+            // In attack range? → transition to ATTACK
+            const attackRange = enemy.attackRange || COMBAT.MELEE_RANGE;
+            if (distToTarget <= attackRange + COMBAT.RANGE_TOLERANCE) {
+                enemy.aiState = AI_STATE.ATTACK;
+                enemyStopMoving(enemy);
+                logger.debug(`[ENEMY AI] ${enemy.name}(${enemyId}) reached target → ATTACK`);
+                break;
+            }
+
+            // Move toward target (skip if in hit stun)
+            if (!inHitStun) {
+                enemyMoveToward(enemy, targetPos.x, targetPos.y, now, enemy.moveSpeed);
+            }
+
+            // ChangeChase: while chasing, switch to a closer player within attack range
+            if (enemy.modeFlags.changeChase) {
+                for (const [charId] of enemy.inCombatWith.entries()) {
+                    if (charId === enemy.targetPlayerId) continue;
+                    const otherPos = getPlayerPosSync(charId);
+                    if (!otherPos) continue;
+                    const dx2 = otherPos.x - enemy.x;
+                    const dy2 = otherPos.y - enemy.y;
+                    const dist2 = Math.sqrt(dx2 * dx2 + dy2 * dy2);
+                    if (dist2 <= attackRange + COMBAT.RANGE_TOLERANCE) {
+                        enemy.targetPlayerId = charId;
+                        logger.debug(`[ENEMY AI] ${enemy.name}(${enemyId}) CHANGECHASE → player ${charId} (closer)`);
+                        break;
+                    }
+                }
+            }
+            break;
+        }
+
+        // ═══════════════════════════════════════════════════════
+        // ATTACK — Auto-attack target at attackDelay interval
+        // ═══════════════════════════════════════════════════════
+        case AI_STATE.ATTACK: {
+            const atkTarget = connectedPlayers.get(enemy.targetPlayerId);
+            if (!atkTarget || atkTarget.isDead) {
+                enemy.inCombatWith.delete(enemy.targetPlayerId);
+                const nextTarget = pickNextTarget(enemy);
+                if (nextTarget) {
+                    enemy.targetPlayerId = nextTarget;
+                    enemy.aiState = AI_STATE.CHASE;
+                } else {
+                    enemy.targetPlayerId = null;
+                    enemy.aiState = AI_STATE.IDLE;
+                    enemy.nextWanderTime = now + ENEMY_AI.IDLE_AFTER_CHASE_MS;
+                    enemyStopMoving(enemy);
+                }
+                break;
+            }
+
+            // Process pending target switch
+            if (enemy.pendingTargetSwitch) {
+                const switchTo = enemy.pendingTargetSwitch.charId;
+                enemy.pendingTargetSwitch = null;
+                if (switchTo !== enemy.targetPlayerId) {
+                    enemy.targetPlayerId = switchTo;
+                    enemy.aiState = AI_STATE.CHASE;
+                    break;
+                }
+            }
+
+            // RandomTarget: pick random attacker each swing
+            if (enemy.modeFlags.randomTarget && enemy.inCombatWith.size > 1) {
+                const combatants = [...enemy.inCombatWith].filter(id => {
+                    const p = connectedPlayers.get(id);
+                    return p && !p.isDead;
+                });
+                if (combatants.length > 0) {
+                    enemy.targetPlayerId = combatants[Math.floor(Math.random() * combatants.length)];
+                }
+            }
+
+            const targetPos = getPlayerPosSync(enemy.targetPlayerId);
+            if (!targetPos) {
+                enemy.targetPlayerId = null;
+                enemy.aiState = AI_STATE.IDLE;
+                enemy.nextWanderTime = now + ENEMY_AI.IDLE_AFTER_CHASE_MS;
+                enemyStopMoving(enemy);
+                break;
+            }
+
+            // Range check — if target moved out of range, chase
+            const dxAtk = targetPos.x - enemy.x;
+            const dyAtk = targetPos.y - enemy.y;
+            const distAtk = Math.sqrt(dxAtk * dxAtk + dyAtk * dyAtk);
+            const atkRange = enemy.attackRange || COMBAT.MELEE_RANGE;
+            if (distAtk > atkRange + COMBAT.RANGE_TOLERANCE + 30) {
+                enemy.aiState = AI_STATE.CHASE;
+                break;
+            }
+
+            // Hit stun: can't attack while flinching
+            if (inHitStun) break;
+
+            // Attack timing check
+            if (now - enemy.lastAttackTime < (enemy.attackDelay || 1500)) break;
+
+            // ── EXECUTE ATTACK ──
+            enemy.lastAttackTime = now;
+
+            const combatResult = calculateEnemyDamage(enemy, enemy.targetPlayerId);
+            if (!combatResult) break;
+
+            const { damage, isCritical, isMiss, hitType, element: atkElement } = combatResult;
+
+            // Build damage payload
+            const damagePayload = {
+                attackerId: enemy.enemyId,
+                attackerName: enemy.name,
+                targetId: enemy.targetPlayerId,
+                targetName: atkTarget.characterName,
+                isEnemy: false,               // Target is player (not enemy)
+                isEnemyAttacker: true,        // Attacker is enemy
+                damage,
+                isCritical,
+                isMiss,
+                hitType,
+                element: atkElement,
+                targetHealth: atkTarget.health,
+                targetMaxHealth: atkTarget.maxHealth,
+                attackerX: enemy.x, attackerY: enemy.y, attackerZ: enemy.z,
+                targetX: targetPos.x, targetY: targetPos.y, targetZ: targetPos.z,
+                timestamp: now
+            };
+
+            if (!isMiss) {
+                atkTarget.health = Math.max(0, atkTarget.health - damage);
+                damagePayload.targetHealth = atkTarget.health;
+                logger.info(`[ENEMY COMBAT] ${enemy.name}(${enemyId}) hit ${atkTarget.characterName} for ${damage}${isCritical ? ' CRIT' : ''} (HP: ${atkTarget.health}/${atkTarget.maxHealth})`);
+            } else {
+                logger.info(`[ENEMY COMBAT] ${enemy.name}(${enemyId}) ${hitType} against ${atkTarget.characterName}`);
+            }
+
+            // Broadcast damage
+            io.emit('combat:damage', damagePayload);
+
+            // Broadcast enemy attack visual (for client-side attack animation)
+            io.emit('enemy:attack', {
+                enemyId: enemy.enemyId,
+                targetId: enemy.targetPlayerId,
+                attackMotion: enemy.attackMotion,
+            });
+
+            // Broadcast target health update
+            const targetSocket = io.sockets.sockets.get(atkTarget.socketId);
+            io.emit('combat:health_update', {
+                characterId: enemy.targetPlayerId,
+                health: atkTarget.health,
+                maxHealth: atkTarget.maxHealth,
+                mana: atkTarget.mana,
+                maxMana: atkTarget.maxMana
+            });
+
+            // Check player death
+            if (!isMiss && atkTarget.health <= 0) {
+                atkTarget.isDead = true;
+
+                // Stop player's auto-attacks
+                autoAttackState.delete(enemy.targetPlayerId);
+
+                // Emit death event
+                io.emit('combat:death', {
+                    killedId: enemy.targetPlayerId,
+                    killedName: atkTarget.characterName,
+                    killerId: enemy.enemyId,
+                    killerName: enemy.name,
+                    isEnemy: false,          // killed is NOT an enemy (it's a player)
+                    isEnemyKiller: true,     // killer is an enemy
+                    targetHealth: 0,
+                    targetMaxHealth: atkTarget.maxHealth,
+                    timestamp: now
+                });
+
+                // Save to DB
+                savePlayerHealthToDB(enemy.targetPlayerId, 0, atkTarget.mana);
+
+                logger.info(`[ENEMY COMBAT] ${enemy.name}(${enemyId}) KILLED ${atkTarget.characterName}`);
+
+                // Clear this target
+                enemy.inCombatWith.delete(enemy.targetPlayerId);
+
+                // Pick next target or go idle
+                const nextTarget = pickNextTarget(enemy);
+                if (nextTarget) {
+                    enemy.targetPlayerId = nextTarget;
+                    enemy.aiState = AI_STATE.CHASE;
+                } else {
+                    enemy.targetPlayerId = null;
+                    enemy.aiState = AI_STATE.IDLE;
+                    enemy.nextWanderTime = now + ENEMY_AI.IDLE_AFTER_CHASE_MS;
+                    enemyStopMoving(enemy);
+                }
+            }
+            break;
+        }
+        } // end switch
+    }
+}, ENEMY_AI.TICK_MS);
+
+// Pick next available target from inCombatWith set (for after current target dies/disconnects)
+function pickNextTarget(enemy) {
+    for (const charId of enemy.inCombatWith) {
+        const p = connectedPlayers.get(charId);
+        if (p && !p.isDead) return charId;
+    }
+    return null;
+}
 
 // Middleware
 app.use(cors());
