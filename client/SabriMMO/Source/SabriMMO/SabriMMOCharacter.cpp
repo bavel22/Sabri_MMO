@@ -18,6 +18,8 @@
 #include "UI/InventorySubsystem.h"
 #include "UI/EquipmentSubsystem.h"
 #include "UI/HotbarSubsystem.h"
+#include "UI/ShopSubsystem.h"
+#include "ShopNPC.h"
 #include "Framework/Application/SlateApplication.h"
 
 ASabriMMOCharacter::ASabriMMOCharacter()
@@ -72,6 +74,7 @@ void ASabriMMOCharacter::BeginPlay()
 		PC->SetInputMode(InputMode);
 		PC->SetShowMouseCursor(true);
 	}
+
 }
 
 void ASabriMMOCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -117,6 +120,10 @@ void ASabriMMOCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 		if (ToggleEquipmentAction)
 		{
 			EnhancedInputComponent->BindAction(ToggleEquipmentAction, ETriggerEvent::Started, this, &ASabriMMOCharacter::HandleToggleEquipment);
+		}
+		if (ToggleShopAction)
+		{
+			EnhancedInputComponent->BindAction(ToggleShopAction, ETriggerEvent::Started, this, &ASabriMMOCharacter::HandleToggleShop);
 		}
 		if (CycleHotbarAction)
 		{
@@ -170,6 +177,11 @@ void ASabriMMOCharacter::CreateUIToggleActions()
 	ToggleEquipmentAction->ValueType = EInputActionValueType::Boolean;
 	UIToggleIMC->MapKey(ToggleEquipmentAction, EKeys::F7);
 
+	// F9: Toggle Shop
+	ToggleShopAction = NewObject<UInputAction>(this, TEXT("IA_ToggleShop"));
+	ToggleShopAction->ValueType = EInputActionValueType::Boolean;
+	UIToggleIMC->MapKey(ToggleShopAction, EKeys::F9);
+
 	// H: Cycle Hotbar visibility
 	CycleHotbarAction = NewObject<UInputAction>(this, TEXT("IA_CycleHotbar"));
 	CycleHotbarAction->ValueType = EInputActionValueType::Boolean;
@@ -222,6 +234,22 @@ void ASabriMMOCharacter::HandleToggleEquipment()
 	}
 }
 
+void ASabriMMOCharacter::HandleToggleShop()
+{
+	// F9: Close shop if open (like Escape in RO Classic).
+	// Opening shops is done by clicking NPC actors in the world.
+	if (UWorld* World = GetWorld())
+	{
+		if (UShopSubsystem* Sub = World->GetSubsystem<UShopSubsystem>())
+		{
+			if (Sub->IsWidgetVisible())
+			{
+				Sub->CloseShop();
+			}
+		}
+	}
+}
+
 void ASabriMMOCharacter::HandleCycleHotbar()
 {
 	if (UWorld* World = GetWorld())
@@ -257,6 +285,19 @@ void ASabriMMOCharacter::HandleHotbarSlotInternal(int32 KeyNumber)
 			Sub->HandleNumberKey(KeyNumber, bAlt, bCtrl, bShift);
 		}
 	}
+}
+
+bool ASabriMMOCharacter::TryInteractWithNPC(AActor* HitActor)
+{
+	if (!HitActor) return false;
+
+	if (AShopNPC* ShopNPC = Cast<AShopNPC>(HitActor))
+	{
+		ShopNPC->Interact();
+		return true;
+	}
+
+	return false;
 }
 
 void ASabriMMOCharacter::Move(const FInputActionValue& Value)

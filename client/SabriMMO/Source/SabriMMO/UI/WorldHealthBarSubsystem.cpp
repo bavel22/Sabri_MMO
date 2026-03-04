@@ -17,6 +17,7 @@
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Character.h"
 #include "Components/CapsuleComponent.h"
+#include "ShopNPC.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWorldHealthBar, Log, All);
 
@@ -158,7 +159,11 @@ void UWorldHealthBarSubsystem::TryWrapSocketEvents()
 	{
 		World->GetTimerManager().SetTimer(
 			ActorCacheTimer,
-			FTimerDelegate::CreateUObject(this, &UWorldHealthBarSubsystem::CacheEnemyActors),
+			FTimerDelegate::CreateLambda([this]()
+			{
+				CacheEnemyActors();
+				CacheNPCActors();
+			}),
 			2.0f,
 			true,
 			0.5f  // Initial delay: let actors spawn first
@@ -657,6 +662,29 @@ void UWorldHealthBarSubsystem::CacheEnemyActors()
 		{
 			Enemy.CachedActor = BestMatch;
 		}
+	}
+}
+
+// ============================================================
+// Cache NPC actors — collect all AShopNPC actors for name rendering
+// ============================================================
+
+void UWorldHealthBarSubsystem::CacheNPCActors()
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	NPCNames.Empty();
+
+	for (TActorIterator<AShopNPC> It(World); It; ++It)
+	{
+		AShopNPC* NPC = *It;
+		if (!NPC) continue;
+
+		FNPCNameData Data;
+		Data.DisplayName = NPC->NPCDisplayName;
+		Data.Actor = NPC;
+		NPCNames.Add(Data);
 	}
 }
 

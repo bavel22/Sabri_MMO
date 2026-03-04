@@ -32,6 +32,10 @@ namespace WorldBarColors
 	// Enemy HP — hot pink/magenta (#FF00E7), turns yellow (#FFFF00) at <=25%
 	static const FLinearColor EnemyHPPink   (1.0f,   0.0f,   0.906f, 1.f);
 	static const FLinearColor EnemyHPCritYellow(1.0f, 1.0f,  0.0f,   1.f);
+
+	// NPC name text — white with dark shadow
+	static const FLinearColor NPCNameWhite  (1.0f,   1.0f,   1.0f,   1.f);
+	static const FLinearColor NPCNameShadow (0.0f,   0.0f,   0.0f,   0.7f);
 }
 
 class SWorldHealthBarOverlay : public SCompoundWidget
@@ -81,4 +85,12 @@ private:
 		const FGeometry& AllottedGeometry,
 		float X, float Y, float Width, float Height,
 		float FillPercent, const FLinearColor& FillColor) const;
+
+	void DrawNPCName(FSlateWindowElementList& OutDrawElements, int32 LayerId,
+		const FGeometry& AllottedGeometry, float InvScale,
+		const FVector2D& ScreenPos, const FString& Name) const;
+
+	// NPC name text offset above the actor's head
+	static constexpr float NPC_NAME_OFFSET_Y = -30.f;  // Above the projected position
+	static constexpr float NPC_NAME_FONT_SIZE = 12.f;
 };

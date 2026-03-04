@@ -6,6 +6,7 @@
 #include "Rendering/DrawElements.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Styling/CoreStyle.h"
+#include "Fonts/FontMeasure.h"
 #include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
 #include "Widgets/SNullWidget.h"
@@ -115,7 +116,24 @@ int32 SWorldHealthBarOverlay::OnPaint(
 			ScreenPos, HPPercent, bCritical);
 	}
 
-	return BarLayerId;
+	// ---- Draw NPC name labels (screen-space text above NPC actors) ----
+	const int32 TextLayerId = BarLayerId + 2;
+	for (const FNPCNameData& NPC : Sub->NPCNames)
+	{
+		if (!NPC.Actor.IsValid()) continue;
+
+		// Project NPC head position to screen (offset above capsule)
+		FVector NPCPos = NPC.Actor->GetActorLocation();
+		NPCPos.Z += 120.f; // Above the NPC's head
+
+		FVector2D ScreenPos;
+		if (!Sub->ProjectWorldToScreen(NPCPos, ScreenPos)) continue;
+
+		DrawNPCName(OutDrawElements, TextLayerId, AllottedGeometry, InvScale,
+			ScreenPos, NPC.DisplayName);
+	}
+
+	return TextLayerId;
 }
 
 // ============================================================
@@ -268,4 +286,55 @@ void SWorldHealthBarOverlay::DrawFilledBar(
 			FillColor
 		);
 	}
+}
+
+// ============================================================
+// Draw NPC name — centered white text with shadow above NPC
+// ============================================================
+
+void SWorldHealthBarOverlay::DrawNPCName(
+	FSlateWindowElementList& OutDrawElements,
+	int32 LayerId,
+	const FGeometry& AllottedGeometry,
+	float InvScale,
+	const FVector2D& ScreenPos,
+	const FString& Name) const
+{
+	FSlateFontInfo NameFont = FCoreStyle::GetDefaultFontStyle("Bold", NPC_NAME_FONT_SIZE);
+
+	TSharedRef<FSlateFontMeasure> FontMeasure =
+		FSlateApplication::Get().GetRenderer()->GetFontMeasureService();
+	FVector2D TextSize = FontMeasure->Measure(Name, NameFont);
+
+	const float CenterX = (float)ScreenPos.X * InvScale;
+	const float TopY = (float)ScreenPos.Y * InvScale + NPC_NAME_OFFSET_Y;
+
+	const FVector2f TextPos(
+		CenterX - (float)TextSize.X * 0.5f,
+		TopY - (float)TextSize.Y * 0.5f);
+
+	const ESlateDrawEffect DrawEffects = ESlateDrawEffect::None;
+
+	// Shadow
+	const FVector2f ShadowPos(TextPos.X + 1.0f, TextPos.Y + 1.0f);
+	FSlateDrawElement::MakeText(
+		OutDrawElements, LayerId,
+		AllottedGeometry.ToPaintGeometry(
+			TextSize,
+			FSlateLayoutTransform(ShadowPos)),
+		Name,
+		NameFont,
+		DrawEffects,
+		WorldBarColors::NPCNameShadow);
+
+	// Main text
+	FSlateDrawElement::MakeText(
+		OutDrawElements, LayerId + 1,
+		AllottedGeometry.ToPaintGeometry(
+			TextSize,
+			FSlateLayoutTransform(TextPos)),
+		Name,
+		NameFont,
+		DrawEffects,
+		WorldBarColors::NPCNameWhite);
 }

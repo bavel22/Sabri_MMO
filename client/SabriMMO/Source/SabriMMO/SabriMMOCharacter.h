@@ -88,6 +88,9 @@ private:
 	UInputAction* ToggleEquipmentAction = nullptr;
 
 	UPROPERTY()
+	UInputAction* ToggleShopAction = nullptr;
+
+	UPROPERTY()
 	UInputAction* CycleHotbarAction = nullptr;
 
 	UPROPERTY()
@@ -97,6 +100,7 @@ private:
 	void HandleToggleCombatStats();
 	void HandleToggleInventory();
 	void HandleToggleEquipment();
+	void HandleToggleShop();
 	void HandleCycleHotbar();
 	void HandleHotbarSlot1();
 	void HandleHotbarSlot2();
@@ -126,6 +130,10 @@ public:
 	/** Handles jump pressed inputs from either controls or UI interfaces */
 	UFUNCTION(BlueprintCallable, Category="Input")
 	virtual void DoJumpEnd();
+
+	/** Try to interact with a clicked actor (e.g. AShopNPC). Returns true if handled. */
+	UFUNCTION(BlueprintCallable, Category="NPC Interaction")
+	bool TryInteractWithNPC(AActor* HitActor);
 
 public:
 

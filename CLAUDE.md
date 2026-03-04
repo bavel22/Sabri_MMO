@@ -127,8 +127,10 @@ Invoke with `/skill-name`. Located at `C:/Users/pladr/.claude/skills/`.
 | `/realtime` | Socket.io events, combat tick, position sync |
 | `/ui-architect` | UE5 Blueprint / Widget work (unrealMCP first) |
 | `/agent-architect` | Enemy AI, stat formulas, RO game systems |
+| `/enemy-ai` | Monster aggro, chase, attack, AI state machine, mode flags, per-monster AI codes |
 | `/planner` | Feature planning, development phases |
 | `/sabrimmo-ui` | Project-specific UI guidance |
 | `/sabrimmo-target-skill` | Set up RO-style click-to-cast targeting for a skill |
+| `/sabrimmo-click-interact` | Add new left-click interactable actors to the world (NPCs, chests, etc.) |
 | `/project-docs` | Load full project documentation context |
 | `/opus-45-thinking` | Complex multi-system architecture decisions |

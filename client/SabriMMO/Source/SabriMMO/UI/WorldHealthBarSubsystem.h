@@ -14,6 +14,13 @@ class USocketIOClientComponent;
 class SWorldHealthBarOverlay;
 struct FSIOBoundEvent;
 
+// Per-NPC name label state (screen-space text above NPC actors)
+struct FNPCNameData
+{
+	FString DisplayName;
+	TWeakObjectPtr<AActor> Actor;
+};
+
 // Per-enemy health bar state
 struct FEnemyBarData
 {
@@ -44,6 +51,9 @@ public:
 
 	// ---- Enemy health data (keyed by enemyId) ----
 	TMap<int32, FEnemyBarData> EnemyHealthMap;
+
+	// ---- NPC name labels (screen-space text above NPC actors) ----
+	TArray<FNPCNameData> NPCNames;
 
 	// ---- Lifecycle ----
 	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
@@ -85,6 +95,7 @@ private:
 
 	// ---- Actor caching ----
 	void CacheEnemyActors();
+	void CacheNPCActors();
 
 	// ---- State ----
 	bool bEventsWrapped = false;

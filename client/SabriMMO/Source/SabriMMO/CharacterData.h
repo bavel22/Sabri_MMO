@@ -115,6 +115,67 @@ struct FDraggedItem
 };
 
 // ============================================================
+// Shop item — item in NPC shop catalog (from shop:data event)
+// ============================================================
+
+USTRUCT()
+struct FShopItem
+{
+	GENERATED_BODY()
+
+	int32 ItemId = 0;
+	FString Name;
+	FString Description;
+	FString ItemType;       // weapon, armor, consumable, etc
+	FString Icon;
+	int32 BuyPrice = 0;     // NPC buy price (after Discount if applicable)
+	int32 SellPrice = 0;    // NPC sell price (after Overcharge if applicable)
+	int32 Weight = 0;
+	int32 ATK = 0;
+	int32 DEF = 0;
+	int32 MATK = 0;
+	int32 MDEF = 0;
+	FString EquipSlot;
+	FString WeaponType;
+	int32 WeaponRange = 0;
+	int32 ASPDModifier = 0;
+	int32 RequiredLevel = 1;
+	bool bStackable = false;
+	int32 StrBonus = 0;
+	int32 AgiBonus = 0;
+	int32 VitBonus = 0;
+	int32 IntBonus = 0;
+	int32 DexBonus = 0;
+	int32 LukBonus = 0;
+	int32 MaxHPBonus = 0;
+	int32 MaxSPBonus = 0;
+
+	bool IsValid() const { return ItemId > 0; }
+};
+
+// ============================================================
+// Cart item — entry in buy/sell shopping cart (client-side)
+// ============================================================
+
+USTRUCT()
+struct FCartItem
+{
+	GENERATED_BODY()
+
+	int32 ItemId = 0;         // For buy cart (shop item ID)
+	int32 InventoryId = 0;    // For sell cart (player inventory ID)
+	FString Name;
+	FString Icon;
+	int32 Quantity = 1;
+	int32 UnitPrice = 0;      // Per-unit price (after Discount/Overcharge)
+	int32 Weight = 0;         // Per-unit weight
+
+	int32 GetTotalPrice() const { return UnitPrice * Quantity; }
+	int32 GetTotalWeight() const { return Weight * Quantity; }
+	bool IsValid() const { return ItemId > 0 || InventoryId > 0; }
+};
+
+// ============================================================
 // Server info — returned by GET /api/servers
 // ============================================================
 

@@ -1162,16 +1162,74 @@ const itemDefinitions = new Map();
 
 // NPC Shop definitions (server-authoritative, shopId → shop config)
 // Buy price = item.price * 2  |  Sell price = item.price
+// RO Classic: shops have unlimited stock, multiple players can use simultaneously
 const NPC_SHOPS = {
     1: {
-        name: 'General Store',
-        itemIds: [1001, 1002, 1003, 1004, 1005, 4001, 4002, 4003]
+        name: 'Tool Dealer',
+        itemIds: [1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1028, 1029]
     },
     2: {
-        name: 'Weapon Shop',
-        itemIds: [3001, 3002, 3003, 3004, 3005, 3006]
+        name: 'Weapon Dealer',
+        itemIds: [3001, 3002, 3003, 3004, 3005, 3006, 3007, 3008, 3009, 3010, 3011, 3012, 3013, 3014, 3015, 3016, 3017, 3018]
+    },
+    3: {
+        name: 'Armor Dealer',
+        itemIds: [4001, 4002, 4003, 4004, 4005, 4006, 4007, 4008, 4009, 4010, 4011, 4012, 4013, 4014]
+    },
+    4: {
+        name: 'General Store',
+        itemIds: [1001, 1002, 1003, 1004, 1005, 4001, 4002, 4003]
     }
 };
+
+// ---- Discount / Overcharge skill helpers (RO Classic Merchant passives) ----
+// Discount (601): reduces NPC buy prices. Overcharge (602): increases NPC sell prices.
+// Formula: effectValue = 7 + (level-1)*2 → levels 1-10 give 7,9,11,13,15,17,19,21,23,25%
+function getDiscountPercent(player) {
+    const learned = player.learnedSkills || {};
+    const level = learned[601] || 0;
+    if (level <= 0) return 0;
+    const skill = SKILL_MAP.get(601);
+    if (!skill) return 0;
+    const lvlData = skill.levels[Math.min(level - 1, skill.levels.length - 1)];
+    return lvlData ? lvlData.effectValue : 0;
+}
+
+function getOverchargePercent(player) {
+    const learned = player.learnedSkills || {};
+    const level = learned[602] || 0;
+    if (level <= 0) return 0;
+    const skill = SKILL_MAP.get(602);
+    if (!skill) return 0;
+    const lvlData = skill.levels[Math.min(level - 1, skill.levels.length - 1)];
+    return lvlData ? lvlData.effectValue : 0;
+}
+
+function applyDiscount(basePrice, discountPct) {
+    if (discountPct <= 0) return basePrice;
+    return Math.floor(basePrice * (100 - discountPct) / 100);
+}
+
+function applyOvercharge(basePrice, overchargePct) {
+    if (overchargePct <= 0) return basePrice;
+    return Math.floor(basePrice * (100 + overchargePct) / 100);
+}
+
+// Calculate max weight: RO Classic formula + Enlarge Weight Limit skill (600)
+function getPlayerMaxWeight(player) {
+    const str = (player.stats && player.stats.str) || 1;
+    let maxW = 2000 + str * 30;
+    const learned = player.learnedSkills || {};
+    const ewlLevel = learned[600] || 0;
+    if (ewlLevel > 0) {
+        const skill = SKILL_MAP.get(600);
+        if (skill) {
+            const lvlData = skill.levels[Math.min(ewlLevel - 1, skill.levels.length - 1)];
+            if (lvlData) maxW += lvlData.effectValue; // +200 per level
+        }
+    }
+    return maxW;
+}
 
 async function loadItemDefinitions() {
     try {
@@ -4683,18 +4741,23 @@ io.on('connection', (socket) => {
     // NPC Shop Events
     // ============================================================
 
-    // Open shop — returns shop inventory and player's current zuzucoin
+    // Open shop — returns shop inventory with Discount/Overcharge-adjusted prices,
+    // player's zuzucoin, weight info, and inventory slot info
     socket.on('shop:open', async (data) => {
         logger.info(`[RECV] shop:open from ${socket.id}: ${JSON.stringify(data)}`);
         const playerInfo = findPlayerBySocketId(socket.id);
         if (!playerInfo) return;
 
+        const { characterId, player } = playerInfo;
         const shopId = parseInt(data.shopId);
         const shop = NPC_SHOPS[shopId];
         if (!shop) {
             socket.emit('shop:error', { message: 'Shop not found' });
             return;
         }
+
+        const discountPct = getDiscountPercent(player);
+        const overchargePct = getOverchargePercent(player);
 
         const shopItems = shop.itemIds
             .map(id => itemDefinitions.get(id))
@@ -4704,11 +4767,23 @@ io.on('connection', (socket) => {
                 name: item.name,
                 description: item.description,
                 itemType: item.item_type,
-                buyPrice: item.price * 2,
-                sellPrice: item.price,
+                equipSlot: item.equip_slot || '',
+                buyPrice: applyDiscount(item.price * 2, discountPct),
+                sellPrice: applyOvercharge(item.price, overchargePct),
+                weight: item.weight || 0,
                 icon: item.icon,
                 atk: item.atk || 0,
                 def: item.def || 0,
+                matk: item.matk || 0,
+                mdef: item.mdef || 0,
+                strBonus: item.str_bonus || 0,
+                agiBonus: item.agi_bonus || 0,
+                vitBonus: item.vit_bonus || 0,
+                intBonus: item.int_bonus || 0,
+                dexBonus: item.dex_bonus || 0,
+                lukBonus: item.luk_bonus || 0,
+                maxHpBonus: item.max_hp_bonus || 0,
+                maxSpBonus: item.max_sp_bonus || 0,
                 weaponType: item.weapon_type || '',
                 weaponRange: item.weapon_range || 0,
                 aspdModifier: item.aspd_modifier || 0,
@@ -4716,16 +4791,48 @@ io.on('connection', (socket) => {
                 stackable: item.stackable || false
             }));
 
+        // Calculate current inventory weight
+        let currentWeight = 0;
+        try {
+            const invW = await pool.query(
+                `SELECT COALESCE(SUM(ci.quantity * i.weight), 0) as total_weight
+                 FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
+                 WHERE ci.character_id = $1`, [characterId]
+            );
+            currentWeight = parseInt(invW.rows[0].total_weight);
+        } catch (err) {
+            logger.warn(`[SHOP] Weight query failed: ${err.message}`);
+        }
+
+        // Count used inventory slots
+        let usedSlots = 0;
+        try {
+            const slotR = await pool.query(
+                'SELECT COUNT(*) as c FROM character_inventory WHERE character_id = $1', [characterId]
+            );
+            usedSlots = parseInt(slotR.rows[0].c);
+        } catch (err) {
+            logger.warn(`[SHOP] Slot query failed: ${err.message}`);
+        }
+
+        const maxWeight = getPlayerMaxWeight(player);
+
         socket.emit('shop:data', {
             shopId,
             shopName: shop.name,
             items: shopItems,
-            playerZuzucoin: playerInfo.player.zuzucoin
+            playerZuzucoin: player.zuzucoin,
+            discountPercent: discountPct,
+            overchargePercent: overchargePct,
+            currentWeight,
+            maxWeight,
+            usedSlots,
+            maxSlots: INVENTORY.MAX_SLOTS
         });
-        logger.info(`[SEND] shop:data to ${socket.id}: shop=${shop.name} items=${shopItems.length} zuzucoin=${playerInfo.player.zuzucoin}`);
+        logger.info(`[SEND] shop:data to ${socket.id}: shop=${shop.name} items=${shopItems.length} zuzucoin=${player.zuzucoin} disc=${discountPct}% oc=${overchargePct}%`);
     });
 
-    // Buy item from shop
+    // DEPRECATED: Single-item buy. Use shop:buy_batch for batch purchases with Discount support.
     socket.on('shop:buy', async (data) => {
         logger.info(`[RECV] shop:buy from ${socket.id}: ${JSON.stringify(data)}`);
         const playerInfo = findPlayerBySocketId(socket.id);
@@ -4785,7 +4892,7 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Sell item to shop
+    // DEPRECATED: Single-item sell. Use shop:sell_batch for batch sales with Overcharge support.
     socket.on('shop:sell', async (data) => {
         logger.info(`[RECV] shop:sell from ${socket.id}: ${JSON.stringify(data)}`);
         const playerInfo = findPlayerBySocketId(socket.id);
@@ -4841,6 +4948,271 @@ io.on('connection', (socket) => {
         } catch (err) {
             logger.error(`[SHOP] Sell error for char ${characterId}: ${err.message}`);
             socket.emit('shop:error', { message: 'Sale failed' });
+        }
+    });
+
+    // ============================================================
+    // Batch Buy — RO Classic shopping cart (buy multiple items at once)
+    // Validates entire cart atomically: zeny, weight, inventory slots
+    // ============================================================
+    socket.on('shop:buy_batch', async (data) => {
+        logger.info(`[RECV] shop:buy_batch from ${socket.id}`);
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+
+        const { characterId, player } = playerInfo;
+        const shopId = parseInt(data.shopId);
+        const cart = data.cart; // Array of { itemId, quantity }
+
+        if (!Array.isArray(cart) || cart.length === 0) {
+            socket.emit('shop:error', { code: 'invalid_cart', message: 'Empty cart' });
+            return;
+        }
+
+        const shop = NPC_SHOPS[shopId];
+        if (!shop) {
+            socket.emit('shop:error', { code: 'invalid_shop', message: 'Shop not found' });
+            return;
+        }
+
+        const discountPct = getDiscountPercent(player);
+
+        // Pre-validate all items and calculate totals
+        let totalCost = 0;
+        let totalWeight = 0;
+        const validatedItems = [];
+        const stackableItemIds = [];
+
+        for (const entry of cart) {
+            const itemId = parseInt(entry.itemId);
+            const quantity = Math.max(1, parseInt(entry.quantity) || 1);
+
+            if (!shop.itemIds.includes(itemId)) {
+                socket.emit('shop:error', { code: 'invalid_item', message: `Item not available in this shop` });
+                return;
+            }
+            const itemDef = itemDefinitions.get(itemId);
+            if (!itemDef) {
+                socket.emit('shop:error', { code: 'invalid_item', message: `Item not found` });
+                return;
+            }
+            if (itemDef.required_level > (player.stats?.level || 1)) {
+                socket.emit('shop:error', { code: 'level_req', message: `${itemDef.name} requires level ${itemDef.required_level}` });
+                return;
+            }
+
+            const unitPrice = applyDiscount(itemDef.price * 2, discountPct);
+            totalCost += unitPrice * quantity;
+            totalWeight += (itemDef.weight || 0) * quantity;
+
+            if (itemDef.stackable) {
+                stackableItemIds.push(itemId);
+            }
+
+            validatedItems.push({ itemId, quantity, itemDef, unitPrice });
+        }
+
+        // 1. Check zeny
+        if (player.zuzucoin < totalCost) {
+            socket.emit('shop:error', {
+                code: 'no_zeny',
+                message: `Not enough Zeny (need ${totalCost.toLocaleString()}, have ${player.zuzucoin.toLocaleString()})`
+            });
+            return;
+        }
+
+        // 2. Check weight
+        let currentWeight = 0;
+        try {
+            const invW = await pool.query(
+                `SELECT COALESCE(SUM(ci.quantity * i.weight), 0) as w
+                 FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
+                 WHERE ci.character_id = $1`, [characterId]
+            );
+            currentWeight = parseInt(invW.rows[0].w);
+        } catch (err) { /* weight query failed, skip check */ }
+
+        const maxWeight = getPlayerMaxWeight(player);
+        if (currentWeight + totalWeight > maxWeight) {
+            socket.emit('shop:error', {
+                code: 'overweight',
+                message: `Would exceed weight limit (${currentWeight + totalWeight} / ${maxWeight})`
+            });
+            return;
+        }
+
+        // 3. Check inventory slots — count how many NEW slots are needed
+        let newSlotCount = 0;
+        try {
+            // Find which stackable items already exist in inventory
+            let existingStackIds = new Set();
+            if (stackableItemIds.length > 0) {
+                const existResult = await pool.query(
+                    'SELECT DISTINCT item_id FROM character_inventory WHERE character_id = $1 AND item_id = ANY($2) AND is_equipped = false',
+                    [characterId, stackableItemIds]
+                );
+                existingStackIds = new Set(existResult.rows.map(r => r.item_id));
+            }
+
+            for (const { itemId, quantity, itemDef } of validatedItems) {
+                if (itemDef.stackable && existingStackIds.has(itemId)) {
+                    // Will stack into existing slot, no new slot needed
+                } else if (itemDef.stackable) {
+                    newSlotCount += 1; // New stack = 1 slot
+                    existingStackIds.add(itemId); // Subsequent same items will stack
+                } else {
+                    newSlotCount += quantity; // Non-stackable = 1 slot per item
+                }
+            }
+
+            const slotR = await pool.query(
+                'SELECT COUNT(*) as c FROM character_inventory WHERE character_id = $1', [characterId]
+            );
+            const usedSlots = parseInt(slotR.rows[0].c);
+            if (usedSlots + newSlotCount > INVENTORY.MAX_SLOTS) {
+                socket.emit('shop:error', {
+                    code: 'no_slots',
+                    message: `Not enough inventory space (${usedSlots}/${INVENTORY.MAX_SLOTS} slots used)`
+                });
+                return;
+            }
+        } catch (err) {
+            logger.warn(`[SHOP] Slot validation error: ${err.message}`);
+        }
+
+        // All validations passed — execute the batch transaction
+        try {
+            const newZeny = player.zuzucoin - totalCost;
+            await pool.query('UPDATE characters SET zuzucoin = $1 WHERE character_id = $2', [newZeny, characterId]);
+            player.zuzucoin = newZeny;
+
+            const boughtItems = [];
+            for (const { itemId, quantity, itemDef, unitPrice } of validatedItems) {
+                const added = await addItemToInventory(characterId, itemId, quantity);
+                if (added) {
+                    boughtItems.push({ itemId, itemName: itemDef.name, quantity, unitPrice, totalPrice: unitPrice * quantity });
+                }
+            }
+
+            logger.info(`[SHOP] ${player.characterName} batch-bought: ${boughtItems.map(i => `${i.quantity}x ${i.itemName}`).join(', ')} for ${totalCost}z (remaining: ${newZeny}z)`);
+
+            const inventory = await getPlayerInventory(characterId);
+            socket.emit('shop:bought', { items: boughtItems, totalCost, newZuzucoin: newZeny });
+            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin });
+            logger.info(`[SEND] shop:bought + inventory:data to ${socket.id}`);
+        } catch (err) {
+            logger.error(`[SHOP] Batch buy error for char ${characterId}: ${err.message}`);
+            // Attempt zeny rollback
+            player.zuzucoin += totalCost;
+            await pool.query('UPDATE characters SET zuzucoin = $1 WHERE character_id = $2', [player.zuzucoin, characterId]).catch(() => {});
+            socket.emit('shop:error', { code: 'server_error', message: 'Purchase failed' });
+        }
+    });
+
+    // ============================================================
+    // Batch Sell — RO Classic sell cart (sell multiple items at once)
+    // Validates ownership, equipped status, quantities, zeny overflow
+    // ============================================================
+    socket.on('shop:sell_batch', async (data) => {
+        logger.info(`[RECV] shop:sell_batch from ${socket.id}`);
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+
+        const { characterId, player } = playerInfo;
+        const cart = data.cart; // Array of { inventoryId, quantity }
+
+        if (!Array.isArray(cart) || cart.length === 0) {
+            socket.emit('shop:error', { code: 'invalid_cart', message: 'Empty sell cart' });
+            return;
+        }
+
+        const overchargePct = getOverchargePercent(player);
+
+        // Pre-validate all items
+        let totalRevenue = 0;
+        const validatedItems = [];
+
+        for (const entry of cart) {
+            const inventoryId = parseInt(entry.inventoryId);
+            const quantity = Math.max(1, parseInt(entry.quantity) || 1);
+
+            if (!inventoryId || isNaN(inventoryId)) {
+                socket.emit('shop:error', { code: 'invalid_item', message: 'Invalid inventory ID' });
+                return;
+            }
+
+            try {
+                const result = await pool.query(
+                    `SELECT ci.inventory_id, ci.item_id, ci.quantity, ci.is_equipped,
+                            i.name, i.price, i.stackable
+                     FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
+                     WHERE ci.inventory_id = $1 AND ci.character_id = $2`,
+                    [inventoryId, characterId]
+                );
+
+                if (result.rows.length === 0) {
+                    socket.emit('shop:error', { code: 'invalid_item', message: 'Item not found in your inventory' });
+                    return;
+                }
+
+                const item = result.rows[0];
+
+                if (item.is_equipped) {
+                    socket.emit('shop:error', { code: 'equipped', message: `Cannot sell equipped item: ${item.name}. Unequip it first.` });
+                    return;
+                }
+
+                if ((item.price || 0) <= 0) {
+                    socket.emit('shop:error', { code: 'unsellable', message: `${item.name} cannot be sold` });
+                    return;
+                }
+
+                const sellQty = Math.min(quantity, item.quantity);
+                const unitSellPrice = applyOvercharge(item.price || 0, overchargePct);
+                totalRevenue += unitSellPrice * sellQty;
+
+                validatedItems.push({ inventoryId, sellQty, item, unitSellPrice });
+            } catch (err) {
+                logger.error(`[SHOP] Sell validation error: ${err.message}`);
+                socket.emit('shop:error', { code: 'server_error', message: 'Validation failed' });
+                return;
+            }
+        }
+
+        // Check zeny overflow (max 2^31 - 1)
+        const MAX_ZENY = 2147483647;
+        if (player.zuzucoin + totalRevenue > MAX_ZENY) {
+            socket.emit('shop:error', { code: 'zeny_overflow', message: 'Cannot hold more Zeny (max reached)' });
+            return;
+        }
+
+        // Execute the batch sale
+        try {
+            const newZeny = player.zuzucoin + totalRevenue;
+            await pool.query('UPDATE characters SET zuzucoin = $1 WHERE character_id = $2', [newZeny, characterId]);
+            player.zuzucoin = newZeny;
+
+            const soldItems = [];
+            for (const { inventoryId, sellQty, item, unitSellPrice } of validatedItems) {
+                await removeItemFromInventory(inventoryId, sellQty);
+                soldItems.push({
+                    inventoryId,
+                    itemName: item.name,
+                    quantity: sellQty,
+                    unitPrice: unitSellPrice,
+                    totalPrice: unitSellPrice * sellQty
+                });
+            }
+
+            logger.info(`[SHOP] ${player.characterName} batch-sold: ${soldItems.map(i => `${i.quantity}x ${i.itemName}`).join(', ')} for ${totalRevenue}z (total: ${newZeny}z)`);
+
+            const inventory = await getPlayerInventory(characterId);
+            socket.emit('shop:sold', { items: soldItems, totalRevenue, newZuzucoin: newZeny });
+            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin });
+            logger.info(`[SEND] shop:sold + inventory:data to ${socket.id}`);
+        } catch (err) {
+            logger.error(`[SHOP] Batch sell error for char ${characterId}: ${err.message}`);
+            socket.emit('shop:error', { code: 'server_error', message: 'Sale failed' });
         }
     });
 
