@@ -376,10 +376,11 @@ void UWorldHealthBarSubsystem::HandleCombatDamage(const TSharedPtr<FJsonValue>& 
 		Enemy.EnemyId = TargetId;
 		Enemy.CurrentHP = FMath::Max((int32)TH, 0);
 		if ((int32)TMH > 0) Enemy.MaxHP = (int32)TMH;
+		const bool bWasVisible = Enemy.bBarVisible;
 		Enemy.bBarVisible = true;
 		Enemy.bIsDead = (Enemy.CurrentHP <= 0);
 
-		// Update position from damage event
+		// Update position from damage event (MUST happen before eager cache)
 		double TX = 0, TY = 0, TZ = 0;
 		Obj->TryGetNumberField(TEXT("targetX"), TX);
 		Obj->TryGetNumberField(TEXT("targetY"), TY);
@@ -387,6 +388,13 @@ void UWorldHealthBarSubsystem::HandleCombatDamage(const TSharedPtr<FJsonValue>& 
 		if (TX != 0.0 || TY != 0.0 || TZ != 0.0)
 		{
 			Enemy.WorldPosition = FVector((float)TX, (float)TY, (float)TZ);
+		}
+
+		// Eagerly cache actor on first visibility so we skip the fallback position path.
+		// WorldPosition must be set first — CacheEnemyActors skips entries with zero position.
+		if (!bWasVisible && !Enemy.CachedActor.IsValid())
+		{
+			CacheEnemyActors();
 		}
 	}
 	// Player target — update player HP
@@ -678,9 +686,14 @@ bool UWorldHealthBarSubsystem::GetEnemyFeetPosition(const FEnemyBarData& Enemy, 
 	}
 
 	// Fallback: use socket-reported position (may be laggy)
+	// Server positions are at capsule-center level (spawn Z).
+	// Offset down by a default capsule half-height to approximate feet level,
+	// matching what the CachedActor path does with the actual capsule component.
 	if (!Enemy.WorldPosition.IsZero())
 	{
 		OutPos = Enemy.WorldPosition;
+		static constexpr float DefaultCapsuleHalfHeight = 96.0f;
+		OutPos.Z -= DefaultCapsuleHalfHeight;
 		return true;
 	}
 

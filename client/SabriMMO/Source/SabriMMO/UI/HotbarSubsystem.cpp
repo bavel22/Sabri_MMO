@@ -84,6 +84,11 @@ void UHotbarSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 
 void UHotbarSubsystem::Deinitialize()
 {
+	UE_LOG(LogHotbar, Log, TEXT("Deinitialize: World=%p CharId=%d bEventsWrapped=%s RowsAdded=[%d,%d,%d,%d]"),
+		GetWorld(), LocalCharacterId, bEventsWrapped ? TEXT("true") : TEXT("false"),
+		RowWidgets[0].bIsAdded ? 1 : 0, RowWidgets[1].bIsAdded ? 1 : 0,
+		RowWidgets[2].bIsAdded ? 1 : 0, RowWidgets[3].bIsAdded ? 1 : 0);
+
 	HideAllRows();
 	HideKeybindWidget();
 
@@ -93,7 +98,9 @@ void UHotbarSubsystem::Deinitialize()
 	}
 
 	bEventsWrapped = false;
+	bInitialRowsShown = false;
 	CachedSIOComponent = nullptr;
+	CachedViewportClient = nullptr;
 	Super::Deinitialize();
 }
 
@@ -122,58 +129,84 @@ USocketIOClientComponent* UHotbarSubsystem::FindSocketIOComponent() const
 
 void UHotbarSubsystem::TryWrapSocketEvents()
 {
-	if (bEventsWrapped) return;
-
-	USocketIOClientComponent* SIOComp = FindSocketIOComponent();
-	if (!SIOComp) return;
-
-	TSharedPtr<FSocketIONative> NativeClient = SIOComp->GetNativeClient();
-	if (!NativeClient.IsValid() || !NativeClient->bIsConnected) return;
-
-	// Wait for BP to bind events first
-	if (!NativeClient->EventFunctionMap.Contains(TEXT("combat:health_update"))) return;
-
-	CachedSIOComponent = SIOComp;
-
-	if (LocalCharacterId == 0)
+	// Phase 1: Wrap socket events (runs once)
+	if (!bEventsWrapped)
 	{
-		if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance()))
+		USocketIOClientComponent* SIOComp = FindSocketIOComponent();
+		if (!SIOComp) return;
+
+		TSharedPtr<FSocketIONative> NativeClient = SIOComp->GetNativeClient();
+		if (!NativeClient.IsValid() || !NativeClient->bIsConnected) return;
+
+		// Wait for BP to bind events first
+		if (!NativeClient->EventFunctionMap.Contains(TEXT("combat:health_update"))) return;
+
+		CachedSIOComponent = SIOComp;
+
+		if (LocalCharacterId == 0)
 		{
-			FCharacterData SelChar = GI->GetSelectedCharacter();
-			LocalCharacterId = SelChar.CharacterId;
+			if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance()))
+			{
+				FCharacterData SelChar = GI->GetSelectedCharacter();
+				LocalCharacterId = SelChar.CharacterId;
+			}
+		}
+
+		// Wrap hotbar:alldata — chains after SkillTreeSubsystem's handler (both parse independently)
+		WrapExistingEvent(TEXT("hotbar:alldata"),
+			[this](const TSharedPtr<FJsonValue>& D) { HandleHotbarAllData(D); });
+
+		bEventsWrapped = true;
+
+		// Request fresh hotbar data (initial events may have fired before wrapping)
+		// Use a delay to allow SkillTreeSubsystem to also wrap first
+		if (UWorld* World = GetWorld())
+		{
+			FTimerHandle RequestTimer;
+			World->GetTimerManager().SetTimer(RequestTimer, [this]()
+			{
+				if (CachedSIOComponent.IsValid())
+				{
+					CachedSIOComponent->EmitNative(TEXT("hotbar:request"), TEXT("{}"));
+					UE_LOG(LogHotbar, Log, TEXT("Emitted hotbar:request (delayed after wrap)"));
+				}
+			}, 1.0f, false);
+		}
+
+		UE_LOG(LogHotbar, Log, TEXT("HotbarSubsystem — events wrapped. LocalCharId=%d World=%p VC=%p"),
+			LocalCharacterId, GetWorld(), GetWorld() ? GetWorld()->GetGameViewport() : nullptr);
+	}
+
+	// Phase 2: Show initial rows (retries until viewport is available)
+	if (bEventsWrapped && !bInitialRowsShown)
+	{
+		UWorld* World = GetWorld();
+		UGameViewportClient* VC = World ? World->GetGameViewport() : nullptr;
+		if (VC)
+		{
+			// Cache this VC for the lifetime of this subsystem.
+			// World->GetGameViewport() returns GEngine->GameViewport which is a global
+			// that changes when other PIE instances transition levels. We must always
+			// use the VC we first added widgets to for all subsequent add/remove calls.
+			CachedViewportClient = VC;
+			ShowRows();
+			bInitialRowsShown = true;
+			UE_LOG(LogHotbar, Log, TEXT("Initial rows shown. CachedVC=%p World=%p"), VC, World);
+		}
+		else
+		{
+			UE_LOG(LogHotbar, Log, TEXT("Viewport not ready yet — will retry (World=%p)"), World);
 		}
 	}
 
-	// Wrap hotbar:alldata — chains after SkillTreeSubsystem's handler (both parse independently)
-	WrapExistingEvent(TEXT("hotbar:alldata"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleHotbarAllData(D); });
-
-	bEventsWrapped = true;
-
-	if (UWorld* World = GetWorld())
+	// Only stop timer when BOTH phases are complete
+	if (bEventsWrapped && bInitialRowsShown)
 	{
-		World->GetTimerManager().ClearTimer(BindCheckTimer);
-	}
-
-	// Request fresh hotbar data (initial events may have fired before wrapping)
-	// Use a delay to allow SkillTreeSubsystem to also wrap first
-	if (UWorld* World = GetWorld())
-	{
-		FTimerHandle RequestTimer;
-		World->GetTimerManager().SetTimer(RequestTimer, [this]()
+		if (UWorld* World = GetWorld())
 		{
-			if (CachedSIOComponent.IsValid())
-			{
-				CachedSIOComponent->EmitNative(TEXT("hotbar:request"), TEXT("{}"));
-				UE_LOG(LogHotbar, Log, TEXT("Emitted hotbar:request (delayed after wrap)"));
-			}
-		}, 1.0f, false);
+			World->GetTimerManager().ClearTimer(BindCheckTimer);
+		}
 	}
-
-	// Show the initial row(s) based on visibility state
-	ShowRows();
-
-	UE_LOG(LogHotbar, Log, TEXT("HotbarSubsystem — events wrapped. LocalCharId=%d"), LocalCharacterId);
 }
 
 // ============================================================
@@ -497,7 +530,13 @@ void UHotbarSubsystem::CycleVisibility()
 
 	ShowRows();
 
-	UE_LOG(LogHotbar, Log, TEXT("CycleVisibility → %d rows visible"), GetVisibleRowCount());
+	int32 RowCount = GetVisibleRowCount();
+	UE_LOG(LogHotbar, Log, TEXT("CycleVisibility → %d rows visible"), RowCount);
+	if (GEngine)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Yellow,
+			FString::Printf(TEXT("[Hotbar] H → %d rows visible"), RowCount));
+	}
 }
 
 int32 UHotbarSubsystem::GetVisibleRowCount() const
@@ -524,10 +563,16 @@ bool UHotbarSubsystem::IsVisible() const
 
 void UHotbarSubsystem::ShowRows()
 {
-	UWorld* World = GetWorld();
-	if (!World) return;
-	UGameViewportClient* VC = World->GetGameViewport();
-	if (!VC) return;
+	// Use cached viewport client (PIE-safe). World->GetGameViewport() returns
+	// GEngine->GameViewport which is a GLOBAL that changes when other PIE instances
+	// transition levels. Using the cached VC ensures we always add/remove from the
+	// correct viewport for THIS subsystem's PIE instance.
+	UGameViewportClient* VC = CachedViewportClient.Get();
+	if (!VC)
+	{
+		UE_LOG(LogHotbar, Warning, TEXT("ShowRows: CachedViewportClient is null!"));
+		return;
+	}
 
 	int32 VisibleCount = GetVisibleRowCount();
 
@@ -573,9 +618,7 @@ void UHotbarSubsystem::ShowRows()
 
 void UHotbarSubsystem::HideAllRows()
 {
-	UWorld* World = GetWorld();
-	if (!World) return;
-	UGameViewportClient* VC = World->GetGameViewport();
+	UGameViewportClient* VC = CachedViewportClient.Get();
 
 	for (int32 i = 0; i < NUM_ROWS; ++i)
 	{
@@ -602,9 +645,7 @@ void UHotbarSubsystem::ToggleKeybindWidget()
 	}
 	else
 	{
-		UWorld* World = GetWorld();
-		if (!World) return;
-		UGameViewportClient* VC = World->GetGameViewport();
+		UGameViewportClient* VC = CachedViewportClient.Get();
 		if (!VC) return;
 
 		KeybindWidget = SNew(SHotbarKeybindWidget).Subsystem(this);
@@ -630,14 +671,10 @@ void UHotbarSubsystem::HideKeybindWidget()
 {
 	if (!bKeybindWidgetVisible) return;
 
-	UWorld* World = GetWorld();
-	if (World)
+	UGameViewportClient* VC = CachedViewportClient.Get();
+	if (VC && KeybindViewportOverlay.IsValid())
 	{
-		UGameViewportClient* VC = World->GetGameViewport();
-		if (VC && KeybindViewportOverlay.IsValid())
-		{
-			VC->RemoveViewportWidgetContent(KeybindViewportOverlay.ToSharedRef());
-		}
+		VC->RemoveViewportWidgetContent(KeybindViewportOverlay.ToSharedRef());
 	}
 
 	KeybindWidget.Reset();

@@ -12,6 +12,7 @@
 #include "HotbarSubsystem.generated.h"
 
 class USocketIOClientComponent;
+class UGameViewportClient;
 class SHotbarRowWidget;
 class SHotbarKeybindWidget;
 struct FSIOBoundEvent;
@@ -166,6 +167,7 @@ private:
 
 	// ---- state ----
 	bool bEventsWrapped = false;
+	bool bInitialRowsShown = false;
 	int32 LocalCharacterId = 0;
 	FTimerHandle BindCheckTimer;
 
@@ -192,6 +194,11 @@ private:
 	bool bKeybindWidgetVisible = false;
 
 	TWeakObjectPtr<USocketIOClientComponent> CachedSIOComponent;
+
+	// ---- cached viewport client (PIE-safe: World->GetGameViewport() returns the global
+	//      GEngine->GameViewport which changes when other PIE instances load, so we cache
+	//      the VC we first added widgets to and always use that for add/remove) ----
+	TWeakObjectPtr<UGameViewportClient> CachedViewportClient;
 
 	// ---- static empty slot for out-of-bounds access ----
 	static const FHotbarSlot EmptySlot;

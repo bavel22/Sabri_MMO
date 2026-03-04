@@ -170,10 +170,10 @@ void ASabriMMOCharacter::CreateUIToggleActions()
 	ToggleEquipmentAction->ValueType = EInputActionValueType::Boolean;
 	UIToggleIMC->MapKey(ToggleEquipmentAction, EKeys::F7);
 
-	// F5: Cycle Hotbar visibility
+	// H: Cycle Hotbar visibility
 	CycleHotbarAction = NewObject<UInputAction>(this, TEXT("IA_CycleHotbar"));
 	CycleHotbarAction->ValueType = EInputActionValueType::Boolean;
-	UIToggleIMC->MapKey(CycleHotbarAction, EKeys::F5);
+	UIToggleIMC->MapKey(CycleHotbarAction, EKeys::H);
 
 	// Keys 1-9: Hotbar slot activation
 	static const FKey NumberKeys[] = {

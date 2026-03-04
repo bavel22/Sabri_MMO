@@ -2584,6 +2584,42 @@ io.on('connection', (socket) => {
         const hasGroundPos = groundX !== undefined && groundY !== undefined && !isNaN(groundX) && !isNaN(groundY);
 
         // ================================================================
+        // PRE-CAST RANGE CHECK — RO Classic behavior
+        // In RO Classic, if the player tries to cast a skill out of range
+        // while stationary, nothing happens (silent rejection). The cast
+        // never starts. Range is checked BEFORE entering the casting state.
+        // ================================================================
+        if (!data._castComplete) {
+            const skillRange = skill.range || 900;
+            const casterPos = await getPlayerPosition(characterId);
+
+            if (casterPos && hasGroundPos && skill.targetType === 'ground') {
+                const dx = casterPos.x - groundX;
+                const dy = casterPos.y - groundY;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                if (dist > skillRange + COMBAT.RANGE_TOLERANCE) {
+                    logger.info(`[SKILLS] ${player.characterName} tried ${skill.displayName} on ground out of range (dist=${Math.round(dist)}, max=${skillRange + COMBAT.RANGE_TOLERANCE})`);
+                    socket.emit('combat:out_of_range', { skillId, distance: Math.round(dist), maxRange: skillRange });
+                    return;
+                }
+            }
+
+            if (casterPos && targetId && isEnemy) {
+                const target = enemies.get(targetId);
+                if (target) {
+                    const dx = casterPos.x - target.x;
+                    const dy = casterPos.y - target.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    if (dist > skillRange + COMBAT.RANGE_TOLERANCE) {
+                        logger.info(`[SKILLS] ${player.characterName} tried ${skill.displayName} on enemy ${targetId} out of range (dist=${Math.round(dist)}, max=${skillRange + COMBAT.RANGE_TOLERANCE})`);
+                        socket.emit('combat:out_of_range', { skillId, targetId, distance: Math.round(dist), maxRange: skillRange });
+                        return;
+                    }
+                }
+            }
+        }
+
+        // ================================================================
         // CAST TIME CHECK — RO pre-renewal cast system
         // If baseCastTime > 0, calculate actual cast time with DEX reduction.
         // If actualCastTime > 0, enter casting state and return (skill executes later).

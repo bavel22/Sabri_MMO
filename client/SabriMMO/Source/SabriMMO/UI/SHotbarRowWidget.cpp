@@ -12,6 +12,9 @@
 #include "Widgets/Images/SImage.h"
 #include "Styling/CoreStyle.h"
 #include "Framework/Application/SlateApplication.h"
+#include "Engine/GameViewportClient.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogHotbarWidget, Log, All);
 
 // ============================================================
 // RO Classic colors (same namespace as other widgets)
@@ -399,17 +402,29 @@ void SHotbarRowWidget::Tick(const FGeometry& AllottedGeometry, const double InCu
 	if (!bPositionInitialized)
 	{
 		FVector2D ViewportSize = FVector2D(1920, 1080);
-		if (GEngine && GEngine->GameViewport)
+		// Use per-world viewport (not GEngine->GameViewport which is global/wrong in multi-PIE)
+		UHotbarSubsystem* SubPtr = OwningSubsystem.Get();
+		if (SubPtr)
 		{
-			FVector2D ViewSz;
-			GEngine->GameViewport->GetViewportSize(ViewSz);
-			if (ViewSz.X > 0) ViewportSize = ViewSz;
+			if (UWorld* World = SubPtr->GetWorld())
+			{
+				if (UGameViewportClient* VC = World->GetGameViewport())
+				{
+					FVector2D ViewSz;
+					VC->GetViewportSize(ViewSz);
+					if (ViewSz.X > 0) ViewportSize = ViewSz;
+				}
+			}
 		}
 		// Center horizontally, near bottom, stacked up per row
 		WidgetPosition.X = (ViewportSize.X - TotalWidth) * 0.5;
 		WidgetPosition.Y = ViewportSize.Y - 100.0 - (RowIndex * (RowHeight + 4.0));
 		ApplyLayout();
 		bPositionInitialized = true;
+
+		UE_LOG(LogHotbarWidget, Log, TEXT("Row%d positioned: (%.0f, %.0f) viewport=(%.0f, %.0f) World=%p"),
+			RowIndex, WidgetPosition.X, WidgetPosition.Y, ViewportSize.X, ViewportSize.Y,
+			SubPtr ? SubPtr->GetWorld() : nullptr);
 	}
 }
 
