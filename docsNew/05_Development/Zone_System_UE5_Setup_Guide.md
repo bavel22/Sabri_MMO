@@ -40,11 +40,36 @@ The current level contains the Prontera town blockout geometry (castle, gates, b
 
 1. Open **World Settings** (Window → World Settings)
 2. Set **GameMode Override** to `GM_MMOGameMode`
-3. Open `GM_MMOGameMode` Blueprint → **Class Defaults** → verify **Default Pawn Class** = `BP_MMOCharacter`
+3. Open `GM_MMOGameMode` Blueprint → **Class Defaults** → verify **Default Pawn Class** = **None**
 
-**If DefaultPawnClass is "None"**, no player pawn will spawn and the zone transition will hang on the loading screen forever. `GM_MMOGameMode` inherits from `AGameModeBase` directly and must have DefaultPawnClass set manually in its Blueprint Class Defaults.
+**DefaultPawnClass must be None.** `BP_SocketManager` is responsible for spawning `BP_MMOCharacter` after the socket connection is established. If the GameMode also has a DefaultPawnClass set, it will spawn a duplicate pawn at the PlayerStart/world origin.
 
-### 1.3: Add Required Blueprint Actors
+### 1.3: Level Blueprint (CRITICAL — Character Spawn)
+
+The Level Blueprint is responsible for spawning and possessing `BP_MMOCharacter`. **Without this, no player character will appear.** The easiest approach: duplicate an existing working level (e.g., `L_PrtSouth`) and modify it, rather than creating from scratch.
+
+The Level Blueprint has 3 sections:
+
+**A. Spawn and Possess Character (Event BeginPlay):**
+1. `Event BeginPlay` → `Delay 0.2s` → `Cast To MMOGameInstance` (from `Get Game Instance`)
+2. `Get Selected Character` → `Break Character Data` → extract `CharacterId`, `X`, `Y`, `Z`
+3. `Branch`: check `CharacterId > 0` (was a character selected?)
+4. `Branch`: check `Vector Length Squared(Make Vector(X,Y,Z)) != 0.0` (has saved location?)
+   - **True (saved location)**: `SpawnActor BP_MMOCharacter` at `(X, Y, Z)` → `Possess` (Get Player Controller 0)
+   - **False (no saved location)**: `SpawnActor BP_MMOCharacter` at default `(0, 0, 900)` → `Possess` (Get Player Controller 0)
+5. After possess → `Set Timer by Function Name` ("SaveCharacterPosition", Time=5.0, Looping=true)
+
+**B. SaveCharacterPosition (Custom Event, called every 5s):**
+1. `Cast To MMOGameInstance` → `Get Selected Character` → `Break Character Data` → `CharacterId`
+2. `Get Player Character (0)` → `Get Actor Location` → `X, Y, Z`
+3. → `Save Character Position` (CharacterId, X, Y, Z)
+
+**C. Cleanup (Event End Play):**
+1. `Event End Play` → `Clear Timer by Function Name` ("SaveCharacterPosition")
+
+> **TIP**: Always duplicate an existing game level instead of creating a new empty one. This copies the Level Blueprint, World Settings, and placed actors automatically.
+
+### 1.4: Add Required Blueprint Actors
 
 Place these in L_Prontera (drag from Content Browser):
 
@@ -298,7 +323,8 @@ float InteractionRadius = 300.f;
 
 Every game level (NOT L_Startup) must have these configured:
 
-- [ ] **GameMode Override** — World Settings → use `GM_MMOGameMode` (must have **Default Pawn Class = `BP_MMOCharacter`** in its Class Defaults)
+- [ ] **Level Blueprint** — Spawn + Possess BP_MMOCharacter, SaveCharacterPosition timer, EndPlay cleanup (see Step 1.3). **Easiest: duplicate an existing level.**
+- [ ] **GameMode Override** — World Settings → use `GM_MMOGameMode` (Default Pawn Class must be **None**)
 - [ ] `BP_SocketManager` — Socket.io connection
 - [ ] `BP_OtherPlayerManager` — remote player spawning
 - [ ] `BP_EnemyManager` — enemy spawning

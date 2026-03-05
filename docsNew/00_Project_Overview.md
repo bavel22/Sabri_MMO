@@ -126,6 +126,18 @@
 #### Game HUD (Pure C++ Slate)
 - `SBasicInfoWidget` — Draggable HUD panel: player name, job, HP/SP bars, base/job EXP bars, weight, zuzucoin
 
+### Zone / Map / Warp System
+- Multi-zone architecture: zone registry (`ro_zone_data.js`), zone-scoped broadcasting, lazy enemy spawning
+- `ZoneTransitionSubsystem` — manages zone:change/error/teleport events, loading overlay, pawn teleport
+- `WarpPortal` — overlap trigger actors for zone-to-zone transitions
+- `KafraSubsystem` + `SKafraWidget` — Kafra NPC service dialog (save point, teleport with zeny cost)
+- `KafraNPC` — clickable NPC actors
+- Login loads correct map directly from character REST data (zone_name + level_name)
+- Level Blueprint spawns and possesses `BP_MMOCharacter` (DefaultPawnClass = None on GameMode)
+- 4 zones: prontera (town), prontera_south (starter field), prontera_north (field), prt_dungeon_01 (dungeon)
+- Position persistence: disconnect handler + 60s periodic save + 5s Level Blueprint save
+- DB migration: `database/migrations/add_zone_system.sql`
+
 ### Automated UI Testing
 - `ASabriMMOUITests` — C++ test runner for automated UI validation
 - `BP_AutomationTestLibrary` — Blueprint function library for UI testing

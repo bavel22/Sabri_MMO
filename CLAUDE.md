@@ -70,6 +70,12 @@ Single monolithic file (~2400 lines). Key sections:
 | `UI/SLoadingOverlayWidget.*` | "Please Wait" fullscreen overlay with progress bar |
 | `UI/SBasicInfoWidget.*` | Slate HUD panel (HP/SP/EXP bars, draggable) |
 | `UI/BasicInfoSubsystem.*` | UWorldSubsystem bridging server data → Slate widget |
+| `UI/ZoneTransitionSubsystem.*` | Zone transitions, loading overlay, pawn teleport, zone:change/error/teleport events |
+| `UI/KafraSubsystem.*` | Kafra NPC dialog, save point, teleport service |
+| `UI/SKafraWidget.*` | Slate Kafra service dialog (save/teleport/cancel) |
+| `WarpPortal.*` | Overlap trigger actor for zone warps |
+| `KafraNPC.*` | Clickable Kafra NPC actor |
+| `SabriMMOGameMode.*` | Base GameMode — sets DefaultPawnClass=nullptr (Level Blueprint spawns pawn) |
 
 ### Database (PostgreSQL)
 4 core tables: `users`, `characters`, `items` (static definitions), `character_inventory` (per-character).

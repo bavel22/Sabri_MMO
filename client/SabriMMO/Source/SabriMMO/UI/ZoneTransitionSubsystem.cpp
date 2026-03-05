@@ -391,30 +391,18 @@ void UZoneTransitionSubsystem::CheckTransitionComplete()
 		{
 			UE_LOG(LogZoneTransition, Error,
 				TEXT("CheckTransition TIMEOUT after %d checks (~10s). Force-completing transition. "
-				     "FIX: Ensure this level has a PlayerStart actor and the GameMode has a valid DefaultPawnClass."),
+				     "FIX: Ensure this level was duplicated from a working level so its Level Blueprint spawns BP_MMOCharacter."),
 				TransitionCheckCount);
 			ForceCompleteTransition();
 		}
 		return;
 	}
 
-	// Teleport pawn to spawn immediately when found (before waiting for socket)
-	// so it's already in the right position while the loading overlay is still visible.
+	// Teleport pawn to correct position (only once)
 	if (!bPawnTeleported)
 	{
 		TeleportPawnToSpawn();
 		bPawnTeleported = true;
-	}
-
-	// Still waiting for socket events — stay on loading screen
-	if (!bEventsWrapped)
-	{
-		if (TransitionCheckCount % 10 == 1)
-		{
-			UE_LOG(LogZoneTransition, Log,
-				TEXT("CheckTransition #%d: pawn placed, waiting for socket events..."), TransitionCheckCount);
-		}
-		return;
 	}
 
 	// Everything ready — complete the transition

@@ -5,5 +5,8 @@
 
 ASabriMMOGameMode::ASabriMMOGameMode()
 {
-	DefaultPawnClass = ASabriMMOCharacter::StaticClass();
+	// Do NOT set DefaultPawnClass here.
+	// BP_SocketManager spawns the player character after socket connection.
+	// Setting DefaultPawnClass causes a duplicate pawn at the PlayerStart/origin.
+	DefaultPawnClass = nullptr;
 }

@@ -95,7 +95,7 @@ const ZONE_REGISTRY = {
                 x: 1740, y: 0, z: 0,
                 radius: 200,
                 destZone: 'prontera',
-                destX: 0, destY: -2140, destZ: 580
+                destX: -240, destY: -1700, destZ: 590
             },
             {
                 id: 'prtsouth_to_dungeon',
