@@ -13,6 +13,7 @@
 #include "InputAction.h"
 #include "InputMappingContext.h"
 #include "SabriMMO.h"
+#include "MMOGameInstance.h"
 #include "GameFramework/PlayerController.h"
 #include "UI/CombatStatsSubsystem.h"
 #include "UI/InventorySubsystem.h"
@@ -77,6 +78,15 @@ void ASabriMMOCharacter::BeginPlay()
 		PC->SetShowMouseCursor(true);
 	}
 
+	// Immediately place pawn at the DB-loaded position during zone transitions / initial login.
+	// BeginPlay runs before the first frame renders, so the player never sees the wrong position.
+	if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetGameInstance()))
+	{
+		if (GI->bIsZoneTransitioning && !GI->PendingSpawnLocation.IsNearlyZero())
+		{
+			SetActorLocation(GI->PendingSpawnLocation);
+		}
+	}
 }
 
 void ASabriMMOCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)

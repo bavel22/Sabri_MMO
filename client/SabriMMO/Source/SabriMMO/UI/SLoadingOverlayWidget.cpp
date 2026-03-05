@@ -16,7 +16,7 @@
 // ============================================================
 namespace LoadingColors
 {
-	static const FLinearColor DimBackground(0.0f, 0.0f, 0.0f, 0.7f);
+	static const FLinearColor DimBackground(0.0f, 0.0f, 0.0f, 1.f);
 	static const FLinearColor PanelBrown   (0.43f, 0.29f, 0.17f, 1.f);
 	static const FLinearColor PanelDark    (0.22f, 0.14f, 0.08f, 1.f);
 	static const FLinearColor GoldTrim     (0.72f, 0.58f, 0.28f, 1.f);

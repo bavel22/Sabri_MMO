@@ -1705,7 +1705,10 @@ io.on('connection', (socket) => {
             success: true, zuzucoin,
             zone: playerZone,
             levelName: zoneInfo ? zoneInfo.levelName : 'L_PrtSouth',
-            displayName: zoneInfo ? zoneInfo.displayName : 'Prontera South Field'
+            displayName: zoneInfo ? zoneInfo.displayName : 'Prontera South Field',
+            x: initialX || (zoneInfo ? zoneInfo.defaultSpawn.x : 0),
+            y: initialY || (zoneInfo ? zoneInfo.defaultSpawn.y : 0),
+            z: initialZ || (zoneInfo ? zoneInfo.defaultSpawn.z : 580)
         };
         socket.emit('player:joined', joinedPayload);
         logger.info(`[SEND] player:joined to ${socket.id}: ${JSON.stringify(joinedPayload)}`);
@@ -1783,29 +1786,8 @@ io.on('connection', (socket) => {
             });
         }
 
-        // Zone redirect: if player's saved zone uses a different level than the default
-        // L_PrtSouth, emit zone:change after a delay so the client loads the correct level.
-        // The client always opens L_PrtSouth on first login; this redirects if needed.
-        // Skip redirect if player is mid-zone-transition (warp, kafra teleport, butterfly wing, respawn)
-        if (zoneInfo && zoneInfo.levelName !== 'L_PrtSouth' && !zoneTransitioning.has(characterId)) {
-            setTimeout(() => {
-                // Verify player is still connected before redirecting
-                const stillConnected = connectedPlayers.get(characterId);
-                if (!stillConnected || stillConnected.socketId !== socket.id) return;
-
-                socket.emit('zone:change', {
-                    zone: playerZone,
-                    displayName: zoneInfo.displayName,
-                    levelName: zoneInfo.levelName,
-                    x: initialX || zoneInfo.defaultSpawn.x,
-                    y: initialY || zoneInfo.defaultSpawn.y,
-                    z: initialZ || zoneInfo.defaultSpawn.z,
-                    flags: zoneInfo.flags,
-                    reason: 'zone_redirect'
-                });
-                logger.info(`[ZONE] Redirecting ${characterName} to ${zoneInfo.levelName} (saved zone: ${playerZone})`);
-            }, 2000); // 2s delay — gives ZoneTransitionSubsystem time to wrap events
-        }
+        // Zone redirect removed — client now loads the correct level directly
+        // using zone_name/level_name from the character REST API response.
         // Clear transitioning flag now that join is complete
         zoneTransitioning.delete(characterId);
     });
@@ -2315,11 +2297,14 @@ io.on('connection', (socket) => {
                 connectedPlayers.delete(charId);
                 logger.info(`Player left: Character ${charId} zone=${leftZone}`);
 
-                // Save zone to DB on disconnect
+                // Save zone + position to DB on disconnect
                 try {
-                    await pool.query('UPDATE characters SET zone_name = $1 WHERE character_id = $2', [leftZone, charId]);
+                    await pool.query(
+                        'UPDATE characters SET zone_name = $1, x = $2, y = $3, z = $4 WHERE character_id = $5',
+                        [leftZone, player.lastX || 0, player.lastY || 0, player.lastZ || 0, charId]
+                    );
                 } catch (zErr) {
-                    logger.warn(`[DB] Failed to save zone for char ${charId}: ${zErr.message}`);
+                    logger.warn(`[DB] Failed to save zone/position for char ${charId}: ${zErr.message}`);
                 }
 
                 // Broadcast to other players in same zone using io (socket is already disconnected)
@@ -7800,6 +7785,7 @@ app.get('/api/characters', authenticateToken, async (req, res) => {
                     stat_points, zuzucoin,
                     job_level, base_exp, job_exp, job_class, skill_points,
                     hair_style, hair_color, gender,
+                    zone_name,
                     delete_date, created_at, last_played
              FROM characters
              WHERE user_id = $1 AND delete_date IS NULL AND deleted = FALSE
@@ -7807,11 +7793,22 @@ app.get('/api/characters', authenticateToken, async (req, res) => {
              LIMIT 9`,
             [req.user.user_id]
         );
-        
-        logger.info(`Retrieved ${result.rows.length} characters for user ${req.user.user_id}`);
+
+        // Enrich each character with zone levelName for direct level loading
+        const characters = result.rows.map(row => {
+            const zoneName = row.zone_name || 'prontera_south';
+            const zoneInfo = getZone(zoneName);
+            return {
+                ...row,
+                zone_name: zoneName,
+                level_name: zoneInfo ? zoneInfo.levelName : 'L_PrtSouth'
+            };
+        });
+
+        logger.info(`Retrieved ${characters.length} characters for user ${req.user.user_id}`);
         res.json({
             message: 'Characters retrieved successfully',
-            characters: result.rows
+            characters
         });
     } catch (err) {
         logger.error('Get characters error:', err.message);
@@ -8461,7 +8458,7 @@ setInterval(async () => {
       try {
         await pool.query(
           'UPDATE characters SET zone_name = $1, x = $2, y = $3, z = $4 WHERE character_id = $5',
-          [player.zone || 'prontera_south', player.lastX || 0, player.lastY || 0, player.lastZ || 300, charId]
+          [player.zone || 'prontera_south', player.lastX || 0, player.lastY || 0, player.lastZ || 0, charId]
         );
       } catch (err) {
         logger.warn(`[DB] Failed to save zone for char ${charId}: ${err.message}`);

@@ -304,6 +304,14 @@ void ULoginFlowSubsystem::OnPlayCharacter(const FCharacterData& Character)
 	GI->SelectCharacter(Character.CharacterId);
 	GI->SaveRememberedUsername();
 
+	// Set the correct level/zone from the character's saved data
+	// so we load directly into the right map instead of defaulting to L_PrtSouth
+	GI->PendingLevelName = Character.LevelName;
+	GI->PendingZoneName = Character.ZoneName;
+	GI->CurrentZoneName = Character.ZoneName;
+	GI->PendingSpawnLocation = FVector(Character.X, Character.Y, Character.Z);
+	GI->bIsZoneTransitioning = true;
+
 	TransitionTo(ELoginFlowState::EnteringWorld);
 }
 

@@ -36,7 +36,7 @@ const ZONE_REGISTRY = {
             town: true,
             indoor: false
         },
-        defaultSpawn: { x: 0, y: -2140, z: 580 },  // south gate entry
+        defaultSpawn: { x: -240, y: -1700, z: 590 },  // south gate entry
         levelName: 'L_Prontera',
         warps: [
             {

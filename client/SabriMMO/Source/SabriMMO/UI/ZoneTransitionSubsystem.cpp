@@ -61,8 +61,9 @@ void UZoneTransitionSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 			ShowLoadingOverlay(FString::Printf(TEXT("Entering %s..."),
 				*GI->PendingZoneName));
 
-			// Reset check counter for this transition
+			// Reset state for this transition
 			TransitionCheckCount = 0;
+			bPawnTeleported = false;
 
 			// Poll until socket is ready and pawn exists
 			InWorld.GetTimerManager().SetTimer(
@@ -397,8 +398,26 @@ void UZoneTransitionSubsystem::CheckTransitionComplete()
 		return;
 	}
 
+	// Teleport pawn to spawn immediately when found (before waiting for socket)
+	// so it's already in the right position while the loading overlay is still visible.
+	if (!bPawnTeleported)
+	{
+		TeleportPawnToSpawn();
+		bPawnTeleported = true;
+	}
+
+	// Still waiting for socket events — stay on loading screen
+	if (!bEventsWrapped)
+	{
+		if (TransitionCheckCount % 10 == 1)
+		{
+			UE_LOG(LogZoneTransition, Log,
+				TEXT("CheckTransition #%d: pawn placed, waiting for socket events..."), TransitionCheckCount);
+		}
+		return;
+	}
+
 	// Everything ready — complete the transition
-	TeleportPawnToSpawn();
 
 	// Update zone state
 	GI->CurrentZoneName = GI->PendingZoneName;
@@ -500,7 +519,7 @@ void UZoneTransitionSubsystem::ShowLoadingOverlay(const FString& StatusText)
 	LoadingWidget =
 		SNew(SBorder)
 		.BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
-		.BorderBackgroundColor(FLinearColor(0.02f, 0.02f, 0.05f, 0.92f))
+		.BorderBackgroundColor(FLinearColor(0.02f, 0.02f, 0.05f, 1.f))
 		.HAlign(HAlign_Center)
 		.VAlign(VAlign_Center)
 		[

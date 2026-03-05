@@ -60,6 +60,7 @@ private:
 
 	// ---- state ----
 	bool bEventsWrapped = false;
+	bool bPawnTeleported = false;
 	int32 LocalCharacterId = 0;
 	int32 TransitionCheckCount = 0;
 	FTimerHandle BindCheckTimer;

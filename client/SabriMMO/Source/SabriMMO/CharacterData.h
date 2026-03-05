@@ -306,6 +306,13 @@ struct FCharacterData
     UPROPERTY(BlueprintReadWrite, Category = "Appearance")
     FString Gender;
 
+    // Zone
+    UPROPERTY(BlueprintReadWrite, Category = "Zone")
+    FString ZoneName;
+
+    UPROPERTY(BlueprintReadWrite, Category = "Zone")
+    FString LevelName;
+
     // Meta
     UPROPERTY(BlueprintReadWrite, Category = "Meta")
     FString DeleteDate;

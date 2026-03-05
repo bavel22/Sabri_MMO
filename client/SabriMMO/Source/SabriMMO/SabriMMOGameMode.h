@@ -15,10 +15,7 @@ class ASabriMMOGameMode : public AGameModeBase
 	GENERATED_BODY()
 
 public:
-	
+
 	/** Constructor */
 	ASabriMMOGameMode();
 };
-
-
-

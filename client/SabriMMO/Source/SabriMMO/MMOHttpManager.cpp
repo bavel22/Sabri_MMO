@@ -354,6 +354,12 @@ static FCharacterData ParseCharacterFromJson(const TSharedPtr<FJsonObject>& Obj)
     D = 0; Obj->TryGetNumberField(TEXT("hair_color"), D); CD.HairColor = (int32)D;
     Obj->TryGetStringField(TEXT("gender"), CD.Gender);
 
+    // Zone
+    Obj->TryGetStringField(TEXT("zone_name"), CD.ZoneName);
+    Obj->TryGetStringField(TEXT("level_name"), CD.LevelName);
+    if (CD.ZoneName.IsEmpty()) CD.ZoneName = TEXT("prontera_south");
+    if (CD.LevelName.IsEmpty()) CD.LevelName = TEXT("L_PrtSouth");
+
     // Meta
     Obj->TryGetStringField(TEXT("delete_date"), CD.DeleteDate);
     Obj->TryGetStringField(TEXT("created_at"), CD.CreatedAt);

@@ -237,16 +237,20 @@ The server auto-creates `zone_name`, `save_map`, `save_x`, `save_y`, `save_z` co
 2. Open `L_Startup` (login screen)
 3. Play in Editor (PIE)
 4. Login → Select Server → Select Character → Enter World
-5. Walk to a warp portal → should trigger zone transition
-6. Verify loading screen appears → new level loads → player spawns at destination
+5. The client now loads the character's saved level directly (no L_PrtSouth redirect). The REST `/api/characters` response includes `zone_name` and `level_name`; `LoginFlowSubsystem::OnPlayCharacter` sets all pending zone state from that data before calling OpenLevel.
+6. Walk to a warp portal → should trigger zone transition
+7. Verify loading screen appears → new level loads → player spawns at destination
 
 ### 7.3: Test Matrix
 
 | Test | Expected Result |
 |------|----------------|
+| Login with character saved in L_Prontera | Loads L_Prontera directly, no redirect via L_PrtSouth |
+| Login with character saved in L_PrtSouth | Loads L_PrtSouth directly |
 | Walk into south→prt warp in L_PrtSouth | Loading screen → L_Prontera loads → spawn at Prontera south gate |
 | Walk into prt→south warp in L_Prontera | Loading screen → L_PrtSouth loads → spawn at north edge |
-| Click Kafra NPC in Prontera | Kafra dialog opens (Save/Teleport/Cancel) |
+| Zone change → Combat Stats panel | Stats populate immediately (player:request_stats emitted on zone wrap) |
+| Click Kafra NPC in Prontera | Kafra dialog opens (Save/Teleport/Cancel); click outside dialog does NOT eat clicks |
 | Kafra → Save | "Save point set!" confirmation |
 | Kafra → Teleport → destination | Zeny deducted, zone transition to destination |
 | Use Fly Wing in field | Random teleport within same zone |
@@ -254,6 +258,7 @@ The server auto-creates `zone_name`, `save_map`, `save_x`, `save_y`, `save_z` co
 | Use Fly Wing in dungeon | Rejected ("Cannot teleport in this zone") |
 | Use Butterfly Wing in dungeon | Rejected ("Cannot use return items in this zone") |
 | Die in field → respawn | Respawn at save point |
+| Disconnect + reconnect | Reconnects to saved position (x, y, z now persisted on disconnect) |
 | 2 PIE instances, different zones | Each sees only their zone's players/enemies |
 
 ---
@@ -313,6 +318,40 @@ The warp `destX, destY, destZ` = where the player spawns in the **destination** 
 
 ---
 
-**Last Updated**: 2026-03-04
-**Version**: 1.2
+---
+
+## Important Implementation Notes
+
+### Login → Correct Level Direct Load
+
+Characters now load into their saved level directly, without going through L_PrtSouth first:
+- REST `/api/characters` returns `zone_name` and `level_name` per character.
+- `FCharacterData` has `ZoneName` (FString) and `LevelName` (FString) fields.
+- `LoginFlowSubsystem::OnPlayCharacter` sets `GI->PendingLevelName`, `GI->PendingZoneName`, `GI->CurrentZoneName`, `GI->PendingSpawnLocation`, and `GI->bIsZoneTransitioning = true` from the selected character data.
+- The 2-second delayed `zone:change` redirect that was emitted in `player:join` was removed from the server.
+- The default `PendingLevelName = L_PrtSouth` fallback remains only if the character has no saved zone.
+
+### Spawn Position on Level Load
+
+- `ASabriMMOCharacter::BeginPlay` checks `GI->bIsZoneTransitioning` and immediately teleports the pawn to `GI->PendingSpawnLocation` before the first frame renders.
+- `ZoneTransitionSubsystem::CheckTransitionComplete` uses a `bPawnTeleported` flag to teleport the pawn as soon as it exists, before waiting for all socket events to arrive.
+
+### Position Persistence
+
+- The disconnect handler saves `x, y, z` alongside `zone_name` (previously only saved zone_name was persisted on disconnect).
+- `player:joined` payload now includes `x, y, z` so the server has the current position immediately after reconnect.
+- Default save location changed from `(0, 0, 300)` to `(0, 0, 580)`.
+- Prontera default spawn changed from `(0, -2140, 580)` to `(-240, -1700, 590)`.
+
+### UI / Input Fixes
+
+- All loading overlays (zone transition and login flow) are fully opaque (alpha 1.0).
+- `SKafraWidget::OnMouseButtonDown` returns `FReply::Unhandled()` for non-title-bar clicks so it does not eat left-clicks meant for other actors.
+- All `FInputModeGameAndUI` calls set `SetHideCursorDuringCapture(false)` to keep the cursor visible during mouse capture.
+- `CombatStatsSubsystem` emits `player:request_stats` after wrapping zone events so the combat stats panel populates immediately after a zone change.
+
+---
+
+**Last Updated**: 2026-03-05
+**Version**: 1.3
 **Status**: Complete
