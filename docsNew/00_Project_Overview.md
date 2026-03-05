@@ -176,7 +176,7 @@ C:/Sabri_MMO/
 │   ├── Content/SabriMMO/         # Blueprint assets (.uasset — not in git)
 │   └── SabriMMO.uproject         # UE5 5.7 project file
 ├── server/
-│   ├── src/index.js              # Monolithic server (2269 lines)
+│   ├── src/index.js              # Monolithic server (~8500 lines)
 │   ├── package.json              # 10 dependencies
 │   ├── .env                      # DB credentials, JWT secret
 │   └── logs/                     # Runtime logs
