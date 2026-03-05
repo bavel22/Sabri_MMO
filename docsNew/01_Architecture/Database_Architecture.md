@@ -41,8 +41,10 @@ await redisClient.connect(); // Required for redis v4+
                       │ mana/max_mana    │       │ stat bonuses│
                       │ str/agi/vit/...  │       │ stackable   │
                       │ stat_points      │       │ weapon_type │
-                      │ created_at       │       │ aspd_mod    │
-                      │ last_played      │       │ weapon_range│
+                      │ delete_date      │       │ aspd_mod    │
+                      │ deleted (soft)   │       │ weapon_range│
+                      │ created_at       │       │             │
+                      │ last_played      │       │             │
                       └────────┬─────────┘       └──────┬──────┘
                                │                        │
                                │    ┌───────────────────┘
@@ -100,11 +102,15 @@ await redisClient.connect(); // Required for redis v4+
 | `dex` | INTEGER | — | 1 | Dexterity stat |
 | `luk` | INTEGER | — | 1 | Luck stat |
 | `stat_points` | INTEGER | — | 48 | Available stat points |
+| `delete_date` | TIMESTAMP | nullable | NULL | Scheduled deletion timestamp (RO-style timed delete) |
+| `deleted` | BOOLEAN | NOT NULL | FALSE | Soft-delete flag — TRUE means character is logically deleted |
 | `created_at` | TIMESTAMP | DEFAULT CURRENT_TIMESTAMP | — | Creation time |
 | `last_played` | TIMESTAMP | nullable | — | Last play session |
 | `zuzucoin` | INTEGER | — | 0 | Character currency (Zuzucoin) |
 
 **Note**: Stat columns and `zuzucoin` (`str` through `stat_points`) and `max_health`/`max_mana` are added via `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` on server startup if missing.
+
+**Soft Delete**: Characters are never permanently removed from the database. The `DELETE /api/characters/:id` endpoint sets `deleted = TRUE` instead of deleting rows. All character queries filter with `AND deleted = FALSE` to hide soft-deleted characters. Inventory, hotbar, and skill data are preserved for potential future restoration.
 
 ### `items`
 
@@ -178,6 +184,7 @@ CREATE INDEX IF NOT EXISTS idx_characters_user_id ON characters(user_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_character ON character_inventory(character_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_item ON character_inventory(item_id);
 CREATE INDEX IF NOT EXISTS idx_hotbar_character ON character_hotbar(character_id);
+CREATE INDEX IF NOT EXISTS idx_characters_deleted ON characters(deleted) WHERE deleted = FALSE;
 ```
 
 ## Seed Data
@@ -284,8 +291,8 @@ UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE user_id = $1;
 
 ### Characters
 ```sql
--- List characters
-SELECT character_id, name, class, level, x, y, z, health, mana, created_at FROM characters WHERE user_id = $1 ORDER BY created_at DESC;
+-- List characters (excludes soft-deleted)
+SELECT ... FROM characters WHERE user_id = $1 AND delete_date IS NULL AND deleted = FALSE ORDER BY character_id ASC LIMIT 9;
 
 -- Create character
 INSERT INTO characters (user_id, name, class, level, x, y, z, health, mana) VALUES ($1, $2, $3, 1, 0, 0, 0, 100, 100) RETURNING ...;
@@ -331,4 +338,4 @@ UPDATE character_inventory SET is_equipped=true WHERE inventory_id=$1;
 
 ---
 
-**Last Updated**: 2026-02-21 — Fully renamed database column from zeny to zuzucoin
+**Last Updated**: 2026-03-04 — Added soft-delete (deleted BOOLEAN) for characters

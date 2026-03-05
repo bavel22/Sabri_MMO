@@ -208,10 +208,19 @@ void ULoginFlowSubsystem::TransitionTo(ELoginFlowState NewState)
 					{
 						FInputModeGameAndUI InputMode;
 						InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+						InputMode.SetHideCursorDuringCapture(false);
 						PC->SetInputMode(InputMode);
 					}
 				}
-				UGameplayStatics::OpenLevel(GetWorld(), TEXT("L_Game"));
+				{
+					UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
+					FString LevelName = TEXT("L_PrtSouth");
+					if (GI && !GI->PendingLevelName.IsEmpty())
+					{
+						LevelName = GI->PendingLevelName;
+					}
+					UGameplayStatics::OpenLevel(GetWorld(), *LevelName);
+				}
 			}, 0.5f, false);
 		}
 		break;
@@ -414,6 +423,13 @@ void ULoginFlowSubsystem::HandleCharacterCreateFailed(const FString& ErrorMessag
 void ULoginFlowSubsystem::HandleCharacterDeleteSuccess(const FString& CharacterName)
 {
 	UE_LOG(LogTemp, Log, TEXT("[LoginFlow] Character deleted: %s. Refreshing list..."), *CharacterName);
+
+	// Close the delete confirmation overlay
+	if (CharacterSelectWidget.IsValid())
+	{
+		CharacterSelectWidget->HideDeleteConfirmation();
+	}
+
 	// Re-fetch characters
 	ShowLoadingOverlay(TEXT("Loading characters..."));
 	UHttpManager::GetCharacters(GetWorld());

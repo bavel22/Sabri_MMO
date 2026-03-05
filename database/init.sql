@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS characters (
     hair_color INTEGER DEFAULT 0,
     gender VARCHAR(10) DEFAULT 'male',
     delete_date TIMESTAMP DEFAULT NULL,
+    deleted BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     last_played TIMESTAMP
 );
@@ -92,6 +93,7 @@ CREATE TABLE IF NOT EXISTS character_hotbar (
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX IF NOT EXISTS idx_characters_user_id ON characters(user_id);
+CREATE INDEX IF NOT EXISTS idx_characters_deleted ON characters(deleted) WHERE deleted = FALSE;
 CREATE INDEX IF NOT EXISTS idx_inventory_character ON character_inventory(character_id);
 CREATE INDEX IF NOT EXISTS idx_inventory_item ON character_inventory(item_id);
 

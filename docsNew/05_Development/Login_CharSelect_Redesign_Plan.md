@@ -554,9 +554,9 @@ app.delete('/api/characters/:id', authenticateToken, async (req, res) => {
         return res.status(401).json({ error: 'Incorrect password' });
     }
 
-    // Verify character belongs to user
+    // Verify character belongs to user and is not already deleted
     const charResult = await pool.query(
-        'SELECT character_id, name FROM characters WHERE character_id = $1 AND user_id = $2',
+        'SELECT character_id, name FROM characters WHERE character_id = $1 AND user_id = $2 AND deleted = FALSE',
         [characterId, req.user.user_id]
     );
     if (charResult.rows.length === 0) {
@@ -568,11 +568,9 @@ app.delete('/api/characters/:id', authenticateToken, async (req, res) => {
         return res.status(409).json({ error: 'Character is currently online. Log out first.' });
     }
 
-    // Delete character and all related data (cascading)
-    await pool.query('DELETE FROM character_hotbar WHERE character_id = $1', [characterId]);
-    await pool.query('DELETE FROM character_skills WHERE character_id = $1', [characterId]);
-    await pool.query('DELETE FROM character_inventory WHERE character_id = $1', [characterId]);
-    await pool.query('DELETE FROM characters WHERE character_id = $1', [characterId]);
+    // Soft delete — mark as deleted instead of removing rows
+    // Inventory, hotbar, and skill data are preserved for potential restoration
+    await pool.query('UPDATE characters SET deleted = TRUE WHERE character_id = $1', [characterId]);
 
     res.json({ message: 'Character deleted successfully', characterName: charResult.rows[0].name });
 });

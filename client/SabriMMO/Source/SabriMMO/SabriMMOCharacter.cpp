@@ -20,6 +20,7 @@
 #include "UI/HotbarSubsystem.h"
 #include "UI/ShopSubsystem.h"
 #include "ShopNPC.h"
+#include "KafraNPC.h"
 #include "Framework/Application/SlateApplication.h"
 
 ASabriMMOCharacter::ASabriMMOCharacter()
@@ -71,6 +72,7 @@ void ASabriMMOCharacter::BeginPlay()
 	{
 		FInputModeGameAndUI InputMode;
 		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		InputMode.SetHideCursorDuringCapture(false);
 		PC->SetInputMode(InputMode);
 		PC->SetShowMouseCursor(true);
 	}
@@ -294,6 +296,12 @@ bool ASabriMMOCharacter::TryInteractWithNPC(AActor* HitActor)
 	if (AShopNPC* ShopNPC = Cast<AShopNPC>(HitActor))
 	{
 		ShopNPC->Interact();
+		return true;
+	}
+
+	if (AKafraNPC* KafraNPC = Cast<AKafraNPC>(HitActor))
+	{
+		KafraNPC->Interact();
 		return true;
 	}
 

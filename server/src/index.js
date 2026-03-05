@@ -32,6 +32,8 @@ const {
 } = require('./ro_skill_data');
 // Import RO monster AI codes (rAthena pre-renewal — maps monster ID → AI type code)
 const { MONSTER_AI_CODES } = require('./ro_monster_ai_codes');
+// Import RO zone registry (map definitions, warps, spawns, Kafra NPCs)
+const { ZONE_REGISTRY, getZone, getAllEnemySpawns, getZoneNames } = require('./ro_zone_data');
 // Import RO pre-renewal damage formulas (element table, size penalty, HIT/FLEE, critical, DEF)
 const {
     ELEMENT_TABLE, SIZE_PENALTY,
@@ -271,7 +273,9 @@ function interruptCast(characterId, reason) {
     activeCasts.delete(characterId);
     const sock = io.sockets.sockets.get(cast.socketId);
     if (sock) sock.emit('skill:cast_interrupted', { skillId: cast.skillId, reason });
-    io.emit('skill:cast_interrupted_broadcast', { casterId: characterId, skillId: cast.skillId });
+    const castPlayer = connectedPlayers.get(characterId);
+    const castZone = (castPlayer && castPlayer.zone) || 'prontera_south';
+    broadcastToZone(castZone, 'skill:cast_interrupted_broadcast', { casterId: characterId, skillId: cast.skillId });
     logger.info(`[CAST] ${cast.casterName}'s ${cast.skill.displayName} interrupted (${reason})`);
 }
 
@@ -509,13 +513,14 @@ async function processEnemyDeathFromSkill(enemy, attacker, attackerId, io) {
                 exp: buildExpPayload(attacker)
             };
             killerSocket.emit('exp:level_up', levelUpPayload);
-            killerSocket.broadcast.emit('exp:level_up', levelUpPayload);
+            const attackerZone = attacker.zone || 'prontera_south';
+            broadcastToZoneExcept(killerSocket, attackerZone, 'exp:level_up', levelUpPayload);
 
             const effectiveStats = getEffectiveStats(attacker);
             const newDerived = calculateDerivedStats(effectiveStats);
             const newFinalAspd = Math.min(COMBAT.ASPD_CAP, newDerived.aspd + (attacker.weaponAspdMod || 0));
             killerSocket.emit('player:stats', buildFullStatsPayload(attackerId, attacker, effectiveStats, newDerived, newFinalAspd));
-            io.emit('combat:health_update', {
+            broadcastToZone(attackerZone, 'combat:health_update', {
                 characterId: attackerId, health: attacker.health,
                 maxHealth: attacker.maxHealth, mana: attacker.mana, maxMana: attacker.maxMana
             });
@@ -531,8 +536,9 @@ async function processEnemyDeathFromSkill(enemy, attacker, attackerId, io) {
         saveExpDataToDB(attackerId, attacker);
     }
 
-    // Broadcast enemy death
-    io.emit('enemy:death', {
+    // Broadcast enemy death to zone
+    const enemyZone = enemy.zone || 'prontera_south';
+    broadcastToZone(enemyZone, 'enemy:death', {
         enemyId: enemy.enemyId, enemyName: enemy.name,
         killerId: attackerId, killerName: attacker.characterName,
         isEnemy: true, isDead: true,
@@ -568,7 +574,7 @@ async function processEnemyDeathFromSkill(enemy, attacker, attackerId, io) {
         }
     }
 
-    // Schedule respawn
+    // Schedule respawn (only if zone is still active)
     setTimeout(() => {
         enemy.health = enemy.maxHealth;
         enemy.isDead = false;
@@ -576,7 +582,7 @@ async function processEnemyDeathFromSkill(enemy, attacker, attackerId, io) {
         enemy.targetPlayerId = null;
         enemy.inCombatWith = new Set();
         if (typeof initEnemyWanderState === 'function') initEnemyWanderState(enemy);
-        io.emit('enemy:spawn', {
+        broadcastToZone(enemy.zone, 'enemy:spawn', {
             enemyId: enemy.enemyId, templateId: enemy.templateId, name: enemy.name,
             level: enemy.level, health: enemy.health, maxHealth: enemy.maxHealth,
             x: enemy.x, y: enemy.y, z: enemy.z
@@ -1073,6 +1079,7 @@ function spawnEnemy(spawnConfig) {
 
     const enemy = {
         enemyId, templateId: spawnConfig.template,
+        zone: spawnConfig.zone || 'prontera_south',  // Zone this enemy belongs to
         name: template.name, level: template.level,
         health: template.maxHealth, maxHealth: template.maxHealth,
         damage: template.damage, attackRange: template.attackRange,
@@ -1125,8 +1132,8 @@ function spawnEnemy(spawnConfig) {
     if (modeFlags.looter) flagSummary.push('LOT');
     if (!modeFlags.canMove) flagSummary.push('IMMOB');
     if (!modeFlags.canAttack) flagSummary.push('NOATK');
-    logger.info(`[ENEMY] Spawned ${enemy.name} (ID: ${enemyId}) Lv${enemy.level} [${enemy.monsterClass}] AI${aiCode} [${flagSummary.join(',')||'passive'}] speed=${moveSpeed.toFixed(0)}u/s at (${enemy.x}, ${enemy.y}, ${enemy.z})`);
-    io.emit('enemy:spawn', {
+    logger.info(`[ENEMY] Spawned ${enemy.name} (ID: ${enemyId}) Lv${enemy.level} [${enemy.monsterClass}] AI${aiCode} [${flagSummary.join(',')||'passive'}] speed=${moveSpeed.toFixed(0)}u/s at (${enemy.x}, ${enemy.y}, ${enemy.z}) zone=${enemy.zone}`);
+    broadcastToZone(enemy.zone, 'enemy:spawn', {
         enemyId, templateId: spawnConfig.template, name: enemy.name,
         level: enemy.level, health: enemy.health, maxHealth: enemy.maxHealth,
         monsterClass: enemy.monsterClass, size: enemy.size, race: enemy.race,
@@ -1425,6 +1432,38 @@ function findPlayerBySocketId(socketId) {
     return null;
 }
 
+// ============================================================
+// Zone-scoped broadcasting helpers
+// ============================================================
+function broadcastToZone(zone, event, data) {
+    io.to('zone:' + zone).emit(event, data);
+}
+function broadcastToZoneExcept(socket, zone, event, data) {
+    socket.to('zone:' + zone).emit(event, data);
+}
+function getPlayerZone(characterId) {
+    const player = connectedPlayers.get(characterId);
+    return player ? (player.zone || 'prontera_south') : 'prontera_south';
+}
+function isZoneActive(zone) {
+    for (const [, player] of connectedPlayers.entries()) {
+        if (player.zone === zone) return true;
+    }
+    return false;
+}
+// Get set of all zones with at least one player (for AI tick optimization)
+function getActiveZones() {
+    const zones = new Set();
+    for (const [, player] of connectedPlayers.entries()) {
+        if (player.zone) zones.add(player.zone);
+    }
+    return zones;
+}
+// Track which zones have enemies spawned (lazy spawning)
+const spawnedZones = new Set();
+// Track characters mid-zone-transition (skip login redirect for these)
+const zoneTransitioning = new Set();
+
 // Socket.io connection handler
 io.on('connection', (socket) => {
     logger.info(`Socket connected: ${socket.id}`);
@@ -1443,7 +1482,7 @@ io.on('connection', (socket) => {
                 const decoded = jwt.verify(rawToken, process.env.JWT_SECRET);
                 // Verify character belongs to authenticated user
                 const ownerCheck = await pool.query(
-                    'SELECT 1 FROM characters WHERE character_id = $1 AND user_id = $2',
+                    'SELECT 1 FROM characters WHERE character_id = $1 AND user_id = $2 AND deleted = FALSE',
                     [characterId, decoded.user_id]
                 );
                 if (ownerCheck.rows.length === 0) {
@@ -1462,9 +1501,10 @@ io.on('connection', (socket) => {
         // Fetch character data from database (position + health/mana + zuzucoin)
         let health = 100, maxHealth = 100, mana = 100, maxMana = 100, zuzucoin = 0;
         let initialX, initialY, initialZ;
+        let playerZone = 'prontera_south';
         try {
             const charResult = await pool.query(
-                'SELECT x, y, z, health, max_health, mana, max_mana, zuzucoin FROM characters WHERE character_id = $1',
+                'SELECT x, y, z, health, max_health, mana, max_mana, zuzucoin, zone_name FROM characters WHERE character_id = $1',
                 [characterId]
             );
             if (charResult.rows.length > 0) {
@@ -1477,11 +1517,14 @@ io.on('connection', (socket) => {
                 initialX = row.x;
                 initialY = row.y;
                 initialZ = row.z;
+                playerZone = row.zone_name || 'prontera_south';
 
                 // Cache correct position in Redis
                 await setPlayerPosition(characterId, row.x, row.y, row.z);
-                // Broadcast correct position to other players immediately
-                socket.broadcast.emit('player:moved', {
+                // Join the Socket.io room for this zone
+                socket.join('zone:' + playerZone);
+                // Broadcast correct position to other players in same zone
+                broadcastToZoneExcept(socket, playerZone, 'player:moved', {
                     characterId,
                     characterName,
                     x: row.x,
@@ -1491,7 +1534,7 @@ io.on('connection', (socket) => {
                     maxHealth,
                     timestamp: Date.now()
                 });
-                logger.info(`Broadcasted initial position for ${characterName} (Character ${characterId}) at (${row.x}, ${row.y}, ${row.z})`);
+                logger.info(`Broadcasted initial position for ${characterName} (Character ${characterId}) at (${row.x}, ${row.y}, ${row.z}) zone=${playerZone}`);
             }
         } catch (err) {
             logger.error(`Failed to fetch initial data for character ${characterId}:`, err.message);
@@ -1620,6 +1663,7 @@ io.on('connection', (socket) => {
             socketId: socket.id,
             characterId: characterId,
             characterName: characterName || 'Unknown',
+            zone: playerZone,
             health: Math.min(health, maxHealth),
             maxHealth,
             mana: Math.min(mana, maxMana),
@@ -1655,8 +1699,14 @@ io.on('connection', (socket) => {
             lastZ: initialZ
         });
         
-        logger.info(`Player joined: ${characterName || 'Unknown'} (Character ${characterId}) HP: ${health}/${maxHealth} MP: ${mana}/${maxMana}`);
-        const joinedPayload = { success: true, zuzucoin };
+        logger.info(`Player joined: ${characterName || 'Unknown'} (Character ${characterId}) HP: ${health}/${maxHealth} MP: ${mana}/${maxMana} zone=${playerZone}`);
+        const zoneInfo = getZone(playerZone);
+        const joinedPayload = {
+            success: true, zuzucoin,
+            zone: playerZone,
+            levelName: zoneInfo ? zoneInfo.levelName : 'L_PrtSouth',
+            displayName: zoneInfo ? zoneInfo.displayName : 'Prontera South Field'
+        };
         socket.emit('player:joined', joinedPayload);
         logger.info(`[SEND] player:joined to ${socket.id}: ${JSON.stringify(joinedPayload)}`);
         
@@ -1665,14 +1715,14 @@ io.on('connection', (socket) => {
         socket.emit('combat:health_update', selfHealthPayload);
         logger.info(`[SEND] combat:health_update to ${socket.id}: ${JSON.stringify(selfHealthPayload)}`);
         
-        // Broadcast this player's health to others so they can show HP bars
+        // Broadcast this player's health to others in same zone so they can show HP bars
         const broadcastHealthPayload = { characterId, health, maxHealth, mana, maxMana };
-        socket.broadcast.emit('combat:health_update', broadcastHealthPayload);
-        logger.info(`[BROADCAST] combat:health_update (excl ${socket.id}): ${JSON.stringify(broadcastHealthPayload)}`);
-        
-        // Send existing players' health to the joining player
+        broadcastToZoneExcept(socket, playerZone, 'combat:health_update', broadcastHealthPayload);
+        logger.info(`[BROADCAST] combat:health_update to zone:${playerZone} (excl ${socket.id}): ${JSON.stringify(broadcastHealthPayload)}`);
+
+        // Send existing players' health to the joining player (only same zone)
         for (const [existingCharId, existingPlayer] of connectedPlayers.entries()) {
-            if (existingCharId !== characterId) {
+            if (existingCharId !== characterId && existingPlayer.zone === playerZone) {
                 socket.emit('combat:health_update', {
                     characterId: existingCharId,
                     health: existingPlayer.health,
@@ -1698,9 +1748,21 @@ io.on('connection', (socket) => {
             logger.info(`[SEND] hotbar:alldata to ${socket.id}: ${hotbar.length} slots (on join, delayed)`);
         }, 600); // 0.6 second delay
         
-        // Send existing enemies to the joining player
+        // Lazy enemy spawning: spawn enemies for this zone if not yet active
+        if (!spawnedZones.has(playerZone)) {
+            const zoneData = getZone(playerZone);
+            if (zoneData && zoneData.enemySpawns.length > 0) {
+                logger.info(`[ZONE] First player in '${playerZone}' — spawning ${zoneData.enemySpawns.length} enemies`);
+                for (const spawn of zoneData.enemySpawns) {
+                    spawnEnemy({ ...spawn, zone: playerZone });
+                }
+            }
+            spawnedZones.add(playerZone);
+        }
+
+        // Send existing enemies to the joining player (only same zone)
         for (const [eid, enemy] of enemies.entries()) {
-            if (!enemy.isDead) {
+            if (!enemy.isDead && enemy.zone === playerZone) {
                 socket.emit('enemy:spawn', {
                     enemyId: eid, templateId: enemy.templateId, name: enemy.name,
                     level: enemy.level, health: enemy.health, maxHealth: enemy.maxHealth,
@@ -1708,6 +1770,44 @@ io.on('connection', (socket) => {
                 });
             }
         }
+
+        // Send zone metadata to client (warps, Kafra NPCs, flags)
+        if (zoneInfo) {
+            socket.emit('zone:data', {
+                zone: playerZone,
+                displayName: zoneInfo.displayName,
+                levelName: zoneInfo.levelName,
+                flags: zoneInfo.flags,
+                warps: zoneInfo.warps,
+                kafraNpcs: zoneInfo.kafraNpcs
+            });
+        }
+
+        // Zone redirect: if player's saved zone uses a different level than the default
+        // L_PrtSouth, emit zone:change after a delay so the client loads the correct level.
+        // The client always opens L_PrtSouth on first login; this redirects if needed.
+        // Skip redirect if player is mid-zone-transition (warp, kafra teleport, butterfly wing, respawn)
+        if (zoneInfo && zoneInfo.levelName !== 'L_PrtSouth' && !zoneTransitioning.has(characterId)) {
+            setTimeout(() => {
+                // Verify player is still connected before redirecting
+                const stillConnected = connectedPlayers.get(characterId);
+                if (!stillConnected || stillConnected.socketId !== socket.id) return;
+
+                socket.emit('zone:change', {
+                    zone: playerZone,
+                    displayName: zoneInfo.displayName,
+                    levelName: zoneInfo.levelName,
+                    x: initialX || zoneInfo.defaultSpawn.x,
+                    y: initialY || zoneInfo.defaultSpawn.y,
+                    z: initialZ || zoneInfo.defaultSpawn.z,
+                    flags: zoneInfo.flags,
+                    reason: 'zone_redirect'
+                });
+                logger.info(`[ZONE] Redirecting ${characterName} to ${zoneInfo.levelName} (saved zone: ${playerZone})`);
+            }, 2000); // 2s delay — gives ZoneTransitionSubsystem time to wrap events
+        }
+        // Clear transitioning flag now that join is complete
+        zoneTransitioning.delete(characterId);
     });
     
     // Position update from client
@@ -1742,8 +1842,9 @@ io.on('connection', (socket) => {
         // Cache in Redis
         await setPlayerPosition(characterId, x, y, z);
         
-        // Broadcast to other players with name
-        socket.broadcast.emit('player:moved', {
+        // Broadcast to other players in same zone
+        const posZone = player ? (player.zone || 'prontera_south') : 'prontera_south';
+        broadcastToZoneExcept(socket, posZone, 'player:moved', {
             characterId,
             characterName,
             x, y, z,
@@ -1751,9 +1852,392 @@ io.on('connection', (socket) => {
             maxHealth: player ? player.maxHealth : 100,
             timestamp: Date.now()
         });
-        logger.debug(`[BROADCAST] player:moved for ${characterName} (Character ${characterId})`);
+        logger.debug(`[BROADCAST] player:moved for ${characterName} (Character ${characterId}) zone=${posZone}`);
     });
     
+    // ============================================================
+    // Zone Warp: Player stepped into a warp portal
+    // ============================================================
+    socket.on('zone:warp', async (data) => {
+        logger.info(`[RECV] zone:warp from ${socket.id}: ${JSON.stringify(data)}`);
+        const { warpId } = data;
+        if (!warpId) {
+            socket.emit('zone:error', { message: 'Missing warpId' });
+            return;
+        }
+
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) {
+            socket.emit('zone:error', { message: 'Player not found' });
+            return;
+        }
+        const { characterId, player } = playerInfo;
+        const oldZone = player.zone || 'prontera_south';
+        const oldZoneData = getZone(oldZone);
+        if (!oldZoneData) {
+            socket.emit('zone:error', { message: 'Current zone not found' });
+            return;
+        }
+
+        // Find the warp definition in current zone
+        const warp = oldZoneData.warps.find(w => w.id === warpId);
+        if (!warp) {
+            socket.emit('zone:error', { message: `Warp '${warpId}' not found in ${oldZone}` });
+            return;
+        }
+
+        // Validate player proximity to warp (generous range: warp radius * 2)
+        const maxWarpDist = (warp.radius || 200) * 2;
+        const px = player.lastX || 0, py = player.lastY || 0;
+        const warpDist = Math.sqrt((px - warp.x) ** 2 + (py - warp.y) ** 2);
+        if (warpDist > maxWarpDist) {
+            socket.emit('zone:error', { message: 'Too far from warp portal' });
+            return;
+        }
+
+        const newZone = warp.destZone;
+        const newZoneData = getZone(newZone);
+        if (!newZoneData) {
+            socket.emit('zone:error', { message: `Destination zone '${newZone}' not found` });
+            return;
+        }
+
+        // Cancel active combat/casting
+        autoAttackState.delete(characterId);
+        activeCasts.delete(characterId);
+        afterCastDelayEnd.delete(characterId);
+
+        // Remove from enemy combat sets in old zone
+        for (const [, enemy] of enemies.entries()) {
+            if (enemy.zone === oldZone) {
+                enemy.inCombatWith.delete(characterId);
+                if (enemy.targetPlayerId === characterId) {
+                    enemy.targetPlayerId = null;
+                    const next = pickNextTarget(enemy);
+                    if (next) {
+                        enemy.targetPlayerId = next;
+                    } else {
+                        enemy.aiState = AI_STATE.IDLE;
+                        enemy.isWandering = false;
+                    }
+                }
+            }
+        }
+
+        // Broadcast player:left to old zone
+        broadcastToZone(oldZone, 'player:left', {
+            characterId, characterName: player.characterName, reason: 'zone_change'
+        });
+
+        // Switch Socket.io rooms
+        socket.leave('zone:' + oldZone);
+        socket.join('zone:' + newZone);
+
+        // Update player data
+        player.zone = newZone;
+        player.lastX = warp.destX;
+        player.lastY = warp.destY;
+        player.lastZ = warp.destZ;
+
+        // Mark as transitioning so login redirect is skipped on reconnect
+        zoneTransitioning.add(characterId);
+
+        // Save to DB
+        try {
+            await pool.query(
+                'UPDATE characters SET zone_name = $1, x = $2, y = $3, z = $4 WHERE character_id = $5',
+                [newZone, warp.destX, warp.destY, warp.destZ, characterId]
+            );
+        } catch (err) {
+            logger.warn(`[DB] Failed to save zone change for char ${characterId}: ${err.message}`);
+        }
+
+        // Lazy spawn enemies in new zone
+        if (!spawnedZones.has(newZone)) {
+            if (newZoneData.enemySpawns.length > 0) {
+                logger.info(`[ZONE] First player in '${newZone}' — spawning ${newZoneData.enemySpawns.length} enemies`);
+                for (const spawn of newZoneData.enemySpawns) {
+                    spawnEnemy({ ...spawn, zone: newZone });
+                }
+            }
+            spawnedZones.add(newZone);
+        }
+
+        // Tell client to load new level
+        socket.emit('zone:change', {
+            zone: newZone,
+            displayName: newZoneData.displayName,
+            levelName: newZoneData.levelName,
+            x: warp.destX, y: warp.destY, z: warp.destZ,
+            flags: newZoneData.flags,
+            reason: 'warp'
+        });
+
+        logger.info(`[ZONE] ${player.characterName} warped ${oldZone} → ${newZone} via ${warpId}`);
+    });
+
+    // ============================================================
+    // Zone Ready: Client finished loading the new level
+    // ============================================================
+    socket.on('zone:ready', async (data) => {
+        logger.info(`[RECV] zone:ready from ${socket.id}: ${JSON.stringify(data || {})}`);
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { characterId, player } = playerInfo;
+        const zone = player.zone || 'prontera_south';
+
+        // Broadcast this player's arrival to others in the zone
+        broadcastToZoneExcept(socket, zone, 'player:moved', {
+            characterId,
+            characterName: player.characterName,
+            x: player.lastX || 0,
+            y: player.lastY || 0,
+            z: player.lastZ || 300,
+            health: player.health,
+            maxHealth: player.maxHealth,
+            timestamp: Date.now()
+        });
+
+        // Send this player's health to the zone
+        broadcastToZoneExcept(socket, zone, 'combat:health_update', {
+            characterId,
+            health: player.health,
+            maxHealth: player.maxHealth,
+            mana: player.mana,
+            maxMana: player.maxMana
+        });
+
+        // Send all zone enemies to this client
+        for (const [eid, enemy] of enemies.entries()) {
+            if (!enemy.isDead && enemy.zone === zone) {
+                socket.emit('enemy:spawn', {
+                    enemyId: eid, templateId: enemy.templateId, name: enemy.name,
+                    level: enemy.level, health: enemy.health, maxHealth: enemy.maxHealth,
+                    x: enemy.x, y: enemy.y, z: enemy.z
+                });
+            }
+        }
+
+        // Send all other players in this zone to this client
+        for (const [existingCharId, existingPlayer] of connectedPlayers.entries()) {
+            if (existingCharId !== characterId && existingPlayer.zone === zone) {
+                socket.emit('player:moved', {
+                    characterId: existingCharId,
+                    characterName: existingPlayer.characterName,
+                    x: existingPlayer.lastX || 0,
+                    y: existingPlayer.lastY || 0,
+                    z: existingPlayer.lastZ || 300,
+                    health: existingPlayer.health,
+                    maxHealth: existingPlayer.maxHealth,
+                    timestamp: Date.now()
+                });
+                socket.emit('combat:health_update', {
+                    characterId: existingCharId,
+                    health: existingPlayer.health,
+                    maxHealth: existingPlayer.maxHealth,
+                    mana: existingPlayer.mana,
+                    maxMana: existingPlayer.maxMana
+                });
+            }
+        }
+
+        // Send zone metadata
+        const zoneData = getZone(zone);
+        if (zoneData) {
+            socket.emit('zone:data', {
+                zone,
+                displayName: zoneData.displayName,
+                levelName: zoneData.levelName,
+                flags: zoneData.flags,
+                warps: zoneData.warps,
+                kafraNpcs: zoneData.kafraNpcs
+            });
+        }
+
+        logger.info(`[ZONE] ${player.characterName} ready in zone ${zone}`);
+    });
+
+    // ============================================================
+    // Kafra NPC Events
+    // ============================================================
+    socket.on('kafra:open', async (data) => {
+        logger.info(`[RECV] kafra:open from ${socket.id}: ${JSON.stringify(data)}`);
+        const { kafraId } = data;
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { characterId, player } = playerInfo;
+        const zone = player.zone || 'prontera_south';
+        const zoneData = getZone(zone);
+        if (!zoneData) {
+            socket.emit('kafra:error', { message: 'Zone not found' });
+            return;
+        }
+
+        const kafra = zoneData.kafraNpcs.find(k => k.id === kafraId);
+        if (!kafra) {
+            socket.emit('kafra:error', { message: 'Kafra NPC not found in this zone' });
+            return;
+        }
+
+        // Get save point
+        let currentSaveMap = 'prontera';
+        try {
+            const saveResult = await pool.query('SELECT save_map FROM characters WHERE character_id = $1', [characterId]);
+            if (saveResult.rows.length > 0) currentSaveMap = saveResult.rows[0].save_map || 'prontera';
+        } catch (err) { /* use default */ }
+
+        socket.emit('kafra:data', {
+            kafraId: kafra.id,
+            kafraName: kafra.name,
+            destinations: kafra.destinations,
+            playerZuzucoin: player.zuzucoin,
+            currentSaveMap
+        });
+    });
+
+    socket.on('kafra:save', async () => {
+        logger.info(`[RECV] kafra:save from ${socket.id}`);
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { characterId, player } = playerInfo;
+        const zone = player.zone || 'prontera_south';
+        const zoneData = getZone(zone);
+
+        // Check nosave flag
+        if (zoneData && zoneData.flags.nosave) {
+            socket.emit('kafra:error', { message: 'Cannot save in this zone' });
+            return;
+        }
+
+        const saveX = player.lastX || 0;
+        const saveY = player.lastY || 0;
+        const saveZ = player.lastZ || 300;
+
+        try {
+            await pool.query(
+                'UPDATE characters SET save_map = $1, save_x = $2, save_y = $3, save_z = $4 WHERE character_id = $5',
+                [zone, saveX, saveY, saveZ, characterId]
+            );
+            socket.emit('kafra:saved', { saveMap: zone, saveX, saveY, saveZ });
+            logger.info(`[KAFRA] ${player.characterName} saved at ${zone} (${saveX}, ${saveY}, ${saveZ})`);
+        } catch (err) {
+            socket.emit('kafra:error', { message: 'Failed to save location' });
+            logger.error(`[KAFRA] Save failed for char ${characterId}: ${err.message}`);
+        }
+    });
+
+    socket.on('kafra:teleport', async (data) => {
+        logger.info(`[RECV] kafra:teleport from ${socket.id}: ${JSON.stringify(data)}`);
+        const { kafraId, destZone } = data;
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { characterId, player } = playerInfo;
+        const zone = player.zone || 'prontera_south';
+        const zoneData = getZone(zone);
+        if (!zoneData) {
+            socket.emit('kafra:error', { message: 'Zone not found' });
+            return;
+        }
+
+        const kafra = zoneData.kafraNpcs.find(k => k.id === kafraId);
+        if (!kafra) {
+            socket.emit('kafra:error', { message: 'Kafra NPC not found' });
+            return;
+        }
+
+        const dest = kafra.destinations.find(d => d.zone === destZone);
+        if (!dest) {
+            socket.emit('kafra:error', { message: 'Invalid destination' });
+            return;
+        }
+
+        // Check zeny
+        if (player.zuzucoin < dest.cost) {
+            socket.emit('kafra:error', { message: `Not enough Zuzucoin (need ${dest.cost}, have ${player.zuzucoin})` });
+            return;
+        }
+
+        // Deduct cost
+        player.zuzucoin -= dest.cost;
+        try {
+            await pool.query('UPDATE characters SET zuzucoin = $1 WHERE character_id = $2', [player.zuzucoin, characterId]);
+        } catch (err) {
+            logger.warn(`[DB] Failed to deduct zuzucoin for char ${characterId}: ${err.message}`);
+        }
+
+        const destZoneData = getZone(destZone);
+        if (!destZoneData) {
+            socket.emit('kafra:error', { message: 'Destination zone not found' });
+            return;
+        }
+
+        // Use the warp flow: leave old zone, join new zone
+        autoAttackState.delete(characterId);
+        activeCasts.delete(characterId);
+        afterCastDelayEnd.delete(characterId);
+
+        // Clean enemy combat sets
+        for (const [, enemy] of enemies.entries()) {
+            if (enemy.zone === zone) {
+                enemy.inCombatWith.delete(characterId);
+                if (enemy.targetPlayerId === characterId) {
+                    enemy.targetPlayerId = null;
+                    const next = pickNextTarget(enemy);
+                    if (next) { enemy.targetPlayerId = next; }
+                    else { enemy.aiState = AI_STATE.IDLE; enemy.isWandering = false; }
+                }
+            }
+        }
+
+        broadcastToZone(zone, 'player:left', {
+            characterId, characterName: player.characterName, reason: 'kafra_teleport'
+        });
+
+        socket.leave('zone:' + zone);
+        socket.join('zone:' + destZone);
+
+        const destSpawn = destZoneData.defaultSpawn;
+        player.zone = destZone;
+        player.lastX = destSpawn.x;
+        player.lastY = destSpawn.y;
+        player.lastZ = destSpawn.z;
+        zoneTransitioning.add(characterId);
+
+        try {
+            await pool.query(
+                'UPDATE characters SET zone_name = $1, x = $2, y = $3, z = $4 WHERE character_id = $5',
+                [destZone, destSpawn.x, destSpawn.y, destSpawn.z, characterId]
+            );
+        } catch (err) {
+            logger.warn(`[DB] Failed to save kafra teleport for char ${characterId}: ${err.message}`);
+        }
+
+        // Lazy spawn enemies
+        if (!spawnedZones.has(destZone)) {
+            if (destZoneData.enemySpawns.length > 0) {
+                for (const spawn of destZoneData.enemySpawns) {
+                    spawnEnemy({ ...spawn, zone: destZone });
+                }
+            }
+            spawnedZones.add(destZone);
+        }
+
+        socket.emit('kafra:teleported', {
+            destZone, cost: dest.cost, remainingZuzucoin: player.zuzucoin
+        });
+
+        socket.emit('zone:change', {
+            zone: destZone,
+            displayName: destZoneData.displayName,
+            levelName: destZoneData.levelName,
+            x: destSpawn.x, y: destSpawn.y, z: destSpawn.z,
+            flags: destZoneData.flags,
+            reason: 'kafra_teleport'
+        });
+
+        logger.info(`[KAFRA] ${player.characterName} teleported ${zone} → ${destZone} (cost: ${dest.cost}z)`);
+    });
+
     // Disconnect
     socket.on('disconnect', async () => {
         logger.info(`[RECV] disconnect from ${socket.id}`);
@@ -1827,13 +2311,21 @@ io.on('connection', (socket) => {
                     }
                 }
                 
+                const leftZone = player.zone || 'prontera_south';
                 connectedPlayers.delete(charId);
-                logger.info(`Player left: Character ${charId}`);
-                
-                // Broadcast to other players using io (socket is already disconnected)
+                logger.info(`Player left: Character ${charId} zone=${leftZone}`);
+
+                // Save zone to DB on disconnect
+                try {
+                    await pool.query('UPDATE characters SET zone_name = $1 WHERE character_id = $2', [leftZone, charId]);
+                } catch (zErr) {
+                    logger.warn(`[DB] Failed to save zone for char ${charId}: ${zErr.message}`);
+                }
+
+                // Broadcast to other players in same zone using io (socket is already disconnected)
                 const leftPayload = { characterId: charId, characterName: player.characterName || 'Unknown' };
-                io.emit('player:left', leftPayload);
-                logger.info(`[BROADCAST] player:left: ${JSON.stringify(leftPayload)}`);
+                broadcastToZone(leftZone, 'player:left', leftPayload);
+                logger.info(`[BROADCAST] player:left to zone:${leftZone}: ${JSON.stringify(leftPayload)}`);
                 break;
             }
         }
@@ -2032,16 +2524,74 @@ io.on('connection', (socket) => {
         player.health = player.maxHealth;
         player.mana = player.maxMana;
         player.isDead = false;
-        
+
         // Save health to database
         await savePlayerHealthToDB(characterId, player.health, player.mana);
-        
-        // Update position cache to spawn point
-        await setPlayerPosition(characterId, COMBAT.SPAWN_POSITION.x, COMBAT.SPAWN_POSITION.y, COMBAT.SPAWN_POSITION.z);
-        
-        logger.info(`[COMBAT] ${player.characterName} respawned at (${COMBAT.SPAWN_POSITION.x}, ${COMBAT.SPAWN_POSITION.y}, ${COMBAT.SPAWN_POSITION.z})`);
-        
-        // Notify all players of respawn with teleport flag
+
+        // Get save point from DB (or use default)
+        let saveMap = 'prontera', saveX = 0, saveY = -2200, saveZ = 300;
+        try {
+            const saveResult = await pool.query(
+                'SELECT save_map, save_x, save_y, save_z FROM characters WHERE character_id = $1',
+                [characterId]
+            );
+            if (saveResult.rows.length > 0) {
+                const sr = saveResult.rows[0];
+                saveMap = sr.save_map || 'prontera';
+                saveX = sr.save_x || 0;
+                saveY = sr.save_y || 0;
+                saveZ = sr.save_z || 580;
+            }
+        } catch (err) {
+            logger.warn(`[DB] Failed to get save point for char ${characterId}: ${err.message}`);
+        }
+
+        const oldZone = player.zone || 'prontera_south';
+        const needsZoneChange = saveMap !== oldZone;
+
+        // Update position cache
+        await setPlayerPosition(characterId, saveX, saveY, saveZ);
+        player.lastX = saveX;
+        player.lastY = saveY;
+        player.lastZ = saveZ;
+
+        if (needsZoneChange) {
+            // Cross-zone respawn — move player to save point zone
+            broadcastToZone(oldZone, 'player:left', {
+                characterId, characterName: player.characterName, reason: 'respawn'
+            });
+            socket.leave('zone:' + oldZone);
+            socket.join('zone:' + saveMap);
+            player.zone = saveMap;
+            zoneTransitioning.add(characterId);
+            await pool.query('UPDATE characters SET zone_name = $1 WHERE character_id = $2', [saveMap, characterId]);
+
+            // Lazy spawn enemies in the new zone if needed
+            if (!spawnedZones.has(saveMap)) {
+                const zd = getZone(saveMap);
+                if (zd && zd.enemySpawns.length > 0) {
+                    for (const spawn of zd.enemySpawns) {
+                        spawnEnemy({ ...spawn, zone: saveMap });
+                    }
+                }
+                spawnedZones.add(saveMap);
+            }
+
+            const zoneInfo = getZone(saveMap);
+            socket.emit('zone:change', {
+                zone: saveMap,
+                displayName: zoneInfo ? zoneInfo.displayName : saveMap,
+                levelName: zoneInfo ? zoneInfo.levelName : 'L_PrtSouth',
+                x: saveX, y: saveY, z: saveZ,
+                flags: zoneInfo ? zoneInfo.flags : {},
+                reason: 'respawn'
+            });
+            logger.info(`[COMBAT] ${player.characterName} respawned at save point in ${saveMap} (cross-zone)`);
+        } else {
+            logger.info(`[COMBAT] ${player.characterName} respawned at save point (${saveX}, ${saveY}, ${saveZ}) in ${oldZone}`);
+        }
+
+        // Notify players in the respawn zone
         const respawnPayload = {
             characterId,
             characterName: player.characterName,
@@ -2049,14 +2599,14 @@ io.on('connection', (socket) => {
             maxHealth: player.maxHealth,
             mana: player.mana,
             maxMana: player.maxMana,
-            x: COMBAT.SPAWN_POSITION.x,
-            y: COMBAT.SPAWN_POSITION.y,
-            z: COMBAT.SPAWN_POSITION.z,
+            x: saveX,
+            y: saveY,
+            z: saveZ,
             teleport: true,
             timestamp: Date.now()
         };
-        io.emit('combat:respawn', respawnPayload);
-        logger.info(`[BROADCAST] combat:respawn: ${JSON.stringify(respawnPayload)}`);
+        broadcastToZone(player.zone, 'combat:respawn', respawnPayload);
+        logger.info(`[BROADCAST] combat:respawn to zone:${player.zone}: ${JSON.stringify(respawnPayload)}`);
     });
     
     // Request current stats (used when opening stat window)
@@ -2235,8 +2785,9 @@ io.on('connection', (socket) => {
             exp: buildExpPayload(player)
         });
         
-        // Broadcast to other players
-        socket.broadcast.emit('job:changed', {
+        // Broadcast to other players in zone
+        const jobZone = player.zone || 'prontera_south';
+        broadcastToZoneExcept(socket, jobZone, 'job:changed', {
             characterId,
             characterName: player.characterName,
             newClass: targetClass,
@@ -2868,8 +3419,9 @@ io.on('connection', (socket) => {
                     spCost, cooldownMs, effectVal, duration,
                     groundX, groundY, groundZ, hasGroundPos
                 });
-                // Broadcast cast start to all clients (for cast bar rendering)
-                io.emit('skill:cast_start', {
+                // Broadcast cast start to zone clients (for cast bar rendering)
+                const castStartZone = player.zone || 'prontera_south';
+                broadcastToZone(castStartZone, 'skill:cast_start', {
                     casterId: characterId, casterName: player.characterName,
                     skillId, skillName: skill.displayName,
                     actualCastTime, targetId, isEnemy
@@ -2957,9 +3509,10 @@ io.on('connection', (socket) => {
             );
             const { damage, isCritical, isMiss, hitType: bashHitType } = bashResult;
 
+            const bashZone = player.zone || 'prontera_south';
             if (isMiss) {
                 // Skill missed — still consume SP/cooldown, broadcast miss
-                io.emit('combat:damage', {
+                broadcastToZone(bashZone, 'combat:damage', {
                     attackerId: characterId, attackerName: player.characterName,
                     targetId, targetName, isEnemy, damage: 0, isCritical: false,
                     isMiss: true, hitType: bashHitType, element: skill.element || 'neutral',
@@ -2985,8 +3538,8 @@ io.on('connection', (socket) => {
             }
             logger.info(`[SKILL-COMBAT] ${player.characterName} BASH Lv${learnedLevel} → ${targetName} for ${damage}${isCritical ? ' CRIT' : ''} [${bashHitType}] (HP: ${target.health}/${target.maxHealth})`);
 
-            // Broadcast skill damage to all
-            io.emit('skill:effect_damage', {
+            // Broadcast skill damage to zone
+            broadcastToZone(bashZone, 'skill:effect_damage', {
                 attackerId: characterId, attackerName: player.characterName,
                 targetId, targetName, isEnemy,
                 skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: skill.element,
@@ -2998,7 +3551,7 @@ io.on('connection', (socket) => {
             });
 
             // Also emit standard combat:damage so existing BP + C++ damage numbers work
-            io.emit('combat:damage', {
+            broadcastToZone(bashZone, 'combat:damage', {
                 attackerId: characterId, attackerName: player.characterName,
                 targetId, targetName, isEnemy, damage, isCritical,
                 isMiss: false, hitType: bashHitType, element: skill.element || 'neutral',
@@ -3010,7 +3563,7 @@ io.on('connection', (socket) => {
 
             // Enemy health update
             if (isEnemy) {
-                io.emit('enemy:health_update', { enemyId: targetId, health: target.health, maxHealth: target.maxHealth, inCombat: true });
+                broadcastToZone(bashZone, 'enemy:health_update', { enemyId: targetId, health: target.health, maxHealth: target.maxHealth, inCombat: true });
             }
 
             // Check death
@@ -3022,8 +3575,8 @@ io.on('connection', (socket) => {
                     for (const [otherId, otherAtk] of autoAttackState.entries()) {
                         if (otherAtk.targetCharId === targetId && !otherAtk.isEnemy) autoAttackState.delete(otherId);
                     }
-                    io.emit('combat:death', { killedId: targetId, killedName: targetName, killerId: characterId, killerName: player.characterName, isEnemy: false, targetHealth: 0, targetMaxHealth: target.maxHealth, timestamp: Date.now() });
-                    io.emit('chat:receive', { type: 'chat:receive', channel: 'COMBAT', senderId: 0, senderName: 'SYSTEM', message: `${player.characterName} has slain ${targetName} with Bash!`, timestamp: Date.now() });
+                    broadcastToZone(bashZone, 'combat:death', { killedId: targetId, killedName: targetName, killerId: characterId, killerName: player.characterName, isEnemy: false, targetHealth: 0, targetMaxHealth: target.maxHealth, timestamp: Date.now() });
+                    broadcastToZone(bashZone, 'chat:receive', { type: 'chat:receive', channel: 'COMBAT', senderId: 0, senderName: 'SYSTEM', message: `${player.characterName} has slain ${targetName} with Bash!`, timestamp: Date.now() });
                     await savePlayerHealthToDB(targetId, 0, target.mana);
                 }
             }
@@ -3079,7 +3632,8 @@ io.on('connection', (socket) => {
             logger.info(`[SKILL-COMBAT] ${player.characterName} PROVOKE Lv${learnedLevel} → ${targetName} (-${effectVal}% DEF, +${effectVal}% ATK for ${(duration || 30000) / 1000}s)`);
 
             // Broadcast buff applied
-            io.emit('skill:buff_applied', {
+            const provokeZone = player.zone || 'prontera_south';
+            broadcastToZone(provokeZone, 'skill:buff_applied', {
                 targetId, targetName, isEnemy,
                 casterId: characterId, casterName: player.characterName,
                 skillId, buffName: 'Provoke', duration: duration || 30000,
@@ -3102,6 +3656,7 @@ io.on('connection', (socket) => {
             applySkillDelays(characterId, player, skillId, levelData, socket);
 
             const AOE_RADIUS = 300; // Fire radius in UE units
+            const mbZone = player.zone || 'prontera_south';
             const atkBuffMods = getBuffStatModifiers(player);
             let totalDamageDealt = 0;
             let enemiesHit = 0;
@@ -3128,7 +3683,7 @@ io.on('connection', (socket) => {
 
                 if (isMiss) {
                     // AoE skill missed this target — broadcast miss
-                    io.emit('combat:damage', {
+                    broadcastToZone(mbZone, 'combat:damage', {
                         attackerId: characterId, attackerName: player.characterName,
                         targetId: eid, targetName: enemy.name, isEnemy: true, damage: 0, isCritical: false,
                         isMiss: true, hitType: mbHitType, element: 'fire',
@@ -3149,7 +3704,7 @@ io.on('connection', (socket) => {
                 if (typeof setEnemyAggro === 'function') setEnemyAggro(enemy, characterId, 'skill');
 
                 // Broadcast damage for each enemy hit
-                io.emit('skill:effect_damage', {
+                broadcastToZone(mbZone, 'skill:effect_damage', {
                     attackerId: characterId, attackerName: player.characterName,
                     targetId: eid, targetName: enemy.name, isEnemy: true,
                     skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: 'fire',
@@ -3159,7 +3714,7 @@ io.on('connection', (socket) => {
                     targetX: enemy.x, targetY: enemy.y, targetZ: enemy.z,
                     timestamp: Date.now()
                 });
-                io.emit('combat:damage', {
+                broadcastToZone(mbZone, 'combat:damage', {
                     attackerId: characterId, attackerName: player.characterName,
                     targetId: eid, targetName: enemy.name, isEnemy: true, damage, isCritical,
                     isMiss: false, hitType: mbHitType, element: 'fire',
@@ -3168,7 +3723,7 @@ io.on('connection', (socket) => {
                     targetX: enemy.x, targetY: enemy.y, targetZ: enemy.z,
                     timestamp: Date.now()
                 });
-                io.emit('enemy:health_update', { enemyId: eid, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: true });
+                broadcastToZone(mbZone, 'enemy:health_update', { enemyId: eid, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: true });
 
                 // Check death
                 if (enemy.health <= 0) {
@@ -3195,7 +3750,7 @@ io.on('connection', (socket) => {
                 const { damage: pvpMbDmg, isCritical: pvpMbCrit, isMiss: pvpMbMiss, hitType: pvpMbHitType } = mbPvpResult;
 
                 if (pvpMbMiss) {
-                    io.emit('combat:damage', {
+                    broadcastToZone(mbZone, 'combat:damage', {
                         attackerId: characterId, attackerName: player.characterName,
                         targetId: pid, targetName: ptarget.characterName, isEnemy: false, damage: 0, isCritical: false,
                         isMiss: true, hitType: pvpMbHitType, element: 'fire',
@@ -3211,7 +3766,7 @@ io.on('connection', (socket) => {
                 if (activeCasts.has(ptId)) interruptCast(ptId, 'damage');
                 totalDamageDealt += pvpMbDmg;
 
-                io.emit('skill:effect_damage', {
+                broadcastToZone(mbZone, 'skill:effect_damage', {
                     attackerId: characterId, attackerName: player.characterName,
                     targetId: pid, targetName: ptarget.characterName, isEnemy: false,
                     skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: 'fire',
@@ -3221,7 +3776,7 @@ io.on('connection', (socket) => {
                     targetX: pPos.x, targetY: pPos.y, targetZ: pPos.z,
                     timestamp: Date.now()
                 });
-                io.emit('combat:damage', {
+                broadcastToZone(mbZone, 'combat:damage', {
                     attackerId: characterId, attackerName: player.characterName,
                     targetId: pid, targetName: ptarget.characterName, isEnemy: false, damage: pvpMbDmg, isCritical: pvpMbCrit,
                     isMiss: false, hitType: pvpMbHitType, element: 'fire',
@@ -3236,8 +3791,8 @@ io.on('connection', (socket) => {
                     for (const [otherId, otherAtk] of autoAttackState.entries()) {
                         if (otherAtk.targetCharId === pid && !otherAtk.isEnemy) autoAttackState.delete(otherId);
                     }
-                    io.emit('combat:death', { killedId: pid, killedName: ptarget.characterName, killerId: characterId, killerName: player.characterName, isEnemy: false, targetHealth: 0, targetMaxHealth: ptarget.maxHealth, timestamp: Date.now() });
-                    io.emit('chat:receive', { type: 'chat:receive', channel: 'COMBAT', senderId: 0, senderName: 'SYSTEM', message: `${player.characterName} has slain ${ptarget.characterName} with Magnum Break!`, timestamp: Date.now() });
+                    broadcastToZone(mbZone, 'combat:death', { killedId: pid, killedName: ptarget.characterName, killerId: characterId, killerName: player.characterName, isEnemy: false, targetHealth: 0, targetMaxHealth: ptarget.maxHealth, timestamp: Date.now() });
+                    broadcastToZone(mbZone, 'chat:receive', { type: 'chat:receive', channel: 'COMBAT', senderId: 0, senderName: 'SYSTEM', message: `${player.characterName} has slain ${ptarget.characterName} with Magnum Break!`, timestamp: Date.now() });
                     await savePlayerHealthToDB(pid, 0, ptarget.mana);
                 }
             }
@@ -3347,9 +3902,10 @@ io.on('connection', (socket) => {
                 totalDamage += hitResult.damage;
             }
 
+            const boltZone = player.zone || 'prontera_south';
             // Check element immunity (if first hit was 0, all are 0)
             if (totalDamage <= 0) {
-                io.emit('combat:damage', {
+                broadcastToZone(boltZone, 'combat:damage', {
                     attackerId: characterId, attackerName: player.characterName,
                     targetId, targetName, isEnemy, damage: 0, isCritical: false,
                     isMiss: true, hitType: 'magical', element: skill.element,
@@ -3375,11 +3931,11 @@ io.on('connection', (socket) => {
             // Fire damage breaks Frozen status
             if (skill.element === 'fire' && targetBuffMods.isFrozen && target.activeBuffs) {
                 target.activeBuffs = target.activeBuffs.filter(b => b.name !== 'frozen');
-                io.emit('skill:buff_removed', { targetId, isEnemy, buffName: 'frozen', reason: 'fire_damage' });
+                broadcastToZone(boltZone, 'skill:buff_removed', { targetId, isEnemy, buffName: 'frozen', reason: 'fire_damage' });
             }
 
             // Summary event for skill effect tracking
-            io.emit('skill:effect_damage', {
+            broadcastToZone(boltZone, 'skill:effect_damage', {
                 attackerId: characterId, attackerName: player.characterName,
                 targetId, targetName, isEnemy,
                 skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: skill.element,
@@ -3390,11 +3946,12 @@ io.on('connection', (socket) => {
 
             // Per-hit damage numbers (RO-style staggered display, ~200ms between hits)
             const HIT_DELAY_MS = 200;
+            const boltZoneCaptured = boltZone; // Capture zone for setTimeout
             for (let h = 0; h < numHits; h++) {
                 const hitDmg = hitDamages[h];
                 const delay = h * HIT_DELAY_MS;
                 setTimeout(() => {
-                    io.emit('combat:damage', {
+                    broadcastToZone(boltZoneCaptured, 'combat:damage', {
                         attackerId: characterId, attackerName: player.characterName,
                         targetId, targetName, isEnemy, damage: hitDmg, isCritical: false,
                         isMiss: false, hitType: 'magical', element: skill.element,
@@ -3406,15 +3963,15 @@ io.on('connection', (socket) => {
             }
 
             if (isEnemy) {
-                io.emit('enemy:health_update', { enemyId: targetId, health: target.health, maxHealth: target.maxHealth, inCombat: true });
+                broadcastToZone(boltZone, 'enemy:health_update', { enemyId: targetId, health: target.health, maxHealth: target.maxHealth, inCombat: true });
                 if (target.health <= 0) await processEnemyDeathFromSkill(target, player, characterId, io);
             } else if (target.health <= 0) {
                 target.isDead = true;
                 for (const [otherId, otherAtk] of autoAttackState.entries()) {
                     if (otherAtk.targetCharId === targetId && !otherAtk.isEnemy) autoAttackState.delete(otherId);
                 }
-                io.emit('combat:death', { killedId: targetId, killedName: targetName, killerId: characterId, killerName: player.characterName, isEnemy: false, targetHealth: 0, targetMaxHealth: target.maxHealth, timestamp: Date.now() });
-                io.emit('chat:receive', { type: 'chat:receive', channel: 'COMBAT', senderId: 0, senderName: 'SYSTEM', message: `${player.characterName} has slain ${targetName} with ${skill.displayName}!`, timestamp: Date.now() });
+                broadcastToZone(boltZone, 'combat:death', { killedId: targetId, killedName: targetName, killerId: characterId, killerName: player.characterName, isEnemy: false, targetHealth: 0, targetMaxHealth: target.maxHealth, timestamp: Date.now() });
+                broadcastToZone(boltZone, 'chat:receive', { type: 'chat:receive', channel: 'COMBAT', senderId: 0, senderName: 'SYSTEM', message: `${player.characterName} has slain ${targetName} with ${skill.displayName}!`, timestamp: Date.now() });
                 await savePlayerHealthToDB(targetId, 0, target.mana);
             }
 
@@ -3493,9 +4050,10 @@ io.on('connection', (socket) => {
                 target.lastDamageTime = Date.now();
                 if (typeof setEnemyAggro === 'function') setEnemyAggro(target, characterId, 'skill');
             }
+            const ssZone = player.zone || 'prontera_south';
             logger.info(`[SKILL-COMBAT] ${player.characterName} Soul Strike Lv${learnedLevel} → ${targetName} for ${totalDamage} (${numHits} hits, ghost${undeadBonus > 1 ? '+undead' : ''}) (HP: ${target.health}/${target.maxHealth})`);
 
-            io.emit('skill:effect_damage', {
+            broadcastToZone(ssZone, 'skill:effect_damage', {
                 attackerId: characterId, attackerName: player.characterName,
                 targetId, targetName, isEnemy,
                 skillId, skillName: 'Soul Strike', skillLevel: learnedLevel, element: 'ghost',
@@ -3506,11 +4064,12 @@ io.on('connection', (socket) => {
 
             // Per-hit damage numbers (RO-style staggered display, ~200ms between hits)
             const SS_HIT_DELAY = 200;
+            const ssZoneCaptured = ssZone; // Capture zone for setTimeout
             for (let h = 0; h < numHits; h++) {
                 const hitDmg = hitDamages[h];
                 const delay = h * SS_HIT_DELAY;
                 setTimeout(() => {
-                    io.emit('combat:damage', {
+                    broadcastToZone(ssZoneCaptured, 'combat:damage', {
                         attackerId: characterId, attackerName: player.characterName,
                         targetId, targetName, isEnemy, damage: hitDmg, isCritical: false,
                         isMiss: false, hitType: 'magical', element: 'ghost',
@@ -3522,15 +4081,15 @@ io.on('connection', (socket) => {
             }
 
             if (isEnemy) {
-                io.emit('enemy:health_update', { enemyId: targetId, health: target.health, maxHealth: target.maxHealth, inCombat: true });
+                broadcastToZone(ssZone, 'enemy:health_update', { enemyId: targetId, health: target.health, maxHealth: target.maxHealth, inCombat: true });
                 if (target.health <= 0) await processEnemyDeathFromSkill(target, player, characterId, io);
             } else if (target.health <= 0) {
                 target.isDead = true;
                 for (const [otherId, otherAtk] of autoAttackState.entries()) {
                     if (otherAtk.targetCharId === targetId && !otherAtk.isEnemy) autoAttackState.delete(otherId);
                 }
-                io.emit('combat:death', { killedId: targetId, killedName: targetName, killerId: characterId, killerName: player.characterName, isEnemy: false, targetHealth: 0, targetMaxHealth: target.maxHealth, timestamp: Date.now() });
-                io.emit('chat:receive', { type: 'chat:receive', channel: 'COMBAT', senderId: 0, senderName: 'SYSTEM', message: `${player.characterName} has slain ${targetName} with Soul Strike!`, timestamp: Date.now() });
+                broadcastToZone(ssZone, 'combat:death', { killedId: targetId, killedName: targetName, killerId: characterId, killerName: player.characterName, isEnemy: false, targetHealth: 0, targetMaxHealth: target.maxHealth, timestamp: Date.now() });
+                broadcastToZone(ssZone, 'chat:receive', { type: 'chat:receive', channel: 'COMBAT', senderId: 0, senderName: 'SYSTEM', message: `${player.characterName} has slain ${targetName} with Soul Strike!`, timestamp: Date.now() });
                 await savePlayerHealthToDB(targetId, 0, target.mana);
             }
 
@@ -3620,6 +4179,7 @@ io.on('connection', (socket) => {
             const totalBaseDamage = baseMagicResult.damage;
             const splitDamage = Math.max(1, Math.floor(totalBaseDamage / splashTargets.length));
 
+            const nbZone = player.zone || 'prontera_south';
             let totalDamageDealt = 0;
             for (const st of splashTargets) {
                 // Recalculate per-target for proper element/MDEF, then scale by split ratio
@@ -3640,7 +4200,7 @@ io.on('connection', (socket) => {
                 }
                 totalDamageDealt += dmg;
 
-                io.emit('skill:effect_damage', {
+                broadcastToZone(nbZone, 'skill:effect_damage', {
                     attackerId: characterId, attackerName: player.characterName,
                     targetId: st.id, targetName: st.name, isEnemy: st.isEnemy,
                     skillId, skillName: 'Napalm Beat', skillLevel: learnedLevel, element: 'ghost',
@@ -3648,7 +4208,7 @@ io.on('connection', (socket) => {
                     targetX: st.pos.x, targetY: st.pos.y, targetZ: st.pos.z,
                     targetHealth: st.target.health, targetMaxHealth: st.target.maxHealth, timestamp: Date.now()
                 });
-                io.emit('combat:damage', {
+                broadcastToZone(nbZone, 'combat:damage', {
                     attackerId: characterId, attackerName: player.characterName,
                     targetId: st.id, targetName: st.name, isEnemy: st.isEnemy, damage: dmg, isCritical: false,
                     isMiss: false, hitType: 'magical', element: 'ghost',
@@ -3657,15 +4217,15 @@ io.on('connection', (socket) => {
                 });
 
                 if (st.isEnemy) {
-                    io.emit('enemy:health_update', { enemyId: st.id, health: st.target.health, maxHealth: st.target.maxHealth, inCombat: true });
+                    broadcastToZone(nbZone, 'enemy:health_update', { enemyId: st.id, health: st.target.health, maxHealth: st.target.maxHealth, inCombat: true });
                     if (st.target.health <= 0) await processEnemyDeathFromSkill(st.target, player, characterId, io);
                 } else if (st.target.health <= 0) {
                     st.target.isDead = true;
                     for (const [otherId, otherAtk] of autoAttackState.entries()) {
                         if (otherAtk.targetCharId === st.id && !otherAtk.isEnemy) autoAttackState.delete(otherId);
                     }
-                    io.emit('combat:death', { killedId: st.id, killedName: st.name, killerId: characterId, killerName: player.characterName, isEnemy: false, targetHealth: 0, targetMaxHealth: st.target.maxHealth, timestamp: Date.now() });
-                    io.emit('chat:receive', { type: 'chat:receive', channel: 'COMBAT', senderId: 0, senderName: 'SYSTEM', message: `${player.characterName} has slain ${st.name} with Napalm Beat!`, timestamp: Date.now() });
+                    broadcastToZone(nbZone, 'combat:death', { killedId: st.id, killedName: st.name, killerId: characterId, killerName: player.characterName, isEnemy: false, targetHealth: 0, targetMaxHealth: st.target.maxHealth, timestamp: Date.now() });
+                    broadcastToZone(nbZone, 'chat:receive', { type: 'chat:receive', channel: 'COMBAT', senderId: 0, senderName: 'SYSTEM', message: `${player.characterName} has slain ${st.name} with Napalm Beat!`, timestamp: Date.now() });
                     await savePlayerHealthToDB(st.id, 0, st.target.mana);
                 }
             }
@@ -3713,6 +4273,7 @@ io.on('connection', (socket) => {
             // Center 3x3 = full damage, outer ring = 75% damage (RO pre-renewal)
             const FIREBALL_AOE = 500;
             const FIREBALL_INNER = 300;  // 3x3 center radius
+            const fbZone = player.zone || 'prontera_south';
             let totalDamageDealt = 0;
             let targetsHit = 0;
 
@@ -3742,10 +4303,10 @@ io.on('connection', (socket) => {
                 // Fire damage breaks Frozen
                 if (tBuffMods.isFrozen && tgt.activeBuffs) {
                     tgt.activeBuffs = tgt.activeBuffs.filter(b => b.name !== 'frozen');
-                    io.emit('skill:buff_removed', { targetId: tId, isEnemy: tIsEnemy, buffName: 'frozen', reason: 'fire_damage' });
+                    broadcastToZone(fbZone, 'skill:buff_removed', { targetId: tId, isEnemy: tIsEnemy, buffName: 'frozen', reason: 'fire_damage' });
                 }
 
-                io.emit('skill:effect_damage', {
+                broadcastToZone(fbZone, 'skill:effect_damage', {
                     attackerId: characterId, attackerName: player.characterName,
                     targetId: tId, targetName: tName, isEnemy: tIsEnemy,
                     skillId, skillName: 'Fire Ball', skillLevel: learnedLevel, element: 'fire',
@@ -3753,7 +4314,7 @@ io.on('connection', (socket) => {
                     targetX: tPos.x, targetY: tPos.y, targetZ: tPos.z,
                     targetHealth: tgt.health, targetMaxHealth: tgt.maxHealth, timestamp: Date.now()
                 });
-                io.emit('combat:damage', {
+                broadcastToZone(fbZone, 'combat:damage', {
                     attackerId: characterId, attackerName: player.characterName,
                     targetId: tId, targetName: tName, isEnemy: tIsEnemy, damage: dmg, isCritical: false,
                     isMiss: false, hitType: 'magical', element: 'fire',
@@ -3762,15 +4323,15 @@ io.on('connection', (socket) => {
                 });
 
                 if (tIsEnemy) {
-                    io.emit('enemy:health_update', { enemyId: tId, health: tgt.health, maxHealth: tgt.maxHealth, inCombat: true });
+                    broadcastToZone(fbZone, 'enemy:health_update', { enemyId: tId, health: tgt.health, maxHealth: tgt.maxHealth, inCombat: true });
                     if (tgt.health <= 0) await processEnemyDeathFromSkill(tgt, player, characterId, io);
                 } else if (tgt.health <= 0) {
                     tgt.isDead = true;
                     for (const [otherId, otherAtk] of autoAttackState.entries()) {
                         if (otherAtk.targetCharId === tId && !otherAtk.isEnemy) autoAttackState.delete(otherId);
                     }
-                    io.emit('combat:death', { killedId: tId, killedName: tName, killerId: characterId, killerName: player.characterName, isEnemy: false, targetHealth: 0, targetMaxHealth: tgt.maxHealth, timestamp: Date.now() });
-                    io.emit('chat:receive', { type: 'chat:receive', channel: 'COMBAT', senderId: 0, senderName: 'SYSTEM', message: `${player.characterName} has slain ${tName} with Fire Ball!`, timestamp: Date.now() });
+                    broadcastToZone(fbZone, 'combat:death', { killedId: tId, killedName: tName, killerId: characterId, killerName: player.characterName, isEnemy: false, targetHealth: 0, targetMaxHealth: tgt.maxHealth, timestamp: Date.now() });
+                    broadcastToZone(fbZone, 'chat:receive', { type: 'chat:receive', channel: 'COMBAT', senderId: 0, senderName: 'SYSTEM', message: `${player.characterName} has slain ${tName} with Fire Ball!`, timestamp: Date.now() });
                     await savePlayerHealthToDB(tId, 0, tgt.mana);
                 }
             };
@@ -3842,6 +4403,7 @@ io.on('connection', (socket) => {
             applySkillDelays(characterId, player, skillId, levelData, socket);
 
             const STORM_AOE = 500; // 5x5 area
+            const tsZone = player.zone || 'prontera_south';
             const numHits = learnedLevel;
             let totalDamageDealt = 0;
             let targetsHit = 0;
@@ -3877,7 +4439,7 @@ io.on('connection', (socket) => {
                 enemy.lastDamageTime = Date.now();
                 if (typeof setEnemyAggro === 'function') setEnemyAggro(enemy, characterId, 'skill');
 
-                io.emit('skill:effect_damage', {
+                broadcastToZone(tsZone, 'skill:effect_damage', {
                     attackerId: characterId, attackerName: player.characterName,
                     targetId: eid, targetName: enemy.name, isEnemy: true,
                     skillId, skillName: 'Thunderstorm', skillLevel: learnedLevel, element: 'wind',
@@ -3888,9 +4450,10 @@ io.on('connection', (socket) => {
                 // Per-hit damage numbers (staggered)
                 const ePos = { x: enemy.x, y: enemy.y, z: enemy.z };
                 const eName = enemy.name;
+                const tsZoneCapturedE = tsZone; // Capture zone for setTimeout
                 for (let h = 0; h < numHits; h++) {
                     setTimeout(() => {
-                        io.emit('combat:damage', {
+                        broadcastToZone(tsZoneCapturedE, 'combat:damage', {
                             attackerId: characterId, attackerName: player.characterName,
                             targetId: eid, targetName: eName, isEnemy: true, damage: tsHitDamages[h], isCritical: false,
                             isMiss: false, hitType: 'magical', element: 'wind',
@@ -3900,7 +4463,7 @@ io.on('connection', (socket) => {
                         });
                     }, h * TS_HIT_DELAY);
                 }
-                io.emit('enemy:health_update', { enemyId: eid, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: true });
+                broadcastToZone(tsZone, 'enemy:health_update', { enemyId: eid, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: true });
                 if (enemy.health <= 0) await processEnemyDeathFromSkill(enemy, player, characterId, io);
             }
 
@@ -3934,7 +4497,7 @@ io.on('connection', (socket) => {
                 totalDamageDealt += dmg;
                 targetsHit++;
 
-                io.emit('skill:effect_damage', {
+                broadcastToZone(tsZone, 'skill:effect_damage', {
                     attackerId: characterId, attackerName: player.characterName,
                     targetId: pid, targetName: ptarget.characterName, isEnemy: false,
                     skillId, skillName: 'Thunderstorm', skillLevel: learnedLevel, element: 'wind',
@@ -3944,9 +4507,10 @@ io.on('connection', (socket) => {
                 });
                 // Per-hit damage numbers (staggered)
                 const pvpName = ptarget.characterName;
+                const tsZoneCapturedP = tsZone; // Capture zone for setTimeout
                 for (let h = 0; h < numHits; h++) {
                     setTimeout(() => {
-                        io.emit('combat:damage', {
+                        broadcastToZone(tsZoneCapturedP, 'combat:damage', {
                             attackerId: characterId, attackerName: player.characterName,
                             targetId: pid, targetName: pvpName, isEnemy: false, damage: pvpHitDmgs[h], isCritical: false,
                             isMiss: false, hitType: 'magical', element: 'wind',
@@ -3962,8 +4526,8 @@ io.on('connection', (socket) => {
                     for (const [otherId, otherAtk] of autoAttackState.entries()) {
                         if (otherAtk.targetCharId === pid && !otherAtk.isEnemy) autoAttackState.delete(otherId);
                     }
-                    io.emit('combat:death', { killedId: pid, killedName: ptarget.characterName, killerId: characterId, killerName: player.characterName, isEnemy: false, targetHealth: 0, targetMaxHealth: ptarget.maxHealth, timestamp: Date.now() });
-                    io.emit('chat:receive', { type: 'chat:receive', channel: 'COMBAT', senderId: 0, senderName: 'SYSTEM', message: `${player.characterName} has slain ${ptarget.characterName} with Thunderstorm!`, timestamp: Date.now() });
+                    broadcastToZone(tsZone, 'combat:death', { killedId: pid, killedName: ptarget.characterName, killerId: characterId, killerName: player.characterName, isEnemy: false, targetHealth: 0, targetMaxHealth: ptarget.maxHealth, timestamp: Date.now() });
+                    broadcastToZone(tsZone, 'chat:receive', { type: 'chat:receive', channel: 'COMBAT', senderId: 0, senderName: 'SYSTEM', message: `${player.characterName} has slain ${ptarget.characterName} with Thunderstorm!`, timestamp: Date.now() });
                     await savePlayerHealthToDB(pid, 0, ptarget.mana);
                 }
             }
@@ -4030,9 +4594,10 @@ io.on('connection', (socket) => {
                 target.lastDamageTime = Date.now();
                 if (typeof setEnemyAggro === 'function') setEnemyAggro(target, characterId, 'skill');
             }
+            const fdZone = player.zone || 'prontera_south';
             logger.info(`[SKILL-COMBAT] ${player.characterName} Frost Diver Lv${learnedLevel} → ${targetName} for ${damage} [water] (HP: ${target.health}/${target.maxHealth})`);
 
-            io.emit('skill:effect_damage', {
+            broadcastToZone(fdZone, 'skill:effect_damage', {
                 attackerId: characterId, attackerName: player.characterName,
                 targetId, targetName, isEnemy,
                 skillId, skillName: 'Frost Diver', skillLevel: learnedLevel, element: 'water',
@@ -4040,7 +4605,7 @@ io.on('connection', (socket) => {
                 targetX: targetPos.x, targetY: targetPos.y, targetZ: targetPos.z,
                 targetHealth: target.health, targetMaxHealth: target.maxHealth, timestamp: Date.now()
             });
-            io.emit('combat:damage', {
+            broadcastToZone(fdZone, 'combat:damage', {
                 attackerId: characterId, attackerName: player.characterName,
                 targetId, targetName, isEnemy, damage, isCritical: false,
                 isMiss: false, hitType: 'magical', element: 'water',
@@ -4063,12 +4628,12 @@ io.on('connection', (socket) => {
                     });
                     logger.info(`[SKILL-COMBAT] ${targetName} FROZEN for ${freezeDuration / 1000}s by Frost Diver`);
 
-                    io.emit('skill:status_applied', {
+                    broadcastToZone(fdZone, 'skill:status_applied', {
                         targetId, targetName, isEnemy,
                         casterId: characterId, casterName: player.characterName,
                         skillId, statusName: 'Frozen', duration: freezeDuration
                     });
-                    io.emit('skill:buff_applied', {
+                    broadcastToZone(fdZone, 'skill:buff_applied', {
                         targetId, targetName, isEnemy,
                         casterId: characterId, casterName: player.characterName,
                         skillId, buffName: 'Frozen', duration: freezeDuration,
@@ -4078,15 +4643,15 @@ io.on('connection', (socket) => {
             }
 
             if (isEnemy) {
-                io.emit('enemy:health_update', { enemyId: targetId, health: target.health, maxHealth: target.maxHealth, inCombat: true });
+                broadcastToZone(fdZone, 'enemy:health_update', { enemyId: targetId, health: target.health, maxHealth: target.maxHealth, inCombat: true });
                 if (target.health <= 0) await processEnemyDeathFromSkill(target, player, characterId, io);
             } else if (target.health <= 0) {
                 target.isDead = true;
                 for (const [otherId, otherAtk] of autoAttackState.entries()) {
                     if (otherAtk.targetCharId === targetId && !otherAtk.isEnemy) autoAttackState.delete(otherId);
                 }
-                io.emit('combat:death', { killedId: targetId, killedName: targetName, killerId: characterId, killerName: player.characterName, isEnemy: false, targetHealth: 0, targetMaxHealth: target.maxHealth, timestamp: Date.now() });
-                io.emit('chat:receive', { type: 'chat:receive', channel: 'COMBAT', senderId: 0, senderName: 'SYSTEM', message: `${player.characterName} has slain ${targetName} with Frost Diver!`, timestamp: Date.now() });
+                broadcastToZone(fdZone, 'combat:death', { killedId: targetId, killedName: targetName, killerId: characterId, killerName: player.characterName, isEnemy: false, targetHealth: 0, targetMaxHealth: target.maxHealth, timestamp: Date.now() });
+                broadcastToZone(fdZone, 'chat:receive', { type: 'chat:receive', channel: 'COMBAT', senderId: 0, senderName: 'SYSTEM', message: `${player.characterName} has slain ${targetName} with Frost Diver!`, timestamp: Date.now() });
                 await savePlayerHealthToDB(targetId, 0, target.mana);
             }
 
@@ -4148,12 +4713,13 @@ io.on('connection', (socket) => {
                 stoneApplied = true;
                 logger.info(`[SKILL-COMBAT] ${targetName} PETRIFIED for ${stoneDuration / 1000}s by Stone Curse (rate: ${successRate}%)`);
 
-                io.emit('skill:status_applied', {
+                const scZone = player.zone || 'prontera_south';
+                broadcastToZone(scZone, 'skill:status_applied', {
                     targetId, targetName, isEnemy,
                     casterId: characterId, casterName: player.characterName,
                     skillId, statusName: 'Stone Curse', duration: stoneDuration
                 });
-                io.emit('skill:buff_applied', {
+                broadcastToZone(scZone, 'skill:buff_applied', {
                     targetId, targetName, isEnemy,
                     casterId: characterId, casterName: player.characterName,
                     skillId, buffName: 'Stone Curse', duration: stoneDuration,
@@ -4186,7 +4752,8 @@ io.on('connection', (socket) => {
 
             logger.info(`[SKILL-COMBAT] ${player.characterName} SIGHT active for ${sightDuration / 1000}s`);
 
-            io.emit('skill:buff_applied', {
+            const sightZone = player.zone || 'prontera_south';
+            broadcastToZone(sightZone, 'skill:buff_applied', {
                 targetId: characterId, targetName: player.characterName, isEnemy: false,
                 casterId: characterId, casterName: player.characterName,
                 skillId, buffName: 'Sight', duration: sightDuration,
@@ -4235,7 +4802,7 @@ io.on('connection', (socket) => {
             // Max 3 concurrent fire walls per caster — remove oldest if exceeded
             while (countGroundEffects(characterId, 'fire_wall') >= 3) {
                 const removedId = removeOldestGroundEffect(characterId, 'fire_wall');
-                if (removedId) io.emit('skill:ground_effect_removed', { effectId: removedId, type: 'fire_wall', reason: 'max_limit' });
+                if (removedId) { const fwRemoveZone = player.zone || 'prontera_south'; broadcastToZone(fwRemoveZone, 'skill:ground_effect_removed', { effectId: removedId, type: 'fire_wall', reason: 'max_limit' }); }
             }
 
             const wallDuration = duration || ((5 + learnedLevel - 1) * 1000);
@@ -4258,7 +4825,8 @@ io.on('connection', (socket) => {
 
             logger.info(`[SKILL-COMBAT] ${player.characterName} Fire Wall Lv${learnedLevel}: placed at (${Math.floor(wallPos.x)}, ${Math.floor(wallPos.y)}), ${hitLimit} hits, ${wallDuration / 1000}s`);
 
-            io.emit('skill:ground_effect_created', {
+            const fwCreatedZone = player.zone || 'prontera_south';
+            broadcastToZone(fwCreatedZone, 'skill:ground_effect_created', {
                 effectId, type: 'fire_wall',
                 casterId: characterId, casterName: player.characterName,
                 x: wallPos.x, y: wallPos.y, z: wallPos.z || 0,
@@ -4313,7 +4881,8 @@ io.on('connection', (socket) => {
 
             logger.info(`[SKILL-COMBAT] ${player.characterName} Safety Wall Lv${learnedLevel}: placed at (${Math.floor(wallPos.x)}, ${Math.floor(wallPos.y)}), ${hitsBlocked} blocks, ${wallDuration / 1000}s`);
 
-            io.emit('skill:ground_effect_created', {
+            const swCreatedZone = player.zone || 'prontera_south';
+            broadcastToZone(swCreatedZone, 'skill:ground_effect_created', {
                 effectId, type: 'safety_wall',
                 casterId: characterId, casterName: player.characterName,
                 x: wallPos.x, y: wallPos.y, z: wallPos.z || 0,
@@ -4378,7 +4947,117 @@ io.on('connection', (socket) => {
                 socket.emit('inventory:error', { message: 'This item cannot be used' });
                 return;
             }
-            
+
+            // ═══════════════════════════════════════════════════
+            // Special items: Fly Wing + Butterfly Wing
+            // ═══════════════════════════════════════════════════
+
+            // Fly Wing (item_id 1029) — random teleport within same zone
+            if (item.item_id === 1029) {
+                const playerZone = player.zone || 'prontera_south';
+                const zoneData = getZone(playerZone);
+                if (zoneData && zoneData.flags && zoneData.flags.noteleport) {
+                    socket.emit('inventory:error', { message: 'Teleportation is blocked in this area.' });
+                    return;
+                }
+                // Consume 1 item
+                await removeItemFromInventory(inventoryId, 1);
+                // Random position near defaultSpawn (±2000 UE units)
+                const spawn = (zoneData && zoneData.defaultSpawn) || { x: 0, y: 0, z: 300 };
+                const newX = spawn.x + (Math.random() * 4000 - 2000);
+                const newY = spawn.y + (Math.random() * 4000 - 2000);
+                const newZ = spawn.z;
+                player.lastX = newX; player.lastY = newY; player.lastZ = newZ;
+                broadcastToZone(playerZone, 'player:teleport', {
+                    characterId, x: newX, y: newY, z: newZ, teleportType: 'fly_wing'
+                });
+                socket.emit('inventory:used', {
+                    inventoryId, itemId: item.item_id, itemName: item.name,
+                    healed: 0, spRestored: 0,
+                    health: player.health, maxHealth: player.maxHealth,
+                    mana: player.mana, maxMana: player.maxMana
+                });
+                const invFW = await getPlayerInventory(characterId);
+                socket.emit('inventory:data', { items: invFW, zuzucoin: player.zuzucoin });
+                logger.info(`[ITEMS] ${player.characterName} used Fly Wing → (${Math.round(newX)}, ${Math.round(newY)}, ${newZ})`);
+                return;
+            }
+
+            // Butterfly Wing (item_id 1028) — teleport to save point
+            if (item.item_id === 1028) {
+                const playerZone = player.zone || 'prontera_south';
+                const zoneData = getZone(playerZone);
+                if (zoneData && zoneData.flags && zoneData.flags.noreturn) {
+                    socket.emit('inventory:error', { message: 'Return is blocked in this area.' });
+                    return;
+                }
+                // Consume 1 item
+                await removeItemFromInventory(inventoryId, 1);
+                // Query save point from DB
+                const saveRes = await pool.query(
+                    `SELECT save_map, save_x, save_y, save_z FROM characters WHERE id = $1`,
+                    [characterId]
+                );
+                const saveRow = saveRes.rows[0] || {};
+                const saveMap = saveRow.save_map || 'prontera';
+                const saveX = parseFloat(saveRow.save_x) || 0;
+                const saveY = parseFloat(saveRow.save_y) || 0;
+                const saveZ = parseFloat(saveRow.save_z) || 580;
+
+                if (saveMap !== playerZone) {
+                    // Cross-zone teleport — full zone change flow
+                    const destZoneData = getZone(saveMap);
+                    const destLevelName = destZoneData ? destZoneData.levelName : 'L_PrtSouth';
+                    const destDisplayName = destZoneData ? destZoneData.displayName : saveMap;
+
+                    // Cancel combat
+                    if (player.autoAttackTarget) {
+                        player.autoAttackTarget = null;
+                        player.isAutoAttacking = false;
+                    }
+                    // Leave old zone room, join new
+                    socket.leave('zone:' + playerZone);
+                    broadcastToZone(playerZone, 'player:left', { characterId, reason: 'butterfly_wing' });
+                    player.zone = saveMap;
+                    player.lastX = saveX; player.lastY = saveY; player.lastZ = saveZ;
+                    socket.join('zone:' + saveMap);
+                    zoneTransitioning.add(characterId);
+                    // Save to DB
+                    await pool.query(
+                        `UPDATE characters SET zone_name = $1, x = $2, y = $3 WHERE id = $4`,
+                        [saveMap, saveX, saveY, characterId]
+                    );
+                    // Lazy spawn enemies in destination
+                    if (!spawnedZones.has(saveMap) && destZoneData) {
+                        destZoneData.enemySpawns.forEach(sc => spawnEnemy({ ...sc, zone: saveMap }));
+                        spawnedZones.add(saveMap);
+                        logger.info(`[ZONE] Lazy-spawned enemies for ${saveMap}`);
+                    }
+                    // Emit zone:change
+                    socket.emit('zone:change', {
+                        zone: saveMap, displayName: destDisplayName, levelName: destLevelName,
+                        x: saveX, y: saveY, z: saveZ,
+                        flags: destZoneData ? destZoneData.flags : {}
+                    });
+                } else {
+                    // Same zone — in-zone teleport
+                    player.lastX = saveX; player.lastY = saveY; player.lastZ = saveZ;
+                    broadcastToZone(playerZone, 'player:teleport', {
+                        characterId, x: saveX, y: saveY, z: saveZ, teleportType: 'butterfly_wing'
+                    });
+                }
+                socket.emit('inventory:used', {
+                    inventoryId, itemId: item.item_id, itemName: item.name,
+                    healed: 0, spRestored: 0,
+                    health: player.health, maxHealth: player.maxHealth,
+                    mana: player.mana, maxMana: player.maxMana
+                });
+                const invBW = await getPlayerInventory(characterId);
+                socket.emit('inventory:data', { items: invBW, zuzucoin: player.zuzucoin });
+                logger.info(`[ITEMS] ${player.characterName} used Butterfly Wing → ${saveMap} (${Math.round(saveX)}, ${Math.round(saveY)})`);
+                return;
+            }
+
             // Apply consumable effect (HP/SP restoration)
             let healed = 0, spRestored = 0;
             if (item.max_hp_bonus > 0 || item.item_id === 1001) {
@@ -4399,12 +5078,13 @@ io.on('connection', (socket) => {
             // Save health/mana
             await savePlayerHealthToDB(characterId, player.health, player.mana);
             
-            // Send updated health to all
-            io.emit('combat:health_update', {
+            // Send updated health to zone
+            const useItemZone = player.zone || 'prontera_south';
+            broadcastToZone(useItemZone, 'combat:health_update', {
                 characterId, health: player.health, maxHealth: player.maxHealth,
                 mana: player.mana, maxMana: player.maxMana
             });
-            
+
             // Notify client of use result
             socket.emit('inventory:used', {
                 inventoryId, itemId: item.item_id, itemName: item.name,
@@ -4612,12 +5292,13 @@ io.on('connection', (socket) => {
             const finalAspd = Math.min(COMBAT.ASPD_CAP, derived.aspd + (player.weaponAspdMod || 0));
             socket.emit('player:stats', buildFullStatsPayload(characterId, player, effectiveStats, derived, finalAspd));
             
-            // Broadcast updated maxHealth so other clients show correct HP bars
-            io.emit('combat:health_update', {
+            // Broadcast updated maxHealth so other clients in zone show correct HP bars
+            const equipZone = player.zone || 'prontera_south';
+            broadcastToZone(equipZone, 'combat:health_update', {
                 characterId, health: player.health, maxHealth: player.maxHealth,
                 mana: player.mana, maxMana: player.maxMana
             });
-            
+
             // Send updated inventory
             const inventory = await getPlayerInventory(characterId);
             socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin });
@@ -5299,8 +5980,10 @@ async function executeCastComplete(characterId, cast) {
         }
     }
 
-    // Broadcast cast complete to all clients (removes cast bar)
-    io.emit('skill:cast_complete', { casterId: characterId, skillId: cast.skillId });
+    // Broadcast cast complete to zone clients (removes cast bar)
+    const castCompletePlayer = connectedPlayers.get(characterId);
+    const castCompleteZone = (castCompletePlayer && castCompletePlayer.zone) || 'prontera_south';
+    broadcastToZone(castCompleteZone, 'skill:cast_complete', { casterId: characterId, skillId: cast.skillId });
 
     // Re-trigger the skill:use handler with _castComplete flag to skip cast time
     // Socket.io: socket.listeners() returns registered handler functions
@@ -5407,11 +6090,12 @@ setInterval(async () => {
                 if (safetyWall && attacker.attackRange <= COMBAT.MELEE_RANGE + COMBAT.RANGE_TOLERANCE) {
                     safetyWall.hitsRemaining--;
                     attacker.lastAttackTime = now;
+                    const swBlockZone = enemy.zone || attacker.zone || 'prontera_south';
                     logger.info(`[COMBAT] Safety Wall blocked melee attack on ${enemy.name} (${safetyWall.hitsRemaining} hits remaining)`);
-                    io.emit('skill:ground_effect_blocked', { effectId: safetyWall.id, type: 'safety_wall', hitsRemaining: safetyWall.hitsRemaining, targetId: enemy.enemyId, targetName: enemy.name, isEnemy: true });
+                    broadcastToZone(swBlockZone, 'skill:ground_effect_blocked', { effectId: safetyWall.id, type: 'safety_wall', hitsRemaining: safetyWall.hitsRemaining, targetId: enemy.enemyId, targetName: enemy.name, isEnemy: true });
                     if (safetyWall.hitsRemaining <= 0) {
                         removeGroundEffect(safetyWall.id);
-                        io.emit('skill:ground_effect_removed', { effectId: safetyWall.id, type: 'safety_wall', reason: 'hits_exhausted' });
+                        broadcastToZone(swBlockZone, 'skill:ground_effect_removed', { effectId: safetyWall.id, type: 'safety_wall', reason: 'hits_exhausted' });
                     }
                     continue;
                 }
@@ -5448,9 +6132,10 @@ setInterval(async () => {
                     timestamp: now
                 };
 
+                const atkEnemyZone = enemy.zone || attacker.zone || 'prontera_south';
                 if (isMiss) {
                     // Miss/Dodge: don't deal damage, still broadcast event
-                    io.emit('combat:damage', damagePayload);
+                    broadcastToZone(atkEnemyZone, 'combat:damage', damagePayload);
                     logger.info(`[COMBAT] ${attacker.characterName} ${hitType} against ${enemy.name}(${enemy.enemyId})`);
                     continue;
                 }
@@ -5467,20 +6152,20 @@ setInterval(async () => {
 
                 logger.info(`[COMBAT] ${attacker.characterName} hit enemy ${enemy.name}(${enemy.enemyId}) for ${damage}${isCritical ? ' CRIT' : ''} [${atkElement}→${(enemy.element||{}).type||'neutral'}] (HP: ${enemy.health}/${enemy.maxHealth})`);
 
-                io.emit('combat:damage', damagePayload);
+                broadcastToZone(atkEnemyZone, 'combat:damage', damagePayload);
 
                 // Fire-element auto-attack breaks Frozen status
                 if (atkElement === 'fire' && enemy.activeBuffs) {
                     const hadFrozen = enemy.activeBuffs.some(b => b.name === 'frozen');
                     if (hadFrozen) {
                         enemy.activeBuffs = enemy.activeBuffs.filter(b => b.name !== 'frozen');
-                        io.emit('skill:buff_removed', { targetId: enemy.enemyId, isEnemy: true, buffName: 'frozen', reason: 'fire_damage' });
+                        broadcastToZone(atkEnemyZone, 'skill:buff_removed', { targetId: enemy.enemyId, isEnemy: true, buffName: 'frozen', reason: 'fire_damage' });
                         logger.info(`[COMBAT] Fire auto-attack removed Frozen from ${enemy.name}`);
                     }
                 }
 
-                // Broadcast enemy health update to all (for health bar visibility)
-                io.emit('enemy:health_update', {
+                // Broadcast enemy health update to zone (for health bar visibility)
+                broadcastToZone(atkEnemyZone, 'enemy:health_update', {
                     enemyId: enemy.enemyId,
                     health: enemy.health,
                     maxHealth: enemy.maxHealth,
@@ -5543,9 +6228,10 @@ setInterval(async () => {
                                 exp: buildExpPayload(attacker)
                             };
                             killerSocket.emit('exp:level_up', levelUpPayload);
-                            // Broadcast to other players so they see the level up
-                            killerSocket.broadcast.emit('exp:level_up', levelUpPayload);
-                            
+                            // Broadcast to other players in zone so they see the level up
+                            const lvlUpZone = attacker.zone || 'prontera_south';
+                            broadcastToZoneExcept(killerSocket, lvlUpZone, 'exp:level_up', levelUpPayload);
+
                             // Send updated stats (derived stats change with level)
                             const effectiveStats = getEffectiveStats(attacker);
                             const newDerived = calculateDerivedStats(effectiveStats);
@@ -5553,15 +6239,15 @@ setInterval(async () => {
                             killerSocket.emit('player:stats', buildFullStatsPayload(attackerId, attacker, effectiveStats, newDerived, newFinalAspd));
 
                             // Broadcast health update (full heal on level up)
-                            io.emit('combat:health_update', {
+                            broadcastToZone(lvlUpZone, 'combat:health_update', {
                                 characterId: attackerId,
                                 health: attacker.health,
                                 maxHealth: attacker.maxHealth,
                                 mana: attacker.mana,
                                 maxMana: attacker.maxMana
                             });
-                            
-                            // Chat announcement for level ups
+
+                            // Chat announcement for level ups (SYSTEM = global)
                             for (const lu of expResult.baseLevelUps) {
                                 io.emit('chat:receive', {
                                     type: 'chat:receive', channel: 'SYSTEM', senderId: 0, senderName: 'SYSTEM',
@@ -5595,9 +6281,10 @@ setInterval(async () => {
                         exp: enemy.exp,
                         timestamp: now
                     };
-                    io.emit('enemy:death', deathPayload);
+                    const enemyDeathZone = enemy.zone || attacker.zone || 'prontera_south';
+                    broadcastToZone(enemyDeathZone, 'enemy:death', deathPayload);
                     logger.info(`[BROADCAST] enemy:death: ${JSON.stringify(deathPayload)}`);
-                    
+
                     // Roll item drops for the killer
                     const droppedItems = rollEnemyDrops(enemy);
                     if (droppedItems.length > 0) {
@@ -5651,6 +6338,7 @@ setInterval(async () => {
                     }
                     
                     // Schedule enemy respawn
+                    const respawnEnemyZone = enemy.zone || 'prontera_south'; // Capture zone for setTimeout
                     setTimeout(() => {
                         enemy.health = enemy.maxHealth;
                         enemy.isDead = false;
@@ -5660,9 +6348,9 @@ setInterval(async () => {
                         enemy.targetPlayerId = null;
                         enemy.inCombatWith = new Set();
                         initEnemyWanderState(enemy);
-                        
+
                         logger.info(`[ENEMY] Respawned ${enemy.name} (ID: ${enemy.enemyId})`);
-                        io.emit('enemy:spawn', {
+                        broadcastToZone(respawnEnemyZone, 'enemy:spawn', {
                             enemyId: enemy.enemyId, templateId: enemy.templateId, name: enemy.name,
                             level: enemy.level, health: enemy.health, maxHealth: enemy.maxHealth,
                             monsterClass: enemy.monsterClass, size: enemy.size, race: enemy.race,
@@ -5736,11 +6424,12 @@ setInterval(async () => {
             if (pvpSafetyWall && attacker.attackRange <= COMBAT.MELEE_RANGE + COMBAT.RANGE_TOLERANCE) {
                 pvpSafetyWall.hitsRemaining--;
                 attacker.lastAttackTime = now;
+                const pvpSwZone = attacker.zone || 'prontera_south';
                 logger.info(`[COMBAT] Safety Wall blocked melee attack on ${target.characterName} (${pvpSafetyWall.hitsRemaining} hits remaining)`);
-                io.emit('skill:ground_effect_blocked', { effectId: pvpSafetyWall.id, type: 'safety_wall', hitsRemaining: pvpSafetyWall.hitsRemaining, targetId: atkState.targetCharId, targetName: target.characterName, isEnemy: false });
+                broadcastToZone(pvpSwZone, 'skill:ground_effect_blocked', { effectId: pvpSafetyWall.id, type: 'safety_wall', hitsRemaining: pvpSafetyWall.hitsRemaining, targetId: atkState.targetCharId, targetName: target.characterName, isEnemy: false });
                 if (pvpSafetyWall.hitsRemaining <= 0) {
                     removeGroundEffect(pvpSafetyWall.id);
-                    io.emit('skill:ground_effect_removed', { effectId: pvpSafetyWall.id, type: 'safety_wall', reason: 'hits_exhausted' });
+                    broadcastToZone(pvpSwZone, 'skill:ground_effect_removed', { effectId: pvpSafetyWall.id, type: 'safety_wall', reason: 'hits_exhausted' });
                 }
                 continue;
             }
@@ -5777,8 +6466,9 @@ setInterval(async () => {
                 timestamp: now
             };
 
+            const pvpAtkZone = attacker.zone || 'prontera_south';
             if (pvpMiss) {
-                io.emit('combat:damage', damagePayload);
+                broadcastToZone(pvpAtkZone, 'combat:damage', damagePayload);
                 logger.info(`[COMBAT] ${attacker.characterName} ${pvpHitType} against ${target.characterName}`);
                 continue;
             }
@@ -5793,14 +6483,14 @@ setInterval(async () => {
 
             logger.info(`[COMBAT] ${attacker.characterName} hit ${target.characterName} for ${pvpDmg}${pvpCrit ? ' CRIT' : ''} [${pvpElement}] (HP: ${target.health}/${target.maxHealth})`);
 
-            io.emit('combat:damage', damagePayload);
+            broadcastToZone(pvpAtkZone, 'combat:damage', damagePayload);
 
             // Fire-element auto-attack breaks Frozen status on PvP target
             if (pvpElement === 'fire' && target.activeBuffs) {
                 const hadFrozen = target.activeBuffs.some(b => b.name === 'frozen');
                 if (hadFrozen) {
                     target.activeBuffs = target.activeBuffs.filter(b => b.name !== 'frozen');
-                    io.emit('skill:buff_removed', { targetId: atkState.targetCharId, isEnemy: false, buffName: 'frozen', reason: 'fire_damage' });
+                    broadcastToZone(pvpAtkZone, 'skill:buff_removed', { targetId: atkState.targetCharId, isEnemy: false, buffName: 'frozen', reason: 'fire_damage' });
                     logger.info(`[COMBAT] Fire auto-attack removed Frozen from ${target.characterName}`);
                 }
             }
@@ -5838,11 +6528,11 @@ setInterval(async () => {
                     targetMaxHealth: target.maxHealth,
                     timestamp: now
                 };
-                io.emit('combat:death', deathPayload);
+                broadcastToZone(pvpAtkZone, 'combat:death', deathPayload);
                 logger.info(`[BROADCAST] combat:death: ${JSON.stringify(deathPayload)}`);
-                
+
                 // Kill message in chat
-                io.emit('chat:receive', {
+                broadcastToZone(pvpAtkZone, 'chat:receive', {
                     type: 'chat:receive',
                     channel: 'COMBAT',
                     senderId: 0,
@@ -5850,7 +6540,7 @@ setInterval(async () => {
                     message: `${attacker.characterName} has slain ${target.characterName}!`,
                     timestamp: now
                 });
-                
+
                 // Save target health to DB
                 await savePlayerHealthToDB(atkState.targetCharId, 0, target.mana);
             }
@@ -6013,8 +6703,9 @@ setInterval(() => {
         if (expired.length > 0) {
             for (const buff of expired) {
                 logger.info(`[BUFF] Enemy ${enemy.name}: ${buff.name} expired`);
-                // Broadcast buff removal to all clients
-                io.emit('skill:buff_removed', {
+                // Broadcast buff removal to zone clients
+                const buffExpireZone = enemy.zone || 'prontera_south';
+                broadcastToZone(buffExpireZone, 'skill:buff_removed', {
                     targetId: eid, isEnemy: true, buffName: buff.name, skillId: buff.skillId, reason: 'expired'
                 });
             }
@@ -6031,7 +6722,8 @@ setInterval(() => {
                         stoneBuff.lastDrainTime = now;
                         const drain = Math.max(1, Math.floor(enemy.maxHealth * 0.01));
                         enemy.health = Math.max(1, enemy.health - drain);
-                        io.emit('enemy:health_update', { enemyId: eid, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: enemy.inCombatWith.size > 0 });
+                        const stoneDrainZone = enemy.zone || 'prontera_south';
+                        broadcastToZone(stoneDrainZone, 'enemy:health_update', { enemyId: eid, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: enemy.inCombatWith.size > 0 });
                         logger.info(`[BUFF] Stone Curse drained ${drain} HP from enemy ${enemy.name} (HP: ${enemy.health}/${enemy.maxHealth})`);
                     }
                 }
@@ -6091,16 +6783,17 @@ setInterval(async () => {
 
                 logger.info(`[SKILL-COMBAT] Fire Wall hit ${enemy.name} for ${finalDmg} fire [${effect.hitsRemaining} hits left]`);
 
+                const fwTickZone = enemy.zone || 'prontera_south';
                 // Fire damage breaks Frozen
                 if (enemy.activeBuffs) {
                     const hadFrozen = enemy.activeBuffs.some(b => b.name === 'frozen');
                     if (hadFrozen) {
                         enemy.activeBuffs = enemy.activeBuffs.filter(b => b.name !== 'frozen');
-                        io.emit('skill:buff_removed', { targetId: eid, isEnemy: true, buffName: 'frozen', reason: 'fire_damage' });
+                        broadcastToZone(fwTickZone, 'skill:buff_removed', { targetId: eid, isEnemy: true, buffName: 'frozen', reason: 'fire_damage' });
                     }
                 }
 
-                io.emit('combat:damage', {
+                broadcastToZone(fwTickZone, 'combat:damage', {
                     attackerId: effect.casterId, attackerName: caster.characterName,
                     targetId: eid, targetName: enemy.name, isEnemy: true,
                     damage: finalDmg, isCritical: false, isMiss: false,
@@ -6109,14 +6802,14 @@ setInterval(async () => {
                     targetHealth: enemy.health, targetMaxHealth: enemy.maxHealth,
                     timestamp: now
                 });
-                io.emit('enemy:health_update', { enemyId: eid, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: enemy.inCombatWith.size > 0 });
+                broadcastToZone(fwTickZone, 'enemy:health_update', { enemyId: eid, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: enemy.inCombatWith.size > 0 });
 
                 // Knockback: push enemy away from fire wall center
                 if (dist > 0) {
                     const knockDist = 100; // 100 UE units knockback
                     enemy.x += (dx / dist) * knockDist;
                     enemy.y += (dy / dist) * knockDist;
-                    io.emit('enemy:move', { enemyId: eid, x: enemy.x, y: enemy.y, z: enemy.z, isMoving: false, knockback: true });
+                    broadcastToZone(fwTickZone, 'enemy:move', { enemyId: eid, x: enemy.x, y: enemy.y, z: enemy.z, isMoving: false, knockback: true });
                 }
 
                 // Enemy death from Fire Wall
@@ -6164,16 +6857,17 @@ setInterval(async () => {
                     interruptCast(charId, 'damage');
                 }
 
+                const fwPvpTickZone = player.zone || 'prontera_south';
                 // Fire damage breaks Frozen
                 if (player.activeBuffs) {
                     const hadFrozen = player.activeBuffs.some(b => b.name === 'frozen');
                     if (hadFrozen) {
                         player.activeBuffs = player.activeBuffs.filter(b => b.name !== 'frozen');
-                        io.emit('skill:buff_removed', { targetId: charId, isEnemy: false, buffName: 'frozen', reason: 'fire_damage' });
+                        broadcastToZone(fwPvpTickZone, 'skill:buff_removed', { targetId: charId, isEnemy: false, buffName: 'frozen', reason: 'fire_damage' });
                     }
                 }
 
-                io.emit('combat:damage', {
+                broadcastToZone(fwPvpTickZone, 'combat:damage', {
                     attackerId: effect.casterId, attackerName: caster.characterName,
                     targetId: charId, targetName: player.characterName, isEnemy: false,
                     damage: finalDmg, isCritical: false, isMiss: false,
@@ -6203,8 +6897,10 @@ setInterval(async () => {
     for (const id of effectsToRemove) {
         const effect = activeGroundEffects.get(id);
         if (effect) {
+            const effectCaster = connectedPlayers.get(effect.casterId);
+            const effectZone = (effectCaster && effectCaster.zone) || 'prontera_south';
             removeGroundEffect(id);
-            io.emit('skill:ground_effect_removed', { effectId: id, type: effect.type, reason: effect.hitsRemaining <= 0 ? 'hits_exhausted' : 'expired' });
+            broadcastToZone(effectZone, 'skill:ground_effect_removed', { effectId: id, type: effect.type, reason: effect.hitsRemaining <= 0 ? 'hits_exhausted' : 'expired' });
         }
     }
 }, 500);
@@ -6292,6 +6988,7 @@ function triggerAssist(attackedEnemy, attackerCharId) {
     for (const [, other] of enemies.entries()) {
         if (other === attackedEnemy) continue;
         if (other.isDead || other.aiState !== AI_STATE.IDLE) continue;
+        if (other.zone !== attackedEnemy.zone) continue;  // Same zone only
         if (other.templateId !== attackedEnemy.templateId) continue;  // Same type only
         if (!other.modeFlags.assist) continue;
         if (!other.modeFlags.canAttack || !other.modeFlags.canMove) continue;
@@ -6345,6 +7042,8 @@ function findAggroTarget(enemy) {
 
     for (const [charId, player] of connectedPlayers.entries()) {
         if (player.isDead) continue;
+        // Only aggro players in the same zone
+        if (player.zone !== enemy.zone) continue;
 
         // Use last known position from player object (updated on player:position events)
         const px = player.lastX;
@@ -6424,7 +7123,8 @@ function enemyMoveToward(enemy, targetX, targetY, now, speed) {
     // Broadcast position at limited rate
     if (now - (enemy.lastMoveBroadcast || 0) >= ENEMY_AI.MOVE_BROADCAST_MS) {
         enemy.lastMoveBroadcast = now;
-        io.emit('enemy:move', {
+        const moveZone = enemy.zone || 'prontera_south';
+        broadcastToZone(moveZone, 'enemy:move', {
             enemyId: enemy.enemyId,
             x: enemy.x, y: enemy.y, z: enemy.z,
             targetX, targetY,
@@ -6435,7 +7135,8 @@ function enemyMoveToward(enemy, targetX, targetY, now, speed) {
 
 // Broadcast enemy stopped moving
 function enemyStopMoving(enemy) {
-    io.emit('enemy:move', {
+    const stopZone = enemy.zone || 'prontera_south';
+    broadcastToZone(stopZone, 'enemy:move', {
         enemyId: enemy.enemyId,
         x: enemy.x, y: enemy.y, z: enemy.z,
         isMoving: false
@@ -6490,9 +7191,12 @@ function getPlayerPosSync(charId) {
 // ============================================================
 setInterval(async () => {
     const now = Date.now();
+    const activeZones = getActiveZones();
 
     for (const [enemyId, enemy] of enemies.entries()) {
         if (enemy.isDead || enemy.aiState === AI_STATE.DEAD) continue;
+        // Skip AI processing for enemies in zones with no players
+        if (!activeZones.has(enemy.zone)) continue;
 
         // Hit stun: if recently damaged, skip movement/attack (but allow state checks)
         const inHitStun = (now - (enemy.lastDamageTime || 0)) < (enemy.damageMotion || 300);
@@ -6729,10 +7433,11 @@ setInterval(async () => {
             }
 
             // Broadcast damage
-            io.emit('combat:damage', damagePayload);
+            const enemyAtkZone = enemy.zone || 'prontera_south';
+            broadcastToZone(enemyAtkZone, 'combat:damage', damagePayload);
 
             // Broadcast enemy attack visual (for client-side attack animation)
-            io.emit('enemy:attack', {
+            broadcastToZone(enemyAtkZone, 'enemy:attack', {
                 enemyId: enemy.enemyId,
                 targetId: enemy.targetPlayerId,
                 attackMotion: enemy.attackMotion,
@@ -6740,7 +7445,7 @@ setInterval(async () => {
 
             // Broadcast target health update
             const targetSocket = io.sockets.sockets.get(atkTarget.socketId);
-            io.emit('combat:health_update', {
+            broadcastToZone(enemyAtkZone, 'combat:health_update', {
                 characterId: enemy.targetPlayerId,
                 health: atkTarget.health,
                 maxHealth: atkTarget.maxHealth,
@@ -6756,7 +7461,7 @@ setInterval(async () => {
                 autoAttackState.delete(enemy.targetPlayerId);
 
                 // Emit death event
-                io.emit('combat:death', {
+                broadcastToZone(enemyAtkZone, 'combat:death', {
                     killedId: enemy.targetPlayerId,
                     killedName: atkTarget.characterName,
                     killerId: enemy.enemyId,
@@ -7097,7 +7802,7 @@ app.get('/api/characters', authenticateToken, async (req, res) => {
                     hair_style, hair_color, gender,
                     delete_date, created_at, last_played
              FROM characters
-             WHERE user_id = $1 AND delete_date IS NULL
+             WHERE user_id = $1 AND delete_date IS NULL AND deleted = FALSE
              ORDER BY character_id ASC
              LIMIT 9`,
             [req.user.user_id]
@@ -7131,7 +7836,7 @@ app.post('/api/characters', authenticateToken, async (req, res) => {
 
         // Check character limit (9 per account)
         const countResult = await pool.query(
-            'SELECT COUNT(*) FROM characters WHERE user_id = $1 AND delete_date IS NULL',
+            'SELECT COUNT(*) FROM characters WHERE user_id = $1 AND delete_date IS NULL AND deleted = FALSE',
             [req.user.user_id]
         );
         if (parseInt(countResult.rows[0].count) >= 9) {
@@ -7240,9 +7945,9 @@ app.delete('/api/characters/:id', authenticateToken, async (req, res) => {
             return res.status(401).json({ error: 'Incorrect password' });
         }
 
-        // Verify character belongs to user
+        // Verify character belongs to user and is not already deleted
         const charResult = await pool.query(
-            'SELECT character_id, name FROM characters WHERE character_id = $1 AND user_id = $2',
+            'SELECT character_id, name FROM characters WHERE character_id = $1 AND user_id = $2 AND deleted = FALSE',
             [characterId, req.user.user_id]
         );
         if (charResult.rows.length === 0) {
@@ -7256,10 +7961,8 @@ app.delete('/api/characters/:id', authenticateToken, async (req, res) => {
 
         const charName = charResult.rows[0].name;
 
-        // Delete character and all related data
-        await pool.query('DELETE FROM character_hotbar WHERE character_id = $1', [characterId]);
-        await pool.query('DELETE FROM character_inventory WHERE character_id = $1', [characterId]);
-        await pool.query('DELETE FROM characters WHERE character_id = $1', [characterId]);
+        // Soft delete — mark as deleted instead of removing
+        await pool.query('UPDATE characters SET deleted = TRUE WHERE character_id = $1', [characterId]);
 
         logger.info(`Character deleted: ${charName} (ID: ${characterId}) by user ${req.user.user_id}`);
 
@@ -7695,6 +8398,27 @@ server.listen(PORT, async () => {
     logger.warn(`[DB] equipped_position column issue: ${err.message}`);
   }
 
+  // Add zone tracking + save point columns if missing (for multi-zone/warp system)
+  try {
+    await pool.query(`
+      ALTER TABLE characters
+      ADD COLUMN IF NOT EXISTS zone_name VARCHAR(50) DEFAULT 'prontera_south'
+    `);
+    await pool.query(`
+      ALTER TABLE characters
+      ADD COLUMN IF NOT EXISTS save_map VARCHAR(50) DEFAULT 'prontera',
+      ADD COLUMN IF NOT EXISTS save_x FLOAT DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS save_y FLOAT DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS save_z FLOAT DEFAULT 580
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_characters_zone ON characters(zone_name)
+    `);
+    logger.info('[DB] Zone system columns verified on characters table');
+  } catch (err) {
+    logger.warn(`[DB] Zone system column issue: ${err.message}`);
+  }
+
   // Fix existing items with slot_index = -1 (assign unique sequential indexes per character)
   try {
     const charsWithBadSlots = await pool.query(
@@ -7721,20 +8445,27 @@ server.listen(PORT, async () => {
   // Load item definitions into memory cache
   await loadItemDefinitions();
   
-  // Spawn initial enemies
-  logger.info(`[ENEMY] Spawning ${ENEMY_SPAWNS.length} enemies...`);
-  for (const spawnConfig of ENEMY_SPAWNS) {
-    spawnEnemy(spawnConfig);
-  }
-  logger.info(`[ENEMY] ${enemies.size} enemies spawned. IDs: ${Array.from(enemies.keys()).join(', ')}`);
+  // Zone-based lazy enemy spawning: enemies spawn when first player enters a zone
+  // No enemies spawned at startup — they spawn on demand in player:join handler
+  const totalSpawns = Object.values(ZONE_REGISTRY).reduce((sum, z) => sum + z.enemySpawns.length, 0);
+  logger.info(`[ZONE] ${Object.keys(ZONE_REGISTRY).length} zones registered, ${totalSpawns} total enemy spawn points (lazy spawn on player enter)`);
 });
 
-// Periodic health/mana + EXP save to DB (every 60 seconds)
+// Periodic health/mana + EXP + zone save to DB (every 60 seconds)
 setInterval(async () => {
   for (const [charId, player] of connectedPlayers.entries()) {
     if (!player.isDead) {
       await savePlayerHealthToDB(charId, player.health, player.mana);
       await saveExpDataToDB(charId, player);
+      // Save zone + position
+      try {
+        await pool.query(
+          'UPDATE characters SET zone_name = $1, x = $2, y = $3, z = $4 WHERE character_id = $5',
+          [player.zone || 'prontera_south', player.lastX || 0, player.lastY || 0, player.lastZ || 300, charId]
+        );
+      } catch (err) {
+        logger.warn(`[DB] Failed to save zone for char ${charId}: ${err.message}`);
+      }
     }
   }
 }, 60000);

@@ -120,7 +120,10 @@ void UCombatStatsSubsystem::TryWrapSocketEvents()
 		World->GetTimerManager().ClearTimer(BindCheckTimer);
 	}
 
-	UE_LOG(LogCombatStats, Log, TEXT("CombatStatsSubsystem — player:stats wrapped. LocalCharId=%d"), LocalCharacterId);
+	// Request current stats so the widget is populated immediately
+	SIOComp->EmitNative(TEXT("player:request_stats"), nullptr);
+
+	UE_LOG(LogCombatStats, Log, TEXT("CombatStatsSubsystem — player:stats wrapped. LocalCharId=%d. Requested initial stats."), LocalCharacterId);
 }
 
 // ============================================================

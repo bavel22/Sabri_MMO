@@ -35,7 +35,7 @@
 
 ### Authentication & Characters
 - JWT-based login/register via REST API
-- Character CRUD (create, list, select, delete with password confirmation)
+- Character CRUD (create, list, select, soft-delete with password confirmation)
 - Server list endpoint (`GET /api/servers`) with population tracking
 - Character customization: hair style (1-19), hair color (0-8), gender
 - 9 character slots per account, globally unique names (case-insensitive)
@@ -173,6 +173,7 @@ C:/Sabri_MMO/
 │   ├── migrations/                # Database migrations
 │   │   ├── add_ro_drop_items.sql   # 126 RO drop items migration
 │   │   ├── add_character_customization.sql  # hair_style, hair_color, gender, delete_date
+│   │   ├── add_soft_delete.sql        # Soft-delete flag (deleted BOOLEAN) for characters
 │   │   ├── add_equipped_position.sql  # Dual-accessory support
 │   │   └── add_hotbar_multirow.sql    # 4-row hotbar storage
 │   ├── create_test_users.*       # Test user scripts

@@ -73,7 +73,8 @@ Single monolithic file (~2400 lines). Key sections:
 
 ### Database (PostgreSQL)
 4 core tables: `users`, `characters`, `items` (static definitions), `character_inventory` (per-character).
-Character columns include: hair_style, hair_color, gender, delete_date, plus stats added dynamically by the server.
+Character columns include: hair_style, hair_color, gender, delete_date, deleted (soft-delete flag), plus stats added dynamically by the server.
+Characters are never hard-deleted — `DELETE /api/characters/:id` sets `deleted = TRUE`. All queries filter with `AND deleted = FALSE`.
 
 ---
 
@@ -132,5 +133,6 @@ Invoke with `/skill-name`. Located at `C:/Users/pladr/.claude/skills/`.
 | `/sabrimmo-ui` | Project-specific UI guidance |
 | `/sabrimmo-target-skill` | Set up RO-style click-to-cast targeting for a skill |
 | `/sabrimmo-click-interact` | Add new left-click interactable actors to the world (NPCs, chests, etc.) |
+| `/sabrimmo-zone` | Add new zones/levels/maps, warp portals, Kafra NPCs, zone configuration |
 | `/project-docs` | Load full project documentation context |
 | `/opus-45-thinking` | Complex multi-system architecture decisions |

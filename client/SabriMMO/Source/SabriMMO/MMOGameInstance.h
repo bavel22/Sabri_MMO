@@ -132,6 +132,22 @@ public:
 
     virtual void Init() override;
 
+    // ---- Zone System (survives level transitions) ----
+    UPROPERTY(BlueprintReadWrite, Category = "MMO Zone")
+    FString CurrentZoneName = TEXT("prontera_south");
+
+    UPROPERTY(BlueprintReadWrite, Category = "MMO Zone")
+    FString PendingZoneName;
+
+    UPROPERTY(BlueprintReadWrite, Category = "MMO Zone")
+    FString PendingLevelName;
+
+    UPROPERTY(BlueprintReadWrite, Category = "MMO Zone")
+    FVector PendingSpawnLocation = FVector::ZeroVector;
+
+    UPROPERTY(BlueprintReadWrite, Category = "MMO Zone")
+    bool bIsZoneTransitioning = false;
+
 private:
     UPROPERTY()
     int32 SelectedCharacterId;
