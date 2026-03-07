@@ -5,6 +5,10 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/PlayerController.h"
 #include "UI/ZoneTransitionSubsystem.h"
+#include "NiagaraComponent.h"
+#include "NiagaraSystem.h"
+#include "NiagaraFunctionLibrary.h"
+#include "SkillVFXSubsystem.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWarpPortal, Log, All);
 
@@ -17,6 +21,11 @@ AWarpPortal::AWarpPortal()
 	TriggerComp->SetCollisionProfileName(TEXT("OverlapAll"));
 	TriggerComp->SetGenerateOverlapEvents(true);
 	RootComponent = TriggerComp;
+
+	// Niagara VFX component — visible portal effect (golden ring + spiraling particles)
+	PortalEffect = CreateDefaultSubobject<UNiagaraComponent>(TEXT("PortalEffect"));
+	PortalEffect->SetupAttachment(RootComponent);
+	PortalEffect->SetAutoActivate(false); // Activated in BeginPlay after system is assigned
 }
 
 void AWarpPortal::BeginPlay()
@@ -27,6 +36,67 @@ void AWarpPortal::BeginPlay()
 	TriggerComp->SetSphereRadius(TriggerRadius);
 
 	TriggerComp->OnComponentBeginOverlap.AddDynamic(this, &AWarpPortal::OnOverlapBegin);
+
+	// Activate portal VFX if a system is explicitly assigned in the Blueprint
+	if (PortalVFXSystem && PortalEffect)
+	{
+		PortalEffect->SetAsset(PortalVFXSystem);
+		PortalEffect->Activate(true);
+	}
+	else
+	{
+		// Deferred: wait for SkillVFXSubsystem to load Niagara assets, then spawn portal VFX
+		VFXRetryCount = 0;
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().SetTimer(VFXRetryTimer,
+				FTimerDelegate::CreateUObject(this, &AWarpPortal::TryActivatePortalVFX),
+				1.0f, true); // Retry every 1s
+		}
+	}
+}
+
+void AWarpPortal::TryActivatePortalVFX()
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	// Give up after 10 retries (10 seconds)
+	if (++VFXRetryCount > 10)
+	{
+		World->GetTimerManager().ClearTimer(VFXRetryTimer);
+		UE_LOG(LogWarpPortal, Warning, TEXT("Warp portal %s: gave up waiting for VFX subsystem"), *WarpId);
+		return;
+	}
+
+	USkillVFXSubsystem* VFXSub = World->GetSubsystem<USkillVFXSubsystem>();
+	if (!VFXSub) return;
+
+	UNiagaraComponent* Comp = VFXSub->SpawnLoopingPortalEffect(GetActorLocation());
+	if (Comp)
+	{
+		SpawnedPortalVFX = Comp;
+		World->GetTimerManager().ClearTimer(VFXRetryTimer);
+		UE_LOG(LogWarpPortal, Log, TEXT("Warp portal %s: VFX activated"), *WarpId);
+	}
+}
+
+void AWarpPortal::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	// Clean up the Niagara portal VFX to prevent orphaned components
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(VFXRetryTimer);
+	}
+
+	if (SpawnedPortalVFX.IsValid())
+	{
+		SpawnedPortalVFX->DeactivateImmediate();
+		SpawnedPortalVFX->DestroyComponent();
+		SpawnedPortalVFX = nullptr;
+	}
+
+	Super::EndPlay(EndPlayReason);
 }
 
 void AWarpPortal::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,

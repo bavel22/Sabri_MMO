@@ -123,6 +123,48 @@ Widget prefix: `WBP_`. Blueprint prefix: `BP_`. Interface prefix: `BPI_`.
 
 ---
 
+## Mandatory Context Loading
+
+**BEFORE starting any task, ALWAYS load the relevant skills and documentation for that task.** This project is large and growing — context from skills and docs prevents regressions, missed patterns, and architectural drift.
+
+### How to Load Context
+
+1. **Identify which systems the task touches** (UI? Server? VFX? Zones? Combat? etc.)
+2. **Load the matching skill(s)** using the Skill tool — skills contain architectural rules, file locations, naming conventions, and common patterns that MUST be followed
+3. **Read relevant source files** before modifying them — never assume code structure
+4. **Check `docsNew/`** for system-specific documentation when the skill references it
+
+### Skill Selection Guide
+
+| If the task involves... | Load these skills | Also read these docs |
+|------------------------|-------------------|---------------------|
+| Crashes, errors, bugs | `/debugger` | — |
+| Server code, DB, REST API | `/full-stack` | `docsNew/00_Project_Overview.md` |
+| Socket.io events, multiplayer sync | `/realtime` | — |
+| Blueprint / Widget work | `/ui-architect` | unrealMCP first |
+| Enemy AI, monster behavior | `/enemy-ai` | `server/src/ro_monster_ai_codes.js` |
+| Slate UI panels | `/sabrimmo-ui` | — |
+| Skill targeting (click-to-cast) | `/sabrimmo-target-skill` | — |
+| Clickable NPCs, interactables | `/sabrimmo-click-interact` | — |
+| Zones, maps, warp portals | `/sabrimmo-zone` | `docsNew/05_Development/Zone_System_UE5_Setup_Guide.md` |
+| VFX, particles, Niagara | `/sabrimmo-vfx` | `docsNew/05_Development/VFX_Asset_Reference.md` |
+| New feature planning | `/planner` | `docsNew/00_Project_Overview.md` |
+| Complex architecture decisions | `/opus-45-thinking` | `/project-docs` |
+| Full project context dump | `/project-docs` | All of `docsNew/` |
+
+### Multi-System Tasks
+
+Many tasks touch multiple systems. **Load ALL relevant skills.** Examples:
+- "Add a new skill with VFX" → `/sabrimmo-target-skill` + `/sabrimmo-vfx` + `/full-stack`
+- "Add a new zone with NPCs and warps" → `/sabrimmo-zone` + `/sabrimmo-click-interact` + `/sabrimmo-vfx`
+- "Fix a crash when casting spells" → `/debugger` + `/sabrimmo-vfx` + `/realtime`
+- "Build a new HUD panel showing buffs" → `/sabrimmo-ui` + `/realtime`
+- "Add a new monster with special attacks" → `/enemy-ai` + `/agent-architect` + `/full-stack`
+
+**Do NOT skip loading skills to save time.** The cost of reloading context is far less than the cost of implementing something wrong and having to redo it.
+
+---
+
 ## Personal Skills Available
 
 Invoke with `/skill-name`. Located at `C:/Users/pladr/.claude/skills/`.
@@ -140,5 +182,18 @@ Invoke with `/skill-name`. Located at `C:/Users/pladr/.claude/skills/`.
 | `/sabrimmo-target-skill` | Set up RO-style click-to-cast targeting for a skill |
 | `/sabrimmo-click-interact` | Add new left-click interactable actors to the world (NPCs, chests, etc.) |
 | `/sabrimmo-zone` | Add new zones/levels/maps, warp portals, Kafra NPCs, zone configuration |
+| `/sabrimmo-vfx` | Skill VFX system — Niagara effects, casting circles, warp portal VFX, adding VFX to new skills |
 | `/project-docs` | Load full project documentation context |
 | `/opus-45-thinking` | Complex multi-system architecture decisions |
+
+### Key Documentation Files
+
+| Document | Path | Contains |
+|----------|------|----------|
+| Project Overview | `docsNew/00_Project_Overview.md` | Full system inventory, tech stack, all implemented features |
+| Global Rules | `docsNew/00_Global_Rules/Global_Rules.md` | Design standards, coding rules |
+| Zone Setup Guide | `docsNew/05_Development/Zone_System_UE5_Setup_Guide.md` | Level Blueprint, zone registry, warp portal placement |
+| VFX Asset Reference | `docsNew/05_Development/VFX_Asset_Reference.md` | 1,574 VFX assets cataloged, mapped to RO skills |
+| VFX Implementation Plan | `docsNew/05_Development/Skill_VFX_Implementation_Plan.md` | Niagara architecture, per-skill specs, RO visual reference |
+| VFX Execution Plan | `docsNew/05_Development/Skill_VFX_Execution_Plan.md` | Step-by-step build status, completion checklist |
+| VFX Research Findings | `docsNew/05_Development/Skill_VFX_Research_Findings.md` | 138-source research on RO effects, UE5 Niagara, AI tools |

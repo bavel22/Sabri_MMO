@@ -24,7 +24,9 @@ public class SabriMMO : ModuleRules
 			"SIOJson",
 			"HTTP",
 			"Json",
-			"JsonUtilities"
+			"JsonUtilities",
+			"Niagara",
+			"NiagaraCore"
 		});
 
 		// Exclude NetworkPrediction module due to UE 5.7 compiler bug
@@ -45,7 +47,8 @@ public class SabriMMO : ModuleRules
 			"SabriMMO/Variant_SideScrolling/Gameplay",
 			"SabriMMO/Variant_SideScrolling/Interfaces",
 			"SabriMMO/Variant_SideScrolling/UI",
-			"SabriMMO/UI"
+			"SabriMMO/UI",
+			"SabriMMO/VFX"
 		});
 
 		// Uncomment if you are using online features

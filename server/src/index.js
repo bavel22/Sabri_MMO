@@ -3430,7 +3430,7 @@ io.on('connection', (socket) => {
             logger.info(`[SKILLS] ${player.characterName} healed ${healed} HP (${player.health}/${player.maxHealth})`);
 
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
-            socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
+            socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana, healAmount: healed });
             return;
         }
 
@@ -3618,12 +3618,14 @@ io.on('connection', (socket) => {
 
             // Broadcast buff applied
             const provokeZone = player.zone || 'prontera_south';
-            broadcastToZone(provokeZone, 'skill:buff_applied', {
+            const buffPayload = {
                 targetId, targetName, isEnemy,
                 casterId: characterId, casterName: player.characterName,
                 skillId, buffName: 'Provoke', duration: duration || 30000,
                 effects: { defReduction: effectVal, atkIncrease: effectVal }
-            });
+            };
+            logger.info(`[SEND] skill:buff_applied to zone:${provokeZone}: ${JSON.stringify(buffPayload)}`);
+            broadcastToZone(provokeZone, 'skill:buff_applied', buffPayload);
 
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
             // cooldown_started emitted by applySkillDelays
