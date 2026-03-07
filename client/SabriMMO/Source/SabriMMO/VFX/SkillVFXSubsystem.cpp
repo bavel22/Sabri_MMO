@@ -133,6 +133,17 @@ void USkillVFXSubsystem::Deinitialize()
 	}
 	ActiveBuffAuras.Empty();
 
+	// Deactivate Cascade buff auras
+	for (auto& Pair : ActiveCascadeBuffs)
+	{
+		if (Pair.Value.IsValid())
+		{
+			Pair.Value->DeactivateImmediate();
+			Pair.Value->DestroyComponent();
+		}
+	}
+	ActiveCascadeBuffs.Empty();
+
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(BindCheckTimer);
@@ -433,10 +444,23 @@ void USkillVFXSubsystem::HandleSkillEffectDamage(const TSharedPtr<FJsonValue>& D
 
 	case ESkillVFXTemplate::TargetDebuff:
 	{
-		// Spawn at target location (actor tags aren't reliably set on enemies)
-		// This works for all debuffs: Provoke, Stone Curse, Frost Diver
-		if (!TargetLoc.IsNearlyZero())
+		// Try to attach to the target actor so the VFX follows them
+		AActor* TargetActor = bIsEnemy
+			? FindEnemyActorById(static_cast<int32>(TargetIdD))
+			: FindPlayerActorById(static_cast<int32>(TargetIdD));
+
+		UE_LOG(LogSkillVFX, Warning, TEXT("TargetDebuff path: SkillId=%d TargetId=%d IsEnemy=%d Actor=%s Scale=%.3f Override=%s"),
+			SkillId, static_cast<int32>(TargetIdD), bIsEnemy,
+			TargetActor ? *TargetActor->GetName() : TEXT("NULL"),
+			Config.Scale, *Config.VFXOverridePath);
+
+		if (TargetActor && TargetActor->GetRootComponent())
 		{
+			SpawnVFXAttached(Config, TargetActor->GetRootComponent());
+		}
+		else if (!TargetLoc.IsNearlyZero())
+		{
+			UE_LOG(LogSkillVFX, Warning, TEXT("TargetDebuff FALLBACK to SpawnVFXAtLocation (no actor found)"));
 			SpawnVFXAtLocation(Config, TargetLoc + FVector(0, 0, 50.f));
 		}
 		break;
@@ -489,16 +513,77 @@ void USkillVFXSubsystem::HandleBuffApplied(const TSharedPtr<FJsonValue>& Data)
 			}
 		}
 	}
-	// Handle TargetDebuff template (Provoke, etc.) — spawn above target's head
+	// Handle TargetDebuff template (Provoke, Frost Diver, etc.) — attach to target actor and track for removal
 	else if (Config.Template == ESkillVFXTemplate::TargetDebuff)
 	{
-		FVector TargetLoc = GetActorLocationById(TargetId, bIsEnemy);
-		UE_LOG(LogSkillVFX, Log, TEXT("HandleBuffApplied TargetDebuff — SkillId=%d TargetId=%d IsEnemy=%d Loc=(%.0f,%.0f,%.0f) Override=%s bCascade=%d Scale=%.1f"),
-			SkillId, TargetId, bIsEnemy, TargetLoc.X, TargetLoc.Y, TargetLoc.Z, *Config.VFXOverridePath, Config.bIsCascade, Config.Scale);
-		if (!TargetLoc.IsNearlyZero())
+		AActor* TargetActor = bIsEnemy
+			? FindEnemyActorById(TargetId)
+			: FindPlayerActorById(TargetId);
+
+		UE_LOG(LogSkillVFX, Log, TEXT("HandleBuffApplied TargetDebuff — SkillId=%d TargetId=%d IsEnemy=%d Actor=%s Override=%s bCascade=%d Scale=%.1f"),
+			SkillId, TargetId, bIsEnemy, TargetActor ? *TargetActor->GetName() : TEXT("NULL"), *Config.VFXOverridePath, Config.bIsCascade, Config.Scale);
+
+		const int64 Key = static_cast<int64>(TargetId) * 10000 + SkillId;
+
+		// Remove any existing effect for this target+skill combo first
+		if (TWeakObjectPtr<UParticleSystemComponent>* OldCascade = ActiveCascadeBuffs.Find(Key))
 		{
-			// Spawn above target head (150 UE units up)
-			SpawnVFXAtLocation(Config, TargetLoc + FVector(0, 0, 150.f));
+			if (OldCascade->IsValid()) { OldCascade->Get()->DeactivateImmediate(); OldCascade->Get()->DestroyComponent(); }
+			ActiveCascadeBuffs.Remove(Key);
+		}
+		if (TWeakObjectPtr<UNiagaraComponent>* OldNiagara = ActiveBuffAuras.Find(Key))
+		{
+			if (OldNiagara->IsValid()) { OldNiagara->Get()->DeactivateImmediate(); OldNiagara->Get()->DestroyComponent(); }
+			ActiveBuffAuras.Remove(Key);
+		}
+
+		if (TargetActor && TargetActor->GetRootComponent())
+		{
+			USceneComponent* Root = TargetActor->GetRootComponent();
+			FVector FinalScale = FVector(Config.Scale);
+
+			if (Config.bIsCascade && !Config.VFXOverridePath.IsEmpty())
+			{
+				UParticleSystem* CascadeSystem = GetOrLoadCascadeOverride(Config.VFXOverridePath);
+				if (CascadeSystem)
+				{
+					UParticleSystemComponent* PSC = UGameplayStatics::SpawnEmitterAttached(
+						CascadeSystem, Root, NAME_None,
+						FVector::ZeroVector, FRotator::ZeroRotator, FinalScale,
+						EAttachLocation::KeepRelativeOffset, false); // bAutoDestroy=false
+					if (PSC)
+					{
+						ActiveCascadeBuffs.Add(Key, PSC);
+					}
+				}
+			}
+			else if (!Config.VFXOverridePath.IsEmpty())
+			{
+				UNiagaraSystem* NiagaraSystem = GetOrLoadNiagaraOverride(Config.VFXOverridePath);
+				if (NiagaraSystem)
+				{
+					UNiagaraComponent* Comp = UNiagaraFunctionLibrary::SpawnSystemAttached(
+						NiagaraSystem, Root, NAME_None,
+						FVector::ZeroVector, FRotator::ZeroRotator, FinalScale,
+						EAttachLocation::KeepRelativeOffset, false, // bAutoDestroy=false so it persists
+						ENCPoolMethod::None);
+					if (Comp)
+					{
+						SetNiagaraColor(Comp, Config.PrimaryColor);
+						SetNiagaraScale(Comp, Config.Scale);
+						ActiveBuffAuras.Add(Key, Comp);
+					}
+				}
+			}
+		}
+		else
+		{
+			// Fallback to location-based spawn (no tracking — fire-and-forget)
+			FVector TargetLoc = GetActorLocationById(TargetId, bIsEnemy);
+			if (!TargetLoc.IsNearlyZero())
+			{
+				SpawnVFXAtLocation(Config, TargetLoc + FVector(0, 0, 150.f));
+			}
 		}
 	}
 	// Handle HealFlash or any other template triggered by buff events
@@ -526,6 +611,7 @@ void USkillVFXSubsystem::HandleBuffRemoved(const TSharedPtr<FJsonValue>& Data)
 
 	const int64 Key = static_cast<int64>(TargetIdD) * 10000 + static_cast<int64>(SkillIdD);
 
+	// Clean up Niagara buff
 	if (TWeakObjectPtr<UNiagaraComponent>* Found = ActiveBuffAuras.Find(Key))
 	{
 		if (Found->IsValid())
@@ -534,6 +620,17 @@ void USkillVFXSubsystem::HandleBuffRemoved(const TSharedPtr<FJsonValue>& Data)
 			Found->Get()->DestroyComponent();
 		}
 		ActiveBuffAuras.Remove(Key);
+	}
+
+	// Clean up Cascade buff (Frost Diver, etc.)
+	if (TWeakObjectPtr<UParticleSystemComponent>* CascadeFound = ActiveCascadeBuffs.Find(Key))
+	{
+		if (CascadeFound->IsValid())
+		{
+			CascadeFound->Get()->DeactivateImmediate();
+			CascadeFound->Get()->DestroyComponent();
+		}
+		ActiveCascadeBuffs.Remove(Key);
 	}
 }
 
@@ -1171,6 +1268,24 @@ void USkillVFXSubsystem::SetNiagaraColor(UNiagaraComponent* Comp, FLinearColor C
 	Comp->SetColorParameter(FName("Color"), Color);
 }
 
+void USkillVFXSubsystem::SetNiagaraScale(UNiagaraComponent* Comp, float Scale)
+{
+	if (!Comp) return;
+	// Set common size/radius/scale parameters used by third-party Niagara systems
+	// This is needed because world-space Niagara systems ignore component transform scale
+	Comp->SetVariableFloat(FName("Scale"), Scale);
+	Comp->SetVariableFloat(FName("Size"), Scale);
+	Comp->SetVariableFloat(FName("Radius"), Scale * 100.f);  // Some use Radius in UE units
+	Comp->SetVariableFloat(FName("SpawnRadius"), Scale * 100.f);
+	Comp->SetVariableFloat(FName("SphereRadius"), Scale * 100.f);
+	Comp->SetVariableVec3(FName("Scale"), FVector(Scale));
+	Comp->SetVariableVec3(FName("User.Scale"), FVector(Scale));
+	Comp->SetVariableFloat(FName("User.Scale"), Scale);
+	Comp->SetVariableFloat(FName("User.Size"), Scale);
+	Comp->SetVariableFloat(FName("ParticleSize"), Scale);
+	Comp->SetVariableFloat(FName("SpriteSize"), Scale * 50.f);
+}
+
 UNiagaraSystem* USkillVFXSubsystem::GetOrLoadNiagaraOverride(const FString& Path)
 {
 	if (Path.IsEmpty()) return nullptr;
@@ -1234,7 +1349,11 @@ void USkillVFXSubsystem::SpawnVFXAtLocation(const FSkillVFXConfig& Config, FVect
 		if (NiagaraSystem)
 		{
 			UNiagaraComponent* Comp = SpawnNiagaraAtLocation(NiagaraSystem, Location, Rotation, FinalScale);
-			if (Comp) SetNiagaraColor(Comp, Config.PrimaryColor);
+			if (Comp)
+			{
+				SetNiagaraColor(Comp, Config.PrimaryColor);
+				SetNiagaraScale(Comp, Config.Scale);
+			}
 		}
 	}
 }
@@ -1282,8 +1401,21 @@ void USkillVFXSubsystem::SpawnVFXAttached(const FSkillVFXConfig& Config, USceneC
 		UNiagaraSystem* NiagaraSystem = GetOrLoadNiagaraOverride(Config.VFXOverridePath);
 		if (NiagaraSystem)
 		{
-			UNiagaraComponent* Comp = SpawnNiagaraAttached(NiagaraSystem, AttachTo);
-			if (Comp) SetNiagaraColor(Comp, Config.PrimaryColor);
+			UNiagaraComponent* Comp = UNiagaraFunctionLibrary::SpawnSystemAttached(
+				NiagaraSystem, AttachTo, NAME_None,
+				FVector::ZeroVector, FRotator::ZeroRotator, FinalScale,
+				EAttachLocation::KeepRelativeOffset, true,
+				ENCPoolMethod::AutoRelease);
+			if (Comp)
+			{
+				// Apply scale via transform AND Niagara parameters (covers both local/world-space systems)
+				Comp->SetRelativeScale3D(FinalScale);
+				Comp->SetWorldScale3D(FinalScale);
+				SetNiagaraColor(Comp, Config.PrimaryColor);
+				SetNiagaraScale(Comp, Config.Scale);
+				UE_LOG(LogSkillVFX, Warning, TEXT("SpawnVFXAttached Niagara: Override=%s Scale=%.3f FinalScale=(%.3f,%.3f,%.3f)"),
+					*Config.VFXOverridePath, Config.Scale, FinalScale.X, FinalScale.Y, FinalScale.Z);
+			}
 		}
 	}
 }

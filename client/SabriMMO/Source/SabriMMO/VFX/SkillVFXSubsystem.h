@@ -85,6 +85,7 @@ private:
 		FRotator Rotation = FRotator::ZeroRotator, FVector Scale = FVector::OneVector);
 	UNiagaraComponent* SpawnNiagaraAttached(UNiagaraSystem* System, USceneComponent* AttachTo);
 	void SetNiagaraColor(UNiagaraComponent* Comp, FLinearColor Color);
+	void SetNiagaraScale(UNiagaraComponent* Comp, float Scale);
 
 	// ---- actor lookup ----
 	AActor* FindEnemyActorById(int32 EnemyId) const;
@@ -146,6 +147,9 @@ private:
 
 	// Buff auras: key = TargetId * 10000 + SkillId
 	TMap<int64, TWeakObjectPtr<UNiagaraComponent>> ActiveBuffAuras;
+
+	// Cascade buff auras (legacy particle system): same key scheme
+	TMap<int64, TWeakObjectPtr<UParticleSystemComponent>> ActiveCascadeBuffs;
 
 	// ---- state ----
 	bool bEventsWrapped = false;
