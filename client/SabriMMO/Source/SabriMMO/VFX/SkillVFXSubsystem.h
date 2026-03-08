@@ -69,6 +69,7 @@ private:
 	// ---- VFX spawning per template type ----
 	void SpawnBoltFromSky(FVector TargetLocation, const FSkillVFXConfig& Config, int32 TotalHits);
 	void SpawnProjectileEffect(FVector AttackerLocation, FVector TargetLocation, const FSkillVFXConfig& Config);
+	void SpawnMultiHitProjectile(FVector AttackerLocation, FVector TargetLocation, const FSkillVFXConfig& Config, int32 TotalHits);
 	void SpawnAoEImpact(FVector Location, const FSkillVFXConfig& Config);
 	void SpawnGroundPersistent(FVector Location, const FSkillVFXConfig& Config, int32 SkillId);
 	void SpawnGroundAoERain(FVector Location, const FSkillVFXConfig& Config, int32 HitNumber);
@@ -150,6 +151,12 @@ private:
 
 	// Cascade buff auras (legacy particle system): same key scheme
 	TMap<int64, TWeakObjectPtr<UParticleSystemComponent>> ActiveCascadeBuffs;
+
+	// Timer that re-activates non-looping Cascade buff particles so they persist until buff removal
+	FTimerHandle CascadeLoopTimer;
+
+	// Dedup for bSingleProjectile skills (Fire Ball): key = AttackerId*10000+SkillId → timestamp
+	TMap<int64, double> SingleProjectileLastSpawnTime;
 
 	// ---- state ----
 	bool bEventsWrapped = false;

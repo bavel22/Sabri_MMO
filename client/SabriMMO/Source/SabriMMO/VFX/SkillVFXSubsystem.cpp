@@ -99,6 +99,30 @@ void USkillVFXSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		0.5f,
 		true
 	);
+
+	// Re-activate non-looping Cascade buff particles every 2s so they persist until buff removal.
+	// Cascade PSCs can report IsActive()==true even after all particles have faded,
+	// so we unconditionally re-activate to ensure continuous visual emission.
+	InWorld.GetTimerManager().SetTimer(
+		CascadeLoopTimer,
+		FTimerDelegate::CreateLambda([this]()
+		{
+			for (auto It = ActiveCascadeBuffs.CreateIterator(); It; ++It)
+			{
+				if (It.Value().IsValid())
+				{
+					UParticleSystemComponent* PSC = It.Value().Get();
+					PSC->ActivateSystem(true); // reset and replay unconditionally
+				}
+				else
+				{
+					It.RemoveCurrent(); // clean up stale entries
+				}
+			}
+		}),
+		2.0f,
+		true
+	);
 }
 
 void USkillVFXSubsystem::Deinitialize()
@@ -147,6 +171,7 @@ void USkillVFXSubsystem::Deinitialize()
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(BindCheckTimer);
+		World->GetTimerManager().ClearTimer(CascadeLoopTimer);
 	}
 
 	bEventsWrapped = false;
@@ -413,9 +438,45 @@ void USkillVFXSubsystem::HandleSkillEffectDamage(const TSharedPtr<FJsonValue>& D
 		break;
 
 	case ESkillVFXTemplate::Projectile:
-		// Spawn projectile per hit (Soul Strike = 1 bubble per hit, Fire Ball = 1 on first hit)
-		SpawnProjectileEffect(AttackerLoc, TargetLoc, Config);
+	{
+		if (Config.bSingleProjectile)
+		{
+			// AoE projectile (Fire Ball): one projectile toward primary target
+			const int64 Key = static_cast<int64>(AttackerIdD) * 10000 + SkillId;
+			const double Now = FPlatformTime::Seconds();
+			bool bSpawn = true;
+			if (const double* Last = SingleProjectileLastSpawnTime.Find(Key))
+			{
+				if (Now - *Last < 1.0) bSpawn = false;
+			}
+			if (bSpawn)
+			{
+				SingleProjectileLastSpawnTime.Add(Key, Now);
+				FVector ProjectileDestination = TargetLoc;
+				double PrimaryTargetIdD = 0;
+				bool bPrimaryIsEnemy = false;
+				Obj->TryGetNumberField(TEXT("primaryTargetId"), PrimaryTargetIdD);
+				Obj->TryGetBoolField(TEXT("primaryTargetIsEnemy"), bPrimaryIsEnemy);
+				if (PrimaryTargetIdD > 0)
+				{
+					FVector PrimaryLoc = GetActorLocationById(static_cast<int32>(PrimaryTargetIdD), bPrimaryIsEnemy);
+					if (!PrimaryLoc.IsNearlyZero()) ProjectileDestination = PrimaryLoc;
+				}
+				SpawnProjectileEffect(AttackerLoc, ProjectileDestination, Config);
+			}
+		}
+		else if (TotalHits > 1)
+		{
+			// Multi-hit projectile (Soul Strike): N projectiles staggered by 200ms
+			SpawnMultiHitProjectile(AttackerLoc, TargetLoc, Config, TotalHits);
+		}
+		else
+		{
+			// Single-target single-hit projectile
+			SpawnProjectileEffect(AttackerLoc, TargetLoc, Config);
+		}
 		break;
+	}
 
 	case ESkillVFXTemplate::AoEImpact:
 		// Only spawn once (on first hit for multi-hit AoEs)
@@ -1001,12 +1062,17 @@ void USkillVFXSubsystem::SpawnProjectileEffect(FVector AttackerLocation, FVector
 		},
 		TickInterval, true, 0.f);
 
-	// Cleanup: deactivate projectile when it arrives + clear timer
+	// Cleanup: deactivate projectile when it arrives + spawn impact explosion + clear timer
 	TWeakObjectPtr<UWorld> WeakWorld = World;
 	TWeakObjectPtr<USceneComponent> WeakMoving = MovingComp;
+	FVector CapturedEndLoc = EndLoc;
+	FLinearColor CapturedColor = Config.PrimaryColor;
+	float CapturedScale = Config.Scale;
+	FString CapturedImpactPath = Config.ImpactOverridePath;
+	TWeakObjectPtr<USkillVFXSubsystem> WeakThis = this;
 	FTimerHandle CleanupTimer;
 	World->GetTimerManager().SetTimer(CleanupTimer,
-		[WeakWorld, MoveTimer, WeakMoving]() mutable
+		[WeakWorld, MoveTimer, WeakMoving, CapturedEndLoc, CapturedColor, CapturedScale, CapturedImpactPath, WeakThis]() mutable
 		{
 			if (WeakWorld.IsValid())
 				WeakWorld->GetTimerManager().ClearTimer(MoveTimer);
@@ -1020,8 +1086,126 @@ void USkillVFXSubsystem::SpawnProjectileEffect(FVector AttackerLocation, FVector
 				}
 				// Niagara auto-destroys via bAutoDestroy=true
 			}
+			// Spawn impact explosion at target location
+			if (WeakThis.IsValid() && !CapturedImpactPath.IsEmpty())
+			{
+				UNiagaraSystem* ImpactSys = WeakThis->GetOrLoadNiagaraOverride(CapturedImpactPath);
+				if (ImpactSys)
+				{
+					UNiagaraComponent* ImpactComp = WeakThis->SpawnNiagaraAtLocation(
+						ImpactSys, CapturedEndLoc, FRotator::ZeroRotator, FVector(CapturedScale));
+					if (ImpactComp)
+					{
+						WeakThis->SetNiagaraColor(ImpactComp, CapturedColor);
+					}
+				}
+			}
 		},
 		TravelTime + 0.05f, false);
+}
+
+void USkillVFXSubsystem::SpawnMultiHitProjectile(FVector AttackerLocation, FVector TargetLocation, const FSkillVFXConfig& Config, int32 TotalHits)
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	TotalHits = FMath::Clamp(TotalHits, 1, 10);
+
+	// Pre-resolve asset once
+	UNiagaraSystem* NiagaraSys = nullptr;
+	if (!Config.VFXOverridePath.IsEmpty() && !Config.bIsCascade)
+	{
+		NiagaraSys = GetOrLoadNiagaraOverride(Config.VFXOverridePath);
+	}
+	if (!NiagaraSys) NiagaraSys = NS_Projectile;
+	if (!NiagaraSys) return;
+
+	// Spawn one projectile per hit, staggered by 200ms (matching server SS_HIT_DELAY)
+	const float HitInterval = 0.2f;
+
+	for (int32 i = 0; i < TotalHits; ++i)
+	{
+		const float SpawnDelay = i * HitInterval;
+
+		TWeakObjectPtr<UWorld> WeakWorld = World;
+		TWeakObjectPtr<USkillVFXSubsystem> WeakThis = this;
+		FVector CapturedStart = AttackerLocation;
+		FVector CapturedEnd = TargetLocation;
+		FSkillVFXConfig CapturedConfig = Config;
+
+		FTimerHandle SpawnTimer;
+		World->GetTimerManager().SetTimer(SpawnTimer,
+			[WeakWorld, WeakThis, NiagaraSys, CapturedStart, CapturedEnd, CapturedConfig]()
+			{
+				UWorld* W = WeakWorld.Get();
+				if (!W || !WeakThis.IsValid()) return;
+
+				FVector SpawnLoc = CapturedStart + FVector(0, 0, 80.f);
+				FVector EndLoc = CapturedEnd + FVector(0, 0, 50.f);
+
+				// Random offset so each projectile is visually distinct
+				const float RandAngle = FMath::FRandRange(0.f, 2.f * PI);
+				const float RandDist = FMath::FRandRange(20.f, 60.f);
+				SpawnLoc += FVector(FMath::Cos(RandAngle) * RandDist, FMath::Sin(RandAngle) * RandDist, 0.f);
+
+				FVector Direction = (EndLoc - SpawnLoc).GetSafeNormal();
+				FRotator SpawnRot = Direction.Rotation();
+				FVector ProjScale = FVector(CapturedConfig.Scale);
+
+				UNiagaraComponent* NComp = WeakThis->SpawnNiagaraAtLocation(NiagaraSys, SpawnLoc, SpawnRot, ProjScale);
+				if (!NComp) return;
+				WeakThis->SetNiagaraColor(NComp, CapturedConfig.PrimaryColor);
+
+				// Animate projectile from caster to target
+				float Distance = FVector::Dist(SpawnLoc, EndLoc);
+				float TravelTime = FMath::Clamp(Distance / FMath::Max(CapturedConfig.ProjectileSpeed, 500.f), 0.1f, 2.0f);
+				const float TickInterval = 0.016f;
+				const int32 TotalSteps = FMath::Max(1, FMath::FloorToInt(TravelTime / TickInterval));
+
+				struct FProjMoveData
+				{
+					TWeakObjectPtr<USceneComponent> Comp;
+					FVector Start;
+					FVector End;
+					int32 CurrentStep;
+					int32 MaxSteps;
+				};
+
+				TSharedPtr<FProjMoveData> MoveData = MakeShared<FProjMoveData>();
+				MoveData->Comp = NComp;
+				MoveData->Start = SpawnLoc;
+				MoveData->End = EndLoc;
+				MoveData->CurrentStep = 0;
+				MoveData->MaxSteps = TotalSteps;
+
+				FTimerHandle MoveTimer;
+				W->GetTimerManager().SetTimer(MoveTimer,
+					[MoveData]()
+					{
+						if (!MoveData->Comp.IsValid()) return;
+						MoveData->CurrentStep++;
+						float Alpha = FMath::Clamp(
+							static_cast<float>(MoveData->CurrentStep) / static_cast<float>(MoveData->MaxSteps), 0.f, 1.f);
+						FVector NewPos = FMath::Lerp(MoveData->Start, MoveData->End, Alpha);
+						MoveData->Comp->SetWorldLocation(NewPos);
+					},
+					TickInterval, true, 0.f);
+
+				// Cleanup on arrival
+				TWeakObjectPtr<UWorld> WeakW = W;
+				TWeakObjectPtr<USceneComponent> WeakComp = NComp;
+				FTimerHandle CleanupTimer;
+				W->GetTimerManager().SetTimer(CleanupTimer,
+					[WeakW, MoveTimer, WeakComp]() mutable
+					{
+						if (WeakW.IsValid())
+							WeakW->GetTimerManager().ClearTimer(MoveTimer);
+						// Niagara auto-destroys via bAutoDestroy=true
+					},
+					TravelTime + 0.05f, false);
+			},
+			SpawnDelay, false);
+	}
 }
 
 void USkillVFXSubsystem::SpawnAoEImpact(FVector Location, const FSkillVFXConfig& Config)

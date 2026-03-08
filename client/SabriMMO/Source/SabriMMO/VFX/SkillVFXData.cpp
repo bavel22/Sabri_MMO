@@ -92,10 +92,13 @@ static TMap<int32, FSkillVFXConfig> BuildSkillVFXConfigs()
 		true, 0.f, true, 0.f, 0.f,
 		TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Dark_Mist.NS_Dark_Mist"), false, 0.5f);
 
-	// Fire Ball — NS_Magma_Shot, projectile player→enemy
+	// Fire Ball — NS_Magma_Shot projectile → NS_Magma_Shot_Impact explosion on arrival
+	// bSingleProjectile=true: only one projectile even though server emits per-target AoE damage
 	Add(207, ESkillVFXTemplate::Projectile, FLinearColor(1.f, 0.3f, 0.0f, 1.f), TEXT("fire"),
 		true, 500.f, false, 1500.f, 0.f,
 		TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Magma_Shot.NS_Magma_Shot"), false, 1.0f);
+	Configs[207].bSingleProjectile = true;
+	Configs[207].ImpactOverridePath = TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/Sperate_VFX/NS_Magma_Shot_Impact.NS_Magma_Shot_Impact");
 
 	// Frost Diver — P_Ice_Proj_charge_01 (Cascade), persists, scale 1.5
 	// Uses Cascade instead of Niagara because NS_Ice_Mist uses world-space simulation

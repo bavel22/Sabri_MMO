@@ -4299,7 +4299,8 @@ io.on('connection', (socket) => {
                     skillId, skillName: 'Fire Ball', skillLevel: learnedLevel, element: 'fire',
                     damage: dmg, isCritical: false, isMiss: false, hitType: 'magical',
                     targetX: tPos.x, targetY: tPos.y, targetZ: tPos.z,
-                    targetHealth: tgt.health, targetMaxHealth: tgt.maxHealth, timestamp: Date.now()
+                    targetHealth: tgt.health, targetMaxHealth: tgt.maxHealth, timestamp: Date.now(),
+                    primaryTargetId: targetId, primaryTargetIsEnemy: isEnemy
                 });
                 broadcastToZone(fbZone, 'combat:damage', {
                     attackerId: characterId, attackerName: player.characterName,

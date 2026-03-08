@@ -100,6 +100,12 @@ struct FSkillVFXConfig
 	 *  Cascade effects with looping emitters never auto-destroy, so this is required.
 	 *  0 = use default (0.5s for one-shot, 10s for persistent). */
 	float CascadeLifetime = 0.f;
+
+	/** Path to a Niagara system spawned at target on projectile arrival (explosion). */
+	FString ImpactOverridePath;
+
+	/** If true, projectile only spawns once even if server emits multiple skill:effect_damage events (AoE projectile like Fire Ball). */
+	bool bSingleProjectile = false;
 };
 
 /**

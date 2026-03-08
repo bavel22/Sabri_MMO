@@ -147,7 +147,7 @@ Widget prefix: `WBP_`. Blueprint prefix: `BP_`. Interface prefix: `BPI_`.
 | Skill targeting (click-to-cast) | `/sabrimmo-target-skill` | — |
 | Clickable NPCs, interactables | `/sabrimmo-click-interact` | — |
 | Zones, maps, warp portals | `/sabrimmo-zone` | `docsNew/05_Development/Zone_System_UE5_Setup_Guide.md` |
-| VFX, particles, Niagara | `/sabrimmo-vfx` | `docsNew/05_Development/VFX_Asset_Reference.md` |
+| VFX, particles, Niagara | `/sabrimmo-skills-vfx` | `docsNew/05_Development/VFX_Asset_Reference.md` |
 | New feature planning | `/planner` | `docsNew/00_Project_Overview.md` |
 | Complex architecture decisions | `/opus-45-thinking` | `/project-docs` |
 | Full project context dump | `/project-docs` | All of `docsNew/` |
@@ -155,9 +155,9 @@ Widget prefix: `WBP_`. Blueprint prefix: `BP_`. Interface prefix: `BPI_`.
 ### Multi-System Tasks
 
 Many tasks touch multiple systems. **Load ALL relevant skills.** Examples:
-- "Add a new skill with VFX" → `/sabrimmo-target-skill` + `/sabrimmo-vfx` + `/full-stack`
-- "Add a new zone with NPCs and warps" → `/sabrimmo-zone` + `/sabrimmo-click-interact` + `/sabrimmo-vfx`
-- "Fix a crash when casting spells" → `/debugger` + `/sabrimmo-vfx` + `/realtime`
+- "Add a new skill with VFX" → `/sabrimmo-target-skill` + `/sabrimmo-skills-vfx` + `/full-stack`
+- "Add a new zone with NPCs and warps" → `/sabrimmo-zone` + `/sabrimmo-click-interact` + `/sabrimmo-skills-vfx`
+- "Fix a crash when casting spells" → `/debugger` + `/sabrimmo-skills-vfx` + `/realtime`
 - "Build a new HUD panel showing buffs" → `/sabrimmo-ui` + `/realtime`
 - "Add a new monster with special attacks" → `/enemy-ai` + `/agent-architect` + `/full-stack`
 
@@ -182,7 +182,7 @@ Invoke with `/skill-name`. Located at `C:/Users/pladr/.claude/skills/`.
 | `/sabrimmo-target-skill` | Set up RO-style click-to-cast targeting for a skill |
 | `/sabrimmo-click-interact` | Add new left-click interactable actors to the world (NPCs, chests, etc.) |
 | `/sabrimmo-zone` | Add new zones/levels/maps, warp portals, Kafra NPCs, zone configuration |
-| `/sabrimmo-vfx` | Skill VFX system — Niagara effects, casting circles, warp portal VFX, adding VFX to new skills |
+| `/sabrimmo-skills-vfx` | Skill VFX system — Niagara effects, casting circles, warp portal VFX, adding VFX to new skills |
 | `/project-docs` | Load full project documentation context |
 | `/opus-45-thinking` | Complex multi-system architecture decisions |
 
