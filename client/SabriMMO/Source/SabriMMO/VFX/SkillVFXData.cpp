@@ -122,7 +122,7 @@ static TMap<int32, FSkillVFXConfig> BuildSkillVFXConfigs()
 		C.Template   = ESkillVFXTemplate::AoEImpact;
 		C.PrimaryColor = FLinearColor(1.f, 0.3f, 0.0f, 1.f);  // orange/fire
 		C.Element    = TEXT("fire");
-		C.AoERadius  = 500.f;
+		C.AoERadius  = 300.f;  // matches server AOE_RADIUS = 300
 		C.bSelfCentered = true;
 		C.VFXOverridePath = TEXT("/Game/Free_Magic/VFX_Niagara/NS_Free_Magic_Buff.NS_Free_Magic_Buff");
 		AddConfig(Configs, C);

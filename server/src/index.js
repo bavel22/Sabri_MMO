@@ -3341,7 +3341,7 @@ io.on('connection', (socket) => {
             }
         }
 
-        // Parse ground coordinates for ground-targeted skills (Thunderstorm, Fire Wall, Safety Wall)
+        // Parse ground coordinates for ground-targeted skills (Magnum Break, Thunderstorm, Fire Wall, Safety Wall)
         const groundX = data.groundX !== undefined ? parseFloat(data.groundX) : undefined;
         const groundY = data.groundY !== undefined ? parseFloat(data.groundY) : undefined;
         const groundZ = data.groundZ !== undefined ? parseFloat(data.groundZ) : undefined;
@@ -3640,10 +3640,27 @@ io.on('connection', (socket) => {
             return;
         }
 
-        // --- MAGNUM BREAK (ID 105) — AoE fire damage around caster ---
+        // --- MAGNUM BREAK (ID 105) — Ground-targeted AoE fire damage ---
         if (skill.name === 'magnum_break') {
             const attackerPos = await getPlayerPosition(characterId);
             if (!attackerPos) return;
+
+            // Ground-targeted: use ground coordinates from client
+            let centerPos;
+            if (hasGroundPos) {
+                centerPos = { x: groundX, y: groundY, z: groundZ || 0 };
+            } else {
+                // Fallback to caster position if no ground coords
+                centerPos = { ...attackerPos };
+            }
+
+            // Range check — short range skill (melee AoE)
+            const mbRange = skill.range || 50;
+            const rangeDist = Math.sqrt((attackerPos.x - centerPos.x) ** 2 + (attackerPos.y - centerPos.y) ** 2);
+            if (rangeDist > mbRange + COMBAT.RANGE_TOLERANCE) {
+                socket.emit('combat:out_of_range', { targetId: 0, isEnemy: false, distance: rangeDist, requiredRange: mbRange });
+                return;
+            }
 
             // Deduct SP and set cooldown
             player.mana = Math.max(0, player.mana - spCost);
@@ -3655,11 +3672,11 @@ io.on('connection', (socket) => {
             let totalDamageDealt = 0;
             let enemiesHit = 0;
 
-            // Hit all enemies within AoE radius
+            // Hit all enemies within AoE radius of ground target
             for (const [eid, enemy] of enemies.entries()) {
                 if (enemy.isDead) continue;
-                const dx = attackerPos.x - enemy.x;
-                const dy = attackerPos.y - enemy.y;
+                const dx = centerPos.x - enemy.x;
+                const dy = centerPos.y - enemy.y;
                 const dist = Math.sqrt(dx * dx + dy * dy);
                 if (dist > AOE_RADIUS) continue;
 
@@ -3723,8 +3740,8 @@ io.on('connection', (socket) => {
                 if (pid === characterId || ptarget.isDead) continue;
                 const pPos = await getPlayerPosition(pid);
                 if (!pPos) continue;
-                const dx = attackerPos.x - pPos.x;
-                const dy = attackerPos.y - pPos.y;
+                const dx = centerPos.x - pPos.x;
+                const dy = centerPos.y - pPos.y;
                 const dist = Math.sqrt(dx * dx + dy * dy);
                 if (dist > AOE_RADIUS) continue;
 
@@ -3783,7 +3800,7 @@ io.on('connection', (socket) => {
                     damage: 0, isCritical: false, isMiss: false, hitType: 'normal',
                     targetHealth: player.health, targetMaxHealth: player.maxHealth,
                     attackerX: attackerPos.x, attackerY: attackerPos.y, attackerZ: attackerPos.z,
-                    targetX: attackerPos.x, targetY: attackerPos.y, targetZ: attackerPos.z,
+                    targetX: centerPos.x, targetY: centerPos.y, targetZ: centerPos.z,
                     timestamp: Date.now()
                 });
             }

@@ -24,6 +24,9 @@
 #include "Engine/Texture2D.h"
 #include "UObject/UnrealType.h"
 #include "GameFramework/PlayerController.h"
+#include "Blueprint/AIBlueprintHelperLibrary.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogSkillTree, Log, All);
 
@@ -156,7 +159,7 @@ namespace GroundAoE
 	{
 		switch (SkillId)
 		{
-		case 105: return { 500.f, FColor(255, 120,  30), 0.5f };  // Magnum Break — instant AoE burst
+		case 105: return { 300.f, FColor(255, 120,  30), 0.5f };  // Magnum Break — 300 UE units (matches server AOE_RADIUS)
 		case 203: return { 300.f, FColor(180, 120, 255), 1.0f };  // Napalm Beat — ghost AoE
 		case 207: return { 500.f, FColor(255,  80,  30), 1.0f };  // Fire Ball — fire AoE explosion
 		case 209: return {   0.f, FColor(255,  50,  20), 0.f  };  // Fire Wall — line effect, no circle
@@ -168,6 +171,74 @@ namespace GroundAoE
 		}
 		default:  return { 200.f, FColor(100, 200, 255), 2.0f };  // Default
 		}
+	}
+}
+
+// ============================================================
+// Walk-to-Cast — cpp-local state (no header changes needed)
+// When a ground-targeted skill is clicked out of range, the player
+// walks toward the target and auto-casts when close enough.
+// ============================================================
+namespace WalkToCast
+{
+	struct FPending
+	{
+		int32 SkillId = 0;
+		FVector GroundTarget = FVector::ZeroVector;
+		float RequiredRange = 0.f;
+		FTimerHandle CheckTimer;
+		bool bActive = false;
+		bool bWaitingForStop = false;  // true = in range, waiting for velocity to reach zero
+	};
+
+	static TMap<UWorld*, FPending>& GetMap()
+	{
+		static auto* Map = new TMap<UWorld*, FPending>();
+		return *Map;
+	}
+
+	static FPending& Get(UWorld* World) { return GetMap().FindOrAdd(World); }
+
+	static void StopMovement(UWorld* World)
+	{
+		if (!World) return;
+		APlayerController* PC = World->GetFirstPlayerController();
+		if (!PC) return;
+		APawn* Pawn = PC->GetPawn();
+		if (!Pawn) return;
+
+		// Stop AI pathfinding
+		UAIBlueprintHelperLibrary::SimpleMoveToLocation(PC, Pawn->GetActorLocation());
+		// Stop controller-level movement
+		PC->StopMovement();
+		// Directly zero out velocity on the CharacterMovementComponent
+		if (ACharacter* Char = Cast<ACharacter>(Pawn))
+		{
+			if (UCharacterMovementComponent* CMC = Char->GetCharacterMovement())
+			{
+				CMC->StopMovementImmediately();
+			}
+		}
+	}
+
+	static void Cancel(UWorld* World)
+	{
+		if (!World) return;
+		FPending& P = Get(World);
+		if (!P.bActive) return;
+		P.bActive = false;
+		P.bWaitingForStop = false;
+		P.SkillId = 0;
+		World->GetTimerManager().ClearTimer(P.CheckTimer);
+		StopMovement(World);
+		UE_LOG(LogSkillTree, Log, TEXT("WalkToCast cancelled"));
+	}
+
+	static void Cleanup(UWorld* World)
+	{
+		if (!World) return;
+		Cancel(World);
+		GetMap().Remove(World);
 	}
 }
 
@@ -201,9 +272,10 @@ void USkillTreeSubsystem::Deinitialize()
 {
 	HideWidget();
 
-	// Clean up targeting overlay and ground indicator if active
+	// Clean up targeting overlay, ground indicator, and walk-to-cast if active
 	GroundAoE::StopDrawing(GetWorld());
 	GroundAoE::Cleanup(GetWorld());
+	WalkToCast::Cleanup(GetWorld());
 	bIsInTargetingMode = false;
 	HideTargetingOverlay();
 
@@ -395,7 +467,11 @@ void USkillTreeSubsystem::TryWrapSocketEvents()
 		[this](const TSharedPtr<FJsonValue>& D) { HandleSkillCooldownStarted(D); });
 
 	// --- Events that dismiss the ground AoE circle (cast rejected/failed/interrupted) ---
-	auto DismissCircle = [this](const TSharedPtr<FJsonValue>&) { GroundAoE::StopDrawing(GetWorld()); };
+	auto DismissCircle = [this](const TSharedPtr<FJsonValue>&)
+	{
+		GroundAoE::StopDrawing(GetWorld());
+		WalkToCast::Cancel(GetWorld());
+	};
 	BindNewEvent(TEXT("combat:out_of_range"), DismissCircle);  // pre-cast range check failed
 	BindNewEvent(TEXT("skill:cast_failed"), DismissCircle);    // cast completed but execution failed
 	BindNewEvent(TEXT("skill:cast_interrupted"), DismissCircle);  // cast was interrupted
@@ -1347,6 +1423,9 @@ const FSkillEntry* USkillTreeSubsystem::FindSkillEntry(int32 SkillId) const
 
 void USkillTreeSubsystem::BeginTargeting(int32 SkillId)
 {
+	// Cancel any active walk-to-cast from a previous skill
+	WalkToCast::Cancel(GetWorld());
+
 	// If already targeting a different skill, cancel the old one first
 	if (bIsInTargetingMode)
 	{
@@ -1422,6 +1501,7 @@ void USkillTreeSubsystem::CancelTargeting()
 	if (!bIsInTargetingMode) return;
 
 	GroundAoE::StopDrawing(GetWorld());
+	WalkToCast::Cancel(GetWorld());
 
 	bIsInTargetingMode   = false;
 	PendingSkillId       = 0;
@@ -1543,37 +1623,154 @@ void USkillTreeSubsystem::HandleTargetingClick()
 		{
 			const FVector GroundPos = HitResult.ImpactPoint;
 			const int32 SkillToUse = PendingSkillId;
-
-			// Look up cast time (DEX-modified) + effect duration (level-dependent)
 			const FSkillEntry* Entry = FindSkillEntry(SkillToUse);
-			int32 BaseCastTimeMs = Entry ? Entry->CastTime : 0;
-			int32 SkillLevel = Entry ? FMath::Max(1, Entry->CurrentLevel) : 1;
+			const float SkillRange = Entry ? static_cast<float>(Entry->Range) : 0.f;
 
-			// Apply DEX cast time reduction: ActualCastTime = Base * (1 - DEX/150)
-			int32 PlayerDex = 1;
-			if (UCombatStatsSubsystem* CSS = World->GetSubsystem<UCombatStatsSubsystem>())
+			// Check if player is in range (0 range = unlimited)
+			APawn* Pawn = PC->GetPawn();
+			const float Dist2D = Pawn ? FVector::Dist2D(Pawn->GetActorLocation(), GroundPos) : 0.f;
+			const float RangeTolerance = 30.f;
+
+			if (SkillRange > 0.f && Pawn && Dist2D > SkillRange + RangeTolerance)
 			{
-				PlayerDex = FMath::Max(1, CSS->DEX);
+				// Out of range — walk toward target and auto-cast when close enough
+				WalkToCast::FPending& P = WalkToCast::Get(World);
+				P.SkillId = SkillToUse;
+				P.GroundTarget = GroundPos;
+				P.RequiredRange = SkillRange;
+				P.bActive = true;
+
+				// Clear targeting UI but keep ground circle following the locked position
+				bIsInTargetingMode = false;
+				PendingSkillId = 0;
+				PendingSkillName.Empty();
+				PendingTargetingMode = ESkillTargetingMode::None;
+				HideTargetingOverlay();
+
+				// Lock the AoE circle at the target position while walking
+				GroundAoE::FState& GS = GroundAoE::Get(World);
+				GS.bLocked = true;
+				GS.LockedPosition = GroundPos + FVector(0.f, 0.f, 5.f);
+
+				// Start walking toward target
+				UAIBlueprintHelperLibrary::SimpleMoveToLocation(PC, GroundPos);
+
+				// Poll distance at 50ms intervals — two-phase: walk to range, then wait for stop
+				TWeakObjectPtr<USkillTreeSubsystem> WeakThis(this);
+				World->GetTimerManager().SetTimer(
+					P.CheckTimer,
+					FTimerDelegate::CreateLambda([WeakThis, World]()
+					{
+						if (!WeakThis.IsValid() || !World) return;
+						WalkToCast::FPending& WP = WalkToCast::Get(World);
+						if (!WP.bActive) return;
+
+						APlayerController* WPC = World->GetFirstPlayerController();
+						APawn* WPawn = WPC ? WPC->GetPawn() : nullptr;
+						if (!WPawn)
+						{
+							WalkToCast::Cancel(World);
+							GroundAoE::StopDrawing(World);
+							return;
+						}
+
+						const float WDist = FVector::Dist2D(WPawn->GetActorLocation(), WP.GroundTarget);
+
+						if (!WP.bWaitingForStop)
+						{
+							// Phase 1: walking toward target — check if we've reached range
+							if (WDist <= WP.RequiredRange + 30.f)
+							{
+								// In range — stop movement and wait for pawn to fully stop
+								WP.bWaitingForStop = true;
+								WalkToCast::StopMovement(World);
+								UE_LOG(LogSkillTree, Log, TEXT("WalkToCast: reached range (%.0f), stopping movement"), WDist);
+							}
+						}
+						else
+						{
+							// Phase 2: waiting for pawn velocity to reach zero
+							const float Speed = WPawn->GetVelocity().Size();
+							if (Speed < 5.f)
+							{
+								// Fully stopped — cast at max range toward the original target
+								const int32 CapturedSkillId = WP.SkillId;
+								const FVector OriginalTarget = WP.GroundTarget;
+								const float MaxRange = WP.RequiredRange;
+								WP.bActive = false;
+								WP.bWaitingForStop = false;
+								World->GetTimerManager().ClearTimer(WP.CheckTimer);
+
+								// Compute cast position: from player toward target, clamped to max range
+								const FVector PlayerPos = WPawn->GetActorLocation();
+								const FVector ToTarget = OriginalTarget - PlayerPos;
+								const float DistToTarget = ToTarget.Size2D();
+								FVector CastPos;
+								if (DistToTarget <= MaxRange)
+								{
+									// Already within max range — cast at original target
+									CastPos = OriginalTarget;
+								}
+								else
+								{
+									// Cast at max range along the direction toward target
+									const FVector Dir2D = FVector(ToTarget.X, ToTarget.Y, 0.f).GetSafeNormal();
+									CastPos = FVector(PlayerPos.X + Dir2D.X * MaxRange,
+										PlayerPos.Y + Dir2D.Y * MaxRange,
+										OriginalTarget.Z);
+								}
+
+								// Lock circle + dismiss after cast+effect duration
+								const FSkillEntry* WEntry = WeakThis->FindSkillEntry(CapturedSkillId);
+								int32 WBaseCastMs = WEntry ? WEntry->CastTime : 0;
+								int32 WSkillLv = WEntry ? FMath::Max(1, WEntry->CurrentLevel) : 1;
+								int32 WDex = 1;
+								if (UCombatStatsSubsystem* WCSS = World->GetSubsystem<UCombatStatsSubsystem>())
+									WDex = FMath::Max(1, WCSS->DEX);
+								float WCastSec = FMath::Max(0.f, (WBaseCastMs / 1000.f) * (1.f - WDex / 150.f));
+								GroundAoE::FAoEInfo WAoE = GroundAoE::GetAoEInfo(CapturedSkillId, WSkillLv);
+								GroundAoE::LockAndDismissAfter(World, CastPos, WCastSec + WAoE.EffectDurationSec);
+
+								WeakThis->UseSkillOnGround(CapturedSkillId, CastPos);
+								UE_LOG(LogSkillTree, Log, TEXT("WalkToCast: stopped, casting skill %d at max range (%.0f, %.0f, %.0f)"),
+									CapturedSkillId, CastPos.X, CastPos.Y, CastPos.Z);
+							}
+						}
+					}),
+					0.05f, true);
+
+				UE_LOG(LogSkillTree, Log, TEXT("WalkToCast: skill %d out of range (%.0f > %.0f), walking to target"),
+					SkillToUse, Dist2D, SkillRange);
 			}
-			float ActualCastTimeSec = FMath::Max(0.f, (BaseCastTimeMs / 1000.f) * (1.f - PlayerDex / 150.f));
+			else
+			{
+				// In range (or unlimited range) — fire immediately
+				int32 BaseCastTimeMs = Entry ? Entry->CastTime : 0;
+				int32 SkillLevel = Entry ? FMath::Max(1, Entry->CurrentLevel) : 1;
 
-			GroundAoE::FAoEInfo AoEInfo = GroundAoE::GetAoEInfo(SkillToUse, SkillLevel);
-			float TotalDuration = ActualCastTimeSec + AoEInfo.EffectDurationSec;
+				int32 PlayerDex = 1;
+				if (UCombatStatsSubsystem* CSS = World->GetSubsystem<UCombatStatsSubsystem>())
+				{
+					PlayerDex = FMath::Max(1, CSS->DEX);
+				}
+				float ActualCastTimeSec = FMath::Max(0.f, (BaseCastTimeMs / 1000.f) * (1.f - PlayerDex / 150.f));
 
-			// Lock circle at cast position — persists until spell effect ends
-			GroundAoE::LockAndDismissAfter(World, GroundPos, TotalDuration);
+				GroundAoE::FAoEInfo AoEInfo = GroundAoE::GetAoEInfo(SkillToUse, SkillLevel);
+				float TotalDuration = ActualCastTimeSec + AoEInfo.EffectDurationSec;
 
-			// Clear targeting state but DON'T stop drawing (circle stays locked)
-			bIsInTargetingMode = false;
-			PendingSkillId = 0;
-			PendingSkillName.Empty();
-			PendingTargetingMode = ESkillTargetingMode::None;
-			HideTargetingOverlay();
+				GroundAoE::LockAndDismissAfter(World, GroundPos, TotalDuration);
 
-			UseSkillOnGround(SkillToUse, GroundPos);
+				bIsInTargetingMode = false;
+				PendingSkillId = 0;
+				PendingSkillName.Empty();
+				PendingTargetingMode = ESkillTargetingMode::None;
+				HideTargetingOverlay();
 
-			UE_LOG(LogSkillTree, Log, TEXT("Targeting executed: skill %d Lv%d at ground (%.0f, %.0f, %.0f) — cast %.1fs (DEX %d) + effect %.1fs = circle %.1fs"),
-				SkillToUse, SkillLevel, GroundPos.X, GroundPos.Y, GroundPos.Z, ActualCastTimeSec, PlayerDex, AoEInfo.EffectDurationSec, TotalDuration);
+				UseSkillOnGround(SkillToUse, GroundPos);
+
+				UE_LOG(LogSkillTree, Log, TEXT("Targeting executed: skill %d Lv%d at ground (%.0f, %.0f, %.0f) — cast %.1fs (DEX %d) + effect %.1fs = circle %.1fs"),
+					SkillToUse, SkillLevel, GroundPos.X, GroundPos.Y, GroundPos.Z, ActualCastTimeSec, PlayerDex, AoEInfo.EffectDurationSec, TotalDuration);
+			}
 		}
 		else
 		{
