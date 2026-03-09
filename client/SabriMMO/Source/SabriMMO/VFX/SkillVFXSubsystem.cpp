@@ -699,6 +699,13 @@ void USkillVFXSubsystem::HandleBuffRemoved(const TSharedPtr<FJsonValue>& Data)
 // Ground effect lifecycle (Fire Wall, Safety Wall)
 // ============================================================
 
+// File-local Cascade ground effect tracking (avoids header change for TMap<int32, PSC*>)
+static TMap<int32, TWeakObjectPtr<UParticleSystemComponent>>& GetCascadeGroundEffects()
+{
+	static auto* Map = new TMap<int32, TWeakObjectPtr<UParticleSystemComponent>>();
+	return *Map;
+}
+
 void USkillVFXSubsystem::HandleGroundEffectCreated(const TSharedPtr<FJsonValue>& Data)
 {
 	if (!bVFXEnabled || !Data.IsValid()) return;
@@ -730,10 +737,42 @@ void USkillVFXSubsystem::HandleGroundEffectCreated(const TSharedPtr<FJsonValue>&
 	// Use per-skill VFX override if available
 	if (!Config.VFXOverridePath.IsEmpty())
 	{
-		SpawnVFXAtLocation(Config, Location);
+		FVector FinalScale = FVector(Config.Scale);
 
-		UE_LOG(LogSkillVFX, Log, TEXT("Ground effect created: %s (id=%d) using override VFX at (%.0f, %.0f, %.0f)"),
-			*Type, EffectId, XD, YD, ZD);
+		if (Config.bIsCascade)
+		{
+			// Cascade ground effect (Fire Wall uses P_Env_Fire_Grate_01)
+			UParticleSystem* CascadeSystem = GetOrLoadCascadeOverride(Config.VFXOverridePath);
+			if (CascadeSystem)
+			{
+				UParticleSystemComponent* PSC = UGameplayStatics::SpawnEmitterAtLocation(
+					GetWorld(), CascadeSystem, Location, FRotator::ZeroRotator, FinalScale, false);
+				if (PSC)
+				{
+					GetCascadeGroundEffects().Add(EffectId, PSC);
+
+					UE_LOG(LogSkillVFX, Log, TEXT("Ground effect created: %s (id=%d) using Cascade override at (%.0f, %.0f, %.0f)"),
+						*Type, EffectId, XD, YD, ZD);
+				}
+			}
+		}
+		else
+		{
+			// Niagara ground effect
+			UNiagaraSystem* NiagaraSystem = GetOrLoadNiagaraOverride(Config.VFXOverridePath);
+			if (NiagaraSystem)
+			{
+				UNiagaraComponent* Comp = SpawnNiagaraAtLocation(NiagaraSystem, Location, FRotator::ZeroRotator, FinalScale);
+				if (Comp)
+				{
+					SetNiagaraColor(Comp, Config.PrimaryColor);
+					ActivePersistentEffects.Add(EffectId, Comp);
+
+					UE_LOG(LogSkillVFX, Log, TEXT("Ground effect created: %s (id=%d) using Niagara override at (%.0f, %.0f, %.0f)"),
+						*Type, EffectId, XD, YD, ZD);
+				}
+			}
+		}
 		return;
 	}
 
@@ -768,6 +807,7 @@ void USkillVFXSubsystem::HandleGroundEffectRemoved(const TSharedPtr<FJsonValue>&
 
 	const int32 EffectId = static_cast<int32>(EffectIdD);
 
+	// Check Niagara tracking
 	if (TWeakObjectPtr<UNiagaraComponent>* Found = ActivePersistentEffects.Find(EffectId))
 	{
 		if (Found->IsValid())
@@ -777,6 +817,22 @@ void USkillVFXSubsystem::HandleGroundEffectRemoved(const TSharedPtr<FJsonValue>&
 		ActivePersistentEffects.Remove(EffectId);
 
 		UE_LOG(LogSkillVFX, Log, TEXT("Ground effect removed: %s (id=%d) reason=%s"),
+			*Type, EffectId, *Reason);
+		return;
+	}
+
+	// Check Cascade tracking (Fire Wall)
+	auto& CascadeMap = GetCascadeGroundEffects();
+	if (TWeakObjectPtr<UParticleSystemComponent>* Found = CascadeMap.Find(EffectId))
+	{
+		if (Found->IsValid())
+		{
+			Found->Get()->DeactivateImmediate();
+			Found->Get()->DestroyComponent();
+		}
+		CascadeMap.Remove(EffectId);
+
+		UE_LOG(LogSkillVFX, Log, TEXT("Ground effect removed (Cascade): %s (id=%d) reason=%s"),
 			*Type, EffectId, *Reason);
 	}
 }

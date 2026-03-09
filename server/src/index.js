@@ -3406,10 +3406,12 @@ io.on('connection', (socket) => {
                 });
                 // Broadcast cast start to zone clients (for cast bar rendering)
                 const castStartZone = player.zone || 'prontera_south';
+                const castAttackerPos = await getPlayerPosition(characterId);
                 broadcastToZone(castStartZone, 'skill:cast_start', {
                     casterId: characterId, casterName: player.characterName,
                     skillId, skillName: skill.displayName,
-                    actualCastTime, targetId, isEnemy
+                    actualCastTime, targetId, isEnemy,
+                    casterX: castAttackerPos?.x || 0, casterY: castAttackerPos?.y || 0, casterZ: castAttackerPos?.z || 0
                 });
                 logger.info(`[CAST] ${player.characterName} begins casting ${skill.displayName} Lv${learnedLevel} (${actualCastTime}ms, base ${baseCastTime}ms, DEX ${effectiveStats.dex})`);
                 return; // Don't execute yet — combat tick will complete the cast
@@ -3428,6 +3430,21 @@ io.on('connection', (socket) => {
             player.health = Math.min(player.maxHealth, player.health + effectVal);
             applySkillDelays(characterId, player, skillId, levelData, socket);
             logger.info(`[SKILLS] ${player.characterName} healed ${healed} HP (${player.health}/${player.maxHealth})`);
+
+            const attackerPos = await getPlayerPosition(characterId);
+            const faZone = player.zone || 'prontera_south';
+
+            // Broadcast heal VFX zone-wide so other players see it
+            broadcastToZone(faZone, 'skill:effect_damage', {
+                attackerId: characterId, attackerName: player.characterName,
+                targetId: characterId, targetName: player.characterName, isEnemy: false,
+                skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: 'holy',
+                damage: 0, isCritical: false, isMiss: false, hitType: 'heal',
+                targetHealth: player.health, targetMaxHealth: player.maxHealth,
+                attackerX: attackerPos?.x || 0, attackerY: attackerPos?.y || 0, attackerZ: attackerPos?.z || 0,
+                targetX: attackerPos?.x || 0, targetY: attackerPos?.y || 0, targetZ: attackerPos?.z || 0,
+                timestamp: Date.now()
+            });
 
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
             socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana, healAmount: healed });
@@ -3497,10 +3514,11 @@ io.on('connection', (socket) => {
             const bashZone = player.zone || 'prontera_south';
             if (isMiss) {
                 // Skill missed — still consume SP/cooldown, broadcast miss
-                broadcastToZone(bashZone, 'combat:damage', {
+                broadcastToZone(bashZone, 'skill:effect_damage', {
                     attackerId: characterId, attackerName: player.characterName,
-                    targetId, targetName, isEnemy, damage: 0, isCritical: false,
-                    isMiss: true, hitType: bashHitType, element: skill.element || 'neutral',
+                    targetId, targetName, isEnemy,
+                    skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: skill.element || 'neutral',
+                    damage: 0, isCritical: false, isMiss: true, hitType: bashHitType,
                     targetHealth: target.health, targetMaxHealth: target.maxHealth,
                     attackerX: attackerPos.x, attackerY: attackerPos.y, attackerZ: attackerPos.z,
                     targetX: targetPos.x, targetY: targetPos.y, targetZ: targetPos.z,
@@ -3529,17 +3547,6 @@ io.on('connection', (socket) => {
                 targetId, targetName, isEnemy,
                 skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: skill.element,
                 damage, isCritical, isMiss: false, hitType: bashHitType,
-                targetHealth: target.health, targetMaxHealth: target.maxHealth,
-                attackerX: attackerPos.x, attackerY: attackerPos.y, attackerZ: attackerPos.z,
-                targetX: targetPos.x, targetY: targetPos.y, targetZ: targetPos.z,
-                timestamp: Date.now()
-            });
-
-            // Also emit standard combat:damage so existing BP + C++ damage numbers work
-            broadcastToZone(bashZone, 'combat:damage', {
-                attackerId: characterId, attackerName: player.characterName,
-                targetId, targetName, isEnemy, damage, isCritical,
-                isMiss: false, hitType: bashHitType, element: skill.element || 'neutral',
                 targetHealth: target.health, targetMaxHealth: target.maxHealth,
                 attackerX: attackerPos.x, attackerY: attackerPos.y, attackerZ: attackerPos.z,
                 targetX: targetPos.x, targetY: targetPos.y, targetZ: targetPos.z,
@@ -3670,10 +3677,11 @@ io.on('connection', (socket) => {
 
                 if (isMiss) {
                     // AoE skill missed this target — broadcast miss
-                    broadcastToZone(mbZone, 'combat:damage', {
+                    broadcastToZone(mbZone, 'skill:effect_damage', {
                         attackerId: characterId, attackerName: player.characterName,
-                        targetId: eid, targetName: enemy.name, isEnemy: true, damage: 0, isCritical: false,
-                        isMiss: true, hitType: mbHitType, element: 'fire',
+                        targetId: eid, targetName: enemy.name, isEnemy: true,
+                        skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: 'fire',
+                        damage: 0, isCritical: false, isMiss: true, hitType: mbHitType,
                         targetHealth: enemy.health, targetMaxHealth: enemy.maxHealth,
                         attackerX: attackerPos.x, attackerY: attackerPos.y, attackerZ: attackerPos.z,
                         targetX: enemy.x, targetY: enemy.y, targetZ: enemy.z,
@@ -3696,15 +3704,6 @@ io.on('connection', (socket) => {
                     targetId: eid, targetName: enemy.name, isEnemy: true,
                     skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: 'fire',
                     damage, isCritical, isMiss: false, hitType: mbHitType,
-                    targetHealth: enemy.health, targetMaxHealth: enemy.maxHealth,
-                    attackerX: attackerPos.x, attackerY: attackerPos.y, attackerZ: attackerPos.z,
-                    targetX: enemy.x, targetY: enemy.y, targetZ: enemy.z,
-                    timestamp: Date.now()
-                });
-                broadcastToZone(mbZone, 'combat:damage', {
-                    attackerId: characterId, attackerName: player.characterName,
-                    targetId: eid, targetName: enemy.name, isEnemy: true, damage, isCritical,
-                    isMiss: false, hitType: mbHitType, element: 'fire',
                     targetHealth: enemy.health, targetMaxHealth: enemy.maxHealth,
                     attackerX: attackerPos.x, attackerY: attackerPos.y, attackerZ: attackerPos.z,
                     targetX: enemy.x, targetY: enemy.y, targetZ: enemy.z,
@@ -3737,10 +3736,11 @@ io.on('connection', (socket) => {
                 const { damage: pvpMbDmg, isCritical: pvpMbCrit, isMiss: pvpMbMiss, hitType: pvpMbHitType } = mbPvpResult;
 
                 if (pvpMbMiss) {
-                    broadcastToZone(mbZone, 'combat:damage', {
+                    broadcastToZone(mbZone, 'skill:effect_damage', {
                         attackerId: characterId, attackerName: player.characterName,
-                        targetId: pid, targetName: ptarget.characterName, isEnemy: false, damage: 0, isCritical: false,
-                        isMiss: true, hitType: pvpMbHitType, element: 'fire',
+                        targetId: pid, targetName: ptarget.characterName, isEnemy: false,
+                        skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: 'fire',
+                        damage: 0, isCritical: false, isMiss: true, hitType: pvpMbHitType,
                         targetHealth: ptarget.health, targetMaxHealth: ptarget.maxHealth,
                         attackerX: attackerPos.x, attackerY: attackerPos.y, attackerZ: attackerPos.z,
                         targetX: pPos.x, targetY: pPos.y, targetZ: pPos.z,
@@ -3763,16 +3763,6 @@ io.on('connection', (socket) => {
                     targetX: pPos.x, targetY: pPos.y, targetZ: pPos.z,
                     timestamp: Date.now()
                 });
-                broadcastToZone(mbZone, 'combat:damage', {
-                    attackerId: characterId, attackerName: player.characterName,
-                    targetId: pid, targetName: ptarget.characterName, isEnemy: false, damage: pvpMbDmg, isCritical: pvpMbCrit,
-                    isMiss: false, hitType: pvpMbHitType, element: 'fire',
-                    targetHealth: ptarget.health, targetMaxHealth: ptarget.maxHealth,
-                    attackerX: attackerPos.x, attackerY: attackerPos.y, attackerZ: attackerPos.z,
-                    targetX: pPos.x, targetY: pPos.y, targetZ: pPos.z,
-                    timestamp: Date.now()
-                });
-
                 if (ptarget.health <= 0) {
                     ptarget.isDead = true;
                     for (const [otherId, otherAtk] of autoAttackState.entries()) {
@@ -3782,6 +3772,20 @@ io.on('connection', (socket) => {
                     broadcastToZone(mbZone, 'chat:receive', { type: 'chat:receive', channel: 'COMBAT', senderId: 0, senderName: 'SYSTEM', message: `${player.characterName} has slain ${ptarget.characterName} with Magnum Break!`, timestamp: Date.now() });
                     await savePlayerHealthToDB(pid, 0, ptarget.mana);
                 }
+            }
+
+            // If no targets were hit, emit a zero-damage "whiff" so the client still shows the AoE VFX
+            if (enemiesHit === 0) {
+                broadcastToZone(mbZone, 'skill:effect_damage', {
+                    attackerId: characterId, attackerName: player.characterName,
+                    targetId: characterId, targetName: player.characterName, isEnemy: false,
+                    skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: 'fire',
+                    damage: 0, isCritical: false, isMiss: false, hitType: 'normal',
+                    targetHealth: player.health, targetMaxHealth: player.maxHealth,
+                    attackerX: attackerPos.x, attackerY: attackerPos.y, attackerZ: attackerPos.z,
+                    targetX: attackerPos.x, targetY: attackerPos.y, targetZ: attackerPos.z,
+                    timestamp: Date.now()
+                });
             }
 
             logger.info(`[SKILL-COMBAT] ${player.characterName} MAGNUM BREAK Lv${learnedLevel}: hit ${enemiesHit} enemies, ${totalDamageDealt} total dmg`);
@@ -3807,7 +3811,8 @@ io.on('connection', (socket) => {
 
             logger.info(`[SKILL-COMBAT] ${player.characterName} ENDURE Lv${learnedLevel}: +${mdefBonus} MDEF for ${buffDuration / 1000}s`);
 
-            socket.emit('skill:buff_applied', {
+            const endureZone = player.zone || 'prontera_south';
+            broadcastToZone(endureZone, 'skill:buff_applied', {
                 targetId: characterId, targetName: player.characterName, isEnemy: false,
                 casterId: characterId, casterName: player.characterName,
                 skillId, buffName: 'Endure', duration: buffDuration,
@@ -3892,10 +3897,11 @@ io.on('connection', (socket) => {
             const boltZone = player.zone || 'prontera_south';
             // Check element immunity (if first hit was 0, all are 0)
             if (totalDamage <= 0) {
-                broadcastToZone(boltZone, 'combat:damage', {
+                broadcastToZone(boltZone, 'skill:effect_damage', {
                     attackerId: characterId, attackerName: player.characterName,
-                    targetId, targetName, isEnemy, damage: 0, isCritical: false,
-                    isMiss: true, hitType: 'magical', element: skill.element,
+                    targetId, targetName, isEnemy,
+                    skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: skill.element,
+                    damage: 0, hits: 0, isCritical: false, isMiss: true, hitType: 'magical',
                     targetX: targetPos.x, targetY: targetPos.y, targetZ: targetPos.z,
                     targetHealth: target.health, targetMaxHealth: target.maxHealth, timestamp: Date.now()
                 });
@@ -3938,10 +3944,11 @@ io.on('connection', (socket) => {
                 const hitDmg = hitDamages[h];
                 const delay = h * HIT_DELAY_MS;
                 setTimeout(() => {
-                    broadcastToZone(boltZoneCaptured, 'combat:damage', {
+                    broadcastToZone(boltZoneCaptured, 'skill:effect_damage', {
                         attackerId: characterId, attackerName: player.characterName,
-                        targetId, targetName, isEnemy, damage: hitDmg, isCritical: false,
-                        isMiss: false, hitType: 'magical', element: skill.element,
+                        targetId, targetName, isEnemy,
+                        skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: skill.element,
+                        damage: hitDmg, isCritical: false, isMiss: false, hitType: 'magical',
                         targetX: targetPos.x, targetY: targetPos.y, targetZ: targetPos.z,
                         hitNumber: h + 1, totalHits: numHits,
                         targetHealth: target.health, targetMaxHealth: target.maxHealth, timestamp: Date.now()
@@ -4056,10 +4063,11 @@ io.on('connection', (socket) => {
                 const hitDmg = hitDamages[h];
                 const delay = h * SS_HIT_DELAY;
                 setTimeout(() => {
-                    broadcastToZone(ssZoneCaptured, 'combat:damage', {
+                    broadcastToZone(ssZoneCaptured, 'skill:effect_damage', {
                         attackerId: characterId, attackerName: player.characterName,
-                        targetId, targetName, isEnemy, damage: hitDmg, isCritical: false,
-                        isMiss: false, hitType: 'magical', element: 'ghost',
+                        targetId, targetName, isEnemy,
+                        skillId, skillName: 'Soul Strike', skillLevel: learnedLevel, element: 'ghost',
+                        damage: hitDmg, isCritical: false, isMiss: false, hitType: 'magical',
                         targetX: targetPos.x, targetY: targetPos.y, targetZ: targetPos.z,
                         hitNumber: h + 1, totalHits: numHits,
                         targetHealth: target.health, targetMaxHealth: target.maxHealth, timestamp: Date.now()
@@ -4195,14 +4203,6 @@ io.on('connection', (socket) => {
                     targetX: st.pos.x, targetY: st.pos.y, targetZ: st.pos.z,
                     targetHealth: st.target.health, targetMaxHealth: st.target.maxHealth, timestamp: Date.now()
                 });
-                broadcastToZone(nbZone, 'combat:damage', {
-                    attackerId: characterId, attackerName: player.characterName,
-                    targetId: st.id, targetName: st.name, isEnemy: st.isEnemy, damage: dmg, isCritical: false,
-                    isMiss: false, hitType: 'magical', element: 'ghost',
-                    targetX: st.pos.x, targetY: st.pos.y, targetZ: st.pos.z,
-                    targetHealth: st.target.health, targetMaxHealth: st.target.maxHealth, timestamp: Date.now()
-                });
-
                 if (st.isEnemy) {
                     broadcastToZone(nbZone, 'enemy:health_update', { enemyId: st.id, health: st.target.health, maxHealth: st.target.maxHealth, inCombat: true });
                     if (st.target.health <= 0) await processEnemyDeathFromSkill(st.target, player, characterId, io);
@@ -4302,14 +4302,6 @@ io.on('connection', (socket) => {
                     targetHealth: tgt.health, targetMaxHealth: tgt.maxHealth, timestamp: Date.now(),
                     primaryTargetId: targetId, primaryTargetIsEnemy: isEnemy
                 });
-                broadcastToZone(fbZone, 'combat:damage', {
-                    attackerId: characterId, attackerName: player.characterName,
-                    targetId: tId, targetName: tName, isEnemy: tIsEnemy, damage: dmg, isCritical: false,
-                    isMiss: false, hitType: 'magical', element: 'fire',
-                    targetX: tPos.x, targetY: tPos.y, targetZ: tPos.z,
-                    targetHealth: tgt.health, targetMaxHealth: tgt.maxHealth, timestamp: Date.now()
-                });
-
                 if (tIsEnemy) {
                     broadcastToZone(fbZone, 'enemy:health_update', { enemyId: tId, health: tgt.health, maxHealth: tgt.maxHealth, inCombat: true });
                     if (tgt.health <= 0) await processEnemyDeathFromSkill(tgt, player, characterId, io);
@@ -4427,29 +4419,24 @@ io.on('connection', (socket) => {
                 enemy.lastDamageTime = Date.now();
                 if (typeof setEnemyAggro === 'function') setEnemyAggro(enemy, characterId, 'skill');
 
-                broadcastToZone(tsZone, 'skill:effect_damage', {
-                    attackerId: characterId, attackerName: player.characterName,
-                    targetId: eid, targetName: enemy.name, isEnemy: true,
-                    skillId, skillName: 'Thunderstorm', skillLevel: learnedLevel, element: 'wind',
-                    damage: dmg, hits: numHits, isCritical: false, isMiss: false, hitType: 'magical',
-                    targetX: enemy.x, targetY: enemy.y, targetZ: enemy.z,
-                    targetHealth: enemy.health, targetMaxHealth: enemy.maxHealth, timestamp: Date.now()
-                });
-                // Per-hit damage numbers (staggered)
-                const ePos = { x: enemy.x, y: enemy.y, z: enemy.z };
-                const eName = enemy.name;
-                const tsZoneCapturedE = tsZone; // Capture zone for setTimeout
+                // Per-hit damage events with staggered delays (RO-style multi-hit display)
+                const tsZoneCaptured = tsZone;
+                const enemyCaptured = { id: eid, name: enemy.name, x: enemy.x, y: enemy.y, z: enemy.z, health: enemy.health, maxHealth: enemy.maxHealth };
                 for (let h = 0; h < numHits; h++) {
+                    const hitDmg = tsHitDamages[h];
+                    const delay = h * TS_HIT_DELAY;
                     setTimeout(() => {
-                        broadcastToZone(tsZoneCapturedE, 'combat:damage', {
+                        broadcastToZone(tsZoneCaptured, 'skill:effect_damage', {
                             attackerId: characterId, attackerName: player.characterName,
-                            targetId: eid, targetName: eName, isEnemy: true, damage: tsHitDamages[h], isCritical: false,
-                            isMiss: false, hitType: 'magical', element: 'wind',
-                            targetX: ePos.x, targetY: ePos.y, targetZ: ePos.z,
+                            targetId: enemyCaptured.id, targetName: enemyCaptured.name, isEnemy: true,
+                            skillId, skillName: 'Thunderstorm', skillLevel: learnedLevel, element: 'wind',
+                            damage: hitDmg, isCritical: false, isMiss: false, hitType: 'magical',
+                            targetX: enemyCaptured.x, targetY: enemyCaptured.y, targetZ: enemyCaptured.z,
                             hitNumber: h + 1, totalHits: numHits,
-                            targetHealth: enemy.health, targetMaxHealth: enemy.maxHealth, timestamp: Date.now()
+                            targetHealth: enemyCaptured.health, targetMaxHealth: enemyCaptured.maxHealth, timestamp: Date.now(),
+                            groundX: centerPos.x, groundY: centerPos.y, groundZ: centerPos.z
                         });
-                    }, h * TS_HIT_DELAY);
+                    }, delay);
                 }
                 broadcastToZone(tsZone, 'enemy:health_update', { enemyId: eid, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: true });
                 if (enemy.health <= 0) await processEnemyDeathFromSkill(enemy, player, characterId, io);
@@ -4485,30 +4472,26 @@ io.on('connection', (socket) => {
                 totalDamageDealt += dmg;
                 targetsHit++;
 
-                broadcastToZone(tsZone, 'skill:effect_damage', {
-                    attackerId: characterId, attackerName: player.characterName,
-                    targetId: pid, targetName: ptarget.characterName, isEnemy: false,
-                    skillId, skillName: 'Thunderstorm', skillLevel: learnedLevel, element: 'wind',
-                    damage: dmg, hits: numHits, isCritical: false, isMiss: false, hitType: 'magical',
-                    targetX: pPos.x, targetY: pPos.y, targetZ: pPos.z,
-                    targetHealth: ptarget.health, targetMaxHealth: ptarget.maxHealth, timestamp: Date.now()
-                });
-                // Per-hit damage numbers (staggered)
-                const pvpName = ptarget.characterName;
-                const tsZoneCapturedP = tsZone; // Capture zone for setTimeout
+                // Per-hit damage events with staggered delays (RO-style multi-hit display)
+                const tsZonePvp = tsZone;
+                const pPosCaptured = { x: pPos.x, y: pPos.y, z: pPos.z };
+                const ptargetCaptured = { id: pid, name: ptarget.characterName, health: ptarget.health, maxHealth: ptarget.maxHealth };
                 for (let h = 0; h < numHits; h++) {
+                    const hitDmg = pvpHitDmgs[h];
+                    const delay = h * TS_HIT_DELAY;
                     setTimeout(() => {
-                        broadcastToZone(tsZoneCapturedP, 'combat:damage', {
+                        broadcastToZone(tsZonePvp, 'skill:effect_damage', {
                             attackerId: characterId, attackerName: player.characterName,
-                            targetId: pid, targetName: pvpName, isEnemy: false, damage: pvpHitDmgs[h], isCritical: false,
-                            isMiss: false, hitType: 'magical', element: 'wind',
-                            targetX: pPos.x, targetY: pPos.y, targetZ: pPos.z,
+                            targetId: ptargetCaptured.id, targetName: ptargetCaptured.name, isEnemy: false,
+                            skillId, skillName: 'Thunderstorm', skillLevel: learnedLevel, element: 'wind',
+                            damage: hitDmg, isCritical: false, isMiss: false, hitType: 'magical',
+                            targetX: pPosCaptured.x, targetY: pPosCaptured.y, targetZ: pPosCaptured.z,
                             hitNumber: h + 1, totalHits: numHits,
-                            targetHealth: ptarget.health, targetMaxHealth: ptarget.maxHealth, timestamp: Date.now()
+                            targetHealth: ptargetCaptured.health, targetMaxHealth: ptargetCaptured.maxHealth, timestamp: Date.now(),
+                            groundX: centerPos.x, groundY: centerPos.y, groundZ: centerPos.z
                         });
-                    }, h * TS_HIT_DELAY);
+                    }, delay);
                 }
-
                 if (ptarget.health <= 0) {
                     ptarget.isDead = true;
                     for (const [otherId, otherAtk] of autoAttackState.entries()) {
@@ -4593,14 +4576,6 @@ io.on('connection', (socket) => {
                 targetX: targetPos.x, targetY: targetPos.y, targetZ: targetPos.z,
                 targetHealth: target.health, targetMaxHealth: target.maxHealth, timestamp: Date.now()
             });
-            broadcastToZone(fdZone, 'combat:damage', {
-                attackerId: characterId, attackerName: player.characterName,
-                targetId, targetName, isEnemy, damage, isCritical: false,
-                isMiss: false, hitType: 'magical', element: 'water',
-                targetX: targetPos.x, targetY: targetPos.y, targetZ: targetPos.z,
-                targetHealth: target.health, targetMaxHealth: target.maxHealth, timestamp: Date.now()
-            });
-
             // Freeze chance: 35 + level*3, reduced by target MDEF (1% per point)
             if (target.health > 0) {
                 const freezeChance = Math.max(0, (35 + learnedLevel * 3) - targetHardMdef);
@@ -4794,21 +4769,16 @@ io.on('connection', (socket) => {
             }
 
             const wallDuration = duration || ((5 + learnedLevel - 1) * 1000);
-            const hitLimit = effectVal; // 3-12 hits
-            const casterStats = getEffectiveStats(player);
+            const hitLimit = effectVal; // skillLevel + 2 hits (3-12)
 
             const effectId = createGroundEffect({
                 type: 'fire_wall', casterId: characterId, casterName: player.characterName,
+                zone: player.zone || 'prontera_south',
                 x: wallPos.x, y: wallPos.y, z: wallPos.z || 0,
                 hitLimit, hitsRemaining: hitLimit,
                 duration: wallDuration, element: 'fire',
-                dmgPercent: 50, // 50% MATK per hit
-                casterStats: { ...casterStats }, // Snapshot caster stats at cast time
-                casterHardMdef: 0,
-                radius: 150, // Fire wall collision radius (1x3 cells ≈ 150 UE units)
-                knockback: 200, // Knockback distance in UE units
-                hitCooldowns: new Map(), // Track per-target hit timing
-                hitInterval: 500 // 500ms between hits on same target
+                radius: 150, // Fire wall collision radius (3 cells ≈ 150 UE units)
+                knockbackTarget: 200 // Push enemies to this distance from center (> radius to exit wall)
             });
 
             logger.info(`[SKILL-COMBAT] ${player.characterName} Fire Wall Lv${learnedLevel}: placed at (${Math.floor(wallPos.x)}, ${Math.floor(wallPos.y)}), ${hitLimit} hits, ${wallDuration / 1000}s`);
@@ -4861,6 +4831,7 @@ io.on('connection', (socket) => {
 
             const effectId = createGroundEffect({
                 type: 'safety_wall', casterId: characterId, casterName: player.characterName,
+                zone: player.zone || 'prontera_south',
                 x: wallPos.x, y: wallPos.y, z: wallPos.z || 0,
                 hitsRemaining: hitsBlocked, hitLimit: hitsBlocked,
                 duration: wallDuration,
@@ -6741,37 +6712,46 @@ setInterval(async () => {
                 continue;
             }
 
-            // Check enemies in Fire Wall zone
+            // RO Classic Fire Wall: hit on contact → knockback outside wall → enemy walks back → repeat
+            const wallRadius = effect.radius || 150;
+            const knockbackTarget = effect.knockbackTarget || 200; // Distance from center to push to (> radius)
+
             for (const [eid, enemy] of enemies.entries()) {
                 if (enemy.isDead) continue;
+                if (effect.hitsRemaining <= 0) break;
+
                 const dx = enemy.x - effect.x;
                 const dy = enemy.y - effect.y;
                 const dist = Math.sqrt(dx * dx + dy * dy);
-                if (dist > 150) continue; // Fire Wall radius ~150 UE units
+                if (dist > wallRadius) continue; // Not inside the wall
 
-                // Cooldown per target to avoid hitting every 500ms tick (hit once per second per target)
+                // Per-target cooldown: 300ms prevents double-hits within same tick cycle
+                // Normal enemies get knocked out and must walk back (~500ms+), so this rarely triggers
+                // Boss/knockback-immune enemies eat charges at ~2/sec (every 300ms)
                 if (!effect.lastHitTargets) effect.lastHitTargets = {};
                 const targetKey = `enemy_${eid}`;
-                if (effect.lastHitTargets[targetKey] && now - effect.lastHitTargets[targetKey] < 1000) continue;
+                if (effect.lastHitTargets[targetKey] && now - effect.lastHitTargets[targetKey] < 300) continue;
                 effect.lastHitTargets[targetKey] = now;
 
-                // Calculate fire damage: 50% MATK
+                // Calculate fire damage: 50% MATK per hit (RO Classic)
                 const caster = connectedPlayers.get(effect.casterId);
                 if (!caster) continue;
                 const casterStats = getEffectiveStats(caster);
-                const fwDmg = calculateMagicSkillDamage(casterStats, enemy.stats, enemy.hardDef || 0, 0.5, 'fire', getEnemyTargetInfo(enemy));
-                const finalDmg = Math.max(1, fwDmg);
+                const fwResult = calculateMagicSkillDamage(casterStats, enemy.stats, enemy.hardDef || 0, 50, 'fire', getEnemyTargetInfo(enemy));
+                const finalDmg = Math.max(1, fwResult.damage || 0);
 
                 enemy.health = Math.max(0, enemy.health - finalDmg);
                 effect.hitsRemaining--;
 
-                // RO AI: Fire Wall aggro — enemy aggros the caster
+                // RO AI: Fire Wall aggro
                 enemy.lastDamageTime = now;
                 if (typeof setEnemyAggro === 'function') setEnemyAggro(enemy, effect.casterId, 'skill');
 
-                logger.info(`[SKILL-COMBAT] Fire Wall hit ${enemy.name} for ${finalDmg} fire [${effect.hitsRemaining} hits left]`);
+                const isBossImmune = enemy.modeFlags && enemy.modeFlags.knockbackImmune;
+                logger.info(`[SKILL-COMBAT] Fire Wall hit ${enemy.name} for ${finalDmg} fire [${effect.hitsRemaining} hits left]${isBossImmune ? ' (boss, no KB)' : ''}`);
 
                 const fwTickZone = enemy.zone || 'prontera_south';
+
                 // Fire damage breaks Frozen
                 if (enemy.activeBuffs) {
                     const hadFrozen = enemy.activeBuffs.some(b => b.name === 'frozen');
@@ -6781,23 +6761,47 @@ setInterval(async () => {
                     }
                 }
 
-                broadcastToZone(fwTickZone, 'combat:damage', {
+                broadcastToZone(fwTickZone, 'skill:effect_damage', {
                     attackerId: effect.casterId, attackerName: caster.characterName,
                     targetId: eid, targetName: enemy.name, isEnemy: true,
+                    skillId: 209, skillName: 'Fire Wall', element: 'fire',
                     damage: finalDmg, isCritical: false, isMiss: false,
-                    hitType: 'skill', element: 'fire',
+                    hitType: 'skill',
                     targetX: enemy.x, targetY: enemy.y, targetZ: enemy.z,
                     targetHealth: enemy.health, targetMaxHealth: enemy.maxHealth,
                     timestamp: now
                 });
                 broadcastToZone(fwTickZone, 'enemy:health_update', { enemyId: eid, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: enemy.inCombatWith.size > 0 });
 
-                // Knockback: push enemy away from fire wall center
-                if (dist > 0) {
-                    const knockDist = 100; // 100 UE units knockback
-                    enemy.x += (dx / dist) * knockDist;
-                    enemy.y += (dy / dist) * knockDist;
-                    broadcastToZone(fwTickZone, 'enemy:move', { enemyId: eid, x: enemy.x, y: enemy.y, z: enemy.z, isMoving: false, knockback: true });
+                // Knockback: push enemy OUTSIDE the wall radius (RO Classic: 2 cells away)
+                // Boss/MVP monsters are knockback-immune — they stay inside and consume charges rapidly
+                if (!isBossImmune) {
+                    if (dist > 0) {
+                        // Push to knockbackTarget distance from wall center (outside radius)
+                        enemy.x = effect.x + (dx / dist) * knockbackTarget;
+                        enemy.y = effect.y + (dy / dist) * knockbackTarget;
+                    } else {
+                        // Enemy exactly at center — push in default direction
+                        enemy.y = effect.y + knockbackTarget;
+                    }
+                    broadcastToZone(fwTickZone, 'enemy:move', {
+                        enemyId: eid, x: enemy.x, y: enemy.y, z: enemy.z,
+                        isMoving: false, knockback: true
+                    });
+
+                    // If enemy was attacking and knockback moved them out of melee range,
+                    // switch to CHASE so AI walks them back through the wall
+                    if (enemy.aiState === AI_STATE.ATTACK && enemy.targetPlayerId) {
+                        const tp = connectedPlayers.get(enemy.targetPlayerId);
+                        if (tp) {
+                            const dxT = (tp.lastX || 0) - enemy.x;
+                            const dyT = (tp.lastY || 0) - enemy.y;
+                            const distT = Math.sqrt(dxT * dxT + dyT * dyT);
+                            if (distT > (enemy.attackRange || COMBAT.MELEE_RANGE) + COMBAT.RANGE_TOLERANCE) {
+                                enemy.aiState = AI_STATE.CHASE;
+                            }
+                        }
+                    }
                 }
 
                 // Enemy death from Fire Wall
@@ -6827,15 +6831,15 @@ setInterval(async () => {
 
                 if (!effect.lastHitTargets) effect.lastHitTargets = {};
                 const targetKey = `player_${charId}`;
-                if (effect.lastHitTargets[targetKey] && now - effect.lastHitTargets[targetKey] < 1000) continue;
+                if (effect.lastHitTargets[targetKey] && now - effect.lastHitTargets[targetKey] < 300) continue;
                 effect.lastHitTargets[targetKey] = now;
 
                 const caster = connectedPlayers.get(effect.casterId);
                 if (!caster) continue;
                 const casterStats = getEffectiveStats(caster);
                 const targetStats = getEffectiveStats(player);
-                const fwDmg = calculateMagicSkillDamage(casterStats, targetStats, player.hardDef || 0, 0.5, 'fire');
-                const finalDmg = Math.max(1, fwDmg);
+                const fwResult = calculateMagicSkillDamage(casterStats, targetStats, player.hardDef || 0, 50, 'fire');
+                const finalDmg = Math.max(1, fwResult.damage || 0);
 
                 player.health = Math.max(0, player.health - finalDmg);
                 effect.hitsRemaining--;
@@ -6855,11 +6859,12 @@ setInterval(async () => {
                     }
                 }
 
-                broadcastToZone(fwPvpTickZone, 'combat:damage', {
+                broadcastToZone(fwPvpTickZone, 'skill:effect_damage', {
                     attackerId: effect.casterId, attackerName: caster.characterName,
                     targetId: charId, targetName: player.characterName, isEnemy: false,
+                    skillId: 209, skillName: 'Fire Wall', element: 'fire',
                     damage: finalDmg, isCritical: false, isMiss: false,
-                    hitType: 'skill', element: 'fire',
+                    hitType: 'skill',
                     targetX: pPos.x, targetY: pPos.y, targetZ: pPos.z,
                     targetHealth: player.health, targetMaxHealth: player.maxHealth,
                     timestamp: now
@@ -6885,8 +6890,7 @@ setInterval(async () => {
     for (const id of effectsToRemove) {
         const effect = activeGroundEffects.get(id);
         if (effect) {
-            const effectCaster = connectedPlayers.get(effect.casterId);
-            const effectZone = (effectCaster && effectCaster.zone) || 'prontera_south';
+            const effectZone = effect.zone || (connectedPlayers.get(effect.casterId) && connectedPlayers.get(effect.casterId).zone) || 'prontera_south';
             removeGroundEffect(id);
             broadcastToZone(effectZone, 'skill:ground_effect_removed', { effectId: id, type: effect.type, reason: effect.hitsRemaining <= 0 ? 'hits_exhausted' : 'expired' });
         }

@@ -141,6 +141,10 @@ void UDamageNumberSubsystem::TryWrapSocketEvents()
 	WrapSingleEvent(TEXT("combat:damage"),
 		[this](const TSharedPtr<FJsonValue>& D) { HandleCombatDamage(D); });
 
+	// Also listen to skill:effect_damage (all skill damage — same payload format)
+	WrapSingleEvent(TEXT("skill:effect_damage"),
+		[this](const TSharedPtr<FJsonValue>& D) { HandleCombatDamage(D); });
+
 	bEventsWrapped = true;
 
 	// Stop the polling timer

@@ -3,6 +3,7 @@
 #include "SkillTreeSubsystem.h"
 #include "SSkillTreeWidget.h"
 #include "SSkillTargetingOverlay.h"
+#include "DrawDebugHelpers.h"
 #include "MMOGameInstance.h"
 #include "SocketIOClientComponent.h"
 #include "SocketIONative.h"
@@ -24,6 +25,146 @@
 #include "GameFramework/PlayerController.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogSkillTree, Log, All);
+
+// ============================================================
+// Ground AoE indicator — cpp-local state (no header changes needed)
+// Keyed by UWorld* for multiplayer (PIE) safety.
+// ============================================================
+namespace GroundAoE
+{
+	// Simple POD state — no destructors, no atexit, fully Live Coding safe
+	struct FState
+	{
+		float AoERadius = 0.f;
+		FColor CircleColor = FColor::Green;
+		FTimerHandle DrawTimer;
+		FTimerHandle DismissTimer;
+		FVector LockedPosition = FVector::ZeroVector;
+		bool bActive = false;
+		bool bLocked = false;  // true = circle locked at cast position, no longer following cursor
+	};
+
+	// Heap-allocated map — never freed, avoids atexit destructor crash on Live Coding DLL unload
+	static TMap<UWorld*, FState>& GetStateMap()
+	{
+		static auto* Map = new TMap<UWorld*, FState>();
+		return *Map;
+	}
+
+	static FState& Get(UWorld* World)
+	{
+		return GetStateMap().FindOrAdd(World);
+	}
+
+	static void Cleanup(UWorld* World)
+	{
+		GetStateMap().Remove(World);
+	}
+
+	// Called every frame — draws circle at cursor (targeting) or locked position (casting)
+	static void DrawCircleAtCursor(UWorld* World)
+	{
+		if (!World) return;
+		FState& S = Get(World);
+		if (!S.bActive || S.AoERadius <= 0.f) return;
+
+		FVector Center;
+		if (S.bLocked)
+		{
+			// Circle locked at cast position — stays put until spell ends
+			Center = S.LockedPosition;
+		}
+		else
+		{
+			// Following cursor during targeting
+			APlayerController* PC = World->GetFirstPlayerController();
+			if (!PC) return;
+
+			FHitResult HitResult;
+			if (!PC->GetHitResultUnderCursor(ECC_Visibility, false, HitResult) || !HitResult.bBlockingHit)
+				return;
+
+			Center = HitResult.ImpactPoint + FVector(0.f, 0.f, 5.f);
+		}
+
+		// Draw filled-looking circle: thick outer ring + inner ring
+		DrawDebugCircle(World, Center, S.AoERadius, 64, S.CircleColor,
+			false, 0.02f, SDPG_World, 4.f,
+			FVector(1.f, 0.f, 0.f), FVector(0.f, 1.f, 0.f), false);
+
+		// Inner ring at 85% radius for a "band" effect
+		DrawDebugCircle(World, Center, S.AoERadius * 0.85f, 48, FColor(S.CircleColor.R, S.CircleColor.G, S.CircleColor.B, 120),
+			false, 0.02f, SDPG_World, 2.f,
+			FVector(1.f, 0.f, 0.f), FVector(0.f, 1.f, 0.f), false);
+
+		// Center crosshair
+		const float Cross = FMath::Min(S.AoERadius * 0.1f, 30.f);
+		DrawDebugLine(World, Center - FVector(Cross, 0, 0), Center + FVector(Cross, 0, 0),
+			S.CircleColor, false, 0.02f, SDPG_World, 2.f);
+		DrawDebugLine(World, Center - FVector(0, Cross, 0), Center + FVector(0, Cross, 0),
+			S.CircleColor, false, 0.02f, SDPG_World, 2.f);
+	}
+
+	static void StartDrawing(UWorld* World)
+	{
+		if (!World) return;
+		FState& S = Get(World);
+		S.bActive = true;
+
+		World->GetTimerManager().SetTimer(
+			S.DrawTimer,
+			FTimerDelegate::CreateLambda([World]() { DrawCircleAtCursor(World); }),
+			0.016f, true);
+
+		UE_LOG(LogSkillTree, Log, TEXT("Ground AoE circle started: radius=%.0f"), S.AoERadius);
+	}
+
+	static void StopDrawing(UWorld* World)
+	{
+		if (!World) return;
+		FState& S = Get(World);
+		S.bActive = false;
+		S.bLocked = false;
+		World->GetTimerManager().ClearTimer(S.DrawTimer);
+		World->GetTimerManager().ClearTimer(S.DismissTimer);
+	}
+
+	// Lock circle at a position and auto-dismiss after duration (cast time + effect)
+	static void LockAndDismissAfter(UWorld* World, FVector Position, float DurationSec)
+	{
+		if (!World) return;
+		FState& S = Get(World);
+		if (!S.bActive) return;
+
+		S.bLocked = true;
+		S.LockedPosition = Position + FVector(0.f, 0.f, 5.f);
+
+		// Auto-dismiss after the spell finishes
+		World->GetTimerManager().SetTimer(
+			S.DismissTimer,
+			FTimerDelegate::CreateLambda([World]() { StopDrawing(World); }),
+			DurationSec, false);
+
+		UE_LOG(LogSkillTree, Log, TEXT("Ground AoE circle locked — dismiss in %.1fs"), DurationSec);
+	}
+
+	// Local AoE data — avoids cross-module calls to SkillVFXData (Live Coding safe)
+	// EffectDurationSec = how long the spell effect lasts AFTER cast completes
+	struct FAoEInfo { float Radius; FColor Color; float EffectDurationSec; };
+	static FAoEInfo GetAoEInfo(int32 SkillId)
+	{
+		switch (SkillId)
+		{
+		case 105: return { 500.f, FColor(255, 120,  30), 0.5f };  // Magnum Break — instant AoE burst
+		case 203: return { 300.f, FColor(180, 120, 255), 1.0f };  // Napalm Beat — ghost AoE
+		case 207: return { 500.f, FColor(255,  80,  30), 1.0f };  // Fire Ball — fire AoE explosion
+		case 209: return { 150.f, FColor(255,  50,  20), 10.f };  // Fire Wall — persists 10s
+		case 211: return { 100.f, FColor(255, 255, 255), 10.f };  // Safety Wall — persists 10s
+		case 212: return { 500.f, FColor(180, 220,  80), 3.0f };  // Thunderstorm — rain lasts ~3s
+		default:  return { 200.f, FColor(100, 200, 255), 2.0f };  // Default
+		}
+	}
+}
 
 // ============================================================
 // Lifecycle
@@ -55,7 +196,9 @@ void USkillTreeSubsystem::Deinitialize()
 {
 	HideWidget();
 
-	// Clean up targeting overlay if active
+	// Clean up targeting overlay and ground indicator if active
+	GroundAoE::StopDrawing(GetWorld());
+	GroundAoE::Cleanup(GetWorld());
 	bIsInTargetingMode = false;
 	HideTargetingOverlay();
 
@@ -1193,6 +1336,7 @@ void USkillTreeSubsystem::BeginTargeting(int32 SkillId)
 	// If already targeting a different skill, cancel the old one first
 	if (bIsInTargetingMode)
 	{
+		GroundAoE::StopDrawing(GetWorld());
 		HideTargetingOverlay();
 	}
 
@@ -1233,10 +1377,26 @@ void USkillTreeSubsystem::BeginTargeting(int32 SkillId)
 	else
 	{
 		PendingTargetingMode = ESkillTargetingMode::GroundTarget;
+
+		// Set AoE radius and color for ground indicator (local lookup, no cross-module calls)
+		UWorld* World = GetWorld();
+		if (World)
+		{
+			GroundAoE::FAoEInfo Info = GroundAoE::GetAoEInfo(SkillId);
+			GroundAoE::FState& S = GroundAoE::Get(World);
+			S.AoERadius = Info.Radius;
+			S.CircleColor = Info.Color;
+		}
 	}
 
 	bIsInTargetingMode = true;
 	ShowTargetingOverlay();
+
+	// Start drawing ground AoE circle for ground-targeted skills
+	if (PendingTargetingMode == ESkillTargetingMode::GroundTarget)
+	{
+		GroundAoE::StartDrawing(GetWorld());
+	}
 
 	UE_LOG(LogSkillTree, Log, TEXT("Targeting started: %s (mode=%s)"),
 		*PendingSkillName,
@@ -1246,6 +1406,8 @@ void USkillTreeSubsystem::BeginTargeting(int32 SkillId)
 void USkillTreeSubsystem::CancelTargeting()
 {
 	if (!bIsInTargetingMode) return;
+
+	GroundAoE::StopDrawing(GetWorld());
 
 	bIsInTargetingMode   = false;
 	PendingSkillId       = 0;
@@ -1367,11 +1529,27 @@ void USkillTreeSubsystem::HandleTargetingClick()
 		{
 			const FVector GroundPos = HitResult.ImpactPoint;
 			const int32 SkillToUse = PendingSkillId;
-			CancelTargeting();
+
+			// Look up cast time from skill entry + effect duration
+			const FSkillEntry* Entry = FindSkillEntry(SkillToUse);
+			float CastTimeSec = Entry ? (Entry->CastTime / 1000.f) : 0.f;
+			GroundAoE::FAoEInfo AoEInfo = GroundAoE::GetAoEInfo(SkillToUse);
+			float TotalDuration = CastTimeSec + AoEInfo.EffectDurationSec;
+
+			// Lock circle at cast position — persists until spell effect ends
+			GroundAoE::LockAndDismissAfter(World, GroundPos, TotalDuration);
+
+			// Clear targeting state but DON'T stop drawing (circle stays locked)
+			bIsInTargetingMode = false;
+			PendingSkillId = 0;
+			PendingSkillName.Empty();
+			PendingTargetingMode = ESkillTargetingMode::None;
+			HideTargetingOverlay();
+
 			UseSkillOnGround(SkillToUse, GroundPos);
 
-			UE_LOG(LogSkillTree, Log, TEXT("Targeting executed: skill %d at ground (%.0f, %.0f, %.0f)"),
-				SkillToUse, GroundPos.X, GroundPos.Y, GroundPos.Z);
+			UE_LOG(LogSkillTree, Log, TEXT("Targeting executed: skill %d at ground (%.0f, %.0f, %.0f) — circle persists %.1fs"),
+				SkillToUse, GroundPos.X, GroundPos.Y, GroundPos.Z, TotalDuration);
 		}
 		else
 		{

@@ -107,10 +107,10 @@ static TMap<int32, FSkillVFXConfig> BuildSkillVFXConfigs()
 		true, 0.f, true, 0.f, 0.f,
 		TEXT("/Game/InfinityBladeEffects/Effects/FX_Monsters/FX_Monster_Spider/ICE/P_Ice_Proj_charge_01.P_Ice_Proj_charge_01"), true, 1.5f, false, 5.0f);
 
-	// Fire Wall — NS_Spline_Fire, ground persistent
+	// Fire Wall — P_Env_Fire_Grate_01 (Cascade), looping ground fire
 	Add(209, ESkillVFXTemplate::GroundPersistent, FLinearColor(1.f, 0.3f, 0.0f, 1.f), TEXT("fire"),
 		true, 150.f, true, 0.f, 0.f,
-		TEXT("/Game/_SplineVFX/NS/NS_Spline_Fire.NS_Spline_Fire"), false, 1.0f);
+		TEXT("/Game/InfinityBladeEffects/Effects/FX_Ambient/Fire/P_Env_Fire_Grate_01.P_Env_Fire_Grate_01"), true, 1.5f);
 
 	// Soul Strike — NS_Magic_Bubbles, projectile player→enemy, per hit
 	Add(210, ESkillVFXTemplate::Projectile, FLinearColor(0.6f, 0.3f, 0.9f, 1.f), TEXT("ghost"),

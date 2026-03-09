@@ -4,12 +4,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-**Sabri_MMO** — Class-based action MMORPG inspired by Ragnarok Online.
+**Sabri_MMO** — Class-based action MMORPG inspired by Ragnarok Online Classic.
 **Stack**: UE5.7 (C++ + Blueprints) | Node.js + Express + Socket.io | PostgreSQL + Redis
 **Architecture**: Server-authoritative — all combat, stats, inventory, and positions are validated server-side. The client is presentation + input only.
 
 Full rules and design standards: `docsNew/00_Global_Rules/Global_Rules.md`
 Architecture reference: `docsNew/00_Project_Overview.md`
+RO Classic game design reference: `RagnaCloneDocs/` (28 files — 14 design + 14 implementation guides)
 
 ---
 
@@ -50,7 +51,7 @@ Single monolithic file (~2400 lines). Key sections:
 - **Socket.io events** — `player:join/position/moved/left`, `combat:*`, `inventory:*`, `chat:*`, `enemy:*`, `stats:*`, `skills:*`
 - **Combat tick loop** — 50ms interval, ASPD-based attack timing
 - **Enemy AI loop** — 509 RO monster templates, 46 active spawn points (zones 1-3 only, zones 4-9 disabled)
-- **Data modules** imported at top: `ro_monster_templates`, `ro_item_mapping`, `ro_exp_tables`, `ro_skill_data`
+- **Data modules** imported at top: `ro_monster_templates`, `ro_item_mapping`, `ro_exp_tables`, `ro_skill_data`, `ro_monster_ai_codes`, `ro_zone_data`
 - **JWT validation** on `player:join` socket event (character ownership check)
 
 ### Client C++ (`client/SabriMMO/Source/SabriMMO/`)
@@ -62,14 +63,14 @@ Single monolithic file (~2400 lines). Key sections:
 | `SabriMMOCharacter.*` | Base player pawn — movement, socket events, stats |
 | `SabriMMOPlayerController.*` | Input mapping (click-to-move + WASD) |
 | `OtherCharacterMovementComponent.*` | Remote player interpolation |
-| `UI/LoginFlowSubsystem.*` | Login flow state machine (Login→Server→CharSelect→Create→EnterWorld) |
+| `UI/LoginFlowSubsystem.*` | Login flow state machine (Login->Server->CharSelect->Create->EnterWorld) |
 | `UI/SLoginWidget.*` | Login screen (username/password, remember me, error display) |
 | `UI/SServerSelectWidget.*` | Server list with population/status, selection highlighting |
 | `UI/SCharacterSelectWidget.*` | 3x3 character card grid + detail panel + delete confirmation |
 | `UI/SCharacterCreateWidget.*` | Name, gender, hair style/color pickers |
 | `UI/SLoadingOverlayWidget.*` | "Please Wait" fullscreen overlay with progress bar |
 | `UI/SBasicInfoWidget.*` | Slate HUD panel (HP/SP/EXP bars, draggable) |
-| `UI/BasicInfoSubsystem.*` | UWorldSubsystem bridging server data → Slate widget |
+| `UI/BasicInfoSubsystem.*` | UWorldSubsystem bridging server data -> Slate widget |
 | `UI/ZoneTransitionSubsystem.*` | Zone transitions, loading overlay, pawn teleport, zone:change/error/teleport events |
 | `UI/KafraSubsystem.*` | Kafra NPC dialog, save point, teleport service |
 | `UI/SKafraWidget.*` | Slate Kafra service dialog (save/teleport/cancel) |
@@ -129,10 +130,11 @@ Widget prefix: `WBP_`. Blueprint prefix: `BP_`. Interface prefix: `BPI_`.
 
 ### How to Load Context
 
-1. **Identify which systems the task touches** (UI? Server? VFX? Zones? Combat? etc.)
+1. **Identify which systems the task touches** (UI? Server? VFX? Zones? Combat? Stats? Items? etc.)
 2. **Load the matching skill(s)** using the Skill tool — skills contain architectural rules, file locations, naming conventions, and common patterns that MUST be followed
 3. **Read relevant source files** before modifying them — never assume code structure
 4. **Check `docsNew/`** for system-specific documentation when the skill references it
+5. **Check `RagnaCloneDocs/`** for RO Classic game design reference when implementing new game systems
 
 ### Skill Selection Guide
 
@@ -148,18 +150,44 @@ Widget prefix: `WBP_`. Blueprint prefix: `BP_`. Interface prefix: `BPI_`.
 | Clickable NPCs, interactables | `/sabrimmo-click-interact` | — |
 | Zones, maps, warp portals | `/sabrimmo-zone` | `docsNew/05_Development/Zone_System_UE5_Setup_Guide.md` |
 | VFX, particles, Niagara | `/sabrimmo-skills-vfx` | `docsNew/05_Development/VFX_Asset_Reference.md` |
-| New feature planning | `/planner` | `docsNew/00_Project_Overview.md` |
+| Stats, leveling, class system | `/sabrimmo-stats` | `RagnaCloneDocs/01_Stats_Leveling_JobSystem.md` |
+| Damage pipelines, combat formulas | `/sabrimmo-combat` | `RagnaCloneDocs/02_Combat_System.md` |
+| Skill trees, cast times, cooldowns | `/sabrimmo-skills` | `RagnaCloneDocs/03_Skills_Magic_System.md` |
+| Items, equipment, refining, cards | `/sabrimmo-items` | `RagnaCloneDocs/06_Items_Equipment.md` |
+| NPCs, shops, quests, Kafra | `/sabrimmo-npcs` | `RagnaCloneDocs/08_NPCs_Quests.md` |
+| Party, guild, social systems | `/sabrimmo-party-guild` | `RagnaCloneDocs/07_Social_Systems.md` |
+| PvP, War of Emperium, siege | `/sabrimmo-pvp-woe` | `RagnaCloneDocs/05_PvP_GvG_WoE.md` |
+| Trading, vending, storage, zeny | `/sabrimmo-economy` | `RagnaCloneDocs/09_Economy_Trading.md` |
+| Pets, homunculus, mercenaries | `/sabrimmo-companions` | `RagnaCloneDocs/12_Pets_Homunculus_Companions.md` |
+| Audio, BGM, SFX, sound design | `/sabrimmo-audio` | `RagnaCloneDocs/13_Audio_Sound_Design.md` |
+| Art, models, animations, hair | `/sabrimmo-art` | `RagnaCloneDocs/14_Art_Visual_Style.md` |
+| New feature planning | `/planner` | `RagnaCloneDocs/00_Master_Build_Plan.md` |
 | Complex architecture decisions | `/opus-45-thinking` | `/project-docs` |
 | Full project context dump | `/project-docs` | All of `docsNew/` |
+| Code style, refactoring, audits | `/code-quality` | — |
+| Security, auth, anti-cheat | `/security` | — |
+| Performance, FPS, tick rate | `/performance` | — |
+| Server tests, quick validation | `/test` | — |
+| Full QA, integration testing | `/tester` | — |
+| Documentation updates | `/docs` | `docsNew/` |
+| Prompt engineering, skill writing | `/prompt-engineer` | — |
+| Deep web research | `/deep-research` | — |
 
 ### Multi-System Tasks
 
 Many tasks touch multiple systems. **Load ALL relevant skills.** Examples:
-- "Add a new skill with VFX" → `/sabrimmo-target-skill` + `/sabrimmo-skills-vfx` + `/full-stack`
-- "Add a new zone with NPCs and warps" → `/sabrimmo-zone` + `/sabrimmo-click-interact` + `/sabrimmo-skills-vfx`
-- "Fix a crash when casting spells" → `/debugger` + `/sabrimmo-skills-vfx` + `/realtime`
-- "Build a new HUD panel showing buffs" → `/sabrimmo-ui` + `/realtime`
-- "Add a new monster with special attacks" → `/enemy-ai` + `/agent-architect` + `/full-stack`
+- "Add a new skill with VFX" -> `/sabrimmo-skills` + `/sabrimmo-combat` + `/sabrimmo-skills-vfx` + `/full-stack`
+- "Add a new zone with NPCs and warps" -> `/sabrimmo-zone` + `/sabrimmo-npcs` + `/sabrimmo-click-interact`
+- "Fix a crash when casting spells" -> `/debugger` + `/sabrimmo-skills` + `/realtime`
+- "Build a new HUD panel showing buffs" -> `/sabrimmo-ui` + `/sabrimmo-combat` + `/realtime`
+- "Add a new monster with special attacks" -> `/enemy-ai` + `/sabrimmo-combat` + `/full-stack`
+- "Implement the inventory system" -> `/sabrimmo-items` + `/sabrimmo-economy` + `/full-stack` + `/sabrimmo-ui`
+- "Add party EXP sharing" -> `/sabrimmo-party-guild` + `/sabrimmo-stats` + `/full-stack`
+- "Implement pet taming system" -> `/sabrimmo-companions` + `/sabrimmo-items` + `/full-stack`
+- "Set up WoE castle sieges" -> `/sabrimmo-pvp-woe` + `/sabrimmo-party-guild` + `/sabrimmo-combat`
+- "Add NPC shops and quest givers" -> `/sabrimmo-npcs` + `/sabrimmo-items` + `/sabrimmo-economy`
+- "Add background music per zone" -> `/sabrimmo-audio` + `/sabrimmo-zone`
+- "Create character hair/costume system" -> `/sabrimmo-art` + `/sabrimmo-ui`
 
 **Do NOT skip loading skills to save time.** The cost of reloading context is far less than the cost of implementing something wrong and having to redo it.
 
@@ -169,24 +197,54 @@ Many tasks touch multiple systems. **Load ALL relevant skills.** Examples:
 
 Invoke with `/skill-name`. Located at `C:/Users/pladr/.claude/skills/`.
 
+### Core Project Skills
+| Skill | Use when |
+|-------|----------|
+| `/full-stack` | `index.js` changes, DB schema, REST endpoints, server logic |
+| `/realtime` | Socket.io events, combat tick, position sync, multiplayer |
+| `/ui-architect` | UE5 Blueprint / Widget work (unrealMCP first) |
+| `/agent-architect` | Enemy AI, stat formulas, RO game systems architecture |
+| `/enemy-ai` | Monster aggro, chase, attack, AI state machine, per-monster AI codes |
+| `/planner` | Feature planning, development phases, 13-phase roadmap |
+| `/project-docs` | Load full project documentation context |
+
+### RO Game System Skills (sabrimmo-*)
+| Skill | Use when |
+|-------|----------|
+| `/sabrimmo-stats` | Base/derived stats, EXP tables, leveling, class/job system, stat allocation |
+| `/sabrimmo-combat` | Physical/magical damage pipeline, elements, size/race, critical hits, ASPD |
+| `/sabrimmo-skills` | Skill trees, cast times, cooldowns, SP costs, 86+ skill definitions |
+| `/sabrimmo-items` | Inventory, equipment slots, weapon types, refining, card system, weight |
+| `/sabrimmo-npcs` | NPC types, dialogue trees, shops, Kafra, quests, job change |
+| `/sabrimmo-party-guild` | Party (12 max), guild (Emperium), EXP sharing, guild skills |
+| `/sabrimmo-pvp-woe` | PvP maps, War of Emperium, castle siege, battlegrounds |
+| `/sabrimmo-economy` | Zeny, trading, vending, buying stores, storage, mail, anti-duplication |
+| `/sabrimmo-companions` | Pets (34 types), homunculus, mercenaries, falcon, cart, mounts |
+| `/sabrimmo-audio` | BGM per zone, SFX categories, UE5 Sound Classes, MetaSounds |
+| `/sabrimmo-art` | Character models, hair system, animations, monster pipeline, LOD |
+| `/sabrimmo-zone` | Zones, maps, warp portals, Kafra NPCs, zone configuration |
+| `/sabrimmo-ui` | Slate UI creation, RO brown/gold theme, drag/resize, HUD panels |
+| `/sabrimmo-target-skill` | Click-to-cast targeting, skill hotbar integration |
+| `/sabrimmo-click-interact` | Left-click interactable actors (NPCs, chests, etc.) |
+| `/sabrimmo-skills-vfx` | Skill VFX, Niagara effects, casting circles, warp portal VFX |
+
+### Utility Skills
 | Skill | Use when |
 |-------|----------|
 | `/debugger` | Crashes, logic errors, failed connections |
-| `/full-stack` | `index.js` changes, DB schema, REST endpoints |
-| `/realtime` | Socket.io events, combat tick, position sync |
-| `/ui-architect` | UE5 Blueprint / Widget work (unrealMCP first) |
-| `/agent-architect` | Enemy AI, stat formulas, RO game systems |
-| `/enemy-ai` | Monster aggro, chase, attack, AI state machine, mode flags, per-monster AI codes |
-| `/planner` | Feature planning, development phases |
-| `/sabrimmo-ui` | Project-specific UI guidance |
-| `/sabrimmo-target-skill` | Set up RO-style click-to-cast targeting for a skill |
-| `/sabrimmo-click-interact` | Add new left-click interactable actors to the world (NPCs, chests, etc.) |
-| `/sabrimmo-zone` | Add new zones/levels/maps, warp portals, Kafra NPCs, zone configuration |
-| `/sabrimmo-skills-vfx` | Skill VFX system — Niagara effects, casting circles, warp portal VFX, adding VFX to new skills |
-| `/project-docs` | Load full project documentation context |
 | `/opus-45-thinking` | Complex multi-system architecture decisions |
+| `/code-quality` | C++/JS coding standards, refactoring, naming, completion audits |
+| `/security` | JWT auth, SQL injection, anti-cheat, rate limiting, input validation |
+| `/performance` | FPS optimization, tick rate tuning, query optimization, bandwidth |
+| `/test` | Quick server tests, Socket.io event validation |
+| `/tester` | Full QA, integration testing, cross-layer behavioral tests |
+| `/docs` | Documentation sync, changelog, docsNew/ updates |
+| `/prompt-engineer` | System prompts, skill definitions, Claude-specific patterns |
+| `/deep-research` | Multi-source web research with reasoning chains |
 
-### Key Documentation Files
+---
+
+## Key Documentation Files
 
 | Document | Path | Contains |
 |----------|------|----------|
@@ -197,3 +255,23 @@ Invoke with `/skill-name`. Located at `C:/Users/pladr/.claude/skills/`.
 | VFX Implementation Plan | `docsNew/05_Development/Skill_VFX_Implementation_Plan.md` | Niagara architecture, per-skill specs, RO visual reference |
 | VFX Execution Plan | `docsNew/05_Development/Skill_VFX_Execution_Plan.md` | Step-by-step build status, completion checklist |
 | VFX Research Findings | `docsNew/05_Development/Skill_VFX_Research_Findings.md` | 138-source research on RO effects, UE5 Niagara, AI tools |
+
+### RagnaCloneDocs Reference (RO Classic Game Design)
+
+| Design Doc | Implementation Doc | Covers |
+|-----------|-------------------|--------|
+| `00_Master_Build_Plan.md` | `00_Master_Implementation_Plan.md` | 13-phase roadmap, priorities, dependencies |
+| `01_Stats_Leveling_JobSystem.md` | `02_Stats_Class_System.md` | 6 stats, derived formulas, EXP tables, 30+ classes |
+| `02_Combat_System.md` | `03_Combat_System.md` | Physical/magical damage, elements, status effects |
+| `03_Skills_Magic_System.md` | `04_Skills_System.md` | 86+ skills, cast times, skill trees, SP costs |
+| `04_Monsters_EnemyAI.md` | `05_Enemy_Monster_System.md` | 509 monsters, AI codes, spawn zones, boss mechanics |
+| `05_PvP_GvG_WoE.md` | `06_PvP_WoE_System.md` | PvP maps, castle siege, Emperium, battlegrounds |
+| `06_Items_Equipment.md` | `07_Items_Equipment.md` | Items, equipment, refining, cards, weight |
+| `07_Social_Systems.md` | `08_Social_Systems.md` | Party, guild, friends, chat channels |
+| `08_NPCs_Quests.md` | `09_NPCs_Quests.md` | NPC types, quest system, shops, Kafra |
+| `09_Economy_Trading.md` | `10_Economy_Trading.md` | Zeny, vending, buying stores, storage |
+| `10_World_Zones_Navigation.md` | — | Zone design, world map, navigation |
+| `11_Multiplayer_Networking.md` | `01_Core_Architecture.md` | Socket.io, position sync, zone broadcasting |
+| `12_Pets_Homunculus_Companions.md` | `12_Companions_System.md` | Pets, homunculus, mercenaries, falcon |
+| `13_Audio_Sound_Design.md` | `13_Audio_System.md` | BGM, SFX, audio settings |
+| `14_Art_Visual_Style.md` | `14_Art_Pipeline.md` | Models, animations, hair, UI art |
