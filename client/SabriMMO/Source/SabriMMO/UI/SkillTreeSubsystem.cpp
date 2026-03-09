@@ -159,7 +159,7 @@ namespace GroundAoE
 		case 105: return { 500.f, FColor(255, 120,  30), 0.5f };  // Magnum Break — instant AoE burst
 		case 203: return { 300.f, FColor(180, 120, 255), 1.0f };  // Napalm Beat — ghost AoE
 		case 207: return { 500.f, FColor(255,  80,  30), 1.0f };  // Fire Ball — fire AoE explosion
-		case 209: return { 150.f, FColor(255,  50,  20), 10.f };  // Fire Wall — persists 10s
+		case 209: return {   0.f, FColor(255,  50,  20), 0.f  };  // Fire Wall — line effect, no circle
 		case 211: return { 100.f, FColor(255, 255, 255), 10.f };  // Safety Wall — persists 10s
 		case 212: {
 			// Thunderstorm: N=SkillLevel strikes staggered 300ms client-side + ~0.5s last strike animation
