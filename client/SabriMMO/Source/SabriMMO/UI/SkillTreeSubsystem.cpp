@@ -1,6 +1,7 @@
 // SkillTreeSubsystem.cpp — Implementation of the Skill Tree HUD subsystem
 
 #include "SkillTreeSubsystem.h"
+#include "CombatStatsSubsystem.h"
 #include "SSkillTreeWidget.h"
 #include "SSkillTargetingOverlay.h"
 #include "DrawDebugHelpers.h"
@@ -151,7 +152,7 @@ namespace GroundAoE
 	// Local AoE data — avoids cross-module calls to SkillVFXData (Live Coding safe)
 	// EffectDurationSec = how long the spell effect lasts AFTER cast completes
 	struct FAoEInfo { float Radius; FColor Color; float EffectDurationSec; };
-	static FAoEInfo GetAoEInfo(int32 SkillId)
+	static FAoEInfo GetAoEInfo(int32 SkillId, int32 SkillLevel = 1)
 	{
 		switch (SkillId)
 		{
@@ -160,7 +161,11 @@ namespace GroundAoE
 		case 207: return { 500.f, FColor(255,  80,  30), 1.0f };  // Fire Ball — fire AoE explosion
 		case 209: return { 150.f, FColor(255,  50,  20), 10.f };  // Fire Wall — persists 10s
 		case 211: return { 100.f, FColor(255, 255, 255), 10.f };  // Safety Wall — persists 10s
-		case 212: return { 500.f, FColor(180, 220,  80), 3.0f };  // Thunderstorm — rain lasts ~3s
+		case 212: {
+			// Thunderstorm: N=SkillLevel strikes staggered 300ms client-side + ~0.5s last strike animation
+			float EffectSec = FMath::Max(1, SkillLevel - 1) * 0.3f + 0.5f;
+			return { 500.f, FColor(180, 220,  80), EffectSec };
+		}
 		default:  return { 200.f, FColor(100, 200, 255), 2.0f };  // Default
 		}
 	}
@@ -388,6 +393,12 @@ void USkillTreeSubsystem::TryWrapSocketEvents()
 
 	BindNewEvent(TEXT("skill:cooldown_started"),
 		[this](const TSharedPtr<FJsonValue>& D) { HandleSkillCooldownStarted(D); });
+
+	// --- Events that dismiss the ground AoE circle (cast rejected/failed/interrupted) ---
+	auto DismissCircle = [this](const TSharedPtr<FJsonValue>&) { GroundAoE::StopDrawing(GetWorld()); };
+	BindNewEvent(TEXT("combat:out_of_range"), DismissCircle);  // pre-cast range check failed
+	BindNewEvent(TEXT("skill:cast_failed"), DismissCircle);    // cast completed but execution failed
+	BindNewEvent(TEXT("skill:cast_interrupted"), DismissCircle);  // cast was interrupted
 
 	// Wrap hotbar:alldata — BP_SocketManager already handles it (PopulateHotbarFromServer),
 	// so we use WrapExistingEvent to chain our handler AFTER the BP handler runs.
@@ -1037,6 +1048,9 @@ void USkillTreeSubsystem::HandleSkillError(const TSharedPtr<FJsonValue>& Data)
 	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
 	const TSharedPtr<FJsonObject>& Obj = *ObjPtr;
 
+	// Dismiss ground AoE circle on any skill error
+	GroundAoE::StopDrawing(GetWorld());
+
 	FString Message;
 	Obj->TryGetStringField(TEXT("message"), Message);
 
@@ -1530,11 +1544,21 @@ void USkillTreeSubsystem::HandleTargetingClick()
 			const FVector GroundPos = HitResult.ImpactPoint;
 			const int32 SkillToUse = PendingSkillId;
 
-			// Look up cast time from skill entry + effect duration
+			// Look up cast time (DEX-modified) + effect duration (level-dependent)
 			const FSkillEntry* Entry = FindSkillEntry(SkillToUse);
-			float CastTimeSec = Entry ? (Entry->CastTime / 1000.f) : 0.f;
-			GroundAoE::FAoEInfo AoEInfo = GroundAoE::GetAoEInfo(SkillToUse);
-			float TotalDuration = CastTimeSec + AoEInfo.EffectDurationSec;
+			int32 BaseCastTimeMs = Entry ? Entry->CastTime : 0;
+			int32 SkillLevel = Entry ? FMath::Max(1, Entry->CurrentLevel) : 1;
+
+			// Apply DEX cast time reduction: ActualCastTime = Base * (1 - DEX/150)
+			int32 PlayerDex = 1;
+			if (UCombatStatsSubsystem* CSS = World->GetSubsystem<UCombatStatsSubsystem>())
+			{
+				PlayerDex = FMath::Max(1, CSS->DEX);
+			}
+			float ActualCastTimeSec = FMath::Max(0.f, (BaseCastTimeMs / 1000.f) * (1.f - PlayerDex / 150.f));
+
+			GroundAoE::FAoEInfo AoEInfo = GroundAoE::GetAoEInfo(SkillToUse, SkillLevel);
+			float TotalDuration = ActualCastTimeSec + AoEInfo.EffectDurationSec;
 
 			// Lock circle at cast position — persists until spell effect ends
 			GroundAoE::LockAndDismissAfter(World, GroundPos, TotalDuration);
@@ -1548,8 +1572,8 @@ void USkillTreeSubsystem::HandleTargetingClick()
 
 			UseSkillOnGround(SkillToUse, GroundPos);
 
-			UE_LOG(LogSkillTree, Log, TEXT("Targeting executed: skill %d at ground (%.0f, %.0f, %.0f) — circle persists %.1fs"),
-				SkillToUse, GroundPos.X, GroundPos.Y, GroundPos.Z, TotalDuration);
+			UE_LOG(LogSkillTree, Log, TEXT("Targeting executed: skill %d Lv%d at ground (%.0f, %.0f, %.0f) — cast %.1fs (DEX %d) + effect %.1fs = circle %.1fs"),
+				SkillToUse, SkillLevel, GroundPos.X, GroundPos.Y, GroundPos.Z, ActualCastTimeSec, PlayerDex, AoEInfo.EffectDurationSec, TotalDuration);
 		}
 		else
 		{
