@@ -329,9 +329,13 @@ void USkillVFXSubsystem::HandleCastStart(const TSharedPtr<FJsonValue>& Data)
 	const TSharedPtr<FJsonObject>& Obj = *ObjPtr;
 
 	double CasterIdD = 0, SkillIdD = 0, CastTimeD = 0;
+	double CasterXD = 0, CasterYD = 0, CasterZD = 0;
 	Obj->TryGetNumberField(TEXT("casterId"), CasterIdD);
 	Obj->TryGetNumberField(TEXT("skillId"), SkillIdD);
 	Obj->TryGetNumberField(TEXT("actualCastTime"), CastTimeD);
+	Obj->TryGetNumberField(TEXT("casterX"), CasterXD);
+	Obj->TryGetNumberField(TEXT("casterY"), CasterYD);
+	Obj->TryGetNumberField(TEXT("casterZ"), CasterZD);
 
 	const int32 CasterId = static_cast<int32>(CasterIdD);
 	const int32 SkillId = static_cast<int32>(SkillIdD);
@@ -343,8 +347,14 @@ void USkillVFXSubsystem::HandleCastStart(const TSharedPtr<FJsonValue>& Data)
 	const FSkillVFXConfig& Config = SkillVFXDataHelper::GetSkillVFXConfig(SkillId);
 
 	// RO style: casting circle always appears at the CASTER's feet.
-	// The circle indicates who is casting, not where the spell will land.
+	// Try actor location first (accurate real-time position), fall back to
+	// event coordinates (casterX/Y/Z) for remote players whose actors
+	// may not have a PlayerId tag.
 	FVector CircleLocation = GetActorLocationById(CasterId, false);
+	if (CircleLocation.IsZero())
+	{
+		CircleLocation = FVector(CasterXD, CasterYD, CasterZD);
+	}
 
 	if (!CircleLocation.IsZero())
 	{
@@ -502,6 +512,21 @@ void USkillVFXSubsystem::HandleSkillEffectDamage(const TSharedPtr<FJsonValue>& D
 	case ESkillVFXTemplate::HealFlash:
 		SpawnHealFlash(TargetLoc, Config);
 		break;
+
+	case ESkillVFXTemplate::SelfBuff:
+	{
+		// Find target actor and spawn attached (same as HandleBuffApplied SelfBuff path)
+		AActor* SelfBuffActor = FindPlayerActorById(static_cast<int32>(TargetIdD));
+		if (SelfBuffActor)
+		{
+			SpawnSelfBuff(SelfBuffActor, Config, SkillId, static_cast<int32>(TargetIdD));
+		}
+		else
+		{
+			SpawnVFXAtLocation(Config, TargetLoc);
+		}
+		break;
+	}
 
 	case ESkillVFXTemplate::TargetDebuff:
 	{

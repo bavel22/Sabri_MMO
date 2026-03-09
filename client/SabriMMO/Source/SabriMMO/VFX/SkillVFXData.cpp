@@ -1,131 +1,323 @@
 // SkillVFXData.cpp — Skill VFX config registry.
 // Rebuilt every call (no static caching) so Live Coding patches take effect immediately.
+//
+// ===== HOW TO ADD A NEW SKILL VFX =====
+//
+// 1. Copy any existing block below (pick one with a similar template type)
+// 2. Change the SkillId and comment
+// 3. Set only the fields that differ from defaults — everything else is already sensible
+// 4. Run PIE — check LogSkillVFX output for asset load warnings
+//
+// Template types:
+//   BoltFromSky     — N bolts strike from above (Cold/Fire/Lightning Bolt)
+//   Projectile      — Travels from attacker to target (Fire Ball, Soul Strike)
+//   AoEImpact       — One-shot burst at location (Bash, Magnum Break)
+//   GroundPersistent — Looping ground effect (Fire Wall, Safety Wall)
+//   GroundAoERain   — Staggered strikes in AoE (Thunderstorm)
+//   SelfBuff        — Aura on caster (Endure, Sight)
+//   TargetDebuff    — Effect on target (Provoke, Frost Diver, Stone Curse)
+//   HealFlash       — Quick heal visual (First Aid)
+//
+// Available Niagara assets (already in project):
+//   /Game/Free_Magic/VFX_Niagara/NS_Free_Magic_Buff
+//   /Game/Free_Magic/VFX_Niagara/NS_Free_Magic_Hit1
+//   /Game/Free_Magic/VFX_Niagara/NS_Free_Magic_Hit2
+//   /Game/Free_Magic/VFX_Niagara/NS_Free_Magic_Projectile1
+//   /Game/Free_Magic/VFX_Niagara/NS_Free_Magic_Area1
+//   /Game/Free_Magic/VFX_Niagara/NS_Free_Magic_Circle1
+//   /Game/Free_Magic/VFX_Niagara/NS_Free_Magic_Circle2
+//   /Game/Mixed_Magic_VFX_Pack/VFX/NS_Dark_Mist
+//   /Game/Mixed_Magic_VFX_Pack/VFX/NS_Dark_Solo_Impact
+//   /Game/Mixed_Magic_VFX_Pack/VFX/NS_Lightning_Strike
+//   /Game/Mixed_Magic_VFX_Pack/VFX/NS_Magma_Shot
+//   /Game/Mixed_Magic_VFX_Pack/VFX/NS_Magic_Bubbles
+//   /Game/Mixed_Magic_VFX_Pack/VFX/NS_Potion
+//   /Game/Mixed_Magic_VFX_Pack/VFX/Sperate_VFX/NS_Magma_Shot_Impact
+//   /Game/Mixed_Magic_VFX_Pack/VFX/Sperate_VFX/NS_Magma_Shot_Projectile
+//   /Game/Vefects/Zap_VFX/VFX/Zap/Particles/NS_Zap_03_Yellow
+//   /Game/Knife_light/VFX/NE_attack01
+//
+// Available Cascade assets (InfinityBlade — verify these exist in your project!):
+//   /Game/InfinityBladeEffects/Effects/FX_Archive/P_Enrage_Base
+//   /Game/InfinityBladeEffects/Effects/FX_Monsters/FX_Monster_Elemental/ICE/P_Elemental_Ice_Proj
+//   /Game/InfinityBladeEffects/Effects/FX_Monsters/FX_Monster_Spider/ICE/P_Ice_Proj_charge_01
+//   /Game/InfinityBladeEffects/Effects/FX_Monsters/FX_Monster_Elemental/Fire/P_ElementalFire_Lg
+//   /Game/InfinityBladeEffects/Effects/FX_Ambient/Fire/P_Env_Fire_Grate_01
+//   /Game/InfinityBladeEffects/Effects/FX_Mobile/Misc/P_levelUp_Detail
+//
 
 #include "SkillVFXData.h"
+
+// Helper: create a config with just the required fields, everything else defaults.
+// Use named-field style: set C.Field = value for anything non-default.
+static void AddConfig(TMap<int32, FSkillVFXConfig>& Configs, FSkillVFXConfig C)
+{
+	// Auto-derive casting circle color from element if not explicitly set
+	if (C.bUseCastingCircle && C.CastingCircleColor == FLinearColor(0.3f, 0.8f, 1.0f, 1.0f))
+	{
+		C.CastingCircleColor = SkillVFXDataHelper::GetElementColor(C.Element);
+	}
+	// Auto-set casting circle radius from AoE radius
+	if (C.bUseCastingCircle && C.CastingCircleRadius == 200.f && C.AoERadius > 0.f)
+	{
+		C.CastingCircleRadius = C.AoERadius;
+	}
+	Configs.Add(C.SkillId, C);
+}
 
 static TMap<int32, FSkillVFXConfig> BuildSkillVFXConfigs()
 {
 	TMap<int32, FSkillVFXConfig> Configs;
 
-	auto Add = [&](int32 Id, ESkillVFXTemplate Tmpl, FLinearColor Primary,
-		const FString& Elem, bool bCastCircle = false,
-		float AoE = 0.f, bool bLoop = false, float ProjSpeed = 2000.f,
-		float BoltHeight = 500.f,
-		const FString& VFXOverride = TEXT(""), bool bCascade = false,
-		float InScale = 1.f, bool bSelfCenter = false, float CascadeLife = 0.f)
+	// =====================================================================
+	//  NOVICE
+	// =====================================================================
+
+	// First Aid (2) — Green heal sparkle on self
 	{
 		FSkillVFXConfig C;
-		C.SkillId = Id;
-		C.Template = Tmpl;
-		C.PrimaryColor = Primary;
-		C.Element = Elem;
-		C.bUseCastingCircle = bCastCircle;
-		C.CastingCircleColor = SkillVFXDataHelper::GetElementColor(Elem);
-		C.CastingCircleRadius = (AoE > 0.f) ? AoE : 150.f;
-		C.AoERadius = AoE;
-		C.bLooping = bLoop;
-		C.ProjectileSpeed = ProjSpeed;
-		C.BoltSpawnHeight = BoltHeight;
-		C.VFXOverridePath = VFXOverride;
-		C.bIsCascade = bCascade;
-		C.Scale = InScale;
-		C.bSelfCentered = bSelfCenter;
-		C.CascadeLifetime = CascadeLife;
-		Configs.Add(Id, C);
-	};
+		C.SkillId    = 2;
+		C.Template   = ESkillVFXTemplate::HealFlash;
+		C.PrimaryColor = FLinearColor(0.2f, 0.9f, 0.3f, 1.f);  // green
+		C.Element    = TEXT("neutral");
+		C.Scale      = 200.0f;  // NS_Potion baseline is tiny
+		C.VFXOverridePath = TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Potion.NS_Potion");
+		AddConfig(Configs, C);
+	}
 
-	// ========= NOVICE =========
-	// First Aid — NS_Potion, green, on self, scale 200.0 for testing visibility
-	Add(2, ESkillVFXTemplate::HealFlash, FLinearColor(0.2f, 0.9f, 0.3f, 1.f), TEXT("neutral"),
-		false, 0.f, false, 0.f, 0.f,
-		TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Potion.NS_Potion"), false, 200.0f);
+	// =====================================================================
+	//  SWORDSMAN
+	// =====================================================================
 
-	// ========= SWORDSMAN =========
-	// Bash — NE_attack01 melee slash, at enemy
-	Add(103, ESkillVFXTemplate::AoEImpact, FLinearColor(1.f, 1.f, 0.8f, 1.f), TEXT("neutral"),
-		false, 0.f, false, 0.f, 0.f,
-		TEXT("/Game/Knife_light/VFX/NE_attack01.NE_attack01"), false, 1.5f);
+	// Bash (103) — Melee slash impact at enemy
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 103;
+		C.Template   = ESkillVFXTemplate::AoEImpact;
+		C.PrimaryColor = FLinearColor(1.f, 1.f, 0.8f, 1.f);  // warm white
+		C.Element    = TEXT("neutral");
+		C.Scale      = 1.5f;
+		C.VFXOverridePath = TEXT("/Game/Knife_light/VFX/NE_attack01.NE_attack01");
+		AddConfig(Configs, C);
+	}
 
-	// Provoke — P_Enrage_Base (Cascade), above enemy head, 3s lifetime
-	Add(104, ESkillVFXTemplate::TargetDebuff, FLinearColor(1.f, 0.1f, 0.1f, 1.f), TEXT("neutral"),
-		false, 0.f, false, 0.f, 0.f,
-		TEXT("/Game/InfinityBladeEffects/Effects/FX_Archive/P_Enrage_Base.P_Enrage_Base"), true, 3.0f, false, 3.0f);
+	// Provoke (104) — Red anger effect on enemy, persists 3s
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 104;
+		C.Template   = ESkillVFXTemplate::TargetDebuff;
+		C.PrimaryColor = FLinearColor(1.f, 0.1f, 0.1f, 1.f);  // red
+		C.Element    = TEXT("neutral");
+		C.Scale      = 3.0f;
+		C.CascadeLifetime = 3.0f;
+		C.VFXOverridePath = TEXT("/Game/InfinityBladeEffects/Effects/FX_Archive/P_Enrage_Base.P_Enrage_Base");
+		C.bIsCascade = true;
+		AddConfig(Configs, C);
+	}
 
-	// Magnum Break — NS_Free_Magic_Buff, SELF-CENTERED AoE
-	Add(105, ESkillVFXTemplate::AoEImpact, FLinearColor(1.f, 0.3f, 0.0f, 1.f), TEXT("fire"),
-		false, 500.f, false, 0.f, 0.f,
-		TEXT("/Game/Free_Magic/VFX_Niagara/NS_Free_Magic_Buff.NS_Free_Magic_Buff"), false, 1.0f, true);
+	// Magnum Break (105) — Fire AoE burst centered on caster
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 105;
+		C.Template   = ESkillVFXTemplate::AoEImpact;
+		C.PrimaryColor = FLinearColor(1.f, 0.3f, 0.0f, 1.f);  // orange/fire
+		C.Element    = TEXT("fire");
+		C.AoERadius  = 500.f;
+		C.bSelfCentered = true;
+		C.VFXOverridePath = TEXT("/Game/Free_Magic/VFX_Niagara/NS_Free_Magic_Buff.NS_Free_Magic_Buff");
+		AddConfig(Configs, C);
+	}
 
-	// Endure — P_Ice_Proj_charge_01, plays once, scale 2.0 for visibility
-	Add(106, ESkillVFXTemplate::SelfBuff, FLinearColor(1.f, 0.9f, 0.3f, 1.f), TEXT("neutral"),
-		false, 0.f, false, 0.f, 0.f,
-		TEXT("/Game/InfinityBladeEffects/Effects/FX_Monsters/FX_Monster_Spider/ICE/P_Ice_Proj_charge_01.P_Ice_Proj_charge_01"), true, 2.0f, false, 1.5f);
+	// Endure (106) — Brief golden aura on self
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 106;
+		C.Template   = ESkillVFXTemplate::SelfBuff;
+		C.PrimaryColor = FLinearColor(1.f, 0.9f, 0.3f, 1.f);  // gold
+		C.Element    = TEXT("neutral");
+		C.Scale      = 2.0f;
+		C.CascadeLifetime = 1.5f;
+		C.VFXOverridePath = TEXT("/Game/InfinityBladeEffects/Effects/FX_Monsters/FX_Monster_Spider/ICE/P_Ice_Proj_charge_01.P_Ice_Proj_charge_01");
+		C.bIsCascade = true;
+		AddConfig(Configs, C);
+	}
 
-	// ========= MAGE =========
-	// Cold Bolt — P_Elemental_Ice_Proj, strikes from above, 0.5s lifetime per bolt
-	Add(200, ESkillVFXTemplate::BoltFromSky, FLinearColor(0.3f, 0.8f, 1.f, 1.f), TEXT("water"), true,
-		0.f, false, 2000.f, 500.f,
-		TEXT("/Game/InfinityBladeEffects/Effects/FX_Monsters/FX_Monster_Elemental/ICE/P_Elemental_Ice_Proj.P_Elemental_Ice_Proj"), true, 1.0f, false, 0.5f);
+	// =====================================================================
+	//  MAGE
+	// =====================================================================
 
-	// Fire Bolt — NS_Magma_Shot_Projectile, scale 3.0 (base is tiny)
-	Add(201, ESkillVFXTemplate::BoltFromSky, FLinearColor(1.f, 0.3f, 0.0f, 1.f), TEXT("fire"), true,
-		0.f, false, 2000.f, 500.f,
-		TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/Sperate_VFX/NS_Magma_Shot_Projectile.NS_Magma_Shot_Projectile"), false, 3.0f);
+	// Cold Bolt (200) — Ice bolts from sky, with casting circle
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 200;
+		C.Template   = ESkillVFXTemplate::BoltFromSky;
+		C.PrimaryColor = FLinearColor(0.3f, 0.8f, 1.f, 1.f);  // cyan/ice
+		C.Element    = TEXT("water");
+		C.bUseCastingCircle = true;
+		C.BoltSpawnHeight = 500.f;
+		C.CascadeLifetime = 0.5f;  // bolt linger time
+		C.VFXOverridePath = TEXT("/Game/InfinityBladeEffects/Effects/FX_Monsters/FX_Monster_Elemental/ICE/P_Elemental_Ice_Proj.P_Elemental_Ice_Proj");
+		C.bIsCascade = true;
+		AddConfig(Configs, C);
+	}
 
-	// Lightning Bolt — NS_Zap_03_Yellow, strikes from above, 1s linger at impact
-	Add(202, ESkillVFXTemplate::BoltFromSky, FLinearColor(1.f, 1.f, 0.5f, 1.f), TEXT("wind"), true,
-		0.f, false, 2000.f, 100.f,
-		TEXT("/Game/Vefects/Zap_VFX/VFX/Zap/Particles/NS_Zap_03_Yellow.NS_Zap_03_Yellow"), false, 1.0f, false, 1.0f);
+	// Fire Bolt (201) — Fire bolts from sky, with casting circle
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 201;
+		C.Template   = ESkillVFXTemplate::BoltFromSky;
+		C.PrimaryColor = FLinearColor(1.f, 0.3f, 0.0f, 1.f);  // orange/fire
+		C.Element    = TEXT("fire");
+		C.bUseCastingCircle = true;
+		C.BoltSpawnHeight = 500.f;
+		C.Scale      = 3.0f;  // NS_Magma_Shot_Projectile baseline is tiny
+		C.VFXOverridePath = TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/Sperate_VFX/NS_Magma_Shot_Projectile.NS_Magma_Shot_Projectile");
+		AddConfig(Configs, C);
+	}
 
-	// Napalm Beat — NS_Dark_Solo_Impact, on enemy
-	Add(203, ESkillVFXTemplate::AoEImpact, FLinearColor(0.6f, 0.2f, 0.8f, 1.f), TEXT("ghost"),
-		false, 300.f, false, 0.f, 0.f,
-		TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Dark_Solo_Impact.NS_Dark_Solo_Impact"), false, 1.0f);
+	// Lightning Bolt (202) — Electric bolts from sky, with casting circle
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 202;
+		C.Template   = ESkillVFXTemplate::BoltFromSky;
+		C.PrimaryColor = FLinearColor(1.f, 1.f, 0.5f, 1.f);  // yellow
+		C.Element    = TEXT("wind");
+		C.bUseCastingCircle = true;
+		C.BoltSpawnHeight = 100.f;  // shorter drop for lightning feel
+		C.CascadeLifetime = 1.0f;   // linger at impact
+		C.VFXOverridePath = TEXT("/Game/Vefects/Zap_VFX/VFX/Zap/Particles/NS_Zap_03_Yellow.NS_Zap_03_Yellow");
+		AddConfig(Configs, C);
+	}
 
-	// Sight — P_ElementalFire_Lg, plays once, scale 1.5 for visibility
-	Add(205, ESkillVFXTemplate::SelfBuff, FLinearColor(1.f, 0.4f, 0.1f, 1.f), TEXT("fire"),
-		false, 0.f, false, 0.f, 0.f,
-		TEXT("/Game/InfinityBladeEffects/Effects/FX_Monsters/FX_Monster_Elemental/Fire/P_ElementalFire_Lg.P_ElementalFire_Lg"), true, 1.5f, false, 2.0f);
+	// Napalm Beat (203) — Ghost AoE impact on enemy
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 203;
+		C.Template   = ESkillVFXTemplate::AoEImpact;
+		C.PrimaryColor = FLinearColor(0.6f, 0.2f, 0.8f, 1.f);  // purple/ghost
+		C.Element    = TEXT("ghost");
+		C.AoERadius  = 300.f;
+		C.VFXOverridePath = TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Dark_Solo_Impact.NS_Dark_Solo_Impact");
+		AddConfig(Configs, C);
+	}
 
-	// Stone Curse — NS_Dark_Mist, persists, scale 0.5 (enemy-sized)
-	Add(206, ESkillVFXTemplate::TargetDebuff, FLinearColor(0.4f, 0.4f, 0.4f, 1.f), TEXT("earth"),
-		true, 0.f, true, 0.f, 0.f,
-		TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Dark_Mist.NS_Dark_Mist"), false, 0.5f);
+	// Sight (205) — Fire aura around caster (reveals hidden)
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 205;
+		C.Template   = ESkillVFXTemplate::SelfBuff;
+		C.PrimaryColor = FLinearColor(1.f, 0.4f, 0.1f, 1.f);  // fire orange
+		C.Element    = TEXT("fire");
+		C.Scale      = 1.5f;
+		C.CascadeLifetime = 2.0f;
+		C.VFXOverridePath = TEXT("/Game/InfinityBladeEffects/Effects/FX_Monsters/FX_Monster_Elemental/Fire/P_ElementalFire_Lg.P_ElementalFire_Lg");
+		C.bIsCascade = true;
+		AddConfig(Configs, C);
+	}
 
-	// Fire Ball — NS_Magma_Shot projectile → NS_Magma_Shot_Impact explosion on arrival
-	// bSingleProjectile=true: only one projectile even though server emits per-target AoE damage
-	Add(207, ESkillVFXTemplate::Projectile, FLinearColor(1.f, 0.3f, 0.0f, 1.f), TEXT("fire"),
-		true, 500.f, false, 1500.f, 0.f,
-		TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Magma_Shot.NS_Magma_Shot"), false, 1.0f);
-	Configs[207].bSingleProjectile = true;
-	Configs[207].ImpactOverridePath = TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/Sperate_VFX/NS_Magma_Shot_Impact.NS_Magma_Shot_Impact");
+	// Stone Curse (206) — Dark mist on target, persists until removed
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 206;
+		C.Template   = ESkillVFXTemplate::TargetDebuff;
+		C.PrimaryColor = FLinearColor(0.4f, 0.4f, 0.4f, 1.f);  // grey/stone
+		C.Element    = TEXT("earth");
+		C.bUseCastingCircle = true;
+		C.bLooping   = true;
+		C.Scale      = 0.5f;  // enemy-sized
+		C.VFXOverridePath = TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Dark_Mist.NS_Dark_Mist");
+		AddConfig(Configs, C);
+	}
 
-	// Frost Diver — P_Ice_Proj_charge_01 (Cascade), persists, scale 1.5
-	// Uses Cascade instead of Niagara because NS_Ice_Mist uses world-space simulation
-	// and ignores component scale entirely. Cascade properly respects SpawnEmitterAttached scale.
-	Add(208, ESkillVFXTemplate::TargetDebuff, FLinearColor(0.3f, 0.8f, 1.f, 1.f), TEXT("water"),
-		true, 0.f, true, 0.f, 0.f,
-		TEXT("/Game/InfinityBladeEffects/Effects/FX_Monsters/FX_Monster_Spider/ICE/P_Ice_Proj_charge_01.P_Ice_Proj_charge_01"), true, 1.5f, false, 5.0f);
+	// Fire Ball (207) — Single projectile to primary target, then AoE explosion
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 207;
+		C.Template   = ESkillVFXTemplate::Projectile;
+		C.PrimaryColor = FLinearColor(1.f, 0.3f, 0.0f, 1.f);  // fire
+		C.Element    = TEXT("fire");
+		C.bUseCastingCircle = true;
+		C.AoERadius  = 500.f;
+		C.ProjectileSpeed = 1500.f;
+		C.bSingleProjectile = true;  // only 1 projectile even with AoE multi-damage
+		C.VFXOverridePath = TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Magma_Shot.NS_Magma_Shot");
+		C.ImpactOverridePath = TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/Sperate_VFX/NS_Magma_Shot_Impact.NS_Magma_Shot_Impact");
+		AddConfig(Configs, C);
+	}
 
-	// Fire Wall — P_Env_Fire_Grate_01 (Cascade), looping ground fire
-	Add(209, ESkillVFXTemplate::GroundPersistent, FLinearColor(1.f, 0.3f, 0.0f, 1.f), TEXT("fire"),
-		true, 150.f, true, 0.f, 0.f,
-		TEXT("/Game/InfinityBladeEffects/Effects/FX_Ambient/Fire/P_Env_Fire_Grate_01.P_Env_Fire_Grate_01"), true, 1.5f);
+	// Frost Diver (208) — Ice effect on target, persists for freeze duration
+	// Uses Cascade because NS_Ice_Mist uses world-space simulation and ignores component scale.
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 208;
+		C.Template   = ESkillVFXTemplate::TargetDebuff;
+		C.PrimaryColor = FLinearColor(0.3f, 0.8f, 1.f, 1.f);  // cyan/ice
+		C.Element    = TEXT("water");
+		C.bUseCastingCircle = true;
+		C.bLooping   = true;
+		C.Scale      = 1.5f;
+		C.CascadeLifetime = 5.0f;
+		C.VFXOverridePath = TEXT("/Game/InfinityBladeEffects/Effects/FX_Monsters/FX_Monster_Spider/ICE/P_Ice_Proj_charge_01.P_Ice_Proj_charge_01");
+		C.bIsCascade = true;
+		AddConfig(Configs, C);
+	}
 
-	// Soul Strike — NS_Magic_Bubbles, projectile player→enemy, per hit
-	Add(210, ESkillVFXTemplate::Projectile, FLinearColor(0.6f, 0.3f, 0.9f, 1.f), TEXT("ghost"),
-		false, 0.f, false, 1500.f, 0.f,
-		TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Magic_Bubbles.NS_Magic_Bubbles"), false, 1.0f);
+	// Fire Wall (209) — Persistent looping fire on ground
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 209;
+		C.Template   = ESkillVFXTemplate::GroundPersistent;
+		C.PrimaryColor = FLinearColor(1.f, 0.3f, 0.0f, 1.f);  // fire
+		C.Element    = TEXT("fire");
+		C.bUseCastingCircle = true;
+		C.AoERadius  = 150.f;
+		C.bLooping   = true;
+		C.Scale      = 1.5f;
+		C.VFXOverridePath = TEXT("/Game/InfinityBladeEffects/Effects/FX_Ambient/Fire/P_Env_Fire_Grate_01.P_Env_Fire_Grate_01");
+		C.bIsCascade = true;
+		AddConfig(Configs, C);
+	}
 
-	// Safety Wall — P_levelUp_Detail, ground persistent, 1.0 scale
-	Add(211, ESkillVFXTemplate::GroundPersistent, FLinearColor(1.f, 0.4f, 0.6f, 1.f), TEXT("neutral"),
-		true, 100.f, true, 0.f, 0.f,
-		TEXT("/Game/InfinityBladeEffects/Effects/FX_Mobile/Misc/P_levelUp_Detail.P_levelUp_Detail"), true, 1.0f, false, 60.f);
+	// Soul Strike (210) — Ghost projectiles from player to enemy, one per hit
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 210;
+		C.Template   = ESkillVFXTemplate::Projectile;
+		C.PrimaryColor = FLinearColor(0.6f, 0.3f, 0.9f, 1.f);  // purple/ghost
+		C.Element    = TEXT("ghost");
+		C.ProjectileSpeed = 1500.f;
+		C.VFXOverridePath = TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Magic_Bubbles.NS_Magic_Bubbles");
+		AddConfig(Configs, C);
+	}
 
-	// Thunderstorm — NS_Lightning_Strike, per-hit in AoE
-	Add(212, ESkillVFXTemplate::GroundAoERain, FLinearColor(1.f, 1.f, 0.5f, 1.f), TEXT("wind"),
-		true, 500.f, false, 0.f, 0.f,
-		TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Lightning_Strike.NS_Lightning_Strike"), false, 1.0f);
+	// Safety Wall (211) — Protective circle on ground, looping
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 211;
+		C.Template   = ESkillVFXTemplate::GroundPersistent;
+		C.PrimaryColor = FLinearColor(1.f, 0.4f, 0.6f, 1.f);  // pink
+		C.Element    = TEXT("neutral");
+		C.bUseCastingCircle = true;
+		C.AoERadius  = 100.f;
+		C.bLooping   = true;
+		C.CascadeLifetime = 60.f;
+		C.VFXOverridePath = TEXT("/Game/InfinityBladeEffects/Effects/FX_Mobile/Misc/P_levelUp_Detail.P_levelUp_Detail");
+		C.bIsCascade = true;
+		AddConfig(Configs, C);
+	}
+
+	// Thunderstorm (212) — Lightning strikes raining in AoE
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 212;
+		C.Template   = ESkillVFXTemplate::GroundAoERain;
+		C.PrimaryColor = FLinearColor(1.f, 1.f, 0.5f, 1.f);  // yellow/wind
+		C.Element    = TEXT("wind");
+		C.bUseCastingCircle = true;
+		C.AoERadius  = 500.f;
+		C.VFXOverridePath = TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Lightning_Strike.NS_Lightning_Strike");
+		AddConfig(Configs, C);
+	}
 
 	return Configs;
 }
