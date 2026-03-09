@@ -176,8 +176,9 @@ namespace GroundAoE
 
 // ============================================================
 // Walk-to-Cast — cpp-local state (no header changes needed)
-// When a ground-targeted skill is clicked out of range, the player
+// When a targeted skill is clicked out of range, the player
 // walks toward the target and auto-casts when close enough.
+// Supports both ground-target and single-target (enemy) skills.
 // ============================================================
 namespace WalkToCast
 {
@@ -189,6 +190,12 @@ namespace WalkToCast
 		FTimerHandle CheckTimer;
 		bool bActive = false;
 		bool bWaitingForStop = false;  // true = in range, waiting for velocity to reach zero
+
+		// Single-target fields (walk toward enemy, then UseSkillOnTarget)
+		bool bIsSingleTarget = false;
+		int32 TargetId = 0;
+		bool bTargetIsEnemy = false;
+		TWeakObjectPtr<AActor> TargetActor;  // track the enemy actor for live position
 	};
 
 	static TMap<UWorld*, FPending>& GetMap()
@@ -228,7 +235,10 @@ namespace WalkToCast
 		if (!P.bActive) return;
 		P.bActive = false;
 		P.bWaitingForStop = false;
+		P.bIsSingleTarget = false;
 		P.SkillId = 0;
+		P.TargetId = 0;
+		P.TargetActor.Reset();
 		World->GetTimerManager().ClearTimer(P.CheckTimer);
 		StopMovement(World);
 		UE_LOG(LogSkillTree, Log, TEXT("WalkToCast cancelled"));
@@ -1599,10 +1609,114 @@ void USkillTreeSubsystem::HandleTargetingClick()
 				if (EnemyId > 0)
 				{
 					const int32 SkillToUse = PendingSkillId;
-					CancelTargeting();
-					UseSkillOnTarget(SkillToUse, EnemyId, /*bIsEnemy=*/ true);
+					const FSkillEntry* Entry = FindSkillEntry(SkillToUse);
+					const float SkillRange = Entry ? static_cast<float>(Entry->Range) : 0.f;
 
-					UE_LOG(LogSkillTree, Log, TEXT("Targeting executed: skill %d on enemy %d"), SkillToUse, EnemyId);
+					APawn* Pawn = PC->GetPawn();
+					const float Dist2D = Pawn ? FVector::Dist2D(Pawn->GetActorLocation(), HitActor->GetActorLocation()) : 0.f;
+					const float RangeTolerance = 30.f;
+
+					if (SkillRange > 0.f && Pawn && Dist2D > SkillRange + RangeTolerance)
+					{
+						// Out of range — walk toward enemy and auto-cast when close enough
+						WalkToCast::FPending& P = WalkToCast::Get(World);
+						P.SkillId = SkillToUse;
+						P.GroundTarget = HitActor->GetActorLocation();  // initial enemy position
+						P.RequiredRange = SkillRange;
+						P.bActive = true;
+						P.bWaitingForStop = false;
+						P.bIsSingleTarget = true;
+						P.TargetId = EnemyId;
+						P.bTargetIsEnemy = true;
+						P.TargetActor = HitActor;
+
+						// Clear targeting UI
+						bIsInTargetingMode = false;
+						PendingSkillId = 0;
+						PendingSkillName.Empty();
+						PendingTargetingMode = ESkillTargetingMode::None;
+						HideTargetingOverlay();
+
+						// Start walking toward enemy
+						UAIBlueprintHelperLibrary::SimpleMoveToLocation(PC, HitActor->GetActorLocation());
+
+						// Poll distance at 50ms — two-phase: walk to range, then wait for stop
+						TWeakObjectPtr<USkillTreeSubsystem> WeakThis(this);
+						World->GetTimerManager().SetTimer(
+							P.CheckTimer,
+							FTimerDelegate::CreateLambda([WeakThis, World]()
+							{
+								if (!WeakThis.IsValid() || !World) return;
+								WalkToCast::FPending& WP = WalkToCast::Get(World);
+								if (!WP.bActive || !WP.bIsSingleTarget) return;
+
+								APlayerController* WPC = World->GetFirstPlayerController();
+								APawn* WPawn = WPC ? WPC->GetPawn() : nullptr;
+								if (!WPawn)
+								{
+									WalkToCast::Cancel(World);
+									return;
+								}
+
+								// Use live enemy position if actor is still valid
+								FVector EnemyPos = WP.GroundTarget;
+								if (WP.TargetActor.IsValid())
+								{
+									EnemyPos = WP.TargetActor->GetActorLocation();
+									WP.GroundTarget = EnemyPos;
+
+									// Update walk destination to track moving enemies
+									if (!WP.bWaitingForStop)
+									{
+										UAIBlueprintHelperLibrary::SimpleMoveToLocation(WPC, EnemyPos);
+									}
+								}
+
+								const float WDist = FVector::Dist2D(WPawn->GetActorLocation(), EnemyPos);
+
+								if (!WP.bWaitingForStop)
+								{
+									// Phase 1: walking toward enemy — check if we've reached range
+									if (WDist <= WP.RequiredRange + 30.f)
+									{
+										WP.bWaitingForStop = true;
+										WalkToCast::StopMovement(World);
+										UE_LOG(LogSkillTree, Log, TEXT("WalkToCast(single): reached range (%.0f), stopping"), WDist);
+									}
+								}
+								else
+								{
+									// Phase 2: waiting for pawn velocity to reach zero
+									const float Speed = WPawn->GetVelocity().Size();
+									if (Speed < 5.f)
+									{
+										const int32 CapturedSkillId = WP.SkillId;
+										const int32 CapturedTargetId = WP.TargetId;
+										const bool CapturedIsEnemy = WP.bTargetIsEnemy;
+										WP.bActive = false;
+										WP.bWaitingForStop = false;
+										WP.bIsSingleTarget = false;
+										WP.TargetActor.Reset();
+										World->GetTimerManager().ClearTimer(WP.CheckTimer);
+
+										WeakThis->UseSkillOnTarget(CapturedSkillId, CapturedTargetId, CapturedIsEnemy);
+										UE_LOG(LogSkillTree, Log, TEXT("WalkToCast(single): stopped, casting skill %d on target %d"),
+											CapturedSkillId, CapturedTargetId);
+									}
+								}
+							}),
+							0.05f, true);
+
+						UE_LOG(LogSkillTree, Log, TEXT("WalkToCast(single): skill %d on enemy %d out of range (%.0f > %.0f), walking"),
+							SkillToUse, EnemyId, Dist2D, SkillRange);
+					}
+					else
+					{
+						// In range — fire immediately
+						CancelTargeting();
+						UseSkillOnTarget(SkillToUse, EnemyId, /*bIsEnemy=*/ true);
+						UE_LOG(LogSkillTree, Log, TEXT("Targeting executed: skill %d on enemy %d"), SkillToUse, EnemyId);
+					}
 					return;
 				}
 			}
