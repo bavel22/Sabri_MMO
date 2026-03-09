@@ -3812,11 +3812,23 @@ io.on('connection', (socket) => {
             logger.info(`[SKILL-COMBAT] ${player.characterName} ENDURE Lv${learnedLevel}: +${mdefBonus} MDEF for ${buffDuration / 1000}s`);
 
             const endureZone = player.zone || 'prontera_south';
+            const endurePos = await getPlayerPosition(characterId);
             broadcastToZone(endureZone, 'skill:buff_applied', {
                 targetId: characterId, targetName: player.characterName, isEnemy: false,
                 casterId: characterId, casterName: player.characterName,
                 skillId, buffName: 'Endure', duration: buffDuration,
                 effects: { mdefBonus }
+            });
+            // Broadcast VFX zone-wide so other players see the effect
+            broadcastToZone(endureZone, 'skill:effect_damage', {
+                attackerId: characterId, attackerName: player.characterName,
+                targetId: characterId, targetName: player.characterName, isEnemy: false,
+                skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: 'neutral',
+                damage: 0, isCritical: false, isMiss: false, hitType: 'buff',
+                targetHealth: player.health, targetMaxHealth: player.maxHealth,
+                attackerX: endurePos?.x || 0, attackerY: endurePos?.y || 0, attackerZ: endurePos?.z || 0,
+                targetX: endurePos?.x || 0, targetY: endurePos?.y || 0, targetZ: endurePos?.z || 0,
+                timestamp: Date.now()
             });
 
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });

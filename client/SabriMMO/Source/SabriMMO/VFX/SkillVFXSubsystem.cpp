@@ -1532,6 +1532,10 @@ UNiagaraSystem* USkillVFXSubsystem::GetOrLoadNiagaraOverride(const FString& Path
 	if (TObjectPtr<UNiagaraSystem>* Found = NiagaraOverrideCache.Find(Path))
 		return *Found;
 	UNiagaraSystem* Loaded = LoadObject<UNiagaraSystem>(nullptr, *Path);
+	if (!Loaded)
+	{
+		UE_LOG(LogSkillVFX, Warning, TEXT("FAILED to load Niagara asset: %s — skill will have NO VFX!"), *Path);
+	}
 	NiagaraOverrideCache.Add(Path, Loaded);
 	return Loaded;
 }
@@ -1542,6 +1546,10 @@ UParticleSystem* USkillVFXSubsystem::GetOrLoadCascadeOverride(const FString& Pat
 	if (TObjectPtr<UParticleSystem>* Found = CascadeOverrideCache.Find(Path))
 		return *Found;
 	UParticleSystem* Loaded = LoadObject<UParticleSystem>(nullptr, *Path);
+	if (!Loaded)
+	{
+		UE_LOG(LogSkillVFX, Warning, TEXT("FAILED to load Cascade asset: %s — skill will have NO VFX!"), *Path);
+	}
 	CascadeOverrideCache.Add(Path, Loaded);
 	return Loaded;
 }
