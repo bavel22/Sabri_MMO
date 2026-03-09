@@ -291,10 +291,11 @@ void UDamageNumberSubsystem::HandleCombatDamage(const TSharedPtr<FJsonValue>& Da
 	const TSharedPtr<FJsonObject>& Obj = *ObjPtr;
 
 	// ---- Extract event fields ----
-	double AttackerIdD = 0, TargetIdD = 0, DamageD = 0;
+	double AttackerIdD = 0, TargetIdD = 0, DamageD = 0, HealAmountD = 0;
 	Obj->TryGetNumberField(TEXT("attackerId"), AttackerIdD);
 	Obj->TryGetNumberField(TEXT("targetId"), TargetIdD);
 	Obj->TryGetNumberField(TEXT("damage"), DamageD);
+	Obj->TryGetNumberField(TEXT("healAmount"), HealAmountD);
 
 	bool bIsCritical = false;
 	Obj->TryGetBoolField(TEXT("isCritical"), bIsCritical);
@@ -312,6 +313,7 @@ void UDamageNumberSubsystem::HandleCombatDamage(const TSharedPtr<FJsonValue>& Da
 	const int32 AttackerId = (int32)AttackerIdD;
 	const int32 TargetId = (int32)TargetIdD;
 	const int32 Damage = (int32)DamageD;
+	const int32 HealAmount = (int32)HealAmountD;
 
 	// ---- Extract target world position ----
 	double TX = 0, TY = 0, TZ = 0;
@@ -321,11 +323,14 @@ void UDamageNumberSubsystem::HandleCombatDamage(const TSharedPtr<FJsonValue>& Da
 
 	const FVector TargetWorldPos((float)TX, (float)TY, (float)TZ);
 
-	UE_LOG(LogDamageNumbers, Log, TEXT("HandleCombatDamage: attacker=%d target=%d dmg=%d crit=%d isEnemy=%d hitType=%s ele=%s pos=(%.0f,%.0f,%.0f)"),
-		AttackerId, TargetId, Damage, bIsCritical ? 1 : 0, bIsEnemy ? 1 : 0, *HitType, *Element, TX, TY, TZ);
+	UE_LOG(LogDamageNumbers, Log, TEXT("HandleCombatDamage: attacker=%d target=%d dmg=%d heal=%d crit=%d isEnemy=%d hitType=%s ele=%s pos=(%.0f,%.0f,%.0f)"),
+		AttackerId, TargetId, Damage, HealAmount, bIsCritical ? 1 : 0, bIsEnemy ? 1 : 0, *HitType, *Element, TX, TY, TZ);
+
+	// ---- For heals, use healAmount as the display value ----
+	const int32 DisplayValue = (HitType == TEXT("heal")) ? HealAmount : Damage;
 
 	// ---- Spawn damage number for ALL combat in view (RO-style) ----
-	SpawnDamagePop(Damage, bIsCritical, bIsEnemy, AttackerId, TargetId, TargetWorldPos, HitType, Element);
+	SpawnDamagePop(DisplayValue, bIsCritical, bIsEnemy, AttackerId, TargetId, TargetWorldPos, HitType, Element);
 }
 
 // ============================================================
@@ -379,7 +384,11 @@ void UDamageNumberSubsystem::SpawnDamagePop(
 	// Determine damage pop type from server hitType
 	EDamagePopType PopType;
 
-	if (HitType == TEXT("miss"))
+	if (HitType == TEXT("heal"))
+	{
+		PopType = EDamagePopType::Heal;
+	}
+	else if (HitType == TEXT("miss"))
 	{
 		PopType = EDamagePopType::Miss;
 	}

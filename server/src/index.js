@@ -3439,7 +3439,7 @@ io.on('connection', (socket) => {
                 attackerId: characterId, attackerName: player.characterName,
                 targetId: characterId, targetName: player.characterName, isEnemy: false,
                 skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: 'holy',
-                damage: 0, isCritical: false, isMiss: false, hitType: 'heal',
+                damage: 0, healAmount: healed, isCritical: false, isMiss: false, hitType: 'heal',
                 targetHealth: player.health, targetMaxHealth: player.maxHealth,
                 attackerX: attackerPos?.x || 0, attackerY: attackerPos?.y || 0, attackerZ: attackerPos?.z || 0,
                 targetX: attackerPos?.x || 0, targetY: attackerPos?.y || 0, targetZ: attackerPos?.z || 0,

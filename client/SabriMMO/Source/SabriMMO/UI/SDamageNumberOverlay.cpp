@@ -325,7 +325,7 @@ int32 SDamageNumberOverlay::OnPaint(
 		FLinearColor TintColor = GetFillColor(Entry.Type);
 
 		// Apply element tinting for non-neutral elemental attacks (blend toward element color)
-		if (!Entry.Element.IsEmpty() && Entry.Element != TEXT("neutral") && !bIsTextLabel)
+		if (!Entry.Element.IsEmpty() && Entry.Element != TEXT("neutral") && !bIsTextLabel && Entry.Type != EDamagePopType::Heal)
 		{
 			const FLinearColor EleTint = GetElementTint(Entry.Element);
 			if (EleTint != FLinearColor::White)
