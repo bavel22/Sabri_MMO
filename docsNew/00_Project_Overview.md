@@ -58,6 +58,10 @@
 - Range checking with tolerance padding
 - Death/respawn cycle with HP restore and teleport
 - Kill messages broadcast in COMBAT chat channel
+- **Element table**: 10 elements × 10 elements × 4 defense levels (rAthena pre-renewal canonical, 537 tests)
+- **Size penalties**: 18 weapon types × 3 sizes (physical attacks only, not magic)
+- **Card modifiers**: Per-category multiplicative stacking (race × element × size)
+- `ro_damage_formulas.js`: Physical/magical damage, HIT/FLEE, Critical, Perfect Dodge, element/size lookups
 
 ### Stat System (RO-Style)
 - 6 base stats: STR, AGI, VIT, INT, DEX, LUK
@@ -123,8 +127,19 @@
 - `WBP_DeathOverlay` — Death screen with respawn button
 - `WBP_LootPopup` — Loot notification popup with auto-fade
 
-#### Game HUD (Pure C++ Slate)
-- `SBasicInfoWidget` — Draggable HUD panel: player name, job, HP/SP bars, base/job EXP bars, weight, zuzucoin
+#### Game HUD (Pure C++ Slate — 15 UWorldSubsystems)
+- `SBasicInfoWidget` — Draggable HUD panel: player name, job, HP/SP bars, base/job EXP bars, weight, zuzucoin (Z=10)
+- `SBuffBarWidget` — Buff/status icons with 3-letter abbreviations and countdown timers (Z=11)
+- `SCombatStatsWidget` — ATK/DEF/HIT/FLEE/ASPD stat panel, F8 toggle (Z=12)
+- `SInventoryWidget` — Item grid with drag-drop, equip/use/drop (Z=14)
+- `SEquipmentWidget` — Equipment slots display (Z=15)
+- `SHotbarRowWidget` — 4-row skill/item hotbar with keybinds (Z=16)
+- `SShopWidget` — NPC shop buy/sell interface (Z=18)
+- `SKafraWidget` — Kafra service dialog (Z=19)
+- `SSkillTreeWidget` — Skill tree with point allocation (Z=20)
+- `SDamageNumberOverlay` — Floating damage/heal numbers (Z=20)
+- `SCastBarOverlay` — World-projected cast time bars (Z=25)
+- `SWorldHealthBarOverlay` — Floating HP/SP bars above characters (Z=8)
 
 ### Zone / Map / Warp System
 - Multi-zone architecture: zone registry (`ro_zone_data.js`), zone-scoped broadcasting, lazy enemy spawning
@@ -137,6 +152,19 @@
 - 4 zones: prontera (town), prontera_south (starter field), prontera_north (field), prt_dungeon_01 (dungeon)
 - Position persistence: disconnect handler + 60s periodic save + 5s Level Blueprint save
 - DB migration: `database/migrations/add_zone_system.sql`
+
+### Status Effect & Buff System (Phase 2)
+- **10 generic status effects**: Stun, Freeze, Stone, Sleep, Poison, Blind, Silence, Confusion, Bleeding, Curse
+- `ro_status_effects.js` — resistance formulas, apply/remove/cleanse/tick, periodic drains, damage-break mechanics
+- `ro_buff_system.js` — generic buff system (Provoke, Endure, Sight + 20 future types), stacking rules, stat modifiers
+- `getCombinedModifiers(target)` merges status + buff modifiers for damage/combat calculations
+- Server enforcement: movement lock during CC, AI CC lock (enemies can't move/attack), skill/attack prevention, regen blocking
+- `checkDamageBreakStatuses()` breaks freeze/stone/sleep/confusion on ANY damage (replaces per-skill fire-breaks-freeze)
+- `BuffBarSubsystem` + `SBuffBarWidget` — client Slate UI showing buff/status icons with timers (Z=11)
+- `reconnectBuffCache` — preserves buffs across zone change disconnect/reconnect (30s TTL)
+- Socket events: `status:applied`, `status:removed`, `status:tick`, `buff:list`, `buff:request`, `buff:removed`
+- Debug commands: `debug:apply_status`, `debug:remove_status`, `debug:list_statuses` (dev only)
+- Skills: `/sabrimmo-buff`, `/sabrimmo-debuff`
 
 ### Automated UI Testing
 - `ASabriMMOUITests` — C++ test runner for automated UI validation
@@ -234,12 +262,18 @@ UMG, Slate, HTTP, Json, JsonUtilities
 
 ## Current Status
 
-- **Phase**: Foundation + Multiplayer + Combat + Inventory + RO Integration (server-side complete)
-- **Monsters**: 509 RO templates loaded, 46 spawns active (zones 1-3)
+**Last Updated**: 2026-03-10
+
+- **Completed**: Foundation, Multiplayer, Combat, Stats, Inventory, Equipment, Hotbar, NPC Shops, Zone System, Skill VFX, Status Effect & Buff System (Phase 2), Element Table & Formula Audit (Phase 3)
+- **In Progress**: Persistent Socket Connection (planning stage — see `docsNew/05_Development/Persistent_Socket_Connection_Plan.md`)
+- **Monsters**: 509 RO templates loaded, 46 spawns active (zones 1-3), full AI state machine with CC lock
 - **Items**: 148 items in database (22 original + 126 RO drops)
-- **Drops**: 846 drops resolved for active zones, all items go to inventory
-- **Next**: Blueprint UI for equipment display, card system implementation
-- **Known Issues**: None critical — all resolved (see `docs/Bug_Fix_Notes.md`)
+- **Skills**: 17 active skills with VFX, 7 passive skill stubs, 10 status effects, 3 active buffs
+- **Combat Data**: Element table (10×10×4 = 400 values) verified against rAthena pre-renewal `attr_fix.yml`, size penalty table (18 weapons × 3 sizes) verified, card modifier stacking fixed (per-category multiplicative)
+- **UI**: 15 C++ Slate subsystems + 18 Blueprint widgets, BuffBar with timer icons
+- **Zones**: 4 zones (prontera, prt_south, prt_north, prt_dungeon_01)
+- **Next**: Phase 4 (Persistent Socket Connection) per Strategic Plan v3
+- **Roadmap**: See `docsNew/05_Development/Strategic_Implementation_Plan_v3.md`
 
 ---
 

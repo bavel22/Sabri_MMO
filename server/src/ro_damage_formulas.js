@@ -13,6 +13,9 @@
 // ELEMENT_TABLE[attackElement][defendElement][defendLevel - 1]
 // Values are damage percentage (100 = normal, 0 = immune, negative = heals)
 // ============================================================
+// Source: rAthena db/pre-re/attr_fix.yml (canonical pre-renewal)
+// Cross-referenced with: iRO Wiki Classic, RateMyServer, MuhRO Wiki, Hercules pre-re
+// Format: [Lv1, Lv2, Lv3, Lv4] for defense element level
 const ELEMENT_TABLE = {
     neutral: {
         neutral: [100, 100, 100, 100],
@@ -23,95 +26,95 @@ const ELEMENT_TABLE = {
         poison:  [100, 100, 100, 100],
         holy:    [100, 100, 100, 100],
         shadow:  [100, 100, 100, 100],
-        ghost:   [ 25,   0,   0,   0],
+        ghost:   [ 25,  25,   0,   0],
         undead:  [100, 100, 100, 100]
     },
     water: {
         neutral: [100, 100, 100, 100],
-        water:   [ 25,   0,   0,   0],
+        water:   [ 25,   0, -25, -50],
         earth:   [100, 100, 100, 100],
         fire:    [150, 175, 200, 200],
-        wind:    [ 90,  80,  70,  60],
-        poison:  [100,  75,  50,  25],
+        wind:    [ 50,  25,   0,   0],
+        poison:  [100, 100, 100,  75],
         holy:    [ 75,  50,  25,   0],
-        shadow:  [100, 100, 100, 100],
-        ghost:   [100,  75,  50,  25],
+        shadow:  [100,  75,  50,  25],
+        ghost:   [100, 100, 100, 100],
         undead:  [100, 100, 125, 150]
     },
     earth: {
         neutral: [100, 100, 100, 100],
         water:   [100, 100, 100, 100],
-        earth:   [ 25,   0,   0,   0],
-        fire:    [ 90,  80,  70,  60],
+        earth:   [100,  50,   0, -25],
+        fire:    [ 50,  25,   0,   0],
         wind:    [150, 175, 200, 200],
-        poison:  [125, 150, 175, 200],
+        poison:  [100, 100, 100,  75],
         holy:    [ 75,  50,  25,   0],
-        shadow:  [100, 100, 100, 100],
-        ghost:   [100,  75,  50,  25],
-        undead:  [100, 100, 100, 100]
+        shadow:  [100,  75,  50,  25],
+        ghost:   [100, 100, 100, 100],
+        undead:  [100, 100,  75,  50]
     },
     fire: {
         neutral: [100, 100, 100, 100],
-        water:   [ 90,  80,  70,  60],
+        water:   [ 50,  25,   0,   0],
         earth:   [150, 175, 200, 200],
-        fire:    [ 25,   0,   0,   0],
+        fire:    [ 25,   0, -25, -50],
         wind:    [100, 100, 100, 100],
-        poison:  [125, 150, 175, 200],
+        poison:  [100, 100, 100,  75],
         holy:    [ 75,  50,  25,   0],
-        shadow:  [100, 100, 100, 100],
-        ghost:   [100,  75,  50,  25],
+        shadow:  [100,  75,  50,  25],
+        ghost:   [100, 100, 100, 100],
         undead:  [125, 150, 175, 200]
     },
     wind: {
         neutral: [100, 100, 100, 100],
-        water:   [150, 175, 200, 200],
-        earth:   [ 90,  80,  70,  60],
+        water:   [175, 175, 200, 200],
+        earth:   [ 50,  25,   0,   0],
         fire:    [100, 100, 100, 100],
-        wind:    [ 25,   0,   0,   0],
-        poison:  [100,  75,  50,  25],
+        wind:    [ 25,   0, -25, -50],
+        poison:  [100, 100, 100,  75],
         holy:    [ 75,  50,  25,   0],
-        shadow:  [100, 100, 100, 100],
-        ghost:   [100,  75,  50,  25],
+        shadow:  [100,  75,  50,  25],
+        ghost:   [100, 100, 100, 100],
         undead:  [100, 100, 100, 100]
     },
     poison: {
         neutral: [100, 100, 100, 100],
-        water:   [100, 100, 100, 100],
-        earth:   [100,  75,  50,  25],
-        fire:    [100, 100, 100, 100],
-        wind:    [100, 100, 100, 100],
+        water:   [100,  75,  50,  25],
+        earth:   [125, 125, 100,  75],
+        fire:    [125, 125, 100,  75],
+        wind:    [125, 125, 100,  75],
         poison:  [  0,   0,   0,   0],
-        holy:    [125, 150, 175, 200],
-        shadow:  [ 50,  25,   0,   0],
+        holy:    [ 75,  50,  25,   0],
+        shadow:  [ 50,  25,   0, -25],
         ghost:   [100,  75,  50,  25],
         undead:  [-25, -50, -75,-100]
     },
     holy: {
         neutral: [100, 100, 100, 100],
-        water:   [100,  75,  50,  25],
-        earth:   [100,  75,  50,  25],
-        fire:    [100,  75,  50,  25],
-        wind:    [100,  75,  50,  25],
-        poison:  [100,  75,  50,  25],
-        holy:    [  0,   0,   0,   0],
+        water:   [100, 100, 100,  75],
+        earth:   [100, 100, 100,  75],
+        fire:    [100, 100, 100,  75],
+        wind:    [100, 100, 100,  75],
+        poison:  [100, 100, 125, 125],
+        holy:    [  0, -25, -50,-100],
         shadow:  [125, 150, 175, 200],
-        ghost:   [100,  75,  50,  25],
+        ghost:   [100, 100, 100, 100],
         undead:  [150, 175, 200, 200]
     },
     shadow: {
         neutral: [100, 100, 100, 100],
-        water:   [100,  75,  50,  25],
-        earth:   [100,  75,  50,  25],
-        fire:    [100,  75,  50,  25],
-        wind:    [100,  75,  50,  25],
-        poison:  [ 50,  25,   0,   0],
+        water:   [100, 100, 100,  75],
+        earth:   [100, 100, 100,  75],
+        fire:    [100, 100, 100,  75],
+        wind:    [100, 100, 100,  75],
+        poison:  [ 50,  25,   0, -25],
         holy:    [125, 150, 175, 200],
-        shadow:  [  0,   0,   0,   0],
-        ghost:   [100,  75,  50,  25],
+        shadow:  [  0, -25, -50,-100],
+        ghost:   [100, 100, 100, 100],
         undead:  [-25, -50, -75,-100]
     },
     ghost: {
-        neutral: [100,  75,  50,  25],
+        neutral: [ 25,   0,   0,   0],
         water:   [100,  75,  50,  25],
         earth:   [100,  75,  50,  25],
         fire:    [100,  75,  50,  25],
@@ -120,18 +123,18 @@ const ELEMENT_TABLE = {
         holy:    [ 75,  50,  25,   0],
         shadow:  [ 75,  50,  25,   0],
         ghost:   [125, 150, 175, 200],
-        undead:  [ 50,  25,   0,   0]
+        undead:  [100, 125, 150, 175]
     },
     undead: {
         neutral: [100, 100, 100, 100],
-        water:   [100, 100, 100, 100],
+        water:   [100,  75,  50,  25],
         earth:   [100,  75,  50,  25],
-        fire:    [125, 150, 175, 200],
-        wind:    [100, 100, 100, 100],
-        poison:  [-50, -75,-100,-125],
-        holy:    [125, 150, 175, 200],
-        shadow:  [100,  75,  50,  25],
-        ghost:   [ 50,  25,   0,   0],
+        fire:    [100,  75,  50,  25],
+        wind:    [100,  75,  50,  25],
+        poison:  [ 50,  25,   0, -25],
+        holy:    [100, 125, 150, 175],
+        shadow:  [  0,   0,   0,   0],
+        ghost:   [100, 100, 100, 100],
         undead:  [  0,   0,   0,   0]
     }
 };
@@ -442,16 +445,17 @@ function calculatePhysicalDamage(attacker, target, options = {}) {
 
     // ─────────────────────────────────────────────────────
     // Step 6: Card modifiers (race%, element%, size%)
-    // All additive with each other, then multiplicative
+    // Within each category: additive (2x Hydra = 40% race bonus)
+    // Between categories: multiplicative (race * ele * size)
+    // rAthena: cardfix = (1+race/100) * (1+ele/100) * (1+size/100)
     // ─────────────────────────────────────────────────────
-    let cardBonus = 0;
     if (attacker.cardMods) {
-        cardBonus += attacker.cardMods[`race_${targetRace}`] || 0;
-        cardBonus += attacker.cardMods[`ele_${targetElement}`] || 0;
-        cardBonus += attacker.cardMods[`size_${targetSize}`] || 0;
-    }
-    if (cardBonus !== 0) {
-        totalATK = Math.floor(totalATK * (100 + cardBonus) / 100);
+        const raceBonus = attacker.cardMods[`race_${targetRace}`] || 0;
+        const eleBonus = attacker.cardMods[`ele_${targetElement}`] || 0;
+        const sizeBonus = attacker.cardMods[`size_${targetSize}`] || 0;
+        if (raceBonus !== 0) totalATK = Math.floor(totalATK * (100 + raceBonus) / 100);
+        if (eleBonus !== 0) totalATK = Math.floor(totalATK * (100 + eleBonus) / 100);
+        if (sizeBonus !== 0) totalATK = Math.floor(totalATK * (100 + sizeBonus) / 100);
     }
 
     // ─────────────────────────────────────────────────────
@@ -461,15 +465,9 @@ function calculatePhysicalDamage(attacker, target, options = {}) {
     result.elementModifier = eleModifier;
 
     if (eleModifier <= 0) {
-        // Immune or heals (we don't implement healing enemies)
-        if (eleModifier < 0) {
-            result.damage = 0;
-            result.hitType = 'miss'; // Element immunity appears as miss
-            result.isMiss = true;
-            return result;
-        }
+        // 0% = immune, negative = would heal target (treat as immune for damage)
         result.damage = 0;
-        result.hitType = 'miss';
+        result.hitType = eleModifier < 0 ? 'elementHeal' : 'elementImmune';
         result.isMiss = true;
         return result;
     }
@@ -559,7 +557,7 @@ function calculateMagicalDamage(attacker, target, options = {}) {
 
     if (eleModifier <= 0) {
         result.damage = 0;
-        result.hitType = 'miss';
+        result.hitType = eleModifier < 0 ? 'elementHeal' : 'elementImmune';
         result.isMiss = true;
         return result;
     }
