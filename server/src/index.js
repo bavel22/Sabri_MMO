@@ -43,6 +43,22 @@ const {
     calculatePhysicalDamage: roPhysicalDamage,
     calculateMagicalDamage: roMagicalDamage
 } = require('./ro_damage_formulas');
+// Import generic status effect engine (Phase 2)
+const {
+    STATUS_EFFECTS, BREAKABLE_STATUSES,
+    applyStatusEffect, forceApplyStatusEffect, removeStatusEffect,
+    cleanse: cleanseStatusEffects, checkDamageBreakStatuses,
+    tickStatusEffects, getStatusModifiers,
+    hasStatusEffect, getActiveStatusList
+} = require('./ro_status_effects');
+// Import generic buff system (Phase 2)
+const {
+    BUFF_TYPES,
+    applyBuff: applyBuffGeneric, removeBuff, hasBuff,
+    getBuffModifiers, getActiveBuffList
+} = require('./ro_buff_system');
+// Re-export expireBuffs from buff system (used in tick loop)
+const { expireBuffs: expireBuffsGeneric } = require('./ro_buff_system');
 
 // Setup file logging
 const logsDir = path.join(__dirname, '..', 'logs');
@@ -111,6 +127,11 @@ const io = new Server(server, {
 
 // Store connected players
 const connectedPlayers = new Map();
+
+// Reconnect buff cache — preserves buffs/statuses across zone-change disconnect/reconnect
+// Key: characterId, Value: { activeBuffs, activeStatusEffects, cachedAt }
+const reconnectBuffCache = new Map();
+const RECONNECT_CACHE_TTL = 30000; // 30 seconds — buffs expire from cache after this
 
 // PvP toggle — set to false to disable all player-vs-player damage
 const PVP_ENABLED = false;
@@ -405,50 +426,75 @@ function applySkillDelays(characterId, player, skillId, levelData, socket) {
 }
 
 // Apply a buff/debuff to a target (player or enemy)
+// Delegates to the generic buff system module
 function applyBuff(target, buffDef) {
-    if (!target.activeBuffs) target.activeBuffs = [];
-    // Remove existing buff of same skillId (refresh)
-    target.activeBuffs = target.activeBuffs.filter(b => b.skillId !== buffDef.skillId);
-    target.activeBuffs.push({
-        ...buffDef,
-        appliedAt: Date.now(),
-        expiresAt: Date.now() + buffDef.duration
-    });
+    return applyBuffGeneric(target, buffDef);
 }
 
 // Remove expired buffs, returns array of expired buff objects
 function expireBuffs(target) {
-    if (!target.activeBuffs || target.activeBuffs.length === 0) return [];
-    const now = Date.now();
-    const expired = target.activeBuffs.filter(b => now >= b.expiresAt);
-    target.activeBuffs = target.activeBuffs.filter(b => now < b.expiresAt);
-    return expired;
+    return expireBuffsGeneric(target);
 }
 
-// Get stat modifiers from all active buffs/debuffs
+// Get combined stat modifiers from both status effects AND buffs
+// This replaces the old getBuffStatModifiers() — merges status + buff mods
+function getCombinedModifiers(target) {
+    const statusMods = getStatusModifiers(target);
+    const buffMods = getBuffModifiers(target);
+    return {
+        // Merge multipliers (multiplicative)
+        defMultiplier: statusMods.defMultiplier * buffMods.defMultiplier,
+        atkMultiplier: statusMods.atkMultiplier * buffMods.atkMultiplier,
+        mdefMultiplier: statusMods.mdefMultiplier || 1.0,
+        hitMultiplier: statusMods.hitMultiplier || 1.0,
+        fleeMultiplier: statusMods.fleeMultiplier || 1.0,
+        moveSpeedMultiplier: statusMods.moveSpeedMultiplier || 1.0,
+        aspdMultiplier: buffMods.aspdMultiplier || 1.0,
+        // Additive bonuses (from buffs)
+        bonusMDEF: buffMods.bonusMDEF || 0,
+        strBonus: buffMods.strBonus || 0,
+        agiBonus: buffMods.agiBonus || 0,
+        vitBonus: buffMods.vitBonus || 0,
+        intBonus: buffMods.intBonus || 0,
+        dexBonus: buffMods.dexBonus || 0,
+        lukBonus: buffMods.lukBonus || 0,
+        defPercent: buffMods.defPercent || 0,
+        moveSpeedBonus: buffMods.moveSpeedBonus || 0,
+        bonusHit: buffMods.bonusHit || 0,
+        bonusFlee: buffMods.bonusFlee || 0,
+        bonusCritical: buffMods.bonusCritical || 0,
+        // Overrides
+        lukOverride: statusMods.lukOverride,
+        overrideElement: statusMods.overrideElement,
+        weaponElement: buffMods.weaponElement || null,
+        // Prevention flags (from status effects)
+        preventsMovement: statusMods.preventsMovement || false,
+        preventsCasting: statusMods.preventsCasting || false,
+        preventsAttack: statusMods.preventsAttack || false,
+        preventsItems: statusMods.preventsItems || false,
+        blocksHPRegen: statusMods.blocksHPRegen || false,
+        blocksSPRegen: statusMods.blocksSPRegen || false,
+        // Special buff flags
+        isHidden: buffMods.isHidden || false,
+        doubleNextDamage: buffMods.doubleNextDamage || false,
+        blockRanged: buffMods.blockRanged || false,
+        // Individual status flags (backward compat)
+        isFrozen: statusMods.isFrozen || false,
+        isStoned: statusMods.isStoned || false,
+        isStunned: statusMods.isStunned || false,
+        isSleeping: statusMods.isSleeping || false,
+        isPoisoned: statusMods.isPoisoned || false,
+        isBleeding: statusMods.isBleeding || false,
+        isCursed: statusMods.isCursed || false,
+        isBlind: statusMods.isBlind || false,
+        isSilenced: statusMods.isSilenced || false,
+        isConfused: statusMods.isConfused || false
+    };
+}
+
+// Backward-compatible alias — old code calls getBuffStatModifiers, new code uses getCombinedModifiers
 function getBuffStatModifiers(target) {
-    const mods = { defMultiplier: 1.0, atkMultiplier: 1.0, bonusMDEF: 0, isFrozen: false, isStoned: false, overrideElement: null };
-    if (!target.activeBuffs) return mods;
-    const now = Date.now();
-    for (const buff of target.activeBuffs) {
-        if (now >= buff.expiresAt) continue; // skip expired
-        if (buff.name === 'provoke') {
-            mods.defMultiplier *= (1 - (buff.defReduction || 0) / 100);
-            mods.atkMultiplier *= (1 + (buff.atkIncrease || 0) / 100);
-        }
-        if (buff.name === 'endure') {
-            mods.bonusMDEF += buff.mdefBonus || 0;
-        }
-        if (buff.name === 'frozen') {
-            mods.isFrozen = true;
-            mods.overrideElement = { type: 'water', level: 1 }; // Frozen targets become Water Lv1
-        }
-        if (buff.name === 'stone_curse') {
-            mods.isStoned = true;
-            mods.overrideElement = { type: 'earth', level: 1 }; // Stoned targets become Earth Lv1
-        }
-    }
-    return mods;
+    return getCombinedModifiers(target);
 }
 
 // Calculate skill damage using full RO damage system
@@ -1304,24 +1350,25 @@ function rollEnemyDrops(enemy) {
 }
 
 // Add item to character inventory (DB + return updated entry)
-async function addItemToInventory(characterId, itemId, quantity = 1) {
+async function addItemToInventory(characterId, itemId, quantity = 1, dbClient = null) {
+    const db = dbClient || pool;
     const itemDef = itemDefinitions.get(itemId);
     if (!itemDef) {
         logger.error(`[ITEMS] Cannot add unknown item ${itemId} to inventory`);
         return null;
     }
-    
+
     try {
         if (itemDef.stackable) {
             // Check if player already has this item stacked
-            const existing = await pool.query(
+            const existing = await db.query(
                 'SELECT inventory_id, quantity FROM character_inventory WHERE character_id = $1 AND item_id = $2 AND is_equipped = false',
                 [characterId, itemId]
             );
-            
+
             if (existing.rows.length > 0) {
                 const newQty = Math.min(existing.rows[0].quantity + quantity, itemDef.max_stack);
-                await pool.query(
+                await db.query(
                     'UPDATE character_inventory SET quantity = $1 WHERE inventory_id = $2',
                     [newQty, existing.rows[0].inventory_id]
                 );
@@ -1329,16 +1376,16 @@ async function addItemToInventory(characterId, itemId, quantity = 1) {
                 return { inventoryId: existing.rows[0].inventory_id, itemId, quantity: newQty, isEquipped: false };
             }
         }
-        
+
         // Find next available slot_index for this character
-        const maxSlotResult = await pool.query(
+        const maxSlotResult = await db.query(
             'SELECT COALESCE(MAX(slot_index), -1) as max_slot FROM character_inventory WHERE character_id = $1',
             [characterId]
         );
         const nextSlot = maxSlotResult.rows[0].max_slot + 1;
 
         // Insert new inventory entry with auto-assigned slot
-        const result = await pool.query(
+        const result = await db.query(
             'INSERT INTO character_inventory (character_id, item_id, quantity, slot_index) VALUES ($1, $2, $3, $4) RETURNING inventory_id',
             [characterId, itemId, quantity, nextSlot]
         );
@@ -1400,20 +1447,21 @@ async function getPlayerHotbar(characterId) {
 }
 
 // Remove item from inventory (by inventory_id, optionally partial quantity)
-async function removeItemFromInventory(inventoryId, quantity = null) {
+async function removeItemFromInventory(inventoryId, quantity = null, dbClient = null) {
+    const db = dbClient || pool;
     try {
         if (quantity !== null) {
             // Partial removal for stackable items
-            const existing = await pool.query('SELECT quantity FROM character_inventory WHERE inventory_id = $1', [inventoryId]);
+            const existing = await db.query('SELECT quantity FROM character_inventory WHERE inventory_id = $1', [inventoryId]);
             if (existing.rows.length === 0) return false;
             const newQty = existing.rows[0].quantity - quantity;
             if (newQty <= 0) {
-                await pool.query('DELETE FROM character_inventory WHERE inventory_id = $1', [inventoryId]);
+                await db.query('DELETE FROM character_inventory WHERE inventory_id = $1', [inventoryId]);
             } else {
-                await pool.query('UPDATE character_inventory SET quantity = $1 WHERE inventory_id = $2', [newQty, inventoryId]);
+                await db.query('UPDATE character_inventory SET quantity = $1 WHERE inventory_id = $2', [newQty, inventoryId]);
             }
         } else {
-            await pool.query('DELETE FROM character_inventory WHERE inventory_id = $1', [inventoryId]);
+            await db.query('DELETE FROM character_inventory WHERE inventory_id = $1', [inventoryId]);
         }
         return true;
     } catch (err) {
@@ -1465,37 +1513,93 @@ const spawnedZones = new Set();
 const zoneTransitioning = new Set();
 
 // Socket.io connection handler
+// ============================================================
+// Socket Event Rate Limiting
+// Per-socket, per-event throttle to prevent DoS via event spam.
+// Each event type has a max calls-per-second. Excess calls are silently dropped.
+// ============================================================
+const SOCKET_RATE_LIMITS = {
+    'player:position':      60,  // Movement updates — high frequency expected
+    'player:moved':         60,
+    'combat:attack':        10,
+    'combat:stop_attack':   10,
+    'skill:use':            10,
+    'chat:message':          5,
+    'inventory:use':         5,
+    'inventory:equip':       5,
+    'inventory:move':       20,
+    'inventory:drop':        5,
+    'shop:buy':              5,
+    'shop:sell':             5,
+    'shop:buy_batch':        3,
+    'shop:sell_batch':       3,
+    'hotbar:save':          10,
+    'hotbar:save_skill':    10,
+    'hotbar:clear':         10,
+    'player:allocate_stat':  5,
+};
+const socketEventCounts = new Map(); // key: "socketId:eventName" → count this second
+
+// Reset all counters every second
+setInterval(() => socketEventCounts.clear(), 1000);
+
+function throttleSocketEvent(socketId, eventName) {
+    const limit = SOCKET_RATE_LIMITS[eventName];
+    if (!limit) return true; // No limit configured — allow
+    const key = `${socketId}:${eventName}`;
+    const count = (socketEventCounts.get(key) || 0) + 1;
+    socketEventCounts.set(key, count);
+    if (count > limit) {
+        if (count === limit + 1) {
+            logger.warn(`[RATE] ${socketId} exceeded ${eventName} limit (${limit}/s)`);
+        }
+        return false; // Drop event
+    }
+    return true; // Allow event
+}
+
 io.on('connection', (socket) => {
     logger.info(`Socket connected: ${socket.id}`);
-    
+
+    // Rate limit middleware — intercepts all events before they reach handlers
+    socket.use(([eventName, ...args], next) => {
+        if (throttleSocketEvent(socket.id, eventName)) {
+            next(); // Allow
+        }
+        // Else silently drop — no next() call, event is swallowed
+    });
+
     // Player authentication and join
     socket.on('player:join', async (data) => {
         logger.info(`[RECV] player:join from ${socket.id}: ${JSON.stringify(data)}`);
         const characterId = parseInt(data.characterId);
         const { token, characterName } = data;
 
-        // SECURITY: Verify JWT token
+        // SECURITY: Verify JWT token — MANDATORY, reject if missing
         // BP_SocketManager sends GetAuthHeader() which includes "Bearer " prefix — strip it
         const rawToken = token && token.startsWith('Bearer ') ? token.slice(7) : token;
-        if (rawToken) {
-            try {
-                const decoded = jwt.verify(rawToken, process.env.JWT_SECRET);
-                // Verify character belongs to authenticated user
-                const ownerCheck = await pool.query(
-                    'SELECT 1 FROM characters WHERE character_id = $1 AND user_id = $2 AND deleted = FALSE',
-                    [characterId, decoded.user_id]
-                );
-                if (ownerCheck.rows.length === 0) {
-                    logger.warn(`[SECURITY] Character ${characterId} does not belong to user ${decoded.user_id}`);
-                    socket.emit('player:join_error', { error: 'Character does not belong to this account' });
-                    return;
-                }
-                logger.info(`[AUTH] JWT verified for user ${decoded.user_id}, character ${characterId}`);
-            } catch (err) {
-                logger.warn(`[SECURITY] Invalid JWT on player:join: ${err.message}`);
-                socket.emit('player:join_error', { error: 'Invalid or expired token' });
+        if (!rawToken) {
+            logger.warn(`[SECURITY] player:join without JWT token from ${socket.id}`);
+            socket.emit('player:join_error', { error: 'Authentication required' });
+            return;
+        }
+        try {
+            const decoded = jwt.verify(rawToken, process.env.JWT_SECRET);
+            // Verify character belongs to authenticated user
+            const ownerCheck = await pool.query(
+                'SELECT 1 FROM characters WHERE character_id = $1 AND user_id = $2 AND deleted = FALSE',
+                [characterId, decoded.user_id]
+            );
+            if (ownerCheck.rows.length === 0) {
+                logger.warn(`[SECURITY] Character ${characterId} does not belong to user ${decoded.user_id}`);
+                socket.emit('player:join_error', { error: 'Character does not belong to this account' });
                 return;
             }
+            logger.info(`[AUTH] JWT verified for user ${decoded.user_id}, character ${characterId}`);
+        } catch (err) {
+            logger.warn(`[SECURITY] Invalid JWT on player:join: ${err.message}`);
+            socket.emit('player:join_error', { error: 'Invalid or expired token' });
+            return;
         }
 
         // Fetch character data from database (position + health/mana + zuzucoin)
@@ -1699,6 +1803,25 @@ io.on('connection', (socket) => {
             lastZ: initialZ
         });
         
+        // Restore cached buffs/statuses from zone-change disconnect
+        if (reconnectBuffCache.has(characterId)) {
+            const cached = reconnectBuffCache.get(characterId);
+            reconnectBuffCache.delete(characterId);
+            const player = connectedPlayers.get(characterId);
+            if (player) {
+                // Filter out expired buffs/statuses
+                const now = Date.now();
+                player.activeBuffs = (cached.activeBuffs || []).filter(b => now < b.expiresAt);
+                player.activeStatusEffects = new Map();
+                for (const [type, effect] of cached.activeStatusEffects.entries()) {
+                    if (now < effect.expiresAt) {
+                        player.activeStatusEffects.set(type, effect);
+                    }
+                }
+                logger.info(`[BUFF-CACHE] Restored ${player.activeBuffs.length} buffs and ${player.activeStatusEffects.size} statuses for char ${characterId}`);
+            }
+        }
+
         logger.info(`Player joined: ${characterName || 'Unknown'} (Character ${characterId}) HP: ${health}/${maxHealth} MP: ${mana}/${maxMana} zone=${playerZone}`);
         const zoneInfo = getZone(playerZone);
         const joinedPayload = {
@@ -1743,7 +1866,15 @@ io.on('connection', (socket) => {
         const statsPayload = buildFullStatsPayload(characterId, playerObj, effectiveStatsJoin, derived, finalAspd);
         socket.emit('player:stats', statsPayload);
         logger.info(`[SEND] player:stats to ${socket.id} on join`);
-        
+
+        // Send current buff/status list (may have persisted buffs from combat)
+        socket.emit('buff:list', {
+            characterId,
+            buffs: getActiveBuffList(playerObj),
+            statuses: getActiveStatusList(playerObj)
+        });
+        logger.info(`[SEND] buff:list to ${socket.id} on join`);
+
         // Send hotbar data after a short delay to ensure HUD is ready
         setTimeout(async () => {
             const hotbar = await getPlayerHotbar(characterId);
@@ -1799,6 +1930,18 @@ io.on('connection', (socket) => {
         const { x, y, z } = data;
         const player = connectedPlayers.get(characterId);
         const characterName = player ? player.characterName : 'Unknown';
+
+        // Movement lock: reject position updates during CC (stun/freeze/stone/sleep)
+        if (player) {
+            const ccMods = getCombinedModifiers(player);
+            if (ccMods.preventsMovement) {
+                socket.emit('player:position_rejected', {
+                    x: player.lastX || x, y: player.lastY || y, z: player.lastZ || z,
+                    reason: 'cc_locked'
+                });
+                return;
+            }
+        }
 
         // Movement cancels casting (RO: cannot move while casting)
         // Only interrupt if the player actually moved (client sends constant position updates even when idle)
@@ -2035,6 +2178,14 @@ io.on('connection', (socket) => {
                 kafraNpcs: zoneData.kafraNpcs
             });
         }
+
+        // Re-sync buff/status list (subsystems are fresh after zone change)
+        socket.emit('buff:list', {
+            characterId,
+            buffs: getActiveBuffList(player),
+            statuses: getActiveStatusList(player)
+        });
+        logger.info(`[SEND] buff:list to ${socket.id} on zone:ready (${getActiveBuffList(player).length} buffs, ${getActiveStatusList(player).length} statuses)`);
 
         logger.info(`[ZONE] ${player.characterName} ready in zone ${zone}`);
     });
@@ -2294,6 +2445,25 @@ io.on('connection', (socket) => {
                 }
                 
                 const leftZone = player.zone || 'prontera_south';
+
+                // Cache buffs/statuses for reconnect (zone change causes disconnect/reconnect)
+                if ((player.activeBuffs && player.activeBuffs.length > 0) ||
+                    (player.activeStatusEffects && player.activeStatusEffects.size > 0)) {
+                    reconnectBuffCache.set(charId, {
+                        activeBuffs: player.activeBuffs ? [...player.activeBuffs] : [],
+                        activeStatusEffects: player.activeStatusEffects ? new Map(player.activeStatusEffects) : new Map(),
+                        cachedAt: Date.now()
+                    });
+                    logger.info(`[BUFF-CACHE] Cached ${(player.activeBuffs || []).length} buffs and ${(player.activeStatusEffects ? player.activeStatusEffects.size : 0)} statuses for char ${charId}`);
+                    // Auto-cleanup after TTL
+                    setTimeout(() => {
+                        if (reconnectBuffCache.has(charId)) {
+                            reconnectBuffCache.delete(charId);
+                            logger.info(`[BUFF-CACHE] Cache expired for char ${charId}`);
+                        }
+                    }, RECONNECT_CACHE_TTL);
+                }
+
                 connectedPlayers.delete(charId);
                 logger.info(`Player left: Character ${charId} zone=${leftZone}`);
 
@@ -2335,7 +2505,14 @@ io.on('connection', (socket) => {
             socket.emit('combat:error', { message: 'You are dead' });
             return;
         }
-        
+
+        // Check CC (cannot attack while stunned, frozen, stoned, sleeping)
+        const attackCCMods = getCombinedModifiers(attacker);
+        if (attackCCMods.preventsAttack) {
+            socket.emit('combat:error', { message: 'Cannot attack while incapacitated' });
+            return;
+        }
+
         // --- Clean up previous auto-attack if switching targets ---
         if (autoAttackState.has(attackerId)) {
             const oldAtk = autoAttackState.get(attackerId);
@@ -2618,6 +2795,20 @@ io.on('connection', (socket) => {
         });
     });
     
+    // Request current buff/status list (used after zone change or reconnect)
+    socket.on('buff:request', () => {
+        logger.info(`[RECV] buff:request from ${socket.id}`);
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { characterId, player } = playerInfo;
+        socket.emit('buff:list', {
+            characterId,
+            buffs: getActiveBuffList(player),
+            statuses: getActiveStatusList(player)
+        });
+        logger.info(`[SEND] buff:list to ${socket.id} on request`);
+    });
+
     // Stat allocation handler (RO Classic: cost = floor((currentStat - 1) / 10) + 2, max 99)
     socket.on('player:allocate_stat', async (data) => {
         logger.info(`[RECV] player:allocate_stat from ${socket.id}: ${JSON.stringify(data)}`);
@@ -3250,10 +3441,18 @@ io.on('connection', (socket) => {
             return;
         }
 
-        // Check CC (cannot cast while frozen, stoned, stunned, silenced)
-        const ccMods = getBuffStatModifiers(player);
-        if (ccMods.isFrozen) { socket.emit('skill:error', { message: 'Cannot use skills while frozen' }); return; }
-        if (ccMods.isStoned) { socket.emit('skill:error', { message: 'Cannot use skills while petrified' }); return; }
+        // Check CC (cannot cast while frozen, stoned, stunned, sleeping, silenced)
+        const ccMods = getCombinedModifiers(player);
+        if (ccMods.preventsCasting) {
+            let ccReason = 'Cannot use skills while incapacitated';
+            if (ccMods.isFrozen) ccReason = 'Cannot use skills while frozen';
+            else if (ccMods.isStoned) ccReason = 'Cannot use skills while petrified';
+            else if (ccMods.isStunned) ccReason = 'Cannot use skills while stunned';
+            else if (ccMods.isSleeping) ccReason = 'Cannot use skills while sleeping';
+            else if (ccMods.isSilenced) ccReason = 'Cannot use skills while silenced';
+            socket.emit('skill:error', { message: ccReason });
+            return;
+        }
 
         // Check if already casting
         if (activeCasts.has(characterId)) {
@@ -3504,10 +3703,12 @@ io.on('connection', (socket) => {
             skillTargetInfo.buffMods = defBuffMods;
             const skillAtkInfo = getAttackerInfo(player);
             skillAtkInfo.buffMods = atkBuffMods;
+            // skill.element = undefined/null for physical skills → formula falls through to attacker.weaponElement
+            // Only forced-element skills (fire/water/wind/ghost/etc.) override weapon element
             const bashResult = calculateSkillDamage(
                 getEffectiveStats(player), isEnemy ? targetStats : getEffectiveStats(target),
                 targetHardDef, effectVal, atkBuffMods, defBuffMods,
-                skillTargetInfo, skillAtkInfo, { skillElement: skill.element || 'neutral' }
+                skillTargetInfo, skillAtkInfo, { skillElement: skill.element === 'neutral' ? null : (skill.element || null) }
             );
             const { damage, isCritical, isMiss, hitType: bashHitType } = bashResult;
 
@@ -3517,7 +3718,7 @@ io.on('connection', (socket) => {
                 broadcastToZone(bashZone, 'skill:effect_damage', {
                     attackerId: characterId, attackerName: player.characterName,
                     targetId, targetName, isEnemy,
-                    skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: skill.element || 'neutral',
+                    skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: bashResult.element || 'neutral',
                     damage: 0, isCritical: false, isMiss: true, hitType: bashHitType,
                     targetHealth: target.health, targetMaxHealth: target.maxHealth,
                     attackerX: attackerPos.x, attackerY: attackerPos.y, attackerZ: attackerPos.z,
@@ -3545,7 +3746,7 @@ io.on('connection', (socket) => {
             broadcastToZone(bashZone, 'skill:effect_damage', {
                 attackerId: characterId, attackerName: player.characterName,
                 targetId, targetName, isEnemy,
-                skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: skill.element,
+                skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: bashResult.element || 'neutral',
                 damage, isCritical, isMiss: false, hitType: bashHitType,
                 targetHealth: target.health, targetMaxHealth: target.maxHealth,
                 attackerX: attackerPos.x, attackerY: attackerPos.y, attackerZ: attackerPos.z,
@@ -3950,10 +4151,11 @@ io.on('connection', (socket) => {
             }
             logger.info(`[SKILL-COMBAT] ${player.characterName} ${skill.displayName} Lv${learnedLevel} → ${targetName} for ${totalDamage} (${numHits} hits) [${skill.element}] (HP: ${target.health}/${target.maxHealth})`);
 
-            // Fire damage breaks Frozen status
-            if (skill.element === 'fire' && targetBuffMods.isFrozen && target.activeBuffs) {
-                target.activeBuffs = target.activeBuffs.filter(b => b.name !== 'frozen');
-                broadcastToZone(boltZone, 'skill:buff_removed', { targetId, isEnemy, buffName: 'frozen', reason: 'fire_damage' });
+            // Damage breaks freeze/stone/sleep/confusion
+            const boltBroken = checkDamageBreakStatuses(target);
+            for (const brokenType of boltBroken) {
+                broadcastToZone(boltZone, 'status:removed', { targetId, isEnemy, statusType: brokenType, reason: 'damage_break' });
+                broadcastToZone(boltZone, 'skill:buff_removed', { targetId, isEnemy, buffName: brokenType, reason: 'damage_break' });
             }
 
             // Summary event for skill effect tracking
@@ -4037,7 +4239,7 @@ io.on('connection', (socket) => {
             }
 
             const casterBuffs = getBuffStatModifiers(player);
-            if (casterBuffs.isFrozen || casterBuffs.isStoned) { socket.emit('skill:error', { message: 'Cannot cast while incapacitated' }); return; }
+            if (casterBuffs.preventsCasting) { socket.emit('skill:error', { message: 'Cannot cast while incapacitated' }); return; }
 
             player.mana = Math.max(0, player.mana - spCost);
             applySkillDelays(characterId, player, skillId, levelData, socket);
@@ -4152,7 +4354,7 @@ io.on('connection', (socket) => {
             }
 
             const casterBuffs = getBuffStatModifiers(player);
-            if (casterBuffs.isFrozen || casterBuffs.isStoned) { socket.emit('skill:error', { message: 'Cannot cast while incapacitated' }); return; }
+            if (casterBuffs.preventsCasting) { socket.emit('skill:error', { message: 'Cannot cast while incapacitated' }); return; }
 
             player.mana = Math.max(0, player.mana - spCost);
             applySkillDelays(characterId, player, skillId, levelData, socket);
@@ -4280,7 +4482,7 @@ io.on('connection', (socket) => {
             }
 
             const casterBuffs = getBuffStatModifiers(player);
-            if (casterBuffs.isFrozen || casterBuffs.isStoned) { socket.emit('skill:error', { message: 'Cannot cast while incapacitated' }); return; }
+            if (casterBuffs.preventsCasting) { socket.emit('skill:error', { message: 'Cannot cast while incapacitated' }); return; }
 
             player.mana = Math.max(0, player.mana - spCost);
             applySkillDelays(characterId, player, skillId, levelData, socket);
@@ -4316,10 +4518,11 @@ io.on('connection', (socket) => {
                 totalDamageDealt += dmg;
                 targetsHit++;
 
-                // Fire damage breaks Frozen
-                if (tBuffMods.isFrozen && tgt.activeBuffs) {
-                    tgt.activeBuffs = tgt.activeBuffs.filter(b => b.name !== 'frozen');
-                    broadcastToZone(fbZone, 'skill:buff_removed', { targetId: tId, isEnemy: tIsEnemy, buffName: 'frozen', reason: 'fire_damage' });
+                // Damage breaks freeze/stone/sleep/confusion
+                const fbBroken = checkDamageBreakStatuses(tgt);
+                for (const brokenType of fbBroken) {
+                    broadcastToZone(fbZone, 'status:removed', { targetId: tId, isEnemy: tIsEnemy, statusType: brokenType, reason: 'damage_break' });
+                    broadcastToZone(fbZone, 'skill:buff_removed', { targetId: tId, isEnemy: tIsEnemy, buffName: brokenType, reason: 'damage_break' });
                 }
 
                 broadcastToZone(fbZone, 'skill:effect_damage', {
@@ -4406,7 +4609,7 @@ io.on('connection', (socket) => {
             }
 
             const casterBuffs = getBuffStatModifiers(player);
-            if (casterBuffs.isFrozen || casterBuffs.isStoned) { socket.emit('skill:error', { message: 'Cannot cast while incapacitated' }); return; }
+            if (casterBuffs.preventsCasting) { socket.emit('skill:error', { message: 'Cannot cast while incapacitated' }); return; }
 
             player.mana = Math.max(0, player.mana - spCost);
             applySkillDelays(characterId, player, skillId, levelData, socket);
@@ -4570,7 +4773,7 @@ io.on('connection', (socket) => {
             }
 
             const casterBuffs = getBuffStatModifiers(player);
-            if (casterBuffs.isFrozen || casterBuffs.isStoned) { socket.emit('skill:error', { message: 'Cannot cast while incapacitated' }); return; }
+            if (casterBuffs.preventsCasting) { socket.emit('skill:error', { message: 'Cannot cast while incapacitated' }); return; }
 
             player.mana = Math.max(0, player.mana - spCost);
             applySkillDelays(characterId, player, skillId, levelData, socket);
@@ -4606,31 +4809,30 @@ io.on('connection', (socket) => {
                 targetHealth: target.health, targetMaxHealth: target.maxHealth, timestamp: Date.now()
             });
             // Freeze chance: 35 + level*3, reduced by target MDEF (1% per point)
+            // Uses generic status effect engine with resistance checks
             if (target.health > 0) {
                 const freezeChance = Math.max(0, (35 + learnedLevel * 3) - targetHardMdef);
-                const targetEle = isEnemy ? ((target.element && target.element.type) || 'neutral') : 'neutral';
-                const isBoss = isEnemy && (target.isBoss || target.mode === 'boss');
-                const isUndead = targetEle === 'undead';
+                const freezeDuration = duration || (learnedLevel * 3000);
+                // Boss/undead immunity is handled inside applyStatusEffect via modeFlags
+                const freezeSource = { characterId, level: player.stats.level || 1, stats: player.stats };
+                const freezeResult = applyStatusEffect(freezeSource, target, 'freeze', freezeChance, freezeDuration);
 
-                if (!isBoss && !isUndead && Math.random() * 100 < freezeChance) {
-                    const freezeDuration = duration || (learnedLevel * 3000);
-                    applyBuff(target, {
-                        skillId, name: 'frozen', casterId: characterId, casterName: player.characterName,
-                        duration: freezeDuration, defReduction: 0, atkIncrease: 0, mdefBonus: 0
-                    });
-                    logger.info(`[SKILL-COMBAT] ${targetName} FROZEN for ${freezeDuration / 1000}s by Frost Diver`);
+                if (freezeResult.applied) {
+                    logger.info(`[SKILL-COMBAT] ${targetName} FROZEN for ${freezeResult.duration / 1000}s by Frost Diver`);
 
-                    broadcastToZone(fdZone, 'skill:status_applied', {
-                        targetId, targetName, isEnemy,
-                        casterId: characterId, casterName: player.characterName,
-                        skillId, statusName: 'Frozen', duration: freezeDuration
+                    broadcastToZone(fdZone, 'status:applied', {
+                        targetId, isEnemy, statusType: 'freeze', duration: freezeResult.duration,
+                        sourceId: characterId, sourceName: player.characterName
                     });
+                    // Backward compat: also emit skill:buff_applied for VFX
                     broadcastToZone(fdZone, 'skill:buff_applied', {
                         targetId, targetName, isEnemy,
                         casterId: characterId, casterName: player.characterName,
-                        skillId, buffName: 'Frozen', duration: freezeDuration,
+                        skillId, buffName: 'Frozen', duration: freezeResult.duration,
                         effects: { frozen: true }
                     });
+                } else {
+                    logger.info(`[SKILL-COMBAT] Frost Diver freeze on ${targetName} — ${freezeResult.reason}`);
                 }
             }
 
@@ -4682,45 +4884,36 @@ io.on('connection', (socket) => {
             }
 
             const casterBuffs = getBuffStatModifiers(player);
-            if (casterBuffs.isFrozen || casterBuffs.isStoned) { socket.emit('skill:error', { message: 'Cannot cast while incapacitated' }); return; }
+            if (casterBuffs.preventsCasting) { socket.emit('skill:error', { message: 'Cannot cast while incapacitated' }); return; }
 
             player.mana = Math.max(0, player.mana - spCost);
             applySkillDelays(characterId, player, skillId, levelData, socket);
 
             // Roll success rate: effectValue% (24-60%), reduced by target MDEF
+            // Uses generic status effect engine with resistance checks
             const successRate = Math.max(0, effectVal - targetHardMdef);
-            const targetEle = isEnemy ? ((target.element && target.element.type) || 'neutral') : 'neutral';
-            const isBoss = isEnemy && (target.isBoss || target.mode === 'boss');
-            const isUndead = targetEle === 'undead';
+            const stoneDuration = duration || 20000;
+            const stoneSource = { characterId, level: player.stats.level || 1, stats: player.stats };
+            const stoneResult = applyStatusEffect(stoneSource, target, 'stone', successRate, stoneDuration);
+            const stoneApplied = stoneResult.applied;
 
-            let stoneApplied = false;
-            if (!isBoss && !isUndead && Math.random() * 100 < successRate) {
-                // Apply stone curse: 20s duration (simplified from 3s half + 20s full)
-                const stoneDuration = duration || 20000;
-                applyBuff(target, {
-                    skillId, name: 'stone_curse', casterId: characterId, casterName: player.characterName,
-                    duration: stoneDuration, defReduction: 0, atkIncrease: 0, mdefBonus: 0,
-                    hpDrainTick: Date.now() + 5000 // Start HP drain after 5s
-                });
-                stoneApplied = true;
-                logger.info(`[SKILL-COMBAT] ${targetName} PETRIFIED for ${stoneDuration / 1000}s by Stone Curse (rate: ${successRate}%)`);
+            if (stoneResult.applied) {
+                logger.info(`[SKILL-COMBAT] ${targetName} PETRIFIED for ${stoneResult.duration / 1000}s by Stone Curse (rate: ${successRate}%)`);
 
                 const scZone = player.zone || 'prontera_south';
-                broadcastToZone(scZone, 'skill:status_applied', {
-                    targetId, targetName, isEnemy,
-                    casterId: characterId, casterName: player.characterName,
-                    skillId, statusName: 'Stone Curse', duration: stoneDuration
+                broadcastToZone(scZone, 'status:applied', {
+                    targetId, isEnemy, statusType: 'stone', duration: stoneResult.duration,
+                    sourceId: characterId, sourceName: player.characterName
                 });
+                // Backward compat: also emit skill:buff_applied for VFX
                 broadcastToZone(scZone, 'skill:buff_applied', {
                     targetId, targetName, isEnemy,
                     casterId: characterId, casterName: player.characterName,
-                    skillId, buffName: 'Stone Curse', duration: stoneDuration,
+                    skillId, buffName: 'Stone Curse', duration: stoneResult.duration,
                     effects: { petrified: true }
                 });
-            } else if (isBoss || isUndead) {
-                logger.info(`[SKILL-COMBAT] Stone Curse on ${targetName} — immune (${isBoss ? 'boss' : 'undead'})`);
             } else {
-                logger.info(`[SKILL-COMBAT] Stone Curse on ${targetName} — failed (rate: ${successRate}%, rolled miss)`);
+                logger.info(`[SKILL-COMBAT] Stone Curse on ${targetName} — ${stoneResult.reason}`);
             }
 
             socket.emit('skill:used', { skillId, skillName: 'Stone Curse', level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana, stoneApplied });
@@ -4732,7 +4925,7 @@ io.on('connection', (socket) => {
         // --- SIGHT (ID 205) — Self buff, reveals hidden enemies ---
         if (skill.name === 'sight') {
             const casterBuffs = getBuffStatModifiers(player);
-            if (casterBuffs.isFrozen || casterBuffs.isStoned) { socket.emit('skill:error', { message: 'Cannot cast while incapacitated' }); return; }
+            if (casterBuffs.preventsCasting) { socket.emit('skill:error', { message: 'Cannot cast while incapacitated' }); return; }
 
             player.mana = Math.max(0, player.mana - spCost);
 
@@ -4760,7 +4953,7 @@ io.on('connection', (socket) => {
         // --- FIRE WALL (ID 209) — Ground-targeted persistent fire zone ---
         if (skill.name === 'fire_wall') {
             const casterBuffs = getBuffStatModifiers(player);
-            if (casterBuffs.isFrozen || casterBuffs.isStoned) { socket.emit('skill:error', { message: 'Cannot cast while incapacitated' }); return; }
+            if (casterBuffs.preventsCasting) { socket.emit('skill:error', { message: 'Cannot cast while incapacitated' }); return; }
 
             // Determine wall position: use ground coordinates from client, fallback to target/caster
             let wallPos;
@@ -4829,7 +5022,7 @@ io.on('connection', (socket) => {
         // --- SAFETY WALL (ID 211) — Ground-targeted protection zone (1x1 cell) ---
         if (skill.name === 'safety_wall') {
             const casterBuffs = getBuffStatModifiers(player);
-            if (casterBuffs.isFrozen || casterBuffs.isStoned) { socket.emit('skill:error', { message: 'Cannot cast while incapacitated' }); return; }
+            if (casterBuffs.preventsCasting) { socket.emit('skill:error', { message: 'Cannot cast while incapacitated' }); return; }
 
             // Determine placement: use ground coordinates from client, fallback to target/caster
             let wallPos;
@@ -4983,7 +5176,7 @@ io.on('connection', (socket) => {
                 await removeItemFromInventory(inventoryId, 1);
                 // Query save point from DB
                 const saveRes = await pool.query(
-                    `SELECT save_map, save_x, save_y, save_z FROM characters WHERE id = $1`,
+                    `SELECT save_map, save_x, save_y, save_z FROM characters WHERE character_id = $1`,
                     [characterId]
                 );
                 const saveRow = saveRes.rows[0] || {};
@@ -5012,8 +5205,8 @@ io.on('connection', (socket) => {
                     zoneTransitioning.add(characterId);
                     // Save to DB
                     await pool.query(
-                        `UPDATE characters SET zone_name = $1, x = $2, y = $3 WHERE id = $4`,
-                        [saveMap, saveX, saveY, characterId]
+                        `UPDATE characters SET zone_name = $1, x = $2, y = $3, z = $4 WHERE character_id = $5`,
+                        [saveMap, saveX, saveY, saveZ, characterId]
                     );
                     // Lazy spawn enemies in destination
                     if (!spawnedZones.has(saveMap) && destZoneData) {
@@ -5535,19 +5728,21 @@ io.on('connection', (socket) => {
             return;
         }
 
+        const client = await pool.connect();
         try {
+            await client.query('BEGIN');
             const newZeny = player.zuzucoin - totalCost;
-            await pool.query('UPDATE characters SET zuzucoin = $1 WHERE character_id = $2', [newZeny, characterId]);
-            player.zuzucoin = newZeny;
+            await client.query('UPDATE characters SET zuzucoin = $1 WHERE character_id = $2', [newZeny, characterId]);
 
-            const added = await addItemToInventory(characterId, itemId, quantity);
+            const added = await addItemToInventory(characterId, itemId, quantity, client);
             if (!added) {
-                // Rollback zuzucoin if item add failed
-                await pool.query('UPDATE characters SET zuzucoin = $1 WHERE character_id = $2', [player.zuzucoin + totalCost, characterId]);
-                player.zuzucoin += totalCost;
+                await client.query('ROLLBACK');
                 socket.emit('shop:error', { message: 'Failed to add item to inventory' });
                 return;
             }
+
+            await client.query('COMMIT');
+            player.zuzucoin = newZeny;
 
             logger.info(`[SHOP] ${player.characterName} bought ${quantity}x ${itemDef.name} for ${totalCost}z (remaining: ${newZeny}z)`);
 
@@ -5556,8 +5751,11 @@ io.on('connection', (socket) => {
             socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin });
             logger.info(`[SEND] shop:bought + inventory:data to ${socket.id}`);
         } catch (err) {
+            await client.query('ROLLBACK').catch(() => {});
             logger.error(`[SHOP] Buy error for char ${characterId}: ${err.message}`);
             socket.emit('shop:error', { message: 'Purchase failed' });
+        } finally {
+            client.release();
         }
     });
 
@@ -5603,10 +5801,21 @@ io.on('connection', (socket) => {
             const sellPrice = (item.price || 0) * sellQty;
             const newZeny = player.zuzucoin + sellPrice;
 
-            await pool.query('UPDATE characters SET zuzucoin = $1 WHERE character_id = $2', [newZeny, characterId]);
-            player.zuzucoin = newZeny;
-
-            await removeItemFromInventory(inventoryId, sellQty);
+            const client = await pool.connect();
+            try {
+                await client.query('BEGIN');
+                await client.query('UPDATE characters SET zuzucoin = $1 WHERE character_id = $2', [newZeny, characterId]);
+                await removeItemFromInventory(inventoryId, sellQty, client);
+                await client.query('COMMIT');
+                player.zuzucoin = newZeny;
+            } catch (txErr) {
+                await client.query('ROLLBACK').catch(() => {});
+                client.release();
+                logger.error(`[SHOP] Sell transaction error for char ${characterId}: ${txErr.message}`);
+                socket.emit('shop:error', { message: 'Sale failed' });
+                return;
+            }
+            client.release();
 
             logger.info(`[SHOP] ${player.characterName} sold ${sellQty}x ${item.name} for ${sellPrice}z (total: ${newZeny}z)`);
 
@@ -5749,19 +5958,23 @@ io.on('connection', (socket) => {
             logger.warn(`[SHOP] Slot validation error: ${err.message}`);
         }
 
-        // All validations passed — execute the batch transaction
+        // All validations passed — execute the batch transaction atomically
+        const client = await pool.connect();
         try {
+            await client.query('BEGIN');
             const newZeny = player.zuzucoin - totalCost;
-            await pool.query('UPDATE characters SET zuzucoin = $1 WHERE character_id = $2', [newZeny, characterId]);
-            player.zuzucoin = newZeny;
+            await client.query('UPDATE characters SET zuzucoin = $1 WHERE character_id = $2', [newZeny, characterId]);
 
             const boughtItems = [];
             for (const { itemId, quantity, itemDef, unitPrice } of validatedItems) {
-                const added = await addItemToInventory(characterId, itemId, quantity);
+                const added = await addItemToInventory(characterId, itemId, quantity, client);
                 if (added) {
                     boughtItems.push({ itemId, itemName: itemDef.name, quantity, unitPrice, totalPrice: unitPrice * quantity });
                 }
             }
+
+            await client.query('COMMIT');
+            player.zuzucoin = newZeny;
 
             logger.info(`[SHOP] ${player.characterName} batch-bought: ${boughtItems.map(i => `${i.quantity}x ${i.itemName}`).join(', ')} for ${totalCost}z (remaining: ${newZeny}z)`);
 
@@ -5770,11 +5983,11 @@ io.on('connection', (socket) => {
             socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin });
             logger.info(`[SEND] shop:bought + inventory:data to ${socket.id}`);
         } catch (err) {
+            await client.query('ROLLBACK').catch(() => {});
             logger.error(`[SHOP] Batch buy error for char ${characterId}: ${err.message}`);
-            // Attempt zeny rollback
-            player.zuzucoin += totalCost;
-            await pool.query('UPDATE characters SET zuzucoin = $1 WHERE character_id = $2', [player.zuzucoin, characterId]).catch(() => {});
             socket.emit('shop:error', { code: 'server_error', message: 'Purchase failed' });
+        } finally {
+            client.release();
         }
     });
 
@@ -5855,15 +6068,16 @@ io.on('connection', (socket) => {
             return;
         }
 
-        // Execute the batch sale
+        // Execute the batch sale atomically
+        const client = await pool.connect();
         try {
+            await client.query('BEGIN');
             const newZeny = player.zuzucoin + totalRevenue;
-            await pool.query('UPDATE characters SET zuzucoin = $1 WHERE character_id = $2', [newZeny, characterId]);
-            player.zuzucoin = newZeny;
+            await client.query('UPDATE characters SET zuzucoin = $1 WHERE character_id = $2', [newZeny, characterId]);
 
             const soldItems = [];
             for (const { inventoryId, sellQty, item, unitSellPrice } of validatedItems) {
-                await removeItemFromInventory(inventoryId, sellQty);
+                await removeItemFromInventory(inventoryId, sellQty, client);
                 soldItems.push({
                     inventoryId,
                     itemName: item.name,
@@ -5873,6 +6087,9 @@ io.on('connection', (socket) => {
                 });
             }
 
+            await client.query('COMMIT');
+            player.zuzucoin = newZeny;
+
             logger.info(`[SHOP] ${player.characterName} batch-sold: ${soldItems.map(i => `${i.quantity}x ${i.itemName}`).join(', ')} for ${totalRevenue}z (total: ${newZeny}z)`);
 
             const inventory = await getPlayerInventory(characterId);
@@ -5880,8 +6097,103 @@ io.on('connection', (socket) => {
             socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin });
             logger.info(`[SEND] shop:sold + inventory:data to ${socket.id}`);
         } catch (err) {
+            await client.query('ROLLBACK').catch(() => {});
             logger.error(`[SHOP] Batch sell error for char ${characterId}: ${err.message}`);
             socket.emit('shop:error', { code: 'server_error', message: 'Sale failed' });
+        } finally {
+            client.release();
+        }
+    });
+
+    // ============================================================
+    // Debug Commands — Status Effect Testing (dev only)
+    // ============================================================
+    socket.on('debug:apply_status', (data) => {
+        if (process.env.NODE_ENV !== 'development') return;
+        try {
+            const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+            const { statusType, targetId, isEnemy, duration } = parsed;
+            if (!statusType || !STATUS_EFFECTS[statusType]) {
+                socket.emit('debug:status_applied', { success: false, reason: 'unknown_status', statusType });
+                return;
+            }
+            const target = isEnemy ? enemies.get(parseInt(targetId)) : connectedPlayers.get(parseInt(targetId));
+            if (!target) {
+                socket.emit('debug:status_applied', { success: false, reason: 'target_not_found' });
+                return;
+            }
+            const effectDuration = duration || STATUS_EFFECTS[statusType].baseDuration;
+            const result = forceApplyStatusEffect(target, statusType, effectDuration);
+            if (result.applied) {
+                const targetZone = target.zone || 'prontera_south';
+                broadcastToZone(targetZone, 'status:applied', {
+                    targetId: parseInt(targetId), isEnemy: !!isEnemy, statusType,
+                    duration: result.duration, sourceId: 0, sourceName: 'DEBUG'
+                });
+                // Backward compat for VFX
+                if (statusType === 'freeze') {
+                    broadcastToZone(targetZone, 'skill:buff_applied', {
+                        targetId: parseInt(targetId), isEnemy: !!isEnemy,
+                        skillId: 208, buffName: 'Frozen', duration: result.duration,
+                        effects: { frozen: true }
+                    });
+                } else if (statusType === 'stone') {
+                    broadcastToZone(targetZone, 'skill:buff_applied', {
+                        targetId: parseInt(targetId), isEnemy: !!isEnemy,
+                        skillId: 206, buffName: 'Stone Curse', duration: result.duration,
+                        effects: { petrified: true }
+                    });
+                }
+            }
+            socket.emit('debug:status_applied', { success: result.applied, statusType, targetId: parseInt(targetId), duration: result.duration });
+            logger.info(`[DEBUG] Applied ${statusType} to ${isEnemy ? 'enemy' : 'player'} ${targetId} for ${result.duration}ms`);
+        } catch (err) {
+            logger.error(`[DEBUG] apply_status error: ${err.message}`);
+            socket.emit('debug:status_applied', { success: false, reason: err.message });
+        }
+    });
+
+    socket.on('debug:remove_status', (data) => {
+        if (process.env.NODE_ENV !== 'development') return;
+        try {
+            const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+            const { statusType, targetId, isEnemy } = parsed;
+            const target = isEnemy ? enemies.get(parseInt(targetId)) : connectedPlayers.get(parseInt(targetId));
+            if (!target) return;
+            const removed = removeStatusEffect(target, statusType);
+            if (removed) {
+                const targetZone = target.zone || 'prontera_south';
+                broadcastToZone(targetZone, 'status:removed', {
+                    targetId: parseInt(targetId), isEnemy: !!isEnemy, statusType, reason: 'debug'
+                });
+                broadcastToZone(targetZone, 'skill:buff_removed', {
+                    targetId: parseInt(targetId), isEnemy: !!isEnemy, buffName: statusType, reason: 'debug'
+                });
+            }
+            socket.emit('debug:status_removed', { success: removed, statusType, targetId: parseInt(targetId) });
+            logger.info(`[DEBUG] Removed ${statusType} from ${isEnemy ? 'enemy' : 'player'} ${targetId}: ${removed}`);
+        } catch (err) {
+            logger.error(`[DEBUG] remove_status error: ${err.message}`);
+        }
+    });
+
+    socket.on('debug:list_statuses', (data) => {
+        if (process.env.NODE_ENV !== 'development') return;
+        try {
+            const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+            const { targetId, isEnemy } = parsed;
+            const target = isEnemy ? enemies.get(parseInt(targetId)) : connectedPlayers.get(parseInt(targetId));
+            if (!target) {
+                socket.emit('debug:status_list', { targetId: parseInt(targetId), statuses: [], buffs: [] });
+                return;
+            }
+            socket.emit('debug:status_list', {
+                targetId: parseInt(targetId),
+                statuses: getActiveStatusList(target),
+                buffs: getActiveBuffList(target)
+            });
+        } catch (err) {
+            logger.error(`[DEBUG] list_statuses error: ${err.message}`);
         }
     });
 
@@ -6025,9 +6337,9 @@ setInterval(async () => {
             continue;
         }
 
-        // Skip if attacker is frozen or stoned (can't attack while CC'd)
-        const attackerCCMods = getBuffStatModifiers(attacker);
-        if (attackerCCMods.isFrozen || attackerCCMods.isStoned) continue;
+        // Skip if attacker is CC'd (stun/freeze/stone/sleep prevent attacks)
+        const attackerCCMods = getCombinedModifiers(attacker);
+        if (attackerCCMods.preventsAttack) continue;
         
         // ========== ENEMY TARGET ==========
         if (atkState.isEnemy) {
@@ -6142,14 +6454,12 @@ setInterval(async () => {
 
                 broadcastToZone(atkEnemyZone, 'combat:damage', damagePayload);
 
-                // Fire-element auto-attack breaks Frozen status
-                if (atkElement === 'fire' && enemy.activeBuffs) {
-                    const hadFrozen = enemy.activeBuffs.some(b => b.name === 'frozen');
-                    if (hadFrozen) {
-                        enemy.activeBuffs = enemy.activeBuffs.filter(b => b.name !== 'frozen');
-                        broadcastToZone(atkEnemyZone, 'skill:buff_removed', { targetId: enemy.enemyId, isEnemy: true, buffName: 'frozen', reason: 'fire_damage' });
-                        logger.info(`[COMBAT] Fire auto-attack removed Frozen from ${enemy.name}`);
-                    }
+                // Any damage breaks freeze/stone/sleep/confusion
+                const aaEnemyBroken = checkDamageBreakStatuses(enemy);
+                for (const brokenType of aaEnemyBroken) {
+                    broadcastToZone(atkEnemyZone, 'status:removed', { targetId: enemy.enemyId, isEnemy: true, statusType: brokenType, reason: 'damage_break' });
+                    broadcastToZone(atkEnemyZone, 'skill:buff_removed', { targetId: enemy.enemyId, isEnemy: true, buffName: brokenType, reason: 'damage_break' });
+                    logger.info(`[COMBAT] Auto-attack broke ${brokenType} on ${enemy.name}`);
                 }
 
                 // Broadcast enemy health update to zone (for health bar visibility)
@@ -6473,14 +6783,12 @@ setInterval(async () => {
 
             broadcastToZone(pvpAtkZone, 'combat:damage', damagePayload);
 
-            // Fire-element auto-attack breaks Frozen status on PvP target
-            if (pvpElement === 'fire' && target.activeBuffs) {
-                const hadFrozen = target.activeBuffs.some(b => b.name === 'frozen');
-                if (hadFrozen) {
-                    target.activeBuffs = target.activeBuffs.filter(b => b.name !== 'frozen');
-                    broadcastToZone(pvpAtkZone, 'skill:buff_removed', { targetId: atkState.targetCharId, isEnemy: false, buffName: 'frozen', reason: 'fire_damage' });
-                    logger.info(`[COMBAT] Fire auto-attack removed Frozen from ${target.characterName}`);
-                }
+            // Any damage breaks freeze/stone/sleep/confusion on PvP target
+            const pvpBroken = checkDamageBreakStatuses(target);
+            for (const brokenType of pvpBroken) {
+                broadcastToZone(pvpAtkZone, 'status:removed', { targetId: atkState.targetCharId, isEnemy: false, statusType: brokenType, reason: 'damage_break' });
+                broadcastToZone(pvpAtkZone, 'skill:buff_removed', { targetId: atkState.targetCharId, isEnemy: false, buffName: brokenType, reason: 'damage_break' });
+                logger.info(`[COMBAT] Auto-attack broke ${brokenType} on ${target.characterName}`);
             }
 
             // Check for player death
@@ -6558,10 +6866,14 @@ function emitRegenUpdate(charId, player) {
 
 // --- HP Natural Regen (every 6 seconds) ---
 // Formula: max(1, floor(MaxHP/200)) + floor(VIT/5)
+// Blocked by: Bleeding status (blocksHPRegen)
 setInterval(() => {
     for (const [charId, player] of connectedPlayers.entries()) {
         if (player.isDead) continue;
         if (player.health >= player.maxHealth) continue;
+        // Status effects can block HP regen (bleeding)
+        const regenMods = getCombinedModifiers(player);
+        if (regenMods.blocksHPRegen) continue;
 
         const stats = getEffectiveStats(player);
         let hpRegen = Math.max(1, Math.floor(player.maxHealth / 200));
@@ -6579,10 +6891,14 @@ setInterval(() => {
 // --- SP Natural Regen (every 8 seconds) ---
 // Formula: 1 + floor(MaxSP/100) + floor(INT/6)
 // Bonus if INT >= 120: extra 4 + floor(INT/2 - 60)
+// Blocked by: Poison status (blocksSPRegen), Bleeding status (blocksSPRegen)
 setInterval(() => {
     for (const [charId, player] of connectedPlayers.entries()) {
         if (player.isDead) continue;
         if (player.mana >= player.maxMana) continue;
+        // Status effects can block SP regen (poison, bleeding)
+        const spRegenMods = getCombinedModifiers(player);
+        if (spRegenMods.blocksSPRegen) continue;
 
         const stats = getEffectiveStats(player);
         const intStat = stats.int || stats.int_stat || 0;
@@ -6638,84 +6954,86 @@ setInterval(() => {
 }, 10000);
 
 // ============================================================
-// Buff Expiry Tick (every 1 second — check and remove expired buffs)
+// Status Effect & Buff Expiry Tick (every 1 second)
+// Handles: status effect expiry, periodic drains (poison/bleeding/stone), buff expiry
 // ============================================================
 setInterval(() => {
     const now = Date.now();
 
-    // Check players
+    // --- Player status effects + buffs ---
     for (const [charId, player] of connectedPlayers.entries()) {
-        const expired = expireBuffs(player);
-        if (expired.length > 0) {
-            const sock = io.sockets.sockets.get(player.socketId);
-            for (const buff of expired) {
-                logger.info(`[BUFF] ${player.characterName}: ${buff.name} expired`);
-                if (sock) {
-                    sock.emit('skill:buff_removed', {
-                        targetId: charId, buffName: buff.name, skillId: buff.skillId, reason: 'expired'
-                    });
-                }
+        if (player.isDead) continue;
+        const playerZone = player.zone || 'prontera_south';
+        const sock = io.sockets.sockets.get(player.socketId);
+
+        // Tick status effects (handles expiry + periodic drains)
+        const { expired: statusExpired, drains: statusDrains } = tickStatusEffects(player, now);
+        for (const type of statusExpired) {
+            logger.info(`[STATUS] ${player.characterName}: ${type} expired`);
+            broadcastToZone(playerZone, 'status:removed', { targetId: charId, isEnemy: false, statusType: type, reason: 'expired' });
+            // Backward compat: also emit skill:buff_removed for VFX
+            if (sock) sock.emit('skill:buff_removed', { targetId: charId, buffName: type, reason: 'expired' });
+        }
+        for (const d of statusDrains) {
+            logger.info(`[STATUS] ${d.type} drained ${d.drain} HP from ${player.characterName} (HP: ${d.newHealth}/${player.maxHealth})`);
+            if (sock) {
+                sock.emit('combat:health_update', {
+                    characterId: charId, health: d.newHealth,
+                    maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana
+                });
             }
+            broadcastToZone(playerZone, 'status:tick', {
+                targetId: charId, isEnemy: false, statusType: d.type,
+                drain: d.drain, newHealth: d.newHealth, maxHealth: player.maxHealth
+            });
         }
 
-        // Stone Curse HP drain: 1% HP every 5 seconds while petrified
-        if (player.activeBuffs && player.activeBuffs.length > 0) {
-            const stoneBuff = player.activeBuffs.find(b => b.name === 'stone_curse');
-            if (stoneBuff) {
-                // Only drain after the first 3 seconds (half-stone phase)
-                const stoneElapsed = now - stoneBuff.appliedAt;
-                if (stoneElapsed > 3000) {
-                    if (!stoneBuff.lastDrainTime) stoneBuff.lastDrainTime = stoneBuff.appliedAt + 3000;
-                    if (now - stoneBuff.lastDrainTime >= 5000) {
-                        stoneBuff.lastDrainTime = now;
-                        const drain = Math.max(1, Math.floor(player.maxHealth * 0.01));
-                        player.health = Math.max(1, player.health - drain); // Don't kill from stone drain
-                        const sock2 = io.sockets.sockets.get(player.socketId);
-                        if (sock2) {
-                            sock2.emit('combat:health_update', {
-                                characterId: charId, health: player.health,
-                                maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana
-                            });
-                        }
-                        logger.info(`[BUFF] Stone Curse drained ${drain} HP from ${player.characterName} (HP: ${player.health}/${player.maxHealth})`);
-                    }
-                }
+        // Tick buffs (Provoke, Endure, Sight, etc.)
+        const expiredBuffs = expireBuffs(player);
+        for (const buff of expiredBuffs) {
+            logger.info(`[BUFF] ${player.characterName}: ${buff.name} expired`);
+            if (sock) {
+                sock.emit('skill:buff_removed', {
+                    targetId: charId, buffName: buff.name, skillId: buff.skillId, reason: 'expired'
+                });
             }
+            broadcastToZone(playerZone, 'buff:removed', {
+                targetId: charId, isEnemy: false, buffName: buff.name, reason: 'expired'
+            });
         }
     }
 
-    // Check enemies
+    // --- Enemy status effects + buffs ---
     for (const [eid, enemy] of enemies.entries()) {
         if (enemy.isDead) continue;
-        const expired = expireBuffs(enemy);
-        if (expired.length > 0) {
-            for (const buff of expired) {
-                logger.info(`[BUFF] Enemy ${enemy.name}: ${buff.name} expired`);
-                // Broadcast buff removal to zone clients
-                const buffExpireZone = enemy.zone || 'prontera_south';
-                broadcastToZone(buffExpireZone, 'skill:buff_removed', {
-                    targetId: eid, isEnemy: true, buffName: buff.name, skillId: buff.skillId, reason: 'expired'
-                });
-            }
+        const enemyZone = enemy.zone || 'prontera_south';
+
+        // Tick status effects
+        const { expired: eStatusExpired, drains: eStatusDrains } = tickStatusEffects(enemy, now);
+        for (const type of eStatusExpired) {
+            logger.info(`[STATUS] Enemy ${enemy.name}: ${type} expired`);
+            broadcastToZone(enemyZone, 'status:removed', { targetId: eid, isEnemy: true, statusType: type, reason: 'expired' });
+            broadcastToZone(enemyZone, 'skill:buff_removed', { targetId: eid, isEnemy: true, buffName: type, reason: 'expired' });
+        }
+        for (const d of eStatusDrains) {
+            logger.info(`[STATUS] ${d.type} drained ${d.drain} HP from enemy ${enemy.name} (HP: ${d.newHealth}/${enemy.maxHealth})`);
+            broadcastToZone(enemyZone, 'enemy:health_update', {
+                enemyId: eid, health: d.newHealth, maxHealth: enemy.maxHealth,
+                inCombat: enemy.inCombatWith ? enemy.inCombatWith.size > 0 : false
+            });
+            broadcastToZone(enemyZone, 'status:tick', {
+                targetId: eid, isEnemy: true, statusType: d.type,
+                drain: d.drain, newHealth: d.newHealth, maxHealth: enemy.maxHealth
+            });
         }
 
-        // Stone Curse HP drain for enemies too
-        if (enemy.activeBuffs && enemy.activeBuffs.length > 0) {
-            const stoneBuff = enemy.activeBuffs.find(b => b.name === 'stone_curse');
-            if (stoneBuff) {
-                const stoneElapsed = now - stoneBuff.appliedAt;
-                if (stoneElapsed > 3000) {
-                    if (!stoneBuff.lastDrainTime) stoneBuff.lastDrainTime = stoneBuff.appliedAt + 3000;
-                    if (now - stoneBuff.lastDrainTime >= 5000) {
-                        stoneBuff.lastDrainTime = now;
-                        const drain = Math.max(1, Math.floor(enemy.maxHealth * 0.01));
-                        enemy.health = Math.max(1, enemy.health - drain);
-                        const stoneDrainZone = enemy.zone || 'prontera_south';
-                        broadcastToZone(stoneDrainZone, 'enemy:health_update', { enemyId: eid, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: enemy.inCombatWith.size > 0 });
-                        logger.info(`[BUFF] Stone Curse drained ${drain} HP from enemy ${enemy.name} (HP: ${enemy.health}/${enemy.maxHealth})`);
-                    }
-                }
-            }
+        // Tick buffs
+        const eExpiredBuffs = expireBuffs(enemy);
+        for (const buff of eExpiredBuffs) {
+            logger.info(`[BUFF] Enemy ${enemy.name}: ${buff.name} expired`);
+            broadcastToZone(enemyZone, 'skill:buff_removed', {
+                targetId: eid, isEnemy: true, buffName: buff.name, skillId: buff.skillId, reason: 'expired'
+            });
         }
     }
 }, 1000);
@@ -6766,7 +7084,7 @@ setInterval(async () => {
                 const caster = connectedPlayers.get(effect.casterId);
                 if (!caster) continue;
                 const casterStats = getEffectiveStats(caster);
-                const fwResult = calculateMagicSkillDamage(casterStats, enemy.stats, enemy.hardDef || 0, 50, 'fire', getEnemyTargetInfo(enemy));
+                const fwResult = calculateMagicSkillDamage(casterStats, enemy.stats, enemy.hardMdef || enemy.magicDefense || 0, 50, 'fire', getEnemyTargetInfo(enemy));
                 const finalDmg = Math.max(1, fwResult.damage || 0);
 
                 enemy.health = Math.max(0, enemy.health - finalDmg);
@@ -6781,13 +7099,11 @@ setInterval(async () => {
 
                 const fwTickZone = enemy.zone || 'prontera_south';
 
-                // Fire damage breaks Frozen
-                if (enemy.activeBuffs) {
-                    const hadFrozen = enemy.activeBuffs.some(b => b.name === 'frozen');
-                    if (hadFrozen) {
-                        enemy.activeBuffs = enemy.activeBuffs.filter(b => b.name !== 'frozen');
-                        broadcastToZone(fwTickZone, 'skill:buff_removed', { targetId: eid, isEnemy: true, buffName: 'frozen', reason: 'fire_damage' });
-                    }
+                // Damage breaks freeze/stone/sleep/confusion
+                const fwEnemyBroken = checkDamageBreakStatuses(enemy);
+                for (const brokenType of fwEnemyBroken) {
+                    broadcastToZone(fwTickZone, 'status:removed', { targetId: eid, isEnemy: true, statusType: brokenType, reason: 'damage_break' });
+                    broadcastToZone(fwTickZone, 'skill:buff_removed', { targetId: eid, isEnemy: true, buffName: brokenType, reason: 'damage_break' });
                 }
 
                 broadcastToZone(fwTickZone, 'skill:effect_damage', {
@@ -6867,7 +7183,7 @@ setInterval(async () => {
                 if (!caster) continue;
                 const casterStats = getEffectiveStats(caster);
                 const targetStats = getEffectiveStats(player);
-                const fwResult = calculateMagicSkillDamage(casterStats, targetStats, player.hardDef || 0, 50, 'fire');
+                const fwResult = calculateMagicSkillDamage(casterStats, targetStats, player.hardMdef || 0, 50, 'fire', getPlayerTargetInfo(player, charId));
                 const finalDmg = Math.max(1, fwResult.damage || 0);
 
                 player.health = Math.max(0, player.health - finalDmg);
@@ -6879,13 +7195,11 @@ setInterval(async () => {
                 }
 
                 const fwPvpTickZone = player.zone || 'prontera_south';
-                // Fire damage breaks Frozen
-                if (player.activeBuffs) {
-                    const hadFrozen = player.activeBuffs.some(b => b.name === 'frozen');
-                    if (hadFrozen) {
-                        player.activeBuffs = player.activeBuffs.filter(b => b.name !== 'frozen');
-                        broadcastToZone(fwPvpTickZone, 'skill:buff_removed', { targetId: charId, isEnemy: false, buffName: 'frozen', reason: 'fire_damage' });
-                    }
+                // Damage breaks freeze/stone/sleep/confusion
+                const fwPlayerBroken = checkDamageBreakStatuses(player);
+                for (const brokenType of fwPlayerBroken) {
+                    broadcastToZone(fwPvpTickZone, 'status:removed', { targetId: charId, isEnemy: false, statusType: brokenType, reason: 'damage_break' });
+                    broadcastToZone(fwPvpTickZone, 'skill:buff_removed', { targetId: charId, isEnemy: false, buffName: brokenType, reason: 'damage_break' });
                 }
 
                 broadcastToZone(fwPvpTickZone, 'skill:effect_damage', {
@@ -7218,6 +7532,17 @@ setInterval(async () => {
         if (enemy.isDead || enemy.aiState === AI_STATE.DEAD) continue;
         // Skip AI processing for enemies in zones with no players
         if (!activeZones.has(enemy.zone)) continue;
+
+        // CC check: frozen/stoned/stunned/sleeping enemies cannot move or act
+        const enemyCCMods = getCombinedModifiers(enemy);
+        if (enemyCCMods.preventsMovement || enemyCCMods.preventsAttack) {
+            // Stop any ongoing movement
+            if (enemy.isWandering) {
+                enemy.isWandering = false;
+                enemyStopMoving(enemy);
+            }
+            continue; // Skip entire AI tick — cannot move, chase, attack, or wander
+        }
 
         // Hit stun: if recently damaged, skip movement/attack (but allow state checks)
         const inHitStun = (now - (enemy.lastDamageTime || 0)) < (enemy.damageMotion || 300);
@@ -8336,12 +8661,16 @@ server.listen(PORT, async () => {
       // PK already includes row_index or other constraint issue — safe to ignore
       logger.info(`[DB] character_hotbar PK note: ${pkErr.message}`);
     }
-    // Normalize existing skill slots from 1-based to 0-based (one-time migration)
+    // Normalize existing skill slots from 1-based to 0-based (one-time, idempotent)
+    // Only runs if any skill slot has slot_index >= 9 (impossible in 0-based 0-8 range)
     try {
-      const result = await pool.query(
-        `UPDATE character_hotbar SET slot_index = slot_index - 1 WHERE slot_type = 'skill' AND slot_index >= 1`
+      const check = await pool.query(
+        `SELECT 1 FROM character_hotbar WHERE slot_type = 'skill' AND slot_index >= 9 LIMIT 1`
       );
-      if (result.rowCount > 0) {
+      if (check.rows.length > 0) {
+        const result = await pool.query(
+          `UPDATE character_hotbar SET slot_index = slot_index - 1 WHERE slot_type = 'skill' AND slot_index >= 1`
+        );
         logger.info(`[DB] character_hotbar: normalized ${result.rowCount} skill slots from 1-based to 0-based`);
       }
     } catch (normErr) {
