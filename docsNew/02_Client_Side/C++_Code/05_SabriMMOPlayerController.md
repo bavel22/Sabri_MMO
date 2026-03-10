@@ -1,3 +1,5 @@
+> **DEPRECATED** — This C++ class exists in the source but is **not used at runtime**. The game's player controller `PC_MMOPlayerController` (Blueprint) inherits from base `APlayerController`, not from `ASabriMMOPlayerController`. All Enhanced Input setup is handled by `ASabriMMOCharacter::SetupPlayerInputComponent()`. This doc is preserved for reference only.
+
 # ASabriMMOPlayerController
 
 **Files**: `Source/SabriMMO/SabriMMOPlayerController.h` (53 lines), `SabriMMOPlayerController.cpp` (68 lines)  

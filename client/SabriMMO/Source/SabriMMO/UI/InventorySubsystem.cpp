@@ -1,16 +1,14 @@
-// InventorySubsystem.cpp — Manages inventory data, Socket.io events, drag-and-drop state,
+// InventorySubsystem.cpp — Manages inventory data, drag-and-drop state,
 // and the SInventoryWidget overlay lifecycle.
 
 #include "InventorySubsystem.h"
 #include "SInventoryWidget.h"
 #include "HotbarSubsystem.h"
 #include "MMOGameInstance.h"
+#include "SocketEventRouter.h"
 #include "Engine/Texture2D.h"
-#include "SocketIOClientComponent.h"
-#include "SocketIONative.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
 #include "Framework/Application/SlateApplication.h"
@@ -36,19 +34,30 @@ void UInventorySubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
 	Super::OnWorldBeginPlay(InWorld);
 
-	if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(InWorld.GetGameInstance()))
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(InWorld.GetGameInstance());
+	if (!GI) return;
+
+	FCharacterData SelChar = GI->GetSelectedCharacter();
+	LocalCharacterId = SelChar.CharacterId;
+
+	// Register socket event handlers via persistent EventRouter
+	USocketEventRouter* Router = GI->GetEventRouter();
+	if (Router)
 	{
-		FCharacterData SelChar = GI->GetSelectedCharacter();
-		LocalCharacterId = SelChar.CharacterId;
+		Router->RegisterHandler(TEXT("inventory:data"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleInventoryData(D); });
+		Router->RegisterHandler(TEXT("inventory:equipped"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleInventoryEquipped(D); });
+		Router->RegisterHandler(TEXT("inventory:dropped"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleInventoryDropped(D); });
+		Router->RegisterHandler(TEXT("inventory:error"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleInventoryError(D); });
 	}
 
-	InWorld.GetTimerManager().SetTimer(
-		BindCheckTimer,
-		FTimerDelegate::CreateUObject(this, &UInventorySubsystem::TryWrapSocketEvents),
-		0.5f, true
-	);
+	// Request fresh inventory data
+	GI->EmitSocketEvent(TEXT("inventory:load"), TEXT("{}"));
 
-	UE_LOG(LogInventory, Log, TEXT("InventorySubsystem started — waiting for SocketIO bindings..."));
+	UE_LOG(LogInventory, Log, TEXT("InventorySubsystem started — events registered via EventRouter. LocalCharId=%d"), LocalCharacterId);
 }
 
 void UInventorySubsystem::Deinitialize()
@@ -58,119 +67,24 @@ void UInventorySubsystem::Deinitialize()
 		ToggleWidget();
 	}
 
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().ClearTimer(BindCheckTimer);
-	}
-
 	HideDragCursor();
 
 	// Clear icon caches — release GC-rooted textures and brush memory
 	ItemIconBrushCache.Empty();
 	ItemIconTextureCache.Empty();
 
-	bEventsWrapped = false;
-	CachedSIOComponent = nullptr;
-	Super::Deinitialize();
-}
-
-// ============================================================
-// Find SocketIO component
-// ============================================================
-
-USocketIOClientComponent* UInventorySubsystem::FindSocketIOComponent() const
-{
-	UWorld* World = GetWorld();
-	if (!World) return nullptr;
-
-	for (TActorIterator<AActor> It(World); It; ++It)
-	{
-		if (USocketIOClientComponent* Comp = It->FindComponentByClass<USocketIOClientComponent>())
-		{
-			return Comp;
-		}
-	}
-	return nullptr;
-}
-
-// ============================================================
-// Timer callback — wrap events when ready
-// ============================================================
-
-void UInventorySubsystem::TryWrapSocketEvents()
-{
-	if (bEventsWrapped) return;
-
-	USocketIOClientComponent* SIOComp = FindSocketIOComponent();
-	if (!SIOComp) return;
-
-	TSharedPtr<FSocketIONative> NativeClient = SIOComp->GetNativeClient();
-	if (!NativeClient.IsValid() || !NativeClient->bIsConnected) return;
-
-	if (!NativeClient->EventFunctionMap.Contains(TEXT("combat:health_update"))) return;
-
-	CachedSIOComponent = SIOComp;
-
-	if (LocalCharacterId == 0)
-	{
-		if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance()))
-		{
-			FCharacterData SelChar = GI->GetSelectedCharacter();
-			LocalCharacterId = SelChar.CharacterId;
-		}
-	}
-
-	WrapSingleEvent(TEXT("inventory:data"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleInventoryData(D); });
-	WrapSingleEvent(TEXT("inventory:equipped"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleInventoryEquipped(D); });
-	WrapSingleEvent(TEXT("inventory:dropped"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleInventoryDropped(D); });
-	WrapSingleEvent(TEXT("inventory:error"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleInventoryError(D); });
-
-	bEventsWrapped = true;
-
 	if (UWorld* World = GetWorld())
 	{
-		World->GetTimerManager().ClearTimer(BindCheckTimer);
-	}
-
-	// Request fresh inventory data (initial events may have fired before wrapping)
-	RequestInventoryRefresh();
-
-	UE_LOG(LogInventory, Log, TEXT("InventorySubsystem — events wrapped. LocalCharId=%d"), LocalCharacterId);
-}
-
-// ============================================================
-// Wrap a single event (same pattern as other subsystems)
-// ============================================================
-
-void UInventorySubsystem::WrapSingleEvent(
-	const FString& EventName,
-	TFunction<void(const TSharedPtr<FJsonValue>&)> OurHandler)
-{
-	if (!CachedSIOComponent.IsValid()) return;
-
-	TSharedPtr<FSocketIONative> NativeClient = CachedSIOComponent->GetNativeClient();
-	if (!NativeClient.IsValid()) return;
-
-	TFunction<void(const FString&, const TSharedPtr<FJsonValue>&)> OriginalCallback;
-	FSIOBoundEvent* Existing = NativeClient->EventFunctionMap.Find(EventName);
-	if (Existing)
-	{
-		OriginalCallback = Existing->Function;
-	}
-
-	NativeClient->OnEvent(EventName,
-		[OriginalCallback, OurHandler](const FString& Event, const TSharedPtr<FJsonValue>& Message)
+		if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance()))
 		{
-			if (OriginalCallback) OriginalCallback(Event, Message);
-			if (OurHandler) OurHandler(Message);
-		},
-		TEXT("/"),
-		ESIOThreadOverrideOption::USE_GAME_THREAD
-	);
+			if (USocketEventRouter* Router = GI->GetEventRouter())
+			{
+				Router->UnregisterAllForOwner(this);
+			}
+		}
+	}
+
+	Super::Deinitialize();
 }
 
 // ============================================================
@@ -428,69 +342,69 @@ TArray<FInventoryItem> UInventorySubsystem::GetFilteredItems() const
 
 void UInventorySubsystem::UseItem(int32 InventoryId)
 {
-	USocketIOClientComponent* SIOComp = CachedSIOComponent.IsValid() ? CachedSIOComponent.Get() : FindSocketIOComponent();
-	if (!SIOComp) return;
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
+	if (!GI) return;
 
-	TSharedPtr<FJsonObject> Payload = MakeShareable(new FJsonObject());
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 	Payload->SetNumberField(TEXT("inventoryId"), InventoryId);
-	SIOComp->EmitNative(TEXT("inventory:use"), Payload);
+	GI->EmitSocketEvent(TEXT("inventory:use"), Payload);
 	UE_LOG(LogInventory, Log, TEXT("Sent inventory:use for inv_id=%d"), InventoryId);
 }
 
 void UInventorySubsystem::EquipItem(int32 InventoryId)
 {
-	USocketIOClientComponent* SIOComp = CachedSIOComponent.IsValid() ? CachedSIOComponent.Get() : FindSocketIOComponent();
-	if (!SIOComp) return;
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
+	if (!GI) return;
 
-	TSharedPtr<FJsonObject> Payload = MakeShareable(new FJsonObject());
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 	Payload->SetNumberField(TEXT("inventoryId"), InventoryId);
 	Payload->SetBoolField(TEXT("equip"), true);
-	SIOComp->EmitNative(TEXT("inventory:equip"), Payload);
+	GI->EmitSocketEvent(TEXT("inventory:equip"), Payload);
 	UE_LOG(LogInventory, Log, TEXT("Sent inventory:equip (equip=true) for inv_id=%d"), InventoryId);
 }
 
 void UInventorySubsystem::UnequipItem(int32 InventoryId)
 {
-	USocketIOClientComponent* SIOComp = CachedSIOComponent.IsValid() ? CachedSIOComponent.Get() : FindSocketIOComponent();
-	if (!SIOComp) return;
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
+	if (!GI) return;
 
-	TSharedPtr<FJsonObject> Payload = MakeShareable(new FJsonObject());
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 	Payload->SetNumberField(TEXT("inventoryId"), InventoryId);
 	Payload->SetBoolField(TEXT("equip"), false);
-	SIOComp->EmitNative(TEXT("inventory:equip"), Payload);
+	GI->EmitSocketEvent(TEXT("inventory:equip"), Payload);
 	UE_LOG(LogInventory, Log, TEXT("Sent inventory:equip (equip=false) for inv_id=%d"), InventoryId);
 }
 
 void UInventorySubsystem::DropItem(int32 InventoryId, int32 Quantity)
 {
-	USocketIOClientComponent* SIOComp = CachedSIOComponent.IsValid() ? CachedSIOComponent.Get() : FindSocketIOComponent();
-	if (!SIOComp) return;
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
+	if (!GI) return;
 
-	TSharedPtr<FJsonObject> Payload = MakeShareable(new FJsonObject());
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 	Payload->SetNumberField(TEXT("inventoryId"), InventoryId);
 	if (Quantity > 0) Payload->SetNumberField(TEXT("quantity"), Quantity);
-	SIOComp->EmitNative(TEXT("inventory:drop"), Payload);
+	GI->EmitSocketEvent(TEXT("inventory:drop"), Payload);
 	UE_LOG(LogInventory, Log, TEXT("Sent inventory:drop for inv_id=%d qty=%d"), InventoryId, Quantity);
 }
 
 void UInventorySubsystem::MoveItem(int32 InventoryId, int32 NewSlotIndex)
 {
-	USocketIOClientComponent* SIOComp = CachedSIOComponent.IsValid() ? CachedSIOComponent.Get() : FindSocketIOComponent();
-	if (!SIOComp) return;
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
+	if (!GI) return;
 
-	TSharedPtr<FJsonObject> Payload = MakeShareable(new FJsonObject());
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 	Payload->SetNumberField(TEXT("inventoryId"), InventoryId);
 	Payload->SetNumberField(TEXT("newSlotIndex"), NewSlotIndex);
-	SIOComp->EmitNative(TEXT("inventory:move"), Payload);
+	GI->EmitSocketEvent(TEXT("inventory:move"), Payload);
 	UE_LOG(LogInventory, Log, TEXT("Sent inventory:move inv_id=%d → slot=%d"), InventoryId, NewSlotIndex);
 }
 
 void UInventorySubsystem::RequestInventoryRefresh()
 {
-	USocketIOClientComponent* SIOComp = CachedSIOComponent.IsValid() ? CachedSIOComponent.Get() : FindSocketIOComponent();
-	if (!SIOComp) return;
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
+	if (!GI) return;
 
-	SIOComp->EmitNative(TEXT("inventory:load"), TEXT("{}"));
+	GI->EmitSocketEvent(TEXT("inventory:load"), TEXT("{}"));
 	UE_LOG(LogInventory, Log, TEXT("Sent inventory:load request"));
 }
 

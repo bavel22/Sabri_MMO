@@ -1,6 +1,7 @@
 // CastBarSubsystem.h — UWorldSubsystem that manages RO-style cast bars.
-// Wraps Socket.io cast events, tracks active casts for all visible players,
-// and feeds the SCastBarOverlay widget for world-projected rendering.
+// Registers Socket.io cast event handlers via the persistent EventRouter,
+// tracks active casts for all visible players, and feeds the SCastBarOverlay
+// widget for world-projected rendering.
 
 #pragma once
 
@@ -10,9 +11,7 @@
 #include "Dom/JsonObject.h"
 #include "CastBarSubsystem.generated.h"
 
-class USocketIOClientComponent;
 class SCastBarOverlay;
-struct FSIOBoundEvent;
 
 // Active cast entry — one per caster currently casting a skill
 struct FCastBarEntry
@@ -41,12 +40,6 @@ public:
 	int32 LocalCharacterId = 0;
 
 private:
-	// ---- socket event wrapping ----
-	void TryWrapSocketEvents();
-	void WrapSingleEvent(const FString& EventName,
-		TFunction<void(const TSharedPtr<FJsonValue>&)> OurHandler);
-	USocketIOClientComponent* FindSocketIOComponent() const;
-
 	// ---- event handlers ----
 	void HandleCastStart(const TSharedPtr<FJsonValue>& Data);
 	void HandleCastComplete(const TSharedPtr<FJsonValue>& Data);
@@ -59,11 +52,8 @@ private:
 	void HideOverlay();
 
 	// ---- state ----
-	bool bEventsWrapped = false;
 	bool bOverlayAdded = false;
-	FTimerHandle BindCheckTimer;
 
 	TSharedPtr<SCastBarOverlay> OverlayWidget;
 	TSharedPtr<SWidget> ViewportOverlay;
-	TWeakObjectPtr<USocketIOClientComponent> CachedSIOComponent;
 };

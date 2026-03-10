@@ -128,11 +128,6 @@ const io = new Server(server, {
 // Store connected players
 const connectedPlayers = new Map();
 
-// Reconnect buff cache — preserves buffs/statuses across zone-change disconnect/reconnect
-// Key: characterId, Value: { activeBuffs, activeStatusEffects, cachedAt }
-const reconnectBuffCache = new Map();
-const RECONNECT_CACHE_TTL = 30000; // 30 seconds — buffs expire from cache after this
-
 // PvP toggle — set to false to disable all player-vs-player damage
 const PVP_ENABLED = false;
 
@@ -1803,25 +1798,6 @@ io.on('connection', (socket) => {
             lastZ: initialZ
         });
         
-        // Restore cached buffs/statuses from zone-change disconnect
-        if (reconnectBuffCache.has(characterId)) {
-            const cached = reconnectBuffCache.get(characterId);
-            reconnectBuffCache.delete(characterId);
-            const player = connectedPlayers.get(characterId);
-            if (player) {
-                // Filter out expired buffs/statuses
-                const now = Date.now();
-                player.activeBuffs = (cached.activeBuffs || []).filter(b => now < b.expiresAt);
-                player.activeStatusEffects = new Map();
-                for (const [type, effect] of cached.activeStatusEffects.entries()) {
-                    if (now < effect.expiresAt) {
-                        player.activeStatusEffects.set(type, effect);
-                    }
-                }
-                logger.info(`[BUFF-CACHE] Restored ${player.activeBuffs.length} buffs and ${player.activeStatusEffects.size} statuses for char ${characterId}`);
-            }
-        }
-
         logger.info(`Player joined: ${characterName || 'Unknown'} (Character ${characterId}) HP: ${health}/${maxHealth} MP: ${mana}/${maxMana} zone=${playerZone}`);
         const zoneInfo = getZone(playerZone);
         const joinedPayload = {
@@ -2445,24 +2421,6 @@ io.on('connection', (socket) => {
                 }
                 
                 const leftZone = player.zone || 'prontera_south';
-
-                // Cache buffs/statuses for reconnect (zone change causes disconnect/reconnect)
-                if ((player.activeBuffs && player.activeBuffs.length > 0) ||
-                    (player.activeStatusEffects && player.activeStatusEffects.size > 0)) {
-                    reconnectBuffCache.set(charId, {
-                        activeBuffs: player.activeBuffs ? [...player.activeBuffs] : [],
-                        activeStatusEffects: player.activeStatusEffects ? new Map(player.activeStatusEffects) : new Map(),
-                        cachedAt: Date.now()
-                    });
-                    logger.info(`[BUFF-CACHE] Cached ${(player.activeBuffs || []).length} buffs and ${(player.activeStatusEffects ? player.activeStatusEffects.size : 0)} statuses for char ${charId}`);
-                    // Auto-cleanup after TTL
-                    setTimeout(() => {
-                        if (reconnectBuffCache.has(charId)) {
-                            reconnectBuffCache.delete(charId);
-                            logger.info(`[BUFF-CACHE] Cache expired for char ${charId}`);
-                        }
-                    }, RECONNECT_CACHE_TTL);
-                }
 
                 connectedPlayers.delete(charId);
                 logger.info(`Player left: Character ${charId} zone=${leftZone}`);

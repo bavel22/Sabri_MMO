@@ -1,5 +1,5 @@
 // SkillTreeSubsystem.h — UWorldSubsystem that manages the Skill Tree Slate widget
-// and wraps Socket.io events for skill data, learning, and resetting.
+// and registers Socket.io event handlers via the persistent EventRouter.
 
 #pragma once
 
@@ -11,10 +11,8 @@
 #include "Engine/Texture2D.h"
 #include "SkillTreeSubsystem.generated.h"
 
-class USocketIOClientComponent;
 class SSkillTreeWidget;
 class SSkillTargetingOverlay;
-struct FSIOBoundEvent;
 
 // Targeting mode for skills that require target/ground selection before casting
 enum class ESkillTargetingMode : uint8
@@ -247,15 +245,6 @@ public:
 	void UpdateSkillDragCursorPosition();  // Call from widget Tick to follow cursor
 
 private:
-	// ---- socket event wrapping ----
-	void TryWrapSocketEvents();
-	void BindNewEvent(const FString& EventName,
-		TFunction<void(const TSharedPtr<FJsonValue>&)> Handler);
-	void WrapExistingEvent(const FString& EventName,
-		TFunction<void(const TSharedPtr<FJsonValue>&)> OurHandler);
-
-	USocketIOClientComponent* FindSocketIOComponent() const;
-
 	// ---- event handlers ----
 	void HandleSkillData(const TSharedPtr<FJsonValue>& Data);
 	void HandleSkillLearned(const TSharedPtr<FJsonValue>& Data);
@@ -270,21 +259,17 @@ private:
 	void HandleSkillCooldownStarted(const TSharedPtr<FJsonValue>& Data);
 
 	// ---- state ----
-	bool bEventsWrapped = false;
 	bool bWidgetAdded   = false;
 	int32 LocalCharacterId = 0;
 
 	// ---- cooldown tracking ----
 	TMap<int32, double> SkillCooldownExpiry;  // skillId -> platform seconds when cooldown expires
 
-	FTimerHandle BindCheckTimer;
 	FTimerHandle HotbarRequestTimer;
 
 	TSharedPtr<SSkillTreeWidget> SkillTreeWidget;
 	TSharedPtr<SWidget>          AlignmentWrapper;
 	TSharedPtr<SWidget>          ViewportOverlay;
-
-	TWeakObjectPtr<USocketIOClientComponent> CachedSIOComponent;
 
 	// ---- icon brush cache (TSharedPtr so raw FSlateBrush* survives TMap rehash) ----
 	TMap<FString, TSharedPtr<FSlateBrush>> IconBrushCache;

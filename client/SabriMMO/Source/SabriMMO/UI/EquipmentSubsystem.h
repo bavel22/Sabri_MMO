@@ -11,7 +11,6 @@
 #include "CharacterData.h"
 #include "EquipmentSubsystem.generated.h"
 
-class USocketIOClientComponent;
 class UInventorySubsystem;
 class SEquipmentWidget;
 
@@ -85,22 +84,12 @@ public:
 	bool IsWidgetVisible() const;
 
 private:
-	void TryWrapSocketEvents();
-	void WrapSingleEvent(const FString& EventName,
-		TFunction<void(const TSharedPtr<FJsonValue>&)> OurHandler);
-	USocketIOClientComponent* FindSocketIOComponent() const;
-
 	void HandleInventoryData(const TSharedPtr<FJsonValue>& Data);
 
-	bool bEventsWrapped = false;
 	bool bWidgetVisible = false;
 	int32 LocalCharacterId = 0;
-
-	FTimerHandle BindCheckTimer;
 
 	TSharedPtr<SEquipmentWidget> EquipWidget;
 	TSharedPtr<SWidget> AlignmentWrapper;
 	TSharedPtr<SWidget> ViewportOverlay;
-
-	TWeakObjectPtr<USocketIOClientComponent> CachedSIOComponent;
 };

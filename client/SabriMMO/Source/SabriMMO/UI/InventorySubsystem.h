@@ -1,5 +1,6 @@
 // InventorySubsystem.h — UWorldSubsystem that owns all inventory item data,
-// manages Socket.io event wrapping, drag-and-drop state, and the SInventoryWidget lifecycle.
+// drag-and-drop state, and the SInventoryWidget lifecycle.
+// Registers Socket.io event handlers via the persistent EventRouter.
 // F6 key toggle handled by SabriMMOCharacter via Enhanced Input.
 
 #pragma once
@@ -11,7 +12,6 @@
 #include "CharacterData.h"
 #include "InventorySubsystem.generated.h"
 
-class USocketIOClientComponent;
 class SInventoryWidget;
 
 UCLASS()
@@ -64,12 +64,6 @@ public:
 	FSlateBrush* GetOrCreateItemIconBrush(const FString& IconName);
 
 private:
-	// ---- socket event wrapping ----
-	void TryWrapSocketEvents();
-	void WrapSingleEvent(const FString& EventName,
-		TFunction<void(const TSharedPtr<FJsonValue>&)> OurHandler);
-	USocketIOClientComponent* FindSocketIOComponent() const;
-
 	// ---- event handlers ----
 	void HandleInventoryData(const TSharedPtr<FJsonValue>& Data);
 	void HandleInventoryEquipped(const TSharedPtr<FJsonValue>& Data);
@@ -81,11 +75,8 @@ private:
 	void RecalculateWeight();
 
 	// ---- state ----
-	bool bEventsWrapped = false;
 	bool bWidgetVisible = false;
 	int32 LocalCharacterId = 0;
-
-	FTimerHandle BindCheckTimer;
 
 	TSharedPtr<SInventoryWidget> InventoryWidget;
 	TSharedPtr<SWidget> AlignmentWrapper;
@@ -97,8 +88,6 @@ private:
 	TSharedPtr<SBox> DragCursorBox;
 	TSharedPtr<SWidget> DragCursorAlignWrapper;  // Keeps drag cursor alive + constrains size
 	TSharedPtr<SWidget> DragCursorOverlay;
-
-	TWeakObjectPtr<USocketIOClientComponent> CachedSIOComponent;
 
 	// ---- item icon brush cache (TSharedPtr so raw FSlateBrush* survives TMap rehash) ----
 	TMap<FString, TSharedPtr<FSlateBrush>> ItemIconBrushCache;

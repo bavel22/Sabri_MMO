@@ -1,15 +1,13 @@
 // ShopSubsystem.cpp — Manages NPC shop state, shopping cart, batch buy/sell,
-// Socket.io event wrapping, and SShopWidget overlay lifecycle.
+// and SShopWidget overlay lifecycle.
 
 #include "ShopSubsystem.h"
 #include "SShopWidget.h"
 #include "InventorySubsystem.h"
 #include "MMOGameInstance.h"
-#include "SocketIOClientComponent.h"
-#include "SocketIONative.h"
+#include "SocketEventRouter.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "EngineUtils.h"
 #include "TimerManager.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Widgets/SWeakWidget.h"
@@ -35,13 +33,24 @@ void UShopSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
 	Super::OnWorldBeginPlay(InWorld);
 
-	InWorld.GetTimerManager().SetTimer(
-		BindCheckTimer,
-		FTimerDelegate::CreateUObject(this, &UShopSubsystem::TryWrapSocketEvents),
-		0.5f, true
-	);
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(InWorld.GetGameInstance());
+	if (!GI) return;
 
-	UE_LOG(LogShop, Log, TEXT("ShopSubsystem started — waiting for SocketIO bindings..."));
+	// Register socket event handlers via persistent EventRouter
+	USocketEventRouter* Router = GI->GetEventRouter();
+	if (Router)
+	{
+		Router->RegisterHandler(TEXT("shop:data"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleShopData(D); });
+		Router->RegisterHandler(TEXT("shop:bought"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleShopBought(D); });
+		Router->RegisterHandler(TEXT("shop:sold"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleShopSold(D); });
+		Router->RegisterHandler(TEXT("shop:error"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleShopError(D); });
+	}
+
+	UE_LOG(LogShop, Log, TEXT("ShopSubsystem started — events registered via EventRouter."));
 }
 
 void UShopSubsystem::Deinitialize()
@@ -50,99 +59,16 @@ void UShopSubsystem::Deinitialize()
 
 	if (UWorld* World = GetWorld())
 	{
-		World->GetTimerManager().ClearTimer(BindCheckTimer);
-	}
-
-	bEventsWrapped = false;
-	CachedSIOComponent = nullptr;
-	Super::Deinitialize();
-}
-
-// ============================================================
-// Find SocketIO component
-// ============================================================
-
-USocketIOClientComponent* UShopSubsystem::FindSocketIOComponent() const
-{
-	UWorld* World = GetWorld();
-	if (!World) return nullptr;
-
-	for (TActorIterator<AActor> It(World); It; ++It)
-	{
-		if (USocketIOClientComponent* Comp = It->FindComponentByClass<USocketIOClientComponent>())
+		if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance()))
 		{
-			return Comp;
+			if (USocketEventRouter* Router = GI->GetEventRouter())
+			{
+				Router->UnregisterAllForOwner(this);
+			}
 		}
 	}
-	return nullptr;
-}
 
-// ============================================================
-// Timer callback — wrap events when ready
-// ============================================================
-
-void UShopSubsystem::TryWrapSocketEvents()
-{
-	if (bEventsWrapped) return;
-
-	USocketIOClientComponent* SIOComp = FindSocketIOComponent();
-	if (!SIOComp) return;
-
-	TSharedPtr<FSocketIONative> NativeClient = SIOComp->GetNativeClient();
-	if (!NativeClient.IsValid() || !NativeClient->bIsConnected) return;
-
-	if (!NativeClient->EventFunctionMap.Contains(TEXT("combat:health_update"))) return;
-
-	CachedSIOComponent = SIOComp;
-
-	WrapSingleEvent(TEXT("shop:data"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleShopData(D); });
-	WrapSingleEvent(TEXT("shop:bought"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleShopBought(D); });
-	WrapSingleEvent(TEXT("shop:sold"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleShopSold(D); });
-	WrapSingleEvent(TEXT("shop:error"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleShopError(D); });
-
-	bEventsWrapped = true;
-
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().ClearTimer(BindCheckTimer);
-	}
-
-	UE_LOG(LogShop, Log, TEXT("ShopSubsystem — events wrapped."));
-}
-
-// ============================================================
-// Wrap a single event (same pattern as InventorySubsystem)
-// ============================================================
-
-void UShopSubsystem::WrapSingleEvent(
-	const FString& EventName,
-	TFunction<void(const TSharedPtr<FJsonValue>&)> OurHandler)
-{
-	if (!CachedSIOComponent.IsValid()) return;
-
-	TSharedPtr<FSocketIONative> NativeClient = CachedSIOComponent->GetNativeClient();
-	if (!NativeClient.IsValid()) return;
-
-	TFunction<void(const FString&, const TSharedPtr<FJsonValue>&)> OriginalCallback;
-	FSIOBoundEvent* Existing = NativeClient->EventFunctionMap.Find(EventName);
-	if (Existing)
-	{
-		OriginalCallback = Existing->Function;
-	}
-
-	NativeClient->OnEvent(EventName,
-		[OriginalCallback, OurHandler](const FString& Event, const TSharedPtr<FJsonValue>& Message)
-		{
-			if (OriginalCallback) OriginalCallback(Event, Message);
-			if (OurHandler) OurHandler(Message);
-		},
-		TEXT("/"),
-		ESIOThreadOverrideOption::USE_GAME_THREAD
-	);
+	Super::Deinitialize();
 }
 
 // ============================================================
@@ -301,18 +227,21 @@ void UShopSubsystem::HandleShopError(const TSharedPtr<FJsonValue>& Data)
 
 void UShopSubsystem::RequestOpenShop(int32 ShopId)
 {
-	if (!CachedSIOComponent.IsValid()) return;
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
+	if (!GI) return;
 
-	TSharedPtr<FJsonObject> Payload = MakeShareable(new FJsonObject());
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 	Payload->SetNumberField(TEXT("shopId"), ShopId);
 
-	CachedSIOComponent->EmitNative(TEXT("shop:open"), Payload);
+	GI->EmitSocketEvent(TEXT("shop:open"), Payload);
 	UE_LOG(LogShop, Log, TEXT("Requesting shop %d"), ShopId);
 }
 
 void UShopSubsystem::SubmitBuyCart()
 {
-	if (!CachedSIOComponent.IsValid() || BuyCart.Num() == 0) return;
+	if (BuyCart.Num() == 0) return;
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
+	if (!GI) return;
 
 	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 	Payload->SetNumberField(TEXT("shopId"), CurrentShopId);
@@ -327,13 +256,15 @@ void UShopSubsystem::SubmitBuyCart()
 	}
 	Payload->SetArrayField(TEXT("cart"), CartArr);
 
-	CachedSIOComponent->EmitNative(TEXT("shop:buy_batch"), Payload);
+	GI->EmitSocketEvent(TEXT("shop:buy_batch"), Payload);
 	UE_LOG(LogShop, Log, TEXT("Submitted buy cart: %d items, total %d"), BuyCart.Num(), GetBuyCartTotalCost());
 }
 
 void UShopSubsystem::SubmitSellCart()
 {
-	if (!CachedSIOComponent.IsValid() || SellCart.Num() == 0) return;
+	if (SellCart.Num() == 0) return;
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
+	if (!GI) return;
 
 	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 
@@ -347,7 +278,7 @@ void UShopSubsystem::SubmitSellCart()
 	}
 	Payload->SetArrayField(TEXT("cart"), CartArr);
 
-	CachedSIOComponent->EmitNative(TEXT("shop:sell_batch"), Payload);
+	GI->EmitSocketEvent(TEXT("shop:sell_batch"), Payload);
 	UE_LOG(LogShop, Log, TEXT("Submitted sell cart: %d items, total %d"), SellCart.Num(), GetSellCartTotalRevenue());
 }
 

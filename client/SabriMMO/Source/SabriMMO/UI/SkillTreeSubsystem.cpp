@@ -6,11 +6,9 @@
 #include "SSkillTargetingOverlay.h"
 #include "DrawDebugHelpers.h"
 #include "MMOGameInstance.h"
-#include "SocketIOClientComponent.h"
-#include "SocketIONative.h"
+#include "SocketEventRouter.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
 #include "Framework/Application/SlateApplication.h"
@@ -267,15 +265,78 @@ void USkillTreeSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
 	Super::OnWorldBeginPlay(InWorld);
 
-	// Start a repeating timer to poll for the SocketIO component
-	InWorld.GetTimerManager().SetTimer(
-		BindCheckTimer,
-		FTimerDelegate::CreateUObject(this, &USkillTreeSubsystem::TryWrapSocketEvents),
-		0.5f,
-		true
-	);
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(InWorld.GetGameInstance());
+	if (!GI) return;
 
-	UE_LOG(LogSkillTree, Log, TEXT("SkillTreeSubsystem started — waiting for SocketIO bindings..."));
+	// Populate character ID from GameInstance
+	{
+		FCharacterData SelChar = GI->GetSelectedCharacter();
+		LocalCharacterId = SelChar.CharacterId;
+	}
+
+	// Register socket event handlers via persistent EventRouter
+	USocketEventRouter* Router = GI->GetEventRouter();
+	if (Router)
+	{
+		// --- Skill events ---
+		Router->RegisterHandler(TEXT("skill:data"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleSkillData(D); });
+		Router->RegisterHandler(TEXT("skill:learned"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleSkillLearned(D); });
+		Router->RegisterHandler(TEXT("skill:refresh"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleSkillRefresh(D); });
+		Router->RegisterHandler(TEXT("skill:reset_complete"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleSkillResetComplete(D); });
+		Router->RegisterHandler(TEXT("skill:error"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleSkillError(D); });
+		Router->RegisterHandler(TEXT("skill:used"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleSkillUsed(D); });
+		Router->RegisterHandler(TEXT("skill:effect_damage"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleSkillEffectDamage(D); });
+		Router->RegisterHandler(TEXT("skill:buff_applied"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleSkillBuffApplied(D); });
+		Router->RegisterHandler(TEXT("skill:buff_removed"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleSkillBuffRemoved(D); });
+		Router->RegisterHandler(TEXT("skill:cooldown_started"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleSkillCooldownStarted(D); });
+
+		// --- Events that dismiss the ground AoE circle (cast rejected/failed/interrupted) ---
+		auto DismissCircle = [this](const TSharedPtr<FJsonValue>&)
+		{
+			GroundAoE::StopDrawing(GetWorld());
+			WalkToCast::Cancel(GetWorld());
+		};
+		Router->RegisterHandler(TEXT("combat:out_of_range"), this, DismissCircle);
+		Router->RegisterHandler(TEXT("skill:cast_failed"), this, DismissCircle);
+		Router->RegisterHandler(TEXT("skill:cast_interrupted"), this, DismissCircle);
+
+		// --- Hotbar data ---
+		Router->RegisterHandler(TEXT("hotbar:alldata"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleHotbarAllData(D); });
+	}
+
+	UE_LOG(LogSkillTree, Log, TEXT("SkillTreeSubsystem started — all skill socket events registered via EventRouter."));
+
+	// Only emit data requests when socket is connected (game level)
+	if (GI->IsSocketConnected())
+	{
+		// Immediately request skill data so it's cached before the user ever opens the window.
+		RequestSkillData();
+		UE_LOG(LogSkillTree, Log, TEXT("Eagerly requesting skill:data now that socket is ready."));
+
+		// Request hotbar data after a delay to ensure BP's HUDManager is fully initialized
+		InWorld.GetTimerManager().SetTimer(HotbarRequestTimer, FTimerDelegate::CreateLambda([this]()
+		{
+			if (UWorld* World = GetWorld())
+			{
+				if (UMMOGameInstance* HGI = Cast<UMMOGameInstance>(World->GetGameInstance()))
+				{
+					HGI->EmitSocketEvent(TEXT("hotbar:request"), TEXT("{}"));
+					UE_LOG(LogSkillTree, Log, TEXT("Emitted hotbar:request (delayed — HUD should be ready)"));
+				}
+			}
+		}), 3.0f, false);
+	}
 }
 
 void USkillTreeSubsystem::Deinitialize()
@@ -299,12 +360,16 @@ void USkillTreeSubsystem::Deinitialize()
 
 	if (UWorld* World = GetWorld())
 	{
-		World->GetTimerManager().ClearTimer(BindCheckTimer);
 		World->GetTimerManager().ClearTimer(HotbarRequestTimer);
-	}
 
-	bEventsWrapped = false;
-	CachedSIOComponent = nullptr;
+		if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance()))
+		{
+			if (USocketEventRouter* Router = GI->GetEventRouter())
+			{
+				Router->UnregisterAllForOwner(this);
+			}
+		}
+	}
 
 	Super::Deinitialize();
 }
@@ -400,220 +465,26 @@ bool USkillTreeSubsystem::IsWidgetVisible() const
 }
 
 // ============================================================
-// Find the SocketIO component on BP_SocketManager
-// ============================================================
-
-USocketIOClientComponent* USkillTreeSubsystem::FindSocketIOComponent() const
-{
-	UWorld* World = GetWorld();
-	if (!World) return nullptr;
-
-	for (TActorIterator<AActor> It(World); It; ++It)
-	{
-		if (USocketIOClientComponent* Comp = It->FindComponentByClass<USocketIOClientComponent>())
-		{
-			return Comp;
-		}
-	}
-	return nullptr;
-}
-
-// ============================================================
-// Timer callback — wait until BP events are bound, then wrap
-// ============================================================
-
-void USkillTreeSubsystem::TryWrapSocketEvents()
-{
-	if (bEventsWrapped) return;
-
-	USocketIOClientComponent* SIOComp = FindSocketIOComponent();
-	if (!SIOComp) return;
-
-	TSharedPtr<FSocketIONative> NativeClient = SIOComp->GetNativeClient();
-	if (!NativeClient.IsValid() || !NativeClient->bIsConnected) return;
-
-	// Wait for BP to have bound at least one event (meaning connection is fully established)
-	if (!NativeClient->EventFunctionMap.Contains(TEXT("combat:health_update"))) return;
-
-	CachedSIOComponent = SIOComp;
-
-	// Populate character ID from GameInstance
-	if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance()))
-	{
-		FCharacterData SelChar = GI->GetSelectedCharacter();
-		LocalCharacterId = SelChar.CharacterId;
-	}
-
-	// --- Bind skill events (these are new events, not wrapping existing BP ones) ---
-	BindNewEvent(TEXT("skill:data"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleSkillData(D); });
-
-	BindNewEvent(TEXT("skill:learned"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleSkillLearned(D); });
-
-	BindNewEvent(TEXT("skill:refresh"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleSkillRefresh(D); });
-
-	BindNewEvent(TEXT("skill:reset_complete"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleSkillResetComplete(D); });
-
-	BindNewEvent(TEXT("skill:error"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleSkillError(D); });
-
-	BindNewEvent(TEXT("skill:used"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleSkillUsed(D); });
-
-	// --- Bind NEW skill combat events (C++ only, not in BP) ---
-	BindNewEvent(TEXT("skill:effect_damage"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleSkillEffectDamage(D); });
-
-	BindNewEvent(TEXT("skill:buff_applied"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleSkillBuffApplied(D); });
-
-	BindNewEvent(TEXT("skill:buff_removed"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleSkillBuffRemoved(D); });
-
-	BindNewEvent(TEXT("skill:cooldown_started"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleSkillCooldownStarted(D); });
-
-	// --- Events that dismiss the ground AoE circle (cast rejected/failed/interrupted) ---
-	auto DismissCircle = [this](const TSharedPtr<FJsonValue>&)
-	{
-		GroundAoE::StopDrawing(GetWorld());
-		WalkToCast::Cancel(GetWorld());
-	};
-	BindNewEvent(TEXT("combat:out_of_range"), DismissCircle);  // pre-cast range check failed
-	BindNewEvent(TEXT("skill:cast_failed"), DismissCircle);    // cast completed but execution failed
-	BindNewEvent(TEXT("skill:cast_interrupted"), DismissCircle);  // cast was interrupted
-
-	// Wrap hotbar:alldata — BP_SocketManager already handles it (PopulateHotbarFromServer),
-	// so we use WrapExistingEvent to chain our handler AFTER the BP handler runs.
-	// This lets us parse skill slots into HotbarSkillMap without breaking item slot display.
-	WrapExistingEvent(TEXT("hotbar:alldata"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleHotbarAllData(D); });
-
-	bEventsWrapped = true;
-
-	// Stop the polling timer
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().ClearTimer(BindCheckTimer);
-	}
-
-	UE_LOG(LogSkillTree, Log, TEXT("SkillTreeSubsystem — all skill socket events bound successfully."));
-
-	// Immediately request skill data so it's cached before the user ever opens the window.
-	// If the widget is already visible (user opened it before socket was ready),
-	// HandleSkillData will rebuild its content when the response arrives.
-	RequestSkillData();
-	UE_LOG(LogSkillTree, Log, TEXT("Eagerly requesting skill:data now that socket is ready."));
-
-	// Request hotbar data after a delay to ensure BP's HUDManager is fully initialized
-	// (BP_SocketManager has a 0.2s Delay before setting MMOCharacterHudManager + InitializeHUD)
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().SetTimer(HotbarRequestTimer, FTimerDelegate::CreateLambda([this]()
-		{
-			if (CachedSIOComponent.IsValid())
-			{
-				CachedSIOComponent->EmitNative(TEXT("hotbar:request"), TEXT("{}"));
-				UE_LOG(LogSkillTree, Log, TEXT("Emitted hotbar:request (delayed — HUD should be ready)"));
-			}
-		}), 3.0f, false);
-	}
-}
-
-// ============================================================
-// Bind a new event (skill events are not wrapped from BP, they are C++ only)
-// ============================================================
-
-void USkillTreeSubsystem::BindNewEvent(
-	const FString& EventName,
-	TFunction<void(const TSharedPtr<FJsonValue>&)> Handler)
-{
-	if (!CachedSIOComponent.IsValid()) return;
-
-	TSharedPtr<FSocketIONative> NativeClient = CachedSIOComponent->GetNativeClient();
-	if (!NativeClient.IsValid()) return;
-
-	NativeClient->OnEvent(EventName,
-		[Handler](const FString& Event, const TSharedPtr<FJsonValue>& Message)
-		{
-			if (Handler)
-			{
-				Handler(Message);
-			}
-		},
-		TEXT("/"),
-		ESIOThreadOverrideOption::USE_GAME_THREAD
-	);
-
-	UE_LOG(LogSkillTree, Verbose, TEXT("Bound skill event: %s"), *EventName);
-}
-
-// ============================================================
-// Wrap an existing BP-bound event: save original, call both
-// ============================================================
-
-void USkillTreeSubsystem::WrapExistingEvent(
-	const FString& EventName,
-	TFunction<void(const TSharedPtr<FJsonValue>&)> OurHandler)
-{
-	if (!CachedSIOComponent.IsValid()) return;
-
-	TSharedPtr<FSocketIONative> NativeClient = CachedSIOComponent->GetNativeClient();
-	if (!NativeClient.IsValid()) return;
-
-	// Save the original callback (Blueprint handler)
-	TFunction<void(const FString&, const TSharedPtr<FJsonValue>&)> OriginalCallback;
-	FSIOBoundEvent* Existing = NativeClient->EventFunctionMap.Find(EventName);
-	if (Existing)
-	{
-		OriginalCallback = Existing->Function;
-	}
-
-	// Replace with a combined callback that calls both
-	NativeClient->OnEvent(EventName,
-		[OriginalCallback, OurHandler](const FString& Event, const TSharedPtr<FJsonValue>& Message)
-		{
-			// Call original Blueprint handler first
-			if (OriginalCallback)
-			{
-				OriginalCallback(Event, Message);
-			}
-			// Then call our C++ handler
-			if (OurHandler)
-			{
-				OurHandler(Message);
-			}
-		},
-		TEXT("/"),
-		ESIOThreadOverrideOption::USE_GAME_THREAD
-	);
-
-	UE_LOG(LogSkillTree, Log, TEXT("Wrapped event: %s (had original: %s)"),
-		*EventName, OriginalCallback ? TEXT("yes") : TEXT("no"));
-}
-
-// ============================================================
 // Actions (called from the widget or Blueprint)
 // ============================================================
 
 void USkillTreeSubsystem::RequestSkillData()
 {
-	if (!CachedSIOComponent.IsValid())
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld() ? GetWorld()->GetGameInstance() : nullptr);
+	if (!GI || !GI->IsSocketConnected())
 	{
 		UE_LOG(LogSkillTree, Warning, TEXT("RequestSkillData — socket not ready yet, will retry when connected."));
 		return;
 	}
 
-	CachedSIOComponent->EmitNative(TEXT("skill:data"), TEXT("{}"));
+	GI->EmitSocketEvent(TEXT("skill:data"), TEXT("{}"));
 	UE_LOG(LogSkillTree, Log, TEXT("Emitted skill:data request"));
 }
 
 void USkillTreeSubsystem::LearnSkill(int32 SkillId)
 {
-	if (!CachedSIOComponent.IsValid()) return;
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld() ? GetWorld()->GetGameInstance() : nullptr);
+	if (!GI || !GI->IsSocketConnected()) return;
 
 	// Validate skillId before sending to server
 	if (SkillId <= 0)
@@ -622,24 +493,26 @@ void USkillTreeSubsystem::LearnSkill(int32 SkillId)
 		return;
 	}
 
-	TSharedPtr<FJsonObject> Payload = MakeShareable(new FJsonObject());
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 	Payload->SetNumberField(TEXT("skillId"), SkillId);
 
-	CachedSIOComponent->EmitNative(TEXT("skill:learn"), Payload);
+	GI->EmitSocketEvent(TEXT("skill:learn"), Payload);
 	UE_LOG(LogSkillTree, Log, TEXT("Emitted skill:learn for skillId=%d"), SkillId);
 }
 
 void USkillTreeSubsystem::ResetAllSkills()
 {
-	if (!CachedSIOComponent.IsValid()) return;
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld() ? GetWorld()->GetGameInstance() : nullptr);
+	if (!GI || !GI->IsSocketConnected()) return;
 
-	CachedSIOComponent->EmitNative(TEXT("skill:reset"), TEXT("{}"));
+	GI->EmitSocketEvent(TEXT("skill:reset"), TEXT("{}"));
 	UE_LOG(LogSkillTree, Log, TEXT("Emitted skill:reset"));
 }
 
 void USkillTreeSubsystem::AssignSkillToHotbar(int32 SkillId, const FString& SkillDisplayName, int32 SlotIndex)
 {
-	if (!CachedSIOComponent.IsValid())
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld() ? GetWorld()->GetGameInstance() : nullptr);
+	if (!GI || !GI->IsSocketConnected())
 	{
 		UE_LOG(LogSkillTree, Warning, TEXT("AssignSkillToHotbar: SocketIO not connected"));
 		return;
@@ -651,12 +524,12 @@ void USkillTreeSubsystem::AssignSkillToHotbar(int32 SkillId, const FString& Skil
 		return;
 	}
 
-	TSharedPtr<FJsonObject> Payload = MakeShareable(new FJsonObject());
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 	Payload->SetNumberField(TEXT("slotIndex"), SlotIndex);
 	Payload->SetNumberField(TEXT("skillId"), SkillId);
 	Payload->SetStringField(TEXT("skillName"), SkillDisplayName);
 
-	CachedSIOComponent->EmitNative(TEXT("hotbar:save_skill"), Payload);
+	GI->EmitSocketEvent(TEXT("hotbar:save_skill"), Payload);
 
 	// Update local skill map (SlotIndex is 1-based from UI, convert to 0-based for storage)
 	HotbarSkillMap.Add(SlotIndex - 1, SkillId);
@@ -692,7 +565,7 @@ bool USkillTreeSubsystem::TryUseHotbarSkill(int32 SlotIndex)
 
 // ============================================================
 // HandleHotbarAllData — Parse hotbar:alldata to populate HotbarSkillMap.
-// Chained after BP PopulateHotbarFromServer via WrapExistingEvent.
+// Receives hotbar data from server via EventRouter.
 // ============================================================
 
 void USkillTreeSubsystem::HandleHotbarAllData(const TSharedPtr<FJsonValue>& Data)
@@ -770,7 +643,8 @@ void USkillTreeSubsystem::UseSkill(int32 SkillId)
 
 void USkillTreeSubsystem::UseSkillOnTarget(int32 SkillId, int32 TargetId, bool bIsEnemy)
 {
-	if (!CachedSIOComponent.IsValid())
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld() ? GetWorld()->GetGameInstance() : nullptr);
+	if (!GI || !GI->IsSocketConnected())
 	{
 		UE_LOG(LogSkillTree, Warning, TEXT("UseSkill: SocketIO not connected"));
 		return;
@@ -792,7 +666,7 @@ void USkillTreeSubsystem::UseSkillOnTarget(int32 SkillId, int32 TargetId, bool b
 		return;
 	}
 
-	TSharedPtr<FJsonObject> Payload = MakeShareable(new FJsonObject());
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 	Payload->SetNumberField(TEXT("skillId"), SkillId);
 	if (TargetId > 0)
 	{
@@ -800,14 +674,15 @@ void USkillTreeSubsystem::UseSkillOnTarget(int32 SkillId, int32 TargetId, bool b
 		Payload->SetBoolField(TEXT("isEnemy"), bIsEnemy);
 	}
 
-	CachedSIOComponent->EmitNative(TEXT("skill:use"), Payload);
+	GI->EmitSocketEvent(TEXT("skill:use"), Payload);
 	UE_LOG(LogSkillTree, Log, TEXT("Emitted skill:use for skillId=%d target=%d isEnemy=%d"),
 		SkillId, TargetId, bIsEnemy);
 }
 
 void USkillTreeSubsystem::UseSkillOnGround(int32 SkillId, FVector GroundPosition)
 {
-	if (!CachedSIOComponent.IsValid())
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld() ? GetWorld()->GetGameInstance() : nullptr);
+	if (!GI || !GI->IsSocketConnected())
 	{
 		UE_LOG(LogSkillTree, Warning, TEXT("UseSkillOnGround: SocketIO not connected"));
 		return;
@@ -828,13 +703,13 @@ void USkillTreeSubsystem::UseSkillOnGround(int32 SkillId, FVector GroundPosition
 		return;
 	}
 
-	TSharedPtr<FJsonObject> Payload = MakeShareable(new FJsonObject());
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 	Payload->SetNumberField(TEXT("skillId"), SkillId);
 	Payload->SetNumberField(TEXT("groundX"), GroundPosition.X);
 	Payload->SetNumberField(TEXT("groundY"), GroundPosition.Y);
 	Payload->SetNumberField(TEXT("groundZ"), GroundPosition.Z);
 
-	CachedSIOComponent->EmitNative(TEXT("skill:use"), Payload);
+	GI->EmitSocketEvent(TEXT("skill:use"), Payload);
 	UE_LOG(LogSkillTree, Log, TEXT("Emitted skill:use for skillId=%d at ground (%.0f, %.0f, %.0f)"),
 		SkillId, GroundPosition.X, GroundPosition.Y, GroundPosition.Z);
 }

@@ -1,5 +1,6 @@
 // HotbarSubsystem.h — UWorldSubsystem that owns all hotbar slot data (4 rows x 9 slots),
-// manages Socket.io event wrapping, keybind configuration, and SHotbarRowWidget lifecycle.
+// keybind configuration, and SHotbarRowWidget lifecycle.
+// Registers Socket.io event handlers via the persistent EventRouter.
 // F5 key toggle handled by SabriMMOCharacter via Enhanced Input.
 
 #pragma once
@@ -11,11 +12,9 @@
 #include "CharacterData.h"
 #include "HotbarSubsystem.generated.h"
 
-class USocketIOClientComponent;
 class UGameViewportClient;
 class SHotbarRowWidget;
 class SHotbarKeybindWidget;
-struct FSIOBoundEvent;
 
 // ============================================================
 // Hotbar slot — single entry in the 4x9 grid
@@ -149,14 +148,6 @@ public:
 	void RefreshItemQuantities();
 
 private:
-	// ---- socket event wrapping ----
-	void TryWrapSocketEvents();
-	void WrapExistingEvent(const FString& EventName,
-		TFunction<void(const TSharedPtr<FJsonValue>&)> OurHandler);
-	void BindNewEvent(const FString& EventName,
-		TFunction<void(const TSharedPtr<FJsonValue>&)> Handler);
-	USocketIOClientComponent* FindSocketIOComponent() const;
-
 	// ---- event handlers ----
 	void HandleHotbarAllData(const TSharedPtr<FJsonValue>& Data);
 
@@ -166,10 +157,10 @@ private:
 	void EmitClearSlot(int32 RowIndex, int32 SlotIndex);
 
 	// ---- state ----
-	bool bEventsWrapped = false;
 	bool bInitialRowsShown = false;
 	int32 LocalCharacterId = 0;
-	FTimerHandle BindCheckTimer;
+	FTimerHandle HotbarRequestTimer;
+	FTimerHandle ViewportCheckTimer;
 
 	// ---- keybind storage (4 rows x 9 slots) ----
 	FHotbarKeybind Keybinds[NUM_ROWS][SLOTS_PER_ROW];
@@ -192,8 +183,6 @@ private:
 	TSharedPtr<SWidget> KeybindAlignmentWrapper;
 	TSharedPtr<SWidget> KeybindViewportOverlay;
 	bool bKeybindWidgetVisible = false;
-
-	TWeakObjectPtr<USocketIOClientComponent> CachedSIOComponent;
 
 	// ---- cached viewport client (PIE-safe: World->GetGameViewport() returns the global
 	//      GEngine->GameViewport which changes when other PIE instances load, so we cache

@@ -5,8 +5,7 @@
 #include "WorldHealthBarSubsystem.h"
 #include "SWorldHealthBarOverlay.h"
 #include "MMOGameInstance.h"
-#include "SocketIOClientComponent.h"
-#include "SocketIONative.h"
+#include "SocketEventRouter.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "EngineUtils.h"
@@ -20,34 +19,6 @@
 #include "ShopNPC.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWorldHealthBar, Log, All);
-
-// ============================================================
-// File-local health check state (heap-allocated for Live Coding safety)
-// ============================================================
-namespace WorldHealthBarHealth
-{
-	struct FState
-	{
-		bool bWasConnected = false;
-		int32 ReconnectStabilityTicks = 0;
-	};
-
-	static TMap<UWorld*, FState>& GetStateMap()
-	{
-		static auto* Map = new TMap<UWorld*, FState>();
-		return *Map;
-	}
-
-	static FState& Get(UWorld* World)
-	{
-		return GetStateMap().FindOrAdd(World);
-	}
-
-	static void Remove(UWorld* World)
-	{
-		GetStateMap().Remove(World);
-	}
-}
 
 // ============================================================
 // Lifecycle
@@ -66,185 +37,42 @@ void UWorldHealthBarSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 
 	PopulateFromGameInstance();
 
-	// Start polling for SocketIO component + event bindings
-	InWorld.GetTimerManager().SetTimer(
-		BindCheckTimer,
-		FTimerDelegate::CreateUObject(this, &UWorldHealthBarSubsystem::TryWrapSocketEvents),
-		0.5f,
-		true
-	);
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(InWorld.GetGameInstance());
+	if (!GI) return;
 
-	UE_LOG(LogWorldHealthBar, Log, TEXT("WorldHealthBarSubsystem started — waiting for SocketIO bindings..."));
-}
-
-void UWorldHealthBarSubsystem::Deinitialize()
-{
-	HideOverlay();
-
-	if (UWorld* World = GetWorld())
+	// Register socket event handlers via persistent EventRouter
+	USocketEventRouter* Router = GI->GetEventRouter();
+	if (Router)
 	{
-		World->GetTimerManager().ClearTimer(BindCheckTimer);
-		World->GetTimerManager().ClearTimer(ActorCacheTimer);
-		WorldHealthBarHealth::Remove(World);
+		Router->RegisterHandler(TEXT("combat:health_update"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleHealthUpdate(D); });
+		Router->RegisterHandler(TEXT("combat:damage"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleCombatDamage(D); });
+		Router->RegisterHandler(TEXT("skill:effect_damage"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleCombatDamage(D); });
+		Router->RegisterHandler(TEXT("combat:death"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleCombatDeath(D); });
+		Router->RegisterHandler(TEXT("combat:respawn"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleCombatRespawn(D); });
+		Router->RegisterHandler(TEXT("player:stats"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandlePlayerStats(D); });
+		Router->RegisterHandler(TEXT("enemy:health_update"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleEnemyHealthUpdate(D); });
+		Router->RegisterHandler(TEXT("enemy:spawn"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleEnemySpawn(D); });
+		Router->RegisterHandler(TEXT("enemy:move"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleEnemyMove(D); });
+		Router->RegisterHandler(TEXT("enemy:death"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleEnemyDeath(D); });
 	}
 
-	bEventsWrapped = false;
-	CachedSIOComponent = nullptr;
-	EnemyHealthMap.Empty();
-
-	Super::Deinitialize();
-}
-
-// ============================================================
-// Find the SocketIO component on BP_SocketManager
-// ============================================================
-
-USocketIOClientComponent* UWorldHealthBarSubsystem::FindSocketIOComponent() const
-{
-	UWorld* World = GetWorld();
-	if (!World) return nullptr;
-
-	for (TActorIterator<AActor> It(World); It; ++It)
+	// Only show overlay and start caching when socket is connected (game level)
+	if (GI->IsSocketConnected())
 	{
-		if (USocketIOClientComponent* Comp = It->FindComponentByClass<USocketIOClientComponent>())
-		{
-			return Comp;
-		}
-	}
-	return nullptr;
-}
+		ShowOverlay();
 
-// ============================================================
-// Timer callback — wait for BP bindings, then wrap
-// ============================================================
-
-void UWorldHealthBarSubsystem::TryWrapSocketEvents()
-{
-	UWorld* World = GetWorld();
-	if (!World) return;
-
-	auto& Health = WorldHealthBarHealth::Get(World);
-
-	// ============================================================
-	// Phase 2: Health check (already wrapped — detect broken handlers)
-	// ============================================================
-	if (bEventsWrapped)
-	{
-		if (!CachedSIOComponent.IsValid())
-		{
-			UE_LOG(LogWorldHealthBar, Warning, TEXT("HealthCheck: Socket component destroyed — will re-wrap."));
-			bEventsWrapped = false;
-			Health.bWasConnected = false;
-			Health.ReconnectStabilityTicks = 0;
-		}
-		else
-		{
-			TSharedPtr<FSocketIONative> NC = CachedSIOComponent->GetNativeClient();
-			const bool bCurrentlyConnected = NC.IsValid() && NC->bIsConnected;
-
-			if (!bCurrentlyConnected)
-			{
-				if (Health.bWasConnected)
-				{
-					UE_LOG(LogWorldHealthBar, Warning, TEXT("HealthCheck: Socket disconnected — will re-wrap on reconnect."));
-				}
-				Health.bWasConnected = false;
-				Health.ReconnectStabilityTicks = 0;
-				return;
-			}
-
-			if (!Health.bWasConnected)
-			{
-				++Health.ReconnectStabilityTicks;
-				if (Health.ReconnectStabilityTicks < 4)
-				{
-					UE_LOG(LogWorldHealthBar, Log, TEXT("HealthCheck: Reconnected — stabilizing (%d/4)..."),
-						Health.ReconnectStabilityTicks);
-					return;
-				}
-
-				UE_LOG(LogWorldHealthBar, Warning, TEXT("HealthCheck: Reconnection stabilized — re-wrapping events."));
-				bEventsWrapped = false;
-				Health.bWasConnected = true;
-				Health.ReconnectStabilityTicks = 0;
-			}
-			else
-			{
-				return; // All good
-			}
-		}
-	}
-
-	// ============================================================
-	// Phase 1: Initial wrapping
-	// ============================================================
-
-	USocketIOClientComponent* SIOComp = FindSocketIOComponent();
-	if (!SIOComp) return;
-
-	TSharedPtr<FSocketIONative> NativeClient = SIOComp->GetNativeClient();
-	if (!NativeClient.IsValid() || !NativeClient->bIsConnected) return;
-
-	// Wait until BP has bound key events
-	if (!NativeClient->EventFunctionMap.Contains(TEXT("combat:health_update"))) return;
-
-	CachedSIOComponent = SIOComp;
-
-	// Resolve local character ID
-	if (LocalCharacterId == 0)
-	{
-		if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance()))
-		{
-			FCharacterData SelChar = GI->GetSelectedCharacter();
-			LocalCharacterId = SelChar.CharacterId;
-		}
-	}
-
-	// --- Wrap player health events ---
-	WrapSingleEvent(TEXT("combat:health_update"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleHealthUpdate(D); });
-
-	WrapSingleEvent(TEXT("combat:damage"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleCombatDamage(D); });
-
-	// Also listen to skill:effect_damage (all skill damage — same payload format)
-	WrapSingleEvent(TEXT("skill:effect_damage"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleCombatDamage(D); });
-
-	WrapSingleEvent(TEXT("combat:death"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleCombatDeath(D); });
-
-	WrapSingleEvent(TEXT("combat:respawn"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleCombatRespawn(D); });
-
-	WrapSingleEvent(TEXT("player:stats"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandlePlayerStats(D); });
-
-	// --- Wrap enemy health events ---
-	WrapSingleEvent(TEXT("enemy:health_update"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleEnemyHealthUpdate(D); });
-
-	WrapSingleEvent(TEXT("enemy:spawn"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleEnemySpawn(D); });
-
-	WrapSingleEvent(TEXT("enemy:move"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleEnemyMove(D); });
-
-	WrapSingleEvent(TEXT("enemy:death"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleEnemyDeath(D); });
-
-	bEventsWrapped = true;
-	Health.bWasConnected = true;
-	Health.ReconnectStabilityTicks = 0;
-
-	// NOTE: Do NOT clear the BindCheckTimer — keep running for health checks.
-
-	// Show the overlay
-	ShowOverlay();
-
-	// Start periodic actor caching (match enemy data to actual world actors for smooth position tracking)
-	{
-		World->GetTimerManager().SetTimer(
+		// Start periodic actor caching (match enemy data to actual world actors for smooth position tracking)
+		InWorld.GetTimerManager().SetTimer(
 			ActorCacheTimer,
 			FTimerDelegate::CreateLambda([this]()
 			{
@@ -257,44 +85,30 @@ void UWorldHealthBarSubsystem::TryWrapSocketEvents()
 		);
 	}
 
-	UE_LOG(LogWorldHealthBar, Log, TEXT("WorldHealthBarSubsystem — all socket events wrapped. LocalCharId=%d"), LocalCharacterId);
+	UE_LOG(LogWorldHealthBar, Log, TEXT("WorldHealthBarSubsystem started — events registered via EventRouter. LocalCharId=%d"), LocalCharacterId);
 }
 
-// ============================================================
-// Wrap a single event: preserve original callback chain
-// ============================================================
-
-void UWorldHealthBarSubsystem::WrapSingleEvent(
-	const FString& EventName,
-	TFunction<void(const TSharedPtr<FJsonValue>&)> OurHandler)
+void UWorldHealthBarSubsystem::Deinitialize()
 {
-	if (!CachedSIOComponent.IsValid()) return;
+	HideOverlay();
 
-	TSharedPtr<FSocketIONative> NativeClient = CachedSIOComponent->GetNativeClient();
-	if (!NativeClient.IsValid()) return;
-
-	TFunction<void(const FString&, const TSharedPtr<FJsonValue>&)> OriginalCallback;
-	FSIOBoundEvent* Existing = NativeClient->EventFunctionMap.Find(EventName);
-	if (Existing)
+	if (UWorld* World = GetWorld())
 	{
-		OriginalCallback = Existing->Function;
+		World->GetTimerManager().ClearTimer(ActorCacheTimer);
+
+		if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance()))
+		{
+			if (USocketEventRouter* Router = GI->GetEventRouter())
+			{
+				Router->UnregisterAllForOwner(this);
+			}
+		}
 	}
 
-	NativeClient->OnEvent(EventName,
-		[OriginalCallback, OurHandler](const FString& Event, const TSharedPtr<FJsonValue>& Message)
-		{
-			if (OriginalCallback)
-			{
-				OriginalCallback(Event, Message);
-			}
-			if (OurHandler)
-			{
-				OurHandler(Message);
-			}
-		},
-		TEXT("/"),
-		ESIOThreadOverrideOption::USE_GAME_THREAD
-	);
+	EnemyHealthMap.Empty();
+
+	UE_LOG(LogWorldHealthBar, Log, TEXT("WorldHealthBarSubsystem deinitialized."));
+	Super::Deinitialize();
 }
 
 // ============================================================

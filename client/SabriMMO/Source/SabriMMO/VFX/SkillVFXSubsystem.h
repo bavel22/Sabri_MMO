@@ -11,7 +11,6 @@
 #include "SkillVFXData.h"
 #include "SkillVFXSubsystem.generated.h"
 
-class USocketIOClientComponent;
 class UNiagaraSystem;
 class UNiagaraComponent;
 class UParticleSystem;
@@ -49,12 +48,6 @@ public:
 	bool AreEffectsEnabled() const { return bVFXEnabled; }
 
 private:
-	// ---- socket wrapping ----
-	void TryWrapSocketEvents();
-	void WrapSingleEvent(const FString& EventName,
-		TFunction<void(const TSharedPtr<FJsonValue>&)> OurHandler);
-	USocketIOClientComponent* FindSocketIOComponent() const;
-
 	// ---- event handlers ----
 	void HandleCastStart(const TSharedPtr<FJsonValue>& Data);
 	void HandleCastComplete(const TSharedPtr<FJsonValue>& Data);
@@ -159,15 +152,11 @@ private:
 	TMap<int64, double> SingleProjectileLastSpawnTime;
 
 	// ---- state ----
-	bool bEventsWrapped = false;
 	bool bVFXEnabled = true;
 	int32 LocalCharacterId = 0;
 
-	/** Count consecutive timer ticks where socket is connected and ready.
-	 *  We wait for stability before wrapping to ensure other subsystems have bound their events. */
-	int32 SocketReadyTicks = 0;
-
-	FTimerHandle BindCheckTimer;
-	TWeakObjectPtr<USocketIOClientComponent> CachedSIOComponent;
+	// Guard: prevents actor access / component spawning during PostLoad.
+	// Set to true one frame after OnWorldBeginPlay via SetTimerForNextTick.
+	bool bReadyToProcess = false;
 };
 

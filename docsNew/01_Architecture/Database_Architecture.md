@@ -85,7 +85,7 @@ await redisClient.connect(); // Required for redis v4+
 | `character_id` | SERIAL | PRIMARY KEY | auto | Character ID |
 | `user_id` | INTEGER | FK → users(user_id) ON DELETE CASCADE | — | Owner |
 | `name` | VARCHAR(50) | NOT NULL | — | Character name |
-| `class` | VARCHAR(20) | — | 'warrior' | Class: warrior/mage/archer/healer/priest |
+| `class` | VARCHAR(20) | — | 'novice' | Class: novice/swordsman/mage/merchant (+ 2nd classes) |
 | `level` | INTEGER | — | 1 | Character level |
 | `experience` | INTEGER | — | 0 | Experience points |
 | `x` | FLOAT | — | 0 | World X position |
@@ -108,7 +108,13 @@ await redisClient.connect(); // Required for redis v4+
 | `last_played` | TIMESTAMP | nullable | — | Last play session |
 | `zuzucoin` | INTEGER | — | 0 | Character currency (Zuzucoin) |
 
-**Note**: Stat columns and `zuzucoin` (`str` through `stat_points`) and `max_health`/`max_mana` are added via `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` on server startup if missing.
+**Auto-added columns** (via `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` on server startup):
+- Stats: `str`, `agi`, `vit`, `int_stat`, `dex`, `luk`, `stat_points`, `max_health`, `max_mana`
+- Economy: `zuzucoin`
+- Appearance: `hair_style` (default 1), `hair_color` (default 0), `gender` (default 'male')
+- Job system: `job_level` (default 1), `base_exp` (default 0), `job_exp` (default 0), `job_class` (default 'novice'), `skill_points` (default 0)
+- Zone system: `zone_name` (default 'prontera_south'), `save_map`, `save_x`, `save_y`, `save_z`
+- Meta: `delete_date`
 
 **Soft Delete**: Characters are never permanently removed from the database. The `DELETE /api/characters/:id` endpoint sets `deleted = TRUE` instead of deleting rows. All character queries filter with `AND deleted = FALSE` to hide soft-deleted characters. Inventory, hotbar, and skill data are preserved for potential future restoration.
 
@@ -338,4 +344,4 @@ UPDATE character_inventory SET is_equipped=true WHERE inventory_id=$1;
 
 ---
 
-**Last Updated**: 2026-03-04 — Added soft-delete (deleted BOOLEAN) for characters
+**Last Updated**: 2026-03-09 — Fixed default class (novice, not warrior), added auto-migrated zone/appearance/job columns

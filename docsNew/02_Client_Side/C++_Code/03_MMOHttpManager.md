@@ -1,116 +1,152 @@
 # UHttpManager (MMOHttpManager)
 
-**Files**: `Source/SabriMMO/MMOHttpManager.h` (53 lines), `MMOHttpManager.cpp` (537 lines)  
-**Parent**: `UBlueprintFunctionLibrary`  
-**Purpose**: Static HTTP API client for REST communication with the Node.js server. All functions are `BlueprintCallable` with `WorldContext` meta for Blueprint usage.
+**Files**: `Source/SabriMMO/MMOHttpManager.h` (61 lines), `MMOHttpManager.cpp` (672 lines)
+**Parent**: `UBlueprintFunctionLibrary`
+**Purpose**: Static HTTP API client for REST communication with the Node.js server, plus bridge functions for Blueprint→Subsystem calls. All functions are `BlueprintCallable` with `WorldContext` meta.
 
 **Note**: The file is named `MMOHttpManager` to avoid collision with UE5's built-in `HttpManager.h` in unity builds. The class name `UHttpManager` is unchanged.
 
 ## Server URL
 
-All requests target `http://localhost:3001` (hardcoded in implementation).
+The URL is **configurable**, resolved per-call via `GetServerBaseUrl()`:
 
-## Functions
+```cpp
+FString UHttpManager::GetServerBaseUrl(UObject* WorldContextObject)
+{
+    if (UMMOGameInstance* GI = GetGameInstance(WorldContextObject))
+        return GI->ServerBaseUrl;   // Reads from UMMOGameInstance property
+    return TEXT("http://localhost:3001");  // Null-safety fallback only
+}
+```
+
+`UMMOGameInstance::ServerBaseUrl` defaults to `"http://localhost:3001"` and is updated by `SelectServer()` when a server is chosen from the server list.
+
+## Helper Functions (4, all private static)
+
+| Function | Purpose |
+|----------|---------|
+| `GetGameInstance(WorldContextObject)` | Resolves `UMMOGameInstance` via `UGameplayStatics::GetGameInstance()` |
+| `GetServerBaseUrl(WorldContextObject)` | Returns `GI->ServerBaseUrl` or fallback URL |
+| `ExtractErrorMessage(ResponseContent, DefaultMessage)` | Parses `"error"` field from JSON response body |
+| `ParseCharacterFromJson(JsonObject)` | File-scope free function — maps JSON → `FCharacterData` (32 fields) |
+
+## HTTP Functions (9)
 
 ### TestServerConnection
 ```cpp
 static void TestServerConnection(UObject* WorldContextObject);
 ```
-Calls `HealthCheck()` internally. Convenience wrapper.
+Alias — calls `HealthCheck()` internally.
 
 ### HealthCheck
-```cpp
-static void HealthCheck(UObject* WorldContextObject);
-```
-- **Endpoint**: `GET /health`
-- **Response Handler**: `OnHealthCheckResponse`
-- **Success (200)**: Logs "Server is ONLINE and connected to database!"
-- **Failure**: Logs connection error
+- **Endpoint**: `GET {ServerBaseUrl}/health`
+- **Auth**: No
+- **Success (200)**: Logs "Server is ONLINE"
+- **Delegates**: None
 
 ### RegisterUser
 ```cpp
 static void RegisterUser(UObject* WorldContextObject, const FString& Username, const FString& Email, const FString& Password);
 ```
-- **Endpoint**: `POST /api/auth/register`
-- **Payload**: `{"username":"...","email":"...","password":"..."}`
-- **Response Handler**: `OnRegisterResponse`
-- **Success (201)**: Logs success
-- **Error (409)**: Username/email already exists
+- **Endpoint**: `POST {ServerBaseUrl}/api/auth/register`
+- **Auth**: No
+- **Payload**: `{ "username", "email", "password" }`
+- **Success (201)**: Parses token + user data → `GI->SetAuthData()` (auto-login after registration)
+- **Error**: `GI->OnLoginFailedWithReason(error)`
 
 ### LoginUser
 ```cpp
 static void LoginUser(UObject* WorldContextObject, const FString& Username, const FString& Password);
 ```
-- **Endpoint**: `POST /api/auth/login`
-- **Payload**: `{"username":"...","password":"..."}`
-- **Response Handler**: `OnLoginResponse` (uses lambda to capture WorldContextObject)
-- **Success (200)**: Parses token, username, user_id from JSON → calls `GameInstance->SetAuthData()` → triggers `OnLoginSuccess`
-- **Error (401)**: Broadcasts `OnLoginFailed`
+- **Endpoint**: `POST {ServerBaseUrl}/api/auth/login`
+- **Auth**: No
+- **Payload**: `{ "username", "password" }`
+- **Success (200)**: Parses token, username, user_id → `GI->SetAuthData()`
+- **Connection fail**: `GI->OnLoginFailed` + `GI->OnLoginFailedWithReason("Cannot connect to server")`
+- **Error**: `GI->OnLoginFailed` + `GI->OnLoginFailedWithReason(error)`
+
+### GetServerList
+```cpp
+static void GetServerList(UObject* WorldContextObject);
+```
+- **Endpoint**: `GET {ServerBaseUrl}/api/servers`
+- **Auth**: No
+- **Success (200)**: Parses `servers` array → `TArray<FServerInfo>` → `GI->SetServerList()`
+- **Error**: Logs error, no delegate
 
 ### GetCharacters
 ```cpp
 static void GetCharacters(UObject* WorldContextObject);
 ```
-- **Endpoint**: `GET /api/characters`
-- **Auth**: `Authorization: Bearer <token>` header
-- **Response Handler**: `OnGetCharactersResponse`
-- **Success (200)**: Parses character array from JSON → populates `TArray<FCharacterData>` → calls `GameInstance->SetCharacterList()`
-- **Error (401)**: Not authenticated
+- **Endpoint**: `GET {ServerBaseUrl}/api/characters`
+- **Auth**: Required (`Authorization: {GI->GetAuthHeader()}`), pre-checks `IsAuthenticated()`
+- **Success (200)**: Parses `characters` array via `ParseCharacterFromJson()` → `GI->SetCharacterList()`
 
 ### CreateCharacter
 ```cpp
-static void CreateCharacter(UObject* WorldContextObject, const FString& CharacterName, const FString& CharacterClass);
+static void CreateCharacter(UObject* WorldContextObject, const FString& CharacterName, const FString& CharacterClass, int32 HairStyle = 1, int32 HairColor = 0, const FString& Gender = TEXT("male"));
 ```
-- **Endpoint**: `POST /api/characters`
-- **Auth**: Bearer token
-- **Payload**: `{"name":"...","characterClass":"..."}`
-- **Response Handler**: `OnCreateCharacterResponse`
-- **Success (201)**: Broadcasts `GameInstance->OnCharacterCreated`
-- **Error (409)**: Name already exists
+- **Endpoint**: `POST {ServerBaseUrl}/api/characters`
+- **Auth**: Required
+- **Payload**: `{ "name", "characterClass", "hairStyle", "hairColor", "gender" }`
+- **Success (201)**: `GI->OnCharacterCreated`
+- **Error**: `GI->OnCharacterCreateFailed(error)`
+
+### DeleteCharacter
+```cpp
+static void DeleteCharacter(UObject* WorldContextObject, int32 CharacterId, const FString& Password);
+```
+- **Endpoint**: `DELETE {ServerBaseUrl}/api/characters/{CharacterId}`
+- **Auth**: Required
+- **Payload**: `{ "password" }` (server-side bcrypt verification)
+- **Success (200)**: `GI->OnCharacterDeleteSuccess(CharacterName)`
+- **Error**: `GI->OnCharacterDeleteFailed(error)`
 
 ### SaveCharacterPosition
 ```cpp
 static void SaveCharacterPosition(UObject* WorldContextObject, int32 CharacterId, float X, float Y, float Z);
 ```
-- **Endpoint**: `PUT /api/characters/{id}/position`
-- **Auth**: Bearer token
-- **Payload**: `{"x":...,"y":...,"z":...}`
-- **Response Handler**: `OnSavePositionResponse`
+- **Endpoint**: `PUT {ServerBaseUrl}/api/characters/{CharacterId}/position`
+- **Auth**: Conditional (sets header if authenticated, but no pre-check)
+- **Payload**: `{ "x", "y", "z" }`
+- **Delegates**: None (silent)
+
+## Bridge Functions (2, not HTTP calls)
+
+These exist so Blueprints can call subsystem methods without C++ casts.
+
+### UseSkillWithTargeting
+```cpp
+static void UseSkillWithTargeting(UObject* WorldContextObject, int32 SkillId);
+```
+- **Category**: "Skills"
+- Gets `USkillTreeSubsystem` from world, calls `Sub->UseSkill(SkillId)`
+
+### ToggleCombatStatsWidget
+```cpp
+static void ToggleCombatStatsWidget(UObject* WorldContextObject);
+```
+- **Category**: "UI"
+- Gets `UCombatStatsSubsystem` from world, calls `Sub->ToggleWidget()`
+
+## Summary Table
+
+| # | Function | Method | Endpoint | Auth | Delegates |
+|---|----------|--------|----------|------|-----------|
+| 1 | TestServerConnection | — | (alias) | No | — |
+| 2 | HealthCheck | GET | `/health` | No | None |
+| 3 | RegisterUser | POST | `/api/auth/register` | No | SetAuthData / OnLoginFailedWithReason |
+| 4 | LoginUser | POST | `/api/auth/login` | No | SetAuthData / OnLoginFailed + OnLoginFailedWithReason |
+| 5 | GetServerList | GET | `/api/servers` | No | SetServerList |
+| 6 | GetCharacters | GET | `/api/characters` | Yes | SetCharacterList |
+| 7 | CreateCharacter | POST | `/api/characters` | Yes | OnCharacterCreated / OnCharacterCreateFailed |
+| 8 | DeleteCharacter | DELETE | `/api/characters/{id}` | Yes | OnCharacterDeleteSuccess / OnCharacterDeleteFailed |
+| 9 | SaveCharacterPosition | PUT | `/api/characters/{id}/position` | Conditional | None |
 
 ## JSON Parsing
 
-The implementation uses manual string parsing (not UE5 `FJsonSerializer`) for simplicity:
-
-```cpp
-// Pattern: Find prefix, extract between prefix end and next quote/comma
-FString TokenPrefix = TEXT("\"token\":\"");
-int32 TokenStart = ResponseContent.Find(TokenPrefix);
-TokenStart += TokenPrefix.Len();
-int32 TokenEnd = ResponseContent.Find(TEXT("\""), ..., TokenStart);
-FString Token = ResponseContent.Mid(TokenStart, TokenEnd - TokenStart);
-```
-
-Character list parsing splits on `},{` and extracts fields individually.
-
-## Helper Function
-
-```cpp
-static UMMOGameInstance* GetGameInstance(UObject* WorldContextObject);
-```
-Private. Returns `Cast<UMMOGameInstance>(UGameplayStatics::GetGameInstance(WorldContextObject))`.
-
-## Blueprint Usage
-
-```
-WBP_LoginScreen — On Login Button Clicked:
-    → Login User (WorldContextObject=Self, Username, Password)
-
-BP_GameFlow — Event BeginPlay:
-    → Get Game Instance → Cast To MMOGameInstance → Bind Events
-    → OnLoginSuccess → Get Characters(WorldContextObject=Self)
-    → OnCharacterListReceived → Show Character Select UI
-```
+Uses UE5 `FJsonObject` / `FJsonSerializer` throughout. The `ParseCharacterFromJson()` free function is the single source of truth for mapping server character JSON to `FCharacterData`. Error extraction uses `ExtractErrorMessage()` to pull the `"error"` field from server JSON responses.
 
 ---
 
-**Last Updated**: 2026-02-17
+**Last Updated**: 2026-03-09

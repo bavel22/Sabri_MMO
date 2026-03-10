@@ -1,4 +1,6 @@
-# AC_HUDManager Refactoring Plan
+> **SUPERSEDED** — This refactoring plan is no longer active. The HUD has been rebuilt as 14 C++ UWorldSubsystems with Slate widgets, replacing the Blueprint-based AC_HUDManager + WBP_ widget architecture described here. See `docsNew/02_Client_Side/C++_Code/` for the current subsystem documentation.
+
+# AC_HUDManager Refactoring Plan (Historical)
 
 ## Overview
 

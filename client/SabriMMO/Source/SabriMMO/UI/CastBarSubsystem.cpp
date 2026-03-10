@@ -1,15 +1,13 @@
 // CastBarSubsystem.cpp — Implementation of the RO-style cast bar subsystem.
-// Wraps skill:cast_start/complete/interrupted Socket.io events, maintains
+// Registers skill:cast_start/complete/interrupted via EventRouter, maintains
 // ActiveCasts map read by SCastBarOverlay for rendering.
 
 #include "CastBarSubsystem.h"
 #include "SCastBarOverlay.h"
 #include "MMOGameInstance.h"
-#include "SocketIOClientComponent.h"
-#include "SocketIONative.h"
+#include "SocketEventRouter.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
 #include "Framework/Application/SlateApplication.h"
@@ -32,154 +30,55 @@ void UCastBarSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
 	Super::OnWorldBeginPlay(InWorld);
 
-	if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(InWorld.GetGameInstance()))
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(InWorld.GetGameInstance());
+	if (!GI) return;
+
+	FCharacterData SelChar = GI->GetSelectedCharacter();
+	LocalCharacterId = SelChar.CharacterId;
+
+	// Register socket event handlers via persistent EventRouter
+	USocketEventRouter* Router = GI->GetEventRouter();
+	if (Router)
 	{
-		FCharacterData SelChar = GI->GetSelectedCharacter();
-		LocalCharacterId = SelChar.CharacterId;
-		UE_LOG(LogCastBar, Log, TEXT("LocalCharacterId resolved: %d"), LocalCharacterId);
+		Router->RegisterHandler(TEXT("skill:cast_start"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleCastStart(D); });
+		Router->RegisterHandler(TEXT("skill:cast_complete"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleCastComplete(D); });
+		Router->RegisterHandler(TEXT("skill:cast_interrupted"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleCastInterrupted(D); });
+		Router->RegisterHandler(TEXT("skill:cast_interrupted_broadcast"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleCastInterruptedBroadcast(D); });
+		Router->RegisterHandler(TEXT("skill:cast_failed"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleCastFailed(D); });
 	}
 
-	InWorld.GetTimerManager().SetTimer(
-		BindCheckTimer,
-		FTimerDelegate::CreateUObject(this, &UCastBarSubsystem::TryWrapSocketEvents),
-		0.5f,
-		true
-	);
+	// Only show overlay when socket is connected (game level)
+	if (GI->IsSocketConnected())
+	{
+		ShowOverlay();
+	}
 
-	UE_LOG(LogCastBar, Log, TEXT("CastBarSubsystem started — waiting for SocketIO bindings..."));
+	UE_LOG(LogCastBar, Log, TEXT("CastBarSubsystem started — events registered via EventRouter. LocalCharId=%d"), LocalCharacterId);
 }
 
 void UCastBarSubsystem::Deinitialize()
 {
 	HideOverlay();
+	ActiveCasts.Empty();
 
 	if (UWorld* World = GetWorld())
 	{
-		World->GetTimerManager().ClearTimer(BindCheckTimer);
+		if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance()))
+		{
+			if (USocketEventRouter* Router = GI->GetEventRouter())
+			{
+				Router->UnregisterAllForOwner(this);
+			}
+		}
 	}
-
-	ActiveCasts.Empty();
-	bEventsWrapped = false;
-	CachedSIOComponent = nullptr;
 
 	UE_LOG(LogCastBar, Log, TEXT("CastBarSubsystem deinitialized."));
 	Super::Deinitialize();
-}
-
-// ============================================================
-// Find the SocketIO component on BP_SocketManager
-// ============================================================
-
-USocketIOClientComponent* UCastBarSubsystem::FindSocketIOComponent() const
-{
-	UWorld* World = GetWorld();
-	if (!World) return nullptr;
-
-	for (TActorIterator<AActor> It(World); It; ++It)
-	{
-		if (USocketIOClientComponent* Comp = It->FindComponentByClass<USocketIOClientComponent>())
-		{
-			return Comp;
-		}
-	}
-	return nullptr;
-}
-
-// ============================================================
-// Timer callback — wait for BP bindings, then wrap
-// ============================================================
-
-void UCastBarSubsystem::TryWrapSocketEvents()
-{
-	if (bEventsWrapped) return;
-
-	USocketIOClientComponent* SIOComp = FindSocketIOComponent();
-	if (!SIOComp) return;
-
-	TSharedPtr<FSocketIONative> NativeClient = SIOComp->GetNativeClient();
-	if (!NativeClient.IsValid() || !NativeClient->bIsConnected) return;
-
-	// Wait until BP has bound key events (same gate as other subsystems)
-	if (!NativeClient->EventFunctionMap.Contains(TEXT("combat:health_update")))
-		return;
-
-	CachedSIOComponent = SIOComp;
-
-	// Re-resolve character ID
-	if (LocalCharacterId == 0)
-	{
-		if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance()))
-		{
-			FCharacterData SelChar = GI->GetSelectedCharacter();
-			LocalCharacterId = SelChar.CharacterId;
-			UE_LOG(LogCastBar, Log, TEXT("Late-resolved LocalCharacterId: %d"), LocalCharacterId);
-		}
-	}
-
-	// Wrap cast events
-	WrapSingleEvent(TEXT("skill:cast_start"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleCastStart(D); });
-	WrapSingleEvent(TEXT("skill:cast_complete"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleCastComplete(D); });
-	WrapSingleEvent(TEXT("skill:cast_interrupted"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleCastInterrupted(D); });
-	WrapSingleEvent(TEXT("skill:cast_interrupted_broadcast"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleCastInterruptedBroadcast(D); });
-	WrapSingleEvent(TEXT("skill:cast_failed"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleCastFailed(D); });
-
-	bEventsWrapped = true;
-
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().ClearTimer(BindCheckTimer);
-	}
-
-	ShowOverlay();
-
-	UE_LOG(LogCastBar, Log, TEXT("CastBarSubsystem — events wrapped, overlay active. LocalCharId=%d"), LocalCharacterId);
-}
-
-// ============================================================
-// Wrap a single event: preserve original callback chain
-// ============================================================
-
-void UCastBarSubsystem::WrapSingleEvent(
-	const FString& EventName,
-	TFunction<void(const TSharedPtr<FJsonValue>&)> OurHandler)
-{
-	if (!CachedSIOComponent.IsValid()) return;
-
-	TSharedPtr<FSocketIONative> NativeClient = CachedSIOComponent->GetNativeClient();
-	if (!NativeClient.IsValid()) return;
-
-	// Save existing callback chain
-	TFunction<void(const FString&, const TSharedPtr<FJsonValue>&)> OriginalCallback;
-	FSIOBoundEvent* Existing = NativeClient->EventFunctionMap.Find(EventName);
-	if (Existing)
-	{
-		OriginalCallback = Existing->Function;
-	}
-
-	// Replace with combined callback
-	NativeClient->OnEvent(EventName,
-		[OriginalCallback, OurHandler](const FString& Event, const TSharedPtr<FJsonValue>& Message)
-		{
-			if (OriginalCallback)
-			{
-				OriginalCallback(Event, Message);
-			}
-			if (OurHandler)
-			{
-				OurHandler(Message);
-			}
-		},
-		TEXT("/"),
-		ESIOThreadOverrideOption::USE_GAME_THREAD
-	);
-
-	UE_LOG(LogCastBar, Log, TEXT("Wrapped event: %s (had original: %s)"),
-		*EventName, OriginalCallback ? TEXT("yes") : TEXT("no"));
 }
 
 // ============================================================
@@ -261,7 +160,7 @@ void UCastBarSubsystem::HandleCastStart(const TSharedPtr<FJsonValue>& Data)
 	Entry.SkillName = SkillName;
 	Entry.SkillId = (int32)SkillIdD;
 	Entry.CastStartTime = FPlatformTime::Seconds();
-	Entry.CastDuration = (float)(ActualCastTimeD / 1000.0);  // ms → seconds
+	Entry.CastDuration = (float)(ActualCastTimeD / 1000.0);  // ms -> seconds
 
 	ActiveCasts.Add(CasterId, Entry);
 

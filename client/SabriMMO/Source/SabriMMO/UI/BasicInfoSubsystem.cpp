@@ -3,11 +3,9 @@
 #include "BasicInfoSubsystem.h"
 #include "SBasicInfoWidget.h"
 #include "MMOGameInstance.h"
-#include "SocketIOClientComponent.h"
-#include "SocketIONative.h"
+#include "SocketEventRouter.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
 #include "Framework/Application/SlateApplication.h"
@@ -34,15 +32,48 @@ void UBasicInfoSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 
 	PopulateNameFromGameInstance();
 
-	// Start a repeating timer to poll for the SocketIO component + event bindings
-	InWorld.GetTimerManager().SetTimer(
-		BindCheckTimer,
-		FTimerDelegate::CreateUObject(this, &UBasicInfoSubsystem::TryWrapSocketEvents),
-		0.5f,
-		true
-	);
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(InWorld.GetGameInstance());
+	if (!GI) return;
 
-	UE_LOG(LogBasicInfo, Log, TEXT("BasicInfoSubsystem started — waiting for SocketIO bindings..."));
+	// Register socket event handlers via persistent EventRouter
+	USocketEventRouter* Router = GI->GetEventRouter();
+	if (Router)
+	{
+		Router->RegisterHandler(TEXT("combat:health_update"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleHealthUpdate(D); });
+		Router->RegisterHandler(TEXT("combat:damage"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleCombatDamage(D); });
+		Router->RegisterHandler(TEXT("skill:effect_damage"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleCombatDamage(D); });
+		Router->RegisterHandler(TEXT("combat:death"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleCombatDeath(D); });
+		Router->RegisterHandler(TEXT("combat:respawn"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleCombatRespawn(D); });
+		Router->RegisterHandler(TEXT("player:stats"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandlePlayerStats(D); });
+		Router->RegisterHandler(TEXT("exp:gain"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleExpGain(D); });
+		Router->RegisterHandler(TEXT("exp:level_up"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleExpLevelUp(D); });
+		Router->RegisterHandler(TEXT("player:joined"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandlePlayerJoined(D); });
+		Router->RegisterHandler(TEXT("shop:bought"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleShopTransaction(D); });
+		Router->RegisterHandler(TEXT("shop:sold"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleShopTransaction(D); });
+		Router->RegisterHandler(TEXT("inventory:data"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleInventoryData(D); });
+	}
+
+	// Only show widget and request data if socket is connected (game level, not login)
+	if (GI->IsSocketConnected())
+	{
+		GI->EmitSocketEvent(TEXT("player:request_stats"), TEXT("{}"));
+		GI->EmitSocketEvent(TEXT("inventory:load"), TEXT("{}"));
+		ShowWidget();
+	}
+
+	UE_LOG(LogBasicInfo, Log, TEXT("BasicInfoSubsystem started — events registered via EventRouter."));
 }
 
 void UBasicInfoSubsystem::Deinitialize()
@@ -51,11 +82,14 @@ void UBasicInfoSubsystem::Deinitialize()
 
 	if (UWorld* World = GetWorld())
 	{
-		World->GetTimerManager().ClearTimer(BindCheckTimer);
+		if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance()))
+		{
+			if (USocketEventRouter* Router = GI->GetEventRouter())
+			{
+				Router->UnregisterAllForOwner(this);
+			}
+		}
 	}
-
-	bEventsWrapped = false;
-	CachedSIOComponent = nullptr;
 
 	Super::Deinitialize();
 }
@@ -121,168 +155,6 @@ void UBasicInfoSubsystem::HideWidget()
 bool UBasicInfoSubsystem::IsWidgetVisible() const
 {
 	return bWidgetAdded;
-}
-
-// ============================================================
-// Find the SocketIO component on BP_SocketManager
-// ============================================================
-
-USocketIOClientComponent* UBasicInfoSubsystem::FindSocketIOComponent() const
-{
-	UWorld* World = GetWorld();
-	if (!World) return nullptr;
-
-	// Iterate all actors looking for one with a USocketIOClientComponent
-	for (TActorIterator<AActor> It(World); It; ++It)
-	{
-		if (USocketIOClientComponent* Comp = It->FindComponentByClass<USocketIOClientComponent>())
-		{
-			return Comp;
-		}
-	}
-	return nullptr;
-}
-
-// ============================================================
-// Timer callback — wait until BP events are bound, then wrap
-// ============================================================
-
-void UBasicInfoSubsystem::TryWrapSocketEvents()
-{
-	if (bEventsWrapped) return;
-
-	USocketIOClientComponent* SIOComp = FindSocketIOComponent();
-	if (!SIOComp)
-	{
-		return; // BP_SocketManager not spawned yet
-	}
-
-	TSharedPtr<FSocketIONative> NativeClient = SIOComp->GetNativeClient();
-	if (!NativeClient.IsValid() || !NativeClient->bIsConnected)
-	{
-		return; // Not connected yet
-	}
-
-	// Check if BP has bound the key events yet
-	if (!NativeClient->EventFunctionMap.Contains(TEXT("combat:health_update")))
-	{
-		return; // BP hasn't set up its bindings yet
-	}
-
-	CachedSIOComponent = SIOComp;
-
-	// Populate character ID from GameInstance
-	if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance()))
-	{
-		FCharacterData SelChar = GI->GetSelectedCharacter();
-		LocalCharacterId = SelChar.CharacterId;
-	}
-
-	// --- Wrap each event ---
-	WrapSingleEvent(TEXT("combat:health_update"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleHealthUpdate(D); });
-
-	WrapSingleEvent(TEXT("combat:damage"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleCombatDamage(D); });
-
-	// Also listen to skill:effect_damage (all skill damage — same payload format)
-	WrapSingleEvent(TEXT("skill:effect_damage"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleCombatDamage(D); });
-
-	WrapSingleEvent(TEXT("combat:death"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleCombatDeath(D); });
-
-	WrapSingleEvent(TEXT("combat:respawn"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleCombatRespawn(D); });
-
-	WrapSingleEvent(TEXT("player:stats"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandlePlayerStats(D); });
-
-	WrapSingleEvent(TEXT("exp:gain"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleExpGain(D); });
-
-	WrapSingleEvent(TEXT("exp:level_up"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleExpLevelUp(D); });
-
-	WrapSingleEvent(TEXT("player:joined"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandlePlayerJoined(D); });
-
-	WrapSingleEvent(TEXT("shop:bought"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleShopTransaction(D); });
-
-	WrapSingleEvent(TEXT("shop:sold"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleShopTransaction(D); });
-
-	WrapSingleEvent(TEXT("inventory:data"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleInventoryData(D); });
-
-	bEventsWrapped = true;
-
-	// Stop the polling timer
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().ClearTimer(BindCheckTimer);
-	}
-
-	// Request fresh data from server (initial events fired before wrapping)
-	if (SIOComp)
-	{
-		SIOComp->EmitNative(TEXT("player:request_stats"), TEXT("{}"));
-		SIOComp->EmitNative(TEXT("inventory:load"),    TEXT("{}"));
-	}
-
-	// Re-populate name in case GameInstance was updated after first call
-	PopulateNameFromGameInstance();
-
-	// Now show the widget
-	ShowWidget();
-
-	UE_LOG(LogBasicInfo, Log, TEXT("BasicInfoSubsystem — all socket events wrapped successfully."));
-}
-
-// ============================================================
-// Wrap a single event: save original callback, replace with
-// a combined callback that calls both original + our handler
-// ============================================================
-
-void UBasicInfoSubsystem::WrapSingleEvent(
-	const FString& EventName,
-	TFunction<void(const TSharedPtr<FJsonValue>&)> OurHandler)
-{
-	if (!CachedSIOComponent.IsValid()) return;
-
-	TSharedPtr<FSocketIONative> NativeClient = CachedSIOComponent->GetNativeClient();
-	if (!NativeClient.IsValid()) return;
-
-	// Save the original callback (if any)
-	TFunction<void(const FString&, const TSharedPtr<FJsonValue>&)> OriginalCallback;
-	FSIOBoundEvent* Existing = NativeClient->EventFunctionMap.Find(EventName);
-	if (Existing)
-	{
-		OriginalCallback = Existing->Function;
-	}
-
-	// Replace with a combined callback
-	NativeClient->OnEvent(EventName,
-		[OriginalCallback, OurHandler](const FString& Event, const TSharedPtr<FJsonValue>& Message)
-		{
-			// Call original Blueprint handler first
-			if (OriginalCallback)
-			{
-				OriginalCallback(Event, Message);
-			}
-			// Then call our C++ handler
-			if (OurHandler)
-			{
-				OurHandler(Message);
-			}
-		},
-		TEXT("/"),
-		ESIOThreadOverrideOption::USE_GAME_THREAD
-	);
-
-	UE_LOG(LogBasicInfo, Verbose, TEXT("Wrapped event: %s (had original: %s)"),
-		*EventName, OriginalCallback ? TEXT("yes") : TEXT("no"));
 }
 
 // ============================================================

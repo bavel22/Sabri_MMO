@@ -10,9 +10,7 @@
 #include "Dom/JsonObject.h"
 #include "WorldHealthBarSubsystem.generated.h"
 
-class USocketIOClientComponent;
 class SWorldHealthBarOverlay;
-struct FSIOBoundEvent;
 
 // Per-NPC name label state (screen-space text above NPC actors)
 struct FNPCNameData
@@ -70,12 +68,6 @@ public:
 	bool GetEnemyFeetPosition(const FEnemyBarData& Enemy, FVector& OutPos) const;
 
 private:
-	// ---- Socket event wrapping ----
-	void TryWrapSocketEvents();
-	void WrapSingleEvent(const FString& EventName,
-		TFunction<void(const TSharedPtr<FJsonValue>&)> OurHandler);
-	USocketIOClientComponent* FindSocketIOComponent() const;
-
 	// ---- Event handlers ----
 	void HandleHealthUpdate(const TSharedPtr<FJsonValue>& Data);
 	void HandleCombatDamage(const TSharedPtr<FJsonValue>& Data);
@@ -98,15 +90,11 @@ private:
 	void CacheNPCActors();
 
 	// ---- State ----
-	bool bEventsWrapped = false;
 	bool bOverlayAdded = false;
 	int32 LocalCharacterId = 0;
 
-	FTimerHandle BindCheckTimer;
 	FTimerHandle ActorCacheTimer;
 
 	TSharedPtr<SWorldHealthBarOverlay> OverlayWidget;
 	TSharedPtr<SWidget> ViewportOverlay;
-
-	TWeakObjectPtr<USocketIOClientComponent> CachedSIOComponent;
 };

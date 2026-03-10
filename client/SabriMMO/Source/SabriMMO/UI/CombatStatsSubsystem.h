@@ -11,9 +11,7 @@
 #include "Dom/JsonObject.h"
 #include "CombatStatsSubsystem.generated.h"
 
-class USocketIOClientComponent;
 class SCombatStatsWidget;
-struct FSIOBoundEvent;
 
 UCLASS()
 class SABRIMMO_API UCombatStatsSubsystem : public UWorldSubsystem
@@ -74,25 +72,13 @@ public:
 	bool IsWidgetVisible() const;
 
 private:
-	// ---- socket event wrapping ----
-	void TryWrapSocketEvents();
-	void WrapSingleEvent(const FString& EventName,
-		TFunction<void(const TSharedPtr<FJsonValue>&)> OurHandler);
-
-	USocketIOClientComponent* FindSocketIOComponent() const;
-
 	// ---- event handlers ----
 	void HandlePlayerStats(const TSharedPtr<FJsonValue>& Data);
 
 	// ---- state ----
-	bool bEventsWrapped = false;
 	bool bWidgetVisible = false;
 	int32 LocalCharacterId = 0;
 
-	FTimerHandle BindCheckTimer;
-
 	TSharedPtr<SCombatStatsWidget> StatsWidget;
 	TSharedPtr<SWidget> ViewportOverlay;
-
-	TWeakObjectPtr<USocketIOClientComponent> CachedSIOComponent;
 };

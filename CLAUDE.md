@@ -58,11 +58,11 @@ Single monolithic file (~2400 lines). Key sections:
 | File | Role |
 |------|------|
 | `CharacterData.h` | `FCharacterData` (30+ fields), `FServerInfo`, `FInventoryItem`, drag-drop structs |
-| `MMOGameInstance.*` | Auth state, server selection, character list, remembered username, configurable URL |
+| `MMOGameInstance.*` | Auth state, server selection, character list, persistent socket (ConnectSocket/EmitSocketEvent/EventRouter) |
 | `MMOHttpManager.*` | BlueprintFunctionLibrary — REST: login, register, servers, characters CRUD, position save |
-| `SabriMMOCharacter.*` | Base player pawn — movement, socket events, stats |
+| `SabriMMOCharacter.*` | Base player pawn — movement, socket events, stats, BeginPlay ground-snap via `SnapLocationToGround` |
 | `SabriMMOPlayerController.*` | Input mapping (click-to-move + WASD) |
-| `OtherCharacterMovementComponent.*` | Remote player interpolation |
+| `OtherCharacterMovementComponent.*` | Remote player interpolation + per-tick floor-snap (Z correction via line trace) |
 | `UI/LoginFlowSubsystem.*` | Login flow state machine (Login->Server->CharSelect->Create->EnterWorld) |
 | `UI/SLoginWidget.*` | Login screen (username/password, remember me, error display) |
 | `UI/SServerSelectWidget.*` | Server list with population/status, selection highlighting |
@@ -71,12 +71,15 @@ Single monolithic file (~2400 lines). Key sections:
 | `UI/SLoadingOverlayWidget.*` | "Please Wait" fullscreen overlay with progress bar |
 | `UI/SBasicInfoWidget.*` | Slate HUD panel (HP/SP/EXP bars, draggable) |
 | `UI/BasicInfoSubsystem.*` | UWorldSubsystem bridging server data -> Slate widget |
-| `UI/ZoneTransitionSubsystem.*` | Zone transitions, loading overlay, pawn teleport, zone:change/error/teleport events |
+| `UI/ZoneTransitionSubsystem.*` | Zone transitions, loading overlay, pawn teleport, zone:change/error/teleport events, `SnapLocationToGround()` static helper |
 | `UI/KafraSubsystem.*` | Kafra NPC dialog, save point, teleport service |
 | `UI/SKafraWidget.*` | Slate Kafra service dialog (save/teleport/cancel) |
 | `WarpPortal.*` | Overlap trigger actor for zone warps |
 | `KafraNPC.*` | Clickable Kafra NPC actor |
 | `SabriMMOGameMode.*` | Base GameMode — sets DefaultPawnClass=nullptr (Level Blueprint spawns pawn) |
+| `SocketEventRouter.*` | Multi-handler Socket.io event dispatch — allows multiple subsystems per event |
+| `UI/MultiplayerEventSubsystem.*` | Bridge: forwards persistent socket events to BP_SocketManager handler functions via ProcessEvent |
+| `UI/PositionBroadcastSubsystem.*` | 30Hz position broadcasting via persistent socket |
 
 ### Database (PostgreSQL)
 4 core tables: `users`, `characters`, `items` (static definitions), `character_inventory` (per-character).
@@ -114,6 +117,12 @@ Widget prefix: `WBP_`. Blueprint prefix: `BP_`. Interface prefix: `BPI_`.
 
 ---
 
+## Persistent Socket Architecture (Phase 4)
+
+**Persistent socket on GameInstance** — `UMMOGameInstance` owns a `TSharedPtr<FSocketIONative>` that survives `OpenLevel()`. No disconnect/reconnect on zone transitions. `USocketEventRouter` provides multi-handler dispatch (multiple subsystems can register for the same event). All C++ subsystems use `Router->RegisterHandler()` in `OnWorldBeginPlay` and `Router->UnregisterAllForOwner(this)` in `Deinitialize`. Blueprint emit calls use `GI->K2_EmitSocketEvent()` (BlueprintCallable). `MultiplayerEventSubsystem` bridges 30 inbound events to BP_SocketManager's existing handler functions via `ProcessEvent`. `PositionBroadcastSubsystem` handles 30Hz position updates. BP_SocketManager still exists in levels as a handler shell — its SocketIO component is no longer connected, but its handler functions (OnCombatDamage, OnEnemySpawn, etc.) are still called by the bridge. All subsystem widgets are gated behind `GI->IsSocketConnected()` so they only show in game levels, not the login screen.
+
+---
+
 ## Naming Conventions
 
 - Variables: `camelCase` locals, `PascalCase` class/component names
@@ -143,6 +152,7 @@ Widget prefix: `WBP_`. Blueprint prefix: `BP_`. Interface prefix: `BPI_`.
 | Crashes, errors, bugs | `/debugger` | — |
 | Server code, DB, REST API | `/full-stack` | `docsNew/00_Project_Overview.md` |
 | Socket.io events, multiplayer sync | `/realtime` | — |
+| Persistent socket, EventRouter, BP bridge | `/sabrimmo-persistent-socket` | `memory/persistent-socket.md` |
 | Blueprint / Widget work | `/ui-architect` | unrealMCP first |
 | Enemy AI, monster behavior | `/enemy-ai` | `server/src/ro_monster_ai_codes.js` |
 | Slate UI panels | `/sabrimmo-ui` | — |
@@ -152,6 +162,8 @@ Widget prefix: `WBP_`. Blueprint prefix: `BP_`. Interface prefix: `BPI_`.
 | VFX, particles, Niagara | `/sabrimmo-skills-vfx` | `docsNew/05_Development/VFX_Asset_Reference.md` |
 | Stats, leveling, class system | `/sabrimmo-stats` | `RagnaCloneDocs/01_Stats_Leveling_JobSystem.md` |
 | Damage pipelines, combat formulas | `/sabrimmo-combat` | `RagnaCloneDocs/02_Combat_System.md` |
+| Buffs (Provoke, Blessing, etc.) | `/sabrimmo-buff` | `docsNew/03_Server_Side/Status_Effect_Buff_System.md` |
+| Status effects (stun, freeze, etc.) | `/sabrimmo-debuff` | `docsNew/03_Server_Side/Status_Effect_Buff_System.md` |
 | Skill trees, cast times, cooldowns | `/sabrimmo-skills` | `RagnaCloneDocs/03_Skills_Magic_System.md` |
 | Items, equipment, refining, cards | `/sabrimmo-items` | `RagnaCloneDocs/06_Items_Equipment.md` |
 | NPCs, shops, quests, Kafra | `/sabrimmo-npcs` | `RagnaCloneDocs/08_NPCs_Quests.md` |
@@ -179,7 +191,9 @@ Many tasks touch multiple systems. **Load ALL relevant skills.** Examples:
 - "Add a new skill with VFX" -> `/sabrimmo-skills` + `/sabrimmo-combat` + `/sabrimmo-skills-vfx` + `/full-stack`
 - "Add a new zone with NPCs and warps" -> `/sabrimmo-zone` + `/sabrimmo-npcs` + `/sabrimmo-click-interact`
 - "Fix a crash when casting spells" -> `/debugger` + `/sabrimmo-skills` + `/realtime`
-- "Build a new HUD panel showing buffs" -> `/sabrimmo-ui` + `/sabrimmo-combat` + `/realtime`
+- "Build a new HUD panel showing buffs" -> `/sabrimmo-buff` + `/sabrimmo-debuff` + `/sabrimmo-ui`
+- "Add a skill that applies poison" -> `/sabrimmo-debuff` + `/sabrimmo-skills` + `/full-stack`
+- "Add a buff skill like Blessing" -> `/sabrimmo-buff` + `/sabrimmo-skills` + `/full-stack`
 - "Add a new monster with special attacks" -> `/enemy-ai` + `/sabrimmo-combat` + `/full-stack`
 - "Implement the inventory system" -> `/sabrimmo-items` + `/sabrimmo-economy` + `/full-stack` + `/sabrimmo-ui`
 - "Add party EXP sharing" -> `/sabrimmo-party-guild` + `/sabrimmo-stats` + `/full-stack`
@@ -188,6 +202,9 @@ Many tasks touch multiple systems. **Load ALL relevant skills.** Examples:
 - "Add NPC shops and quest givers" -> `/sabrimmo-npcs` + `/sabrimmo-items` + `/sabrimmo-economy`
 - "Add background music per zone" -> `/sabrimmo-audio` + `/sabrimmo-zone`
 - "Create character hair/costume system" -> `/sabrimmo-art` + `/sabrimmo-ui`
+- "Add a new socket event for party invites" -> `/sabrimmo-persistent-socket` + `/sabrimmo-party-guild` + `/full-stack`
+- "New subsystem listening to socket events" -> `/sabrimmo-persistent-socket` + `/sabrimmo-ui`
+- "Debug socket events not arriving" -> `/debugger` + `/sabrimmo-persistent-socket` + `/realtime`
 
 **Do NOT skip loading skills to save time.** The cost of reloading context is far less than the cost of implementing something wrong and having to redo it.
 
@@ -213,6 +230,8 @@ Invoke with `/skill-name`. Located at `C:/Users/pladr/.claude/skills/`.
 |-------|----------|
 | `/sabrimmo-stats` | Base/derived stats, EXP tables, leveling, class/job system, stat allocation |
 | `/sabrimmo-combat` | Physical/magical damage pipeline, elements, size/race, critical hits, ASPD |
+| `/sabrimmo-buff` | Buff system (Provoke, Endure, Blessing, etc.), stat modifiers, stacking rules, BuffBarWidget |
+| `/sabrimmo-debuff` | Status effects (stun, freeze, poison, etc.), resistance formulas, CC, periodic drains, cleanse |
 | `/sabrimmo-skills` | Skill trees, cast times, cooldowns, SP costs, 86+ skill definitions |
 | `/sabrimmo-items` | Inventory, equipment slots, weapon types, refining, card system, weight |
 | `/sabrimmo-npcs` | NPC types, dialogue trees, shops, Kafra, quests, job change |
@@ -227,6 +246,7 @@ Invoke with `/skill-name`. Located at `C:/Users/pladr/.claude/skills/`.
 | `/sabrimmo-target-skill` | Click-to-cast targeting, skill hotbar integration |
 | `/sabrimmo-click-interact` | Left-click interactable actors (NPCs, chests, etc.) |
 | `/sabrimmo-skills-vfx` | Skill VFX, Niagara effects, casting circles, warp portal VFX |
+| `/sabrimmo-persistent-socket` | Persistent socket, EventRouter, BP event bridge, subsystem registration |
 
 ### Utility Skills
 | Skill | Use when |

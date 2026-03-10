@@ -5,11 +5,9 @@
 #include "CombatStatsSubsystem.h"
 #include "SCombatStatsWidget.h"
 #include "MMOGameInstance.h"
-#include "SocketIOClientComponent.h"
-#include "SocketIONative.h"
+#include "SocketEventRouter.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
 #include "Widgets/SWeakWidget.h"
@@ -31,20 +29,26 @@ void UCombatStatsSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
 	Super::OnWorldBeginPlay(InWorld);
 
-	if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(InWorld.GetGameInstance()))
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(InWorld.GetGameInstance());
+	if (!GI) return;
+
+	FCharacterData SelChar = GI->GetSelectedCharacter();
+	LocalCharacterId = SelChar.CharacterId;
+
+	// Register socket event handlers via persistent EventRouter
+	if (USocketEventRouter* Router = GI->GetEventRouter())
 	{
-		FCharacterData SelChar = GI->GetSelectedCharacter();
-		LocalCharacterId = SelChar.CharacterId;
+		Router->RegisterHandler(TEXT("player:stats"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandlePlayerStats(D); });
 	}
 
-	// Poll for SocketIO bindings
-	InWorld.GetTimerManager().SetTimer(
-		BindCheckTimer,
-		FTimerDelegate::CreateUObject(this, &UCombatStatsSubsystem::TryWrapSocketEvents),
-		0.5f, true
-	);
+	// Request current stats so the widget is populated immediately (only when connected)
+	if (GI->IsSocketConnected())
+	{
+		GI->EmitSocketEvent(TEXT("player:request_stats"), TEXT("{}"));
+	}
 
-	UE_LOG(LogCombatStats, Log, TEXT("CombatStatsSubsystem started — F8 bound via Enhanced Input, waiting for SocketIO bindings..."));
+	UE_LOG(LogCombatStats, Log, TEXT("CombatStatsSubsystem started — events registered. LocalCharId=%d."), LocalCharacterId);
 }
 
 void UCombatStatsSubsystem::Deinitialize()
@@ -56,105 +60,16 @@ void UCombatStatsSubsystem::Deinitialize()
 
 	if (UWorld* World = GetWorld())
 	{
-		World->GetTimerManager().ClearTimer(BindCheckTimer);
+		if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance()))
+		{
+			if (USocketEventRouter* Router = GI->GetEventRouter())
+			{
+				Router->UnregisterAllForOwner(this);
+			}
+		}
 	}
 
-	bEventsWrapped = false;
-	CachedSIOComponent = nullptr;
 	Super::Deinitialize();
-}
-
-// ============================================================
-// Find SocketIO component
-// ============================================================
-
-USocketIOClientComponent* UCombatStatsSubsystem::FindSocketIOComponent() const
-{
-	UWorld* World = GetWorld();
-	if (!World) return nullptr;
-
-	for (TActorIterator<AActor> It(World); It; ++It)
-	{
-		if (USocketIOClientComponent* Comp = It->FindComponentByClass<USocketIOClientComponent>())
-		{
-			return Comp;
-		}
-	}
-	return nullptr;
-}
-
-// ============================================================
-// Timer callback — wrap events when ready
-// ============================================================
-
-void UCombatStatsSubsystem::TryWrapSocketEvents()
-{
-	if (bEventsWrapped) return;
-
-	USocketIOClientComponent* SIOComp = FindSocketIOComponent();
-	if (!SIOComp) return;
-
-	TSharedPtr<FSocketIONative> NativeClient = SIOComp->GetNativeClient();
-	if (!NativeClient.IsValid() || !NativeClient->bIsConnected) return;
-
-	if (!NativeClient->EventFunctionMap.Contains(TEXT("combat:health_update"))) return;
-
-	CachedSIOComponent = SIOComp;
-
-	if (LocalCharacterId == 0)
-	{
-		if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance()))
-		{
-			FCharacterData SelChar = GI->GetSelectedCharacter();
-			LocalCharacterId = SelChar.CharacterId;
-		}
-	}
-
-	WrapSingleEvent(TEXT("player:stats"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandlePlayerStats(D); });
-
-	bEventsWrapped = true;
-
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().ClearTimer(BindCheckTimer);
-	}
-
-	// Request current stats so the widget is populated immediately
-	SIOComp->EmitNative(TEXT("player:request_stats"), nullptr);
-
-	UE_LOG(LogCombatStats, Log, TEXT("CombatStatsSubsystem — player:stats wrapped. LocalCharId=%d. Requested initial stats."), LocalCharacterId);
-}
-
-// ============================================================
-// Wrap a single event (same pattern as other subsystems)
-// ============================================================
-
-void UCombatStatsSubsystem::WrapSingleEvent(
-	const FString& EventName,
-	TFunction<void(const TSharedPtr<FJsonValue>&)> OurHandler)
-{
-	if (!CachedSIOComponent.IsValid()) return;
-
-	TSharedPtr<FSocketIONative> NativeClient = CachedSIOComponent->GetNativeClient();
-	if (!NativeClient.IsValid()) return;
-
-	TFunction<void(const FString&, const TSharedPtr<FJsonValue>&)> OriginalCallback;
-	FSIOBoundEvent* Existing = NativeClient->EventFunctionMap.Find(EventName);
-	if (Existing)
-	{
-		OriginalCallback = Existing->Function;
-	}
-
-	NativeClient->OnEvent(EventName,
-		[OriginalCallback, OurHandler](const FString& Event, const TSharedPtr<FJsonValue>& Message)
-		{
-			if (OriginalCallback) OriginalCallback(Event, Message);
-			if (OurHandler) OurHandler(Message);
-		},
-		TEXT("/"),
-		ESIOThreadOverrideOption::USE_GAME_THREAD
-	);
 }
 
 // ============================================================
@@ -287,12 +202,15 @@ bool UCombatStatsSubsystem::IsWidgetVisible() const
 
 void UCombatStatsSubsystem::AllocateStat(const FString& StatName)
 {
-	USocketIOClientComponent* SIOComp = CachedSIOComponent.IsValid() ? CachedSIOComponent.Get() : FindSocketIOComponent();
-	if (!SIOComp) return;
+	UWorld* World = GetWorld();
+	if (!World) return;
 
-	TSharedPtr<FJsonObject> Payload = MakeShareable(new FJsonObject());
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance());
+	if (!GI || !GI->IsSocketConnected()) return;
+
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 	Payload->SetStringField(TEXT("statName"), StatName);
 
-	SIOComp->EmitNative(TEXT("player:allocate_stat"), Payload);
+	GI->EmitSocketEvent(TEXT("player:allocate_stat"), Payload);
 	UE_LOG(LogCombatStats, Log, TEXT("Sent player:allocate_stat for %s"), *StatName);
 }

@@ -1,6 +1,7 @@
 // DamageNumberSubsystem.h — UWorldSubsystem that manages the RO-style
-// damage number overlay. Wraps Socket.io combat events, projects world
-// positions to screen space, and feeds the SDamageNumberOverlay widget.
+// damage number overlay. Registers Socket.io event handlers via the persistent
+// EventRouter, projects world positions to screen space, and feeds the
+// SDamageNumberOverlay widget.
 
 #pragma once
 
@@ -10,9 +11,7 @@
 #include "Dom/JsonObject.h"
 #include "DamageNumberSubsystem.generated.h"
 
-class USocketIOClientComponent;
 class SDamageNumberOverlay;
-struct FSIOBoundEvent;
 enum class EDamagePopType : uint8;
 
 UCLASS()
@@ -27,13 +26,6 @@ public:
 	virtual void Deinitialize() override;
 
 private:
-	// ---- socket event wrapping ----
-	void TryWrapSocketEvents();
-	void WrapSingleEvent(const FString& EventName,
-		TFunction<void(const TSharedPtr<FJsonValue>&)> OurHandler);
-
-	USocketIOClientComponent* FindSocketIOComponent() const;
-
 	// ---- event handlers ----
 	void HandleCombatDamage(const TSharedPtr<FJsonValue>& Data);
 
@@ -52,17 +44,12 @@ private:
 		const FString& Element = TEXT("neutral"));
 
 	// ---- state ----
-	bool bEventsWrapped = false;
 	bool bOverlayAdded = false;
 	int32 LocalCharacterId = 0;
 
 	// Vertical offset in world units to position numbers above character's head
 	static constexpr float HEAD_OFFSET_Z = 120.0f;
 
-	FTimerHandle BindCheckTimer;
-
 	TSharedPtr<SDamageNumberOverlay> OverlayWidget;
 	TSharedPtr<SWidget> ViewportOverlay;
-
-	TWeakObjectPtr<USocketIOClientComponent> CachedSIOComponent;
 };

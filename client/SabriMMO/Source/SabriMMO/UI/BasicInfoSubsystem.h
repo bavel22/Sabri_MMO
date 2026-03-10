@@ -1,5 +1,5 @@
 // BasicInfoSubsystem.h — UWorldSubsystem that manages the Basic Info Slate widget
-// and wraps existing Socket.io event callbacks to feed data into it.
+// and registers Socket.io event handlers via the persistent EventRouter.
 
 #pragma once
 
@@ -9,9 +9,7 @@
 #include "Dom/JsonObject.h"
 #include "BasicInfoSubsystem.generated.h"
 
-class USocketIOClientComponent;
 class SBasicInfoWidget;
-struct FSIOBoundEvent;
 
 UCLASS()
 class SABRIMMO_API UBasicInfoSubsystem : public UWorldSubsystem
@@ -52,13 +50,6 @@ public:
 	bool IsWidgetVisible() const;
 
 private:
-	// ---- socket event wrapping ----
-	void TryWrapSocketEvents();
-	void WrapSingleEvent(const FString& EventName,
-		TFunction<void(const TSharedPtr<FJsonValue>&)> OurHandler);
-
-	USocketIOClientComponent* FindSocketIOComponent() const;
-
 	// ---- event handlers ----
 	void HandleHealthUpdate(const TSharedPtr<FJsonValue>& Data);
 	void HandleCombatDamage(const TSharedPtr<FJsonValue>& Data);
@@ -76,15 +67,10 @@ private:
 	void RecalcMaxWeight();
 
 	// ---- state ----
-	bool bEventsWrapped = false;
 	bool bWidgetAdded   = false;
 	int32 LocalCharacterId = 0;
-
-	FTimerHandle BindCheckTimer;
 
 	TSharedPtr<SBasicInfoWidget> BasicInfoWidget;
 	TSharedPtr<SWidget>          AlignmentWrapper;
 	TSharedPtr<SWidget>          ViewportOverlay;
-
-	TWeakObjectPtr<USocketIOClientComponent> CachedSIOComponent;
 };

@@ -1,5 +1,6 @@
 // ShopSubsystem.h — UWorldSubsystem managing NPC shop state,
-// Socket.io event wrapping, shopping cart, and SShopWidget lifecycle.
+// shopping cart, and SShopWidget lifecycle.
+// Registers Socket.io event handlers via the persistent EventRouter.
 // RO Classic: Buy/Sell mode select, batch cart, Discount/Overcharge, weight checks.
 
 #pragma once
@@ -11,7 +12,6 @@
 #include "CharacterData.h"
 #include "ShopSubsystem.generated.h"
 
-class USocketIOClientComponent;
 class SShopWidget;
 
 UENUM()
@@ -83,12 +83,6 @@ public:
 	bool IsWidgetVisible() const;
 
 private:
-	// ---- socket event wrapping ----
-	void TryWrapSocketEvents();
-	void WrapSingleEvent(const FString& EventName,
-		TFunction<void(const TSharedPtr<FJsonValue>&)> OurHandler);
-	USocketIOClientComponent* FindSocketIOComponent() const;
-
 	// ---- event handlers ----
 	void HandleShopData(const TSharedPtr<FJsonValue>& Data);
 	void HandleShopBought(const TSharedPtr<FJsonValue>& Data);
@@ -99,13 +93,10 @@ private:
 	FShopItem ParseShopItemFromJson(const TSharedPtr<FJsonObject>& Obj);
 
 	// ---- state ----
-	bool bEventsWrapped = false;
 	bool bWidgetAdded = false;
-	FTimerHandle BindCheckTimer;
 
 	TSharedPtr<SShopWidget> ShopWidget;
 	TSharedPtr<SWidget> AlignmentWrapper;
 	TSharedPtr<SWidget> ViewportOverlay;
 
-	TWeakObjectPtr<USocketIOClientComponent> CachedSIOComponent;
 };

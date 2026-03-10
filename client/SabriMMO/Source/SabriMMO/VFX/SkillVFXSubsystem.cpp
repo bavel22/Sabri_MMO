@@ -4,8 +4,7 @@
 #include "CastingCircleActor.h"
 #include "MMOGameInstance.h"
 #include "CharacterData.h"
-#include "SocketIOClientComponent.h"
-#include "SocketIONative.h"
+#include "SocketEventRouter.h"
 #include "NiagaraComponent.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
@@ -92,13 +91,49 @@ void USkillVFXSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	UE_LOG(LogSkillVFX, Log, TEXT("SkillVFXSubsystem started — loaded %d/8 Niagara templates, CastCircleMat=%s"),
 		LoadedCount, MI_CastingCircle ? TEXT("YES") : TEXT("NO"));
 
-	// Poll for socket connection
-	InWorld.GetTimerManager().SetTimer(
-		BindCheckTimer,
-		FTimerDelegate::CreateUObject(this, &USkillVFXSubsystem::TryWrapSocketEvents),
-		0.5f,
-		true
-	);
+	// Register socket event handlers via persistent EventRouter
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(InWorld.GetGameInstance());
+	if (GI)
+	{
+		FCharacterData SelChar = GI->GetSelectedCharacter();
+		LocalCharacterId = SelChar.CharacterId;
+
+		USocketEventRouter* Router = GI->GetEventRouter();
+		if (Router)
+		{
+			Router->RegisterHandler(TEXT("skill:cast_start"), this,
+				[this](const TSharedPtr<FJsonValue>& D) { HandleCastStart(D); });
+			Router->RegisterHandler(TEXT("skill:cast_complete"), this,
+				[this](const TSharedPtr<FJsonValue>& D) { HandleCastComplete(D); });
+			Router->RegisterHandler(TEXT("skill:cast_interrupted_broadcast"), this,
+				[this](const TSharedPtr<FJsonValue>& D) { HandleCastInterrupted(D); });
+			Router->RegisterHandler(TEXT("skill:cast_interrupted"), this,
+				[this](const TSharedPtr<FJsonValue>& D) { HandleCastInterrupted(D); });
+			Router->RegisterHandler(TEXT("skill:effect_damage"), this,
+				[this](const TSharedPtr<FJsonValue>& D) { HandleSkillEffectDamage(D); });
+			Router->RegisterHandler(TEXT("skill:buff_applied"), this,
+				[this](const TSharedPtr<FJsonValue>& D) { HandleBuffApplied(D); });
+			Router->RegisterHandler(TEXT("skill:buff_removed"), this,
+				[this](const TSharedPtr<FJsonValue>& D) { HandleBuffRemoved(D); });
+			Router->RegisterHandler(TEXT("skill:ground_effect_created"), this,
+				[this](const TSharedPtr<FJsonValue>& D) { HandleGroundEffectCreated(D); });
+			Router->RegisterHandler(TEXT("skill:ground_effect_removed"), this,
+				[this](const TSharedPtr<FJsonValue>& D) { HandleGroundEffectRemoved(D); });
+			Router->RegisterHandler(TEXT("combat:health_update"), this,
+				[this](const TSharedPtr<FJsonValue>& D) { HandleCombatHealthUpdate(D); });
+		}
+	}
+
+	UE_LOG(LogSkillVFX, Log, TEXT("SkillVFXSubsystem — events registered via EventRouter. LocalCharId=%d"), LocalCharacterId);
+
+	// Defer VFX processing by one frame — prevents actor access / component spawning during PostLoad.
+	// (UE5 assertion: "Cannot call UnrealScript while PostLoading objects")
+	// VFX events during PostLoad are safely dropped — purely cosmetic, no gameplay impact.
+	bReadyToProcess = false;
+	InWorld.GetTimerManager().SetTimerForNextTick([this]()
+	{
+		bReadyToProcess = true;
+	});
 
 	// Re-activate non-looping Cascade buff particles every 2s so they persist until buff removal.
 	// Cascade PSCs can report IsActive()==true even after all particles have faded,
@@ -127,6 +162,8 @@ void USkillVFXSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 
 void USkillVFXSubsystem::Deinitialize()
 {
+	bReadyToProcess = false;
+
 	// Destroy all active casting circles
 	for (auto& Pair : ActiveCastingCircles)
 	{
@@ -170,150 +207,19 @@ void USkillVFXSubsystem::Deinitialize()
 
 	if (UWorld* World = GetWorld())
 	{
-		World->GetTimerManager().ClearTimer(BindCheckTimer);
 		World->GetTimerManager().ClearTimer(CascadeLoopTimer);
-	}
 
-	bEventsWrapped = false;
-	CachedSIOComponent = nullptr;
-
-	Super::Deinitialize();
-}
-
-// ============================================================
-// Socket event wrapping
-// ============================================================
-
-USocketIOClientComponent* USkillVFXSubsystem::FindSocketIOComponent() const
-{
-	UWorld* World = GetWorld();
-	if (!World) return nullptr;
-
-	for (TActorIterator<AActor> It(World); It; ++It)
-	{
-		if (USocketIOClientComponent* SIO = It->FindComponentByClass<USocketIOClientComponent>())
+		if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance()))
 		{
-			return SIO;
+			if (USocketEventRouter* Router = GI->GetEventRouter())
+			{
+				Router->UnregisterAllForOwner(this);
+			}
 		}
 	}
-	return nullptr;
-}
 
-void USkillVFXSubsystem::TryWrapSocketEvents()
-{
-	if (bEventsWrapped) return;
-
-	USocketIOClientComponent* SIOComp = FindSocketIOComponent();
-	if (!SIOComp)
-	{
-		SocketReadyTicks = 0;
-		return;
-	}
-
-	TSharedPtr<FSocketIONative> NativeClient = SIOComp->GetNativeClient();
-	if (!NativeClient.IsValid() || !NativeClient->bIsConnected)
-	{
-		SocketReadyTicks = 0;
-		return;
-	}
-
-	// Wait for socket to be stable for 3 seconds (6 ticks at 0.5s each).
-	// This ensures ALL other subsystems (CastBar, DamageNumbers, SkillTree, etc.)
-	// have bound their event handlers FIRST. The NativeClient only supports one handler
-	// per event name, so we must wrap AFTER everyone else has bound.
-	if (++SocketReadyTicks < 6)
-	{
-		return;
-	}
-
-	CachedSIOComponent = SIOComp;
-
-	// Resolve local character ID
-	if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance()))
-	{
-		FCharacterData SelChar = GI->GetSelectedCharacter();
-		LocalCharacterId = SelChar.CharacterId;
-	}
-
-	// Wrap existing events — chains our handler AFTER any existing handler.
-	// Uses TWeakObjectPtr to safely handle zone transitions (old subsystem destruction).
-	TWeakObjectPtr<USkillVFXSubsystem> WeakThis(this);
-
-	WrapSingleEvent(TEXT("skill:cast_start"),
-		[WeakThis](const TSharedPtr<FJsonValue>& D) { if (WeakThis.IsValid()) WeakThis->HandleCastStart(D); });
-
-	WrapSingleEvent(TEXT("skill:cast_complete"),
-		[WeakThis](const TSharedPtr<FJsonValue>& D) { if (WeakThis.IsValid()) WeakThis->HandleCastComplete(D); });
-
-	WrapSingleEvent(TEXT("skill:cast_interrupted_broadcast"),
-		[WeakThis](const TSharedPtr<FJsonValue>& D) { if (WeakThis.IsValid()) WeakThis->HandleCastInterrupted(D); });
-
-	WrapSingleEvent(TEXT("skill:cast_interrupted"),
-		[WeakThis](const TSharedPtr<FJsonValue>& D) { if (WeakThis.IsValid()) WeakThis->HandleCastInterrupted(D); });
-
-	WrapSingleEvent(TEXT("skill:effect_damage"),
-		[WeakThis](const TSharedPtr<FJsonValue>& D) { if (WeakThis.IsValid()) WeakThis->HandleSkillEffectDamage(D); });
-
-	WrapSingleEvent(TEXT("skill:buff_applied"),
-		[WeakThis](const TSharedPtr<FJsonValue>& D) { if (WeakThis.IsValid()) WeakThis->HandleBuffApplied(D); });
-
-	WrapSingleEvent(TEXT("skill:buff_removed"),
-		[WeakThis](const TSharedPtr<FJsonValue>& D) { if (WeakThis.IsValid()) WeakThis->HandleBuffRemoved(D); });
-
-	// Ground effect lifecycle (Fire Wall, Safety Wall)
-	WrapSingleEvent(TEXT("skill:ground_effect_created"),
-		[WeakThis](const TSharedPtr<FJsonValue>& D) { if (WeakThis.IsValid()) WeakThis->HandleGroundEffectCreated(D); });
-
-	WrapSingleEvent(TEXT("skill:ground_effect_removed"),
-		[WeakThis](const TSharedPtr<FJsonValue>& D) { if (WeakThis.IsValid()) WeakThis->HandleGroundEffectRemoved(D); });
-
-	// Health update — for First Aid VFX (server emits combat:health_update, not skill:effect_damage)
-	WrapSingleEvent(TEXT("combat:health_update"),
-		[WeakThis](const TSharedPtr<FJsonValue>& D) { if (WeakThis.IsValid()) WeakThis->HandleCombatHealthUpdate(D); });
-
-	bEventsWrapped = true;
-
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().ClearTimer(BindCheckTimer);
-	}
-
-	UE_LOG(LogSkillVFX, Log, TEXT("SkillVFXSubsystem — socket events wrapped after %d stable ticks. LocalCharId=%d"),
-		SocketReadyTicks, LocalCharacterId);
-}
-
-void USkillVFXSubsystem::WrapSingleEvent(
-	const FString& EventName,
-	TFunction<void(const TSharedPtr<FJsonValue>&)> OurHandler)
-{
-	if (!CachedSIOComponent.IsValid()) return;
-
-	TSharedPtr<FSocketIONative> NativeClient = CachedSIOComponent->GetNativeClient();
-	if (!NativeClient.IsValid()) return;
-
-	// Preserve existing callback chain
-	TFunction<void(const FString&, const TSharedPtr<FJsonValue>&)> OriginalCallback;
-	FSIOBoundEvent* Existing = NativeClient->EventFunctionMap.Find(EventName);
-	if (Existing)
-	{
-		OriginalCallback = Existing->Function;
-	}
-
-	NativeClient->OnEvent(EventName,
-		[OriginalCallback, OurHandler](const FString& Event, const TSharedPtr<FJsonValue>& Message)
-		{
-			if (OriginalCallback)
-			{
-				OriginalCallback(Event, Message);
-			}
-			if (OurHandler)
-			{
-				OurHandler(Message);
-			}
-		},
-		TEXT("/"),
-		ESIOThreadOverrideOption::USE_GAME_THREAD
-	);
+	UE_LOG(LogSkillVFX, Log, TEXT("SkillVFXSubsystem deinitialized."));
+	Super::Deinitialize();
 }
 
 // ============================================================
@@ -322,6 +228,7 @@ void USkillVFXSubsystem::WrapSingleEvent(
 
 void USkillVFXSubsystem::HandleCastStart(const TSharedPtr<FJsonValue>& Data)
 {
+	if (!bReadyToProcess) return;
 	if (!bVFXEnabled || !Data.IsValid()) return;
 
 	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
@@ -368,6 +275,7 @@ void USkillVFXSubsystem::HandleCastStart(const TSharedPtr<FJsonValue>& Data)
 
 void USkillVFXSubsystem::HandleCastComplete(const TSharedPtr<FJsonValue>& Data)
 {
+	if (!bReadyToProcess) return;
 	if (!Data.IsValid()) return;
 	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
 	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
@@ -379,6 +287,7 @@ void USkillVFXSubsystem::HandleCastComplete(const TSharedPtr<FJsonValue>& Data)
 
 void USkillVFXSubsystem::HandleCastInterrupted(const TSharedPtr<FJsonValue>& Data)
 {
+	if (!bReadyToProcess) return;
 	if (!Data.IsValid()) return;
 	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
 	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
@@ -390,6 +299,7 @@ void USkillVFXSubsystem::HandleCastInterrupted(const TSharedPtr<FJsonValue>& Dat
 
 void USkillVFXSubsystem::HandleSkillEffectDamage(const TSharedPtr<FJsonValue>& Data)
 {
+	if (!bReadyToProcess) return;
 	if (!bVFXEnabled || !Data.IsValid()) return;
 
 	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
@@ -559,6 +469,7 @@ void USkillVFXSubsystem::HandleSkillEffectDamage(const TSharedPtr<FJsonValue>& D
 
 void USkillVFXSubsystem::HandleBuffApplied(const TSharedPtr<FJsonValue>& Data)
 {
+	if (!bReadyToProcess) return;
 	UE_LOG(LogSkillVFX, Log, TEXT("HandleBuffApplied ENTERED — bVFXEnabled=%d DataValid=%d"), bVFXEnabled, Data.IsValid());
 	if (!bVFXEnabled || !Data.IsValid()) return;
 
@@ -685,6 +596,7 @@ void USkillVFXSubsystem::HandleBuffApplied(const TSharedPtr<FJsonValue>& Data)
 
 void USkillVFXSubsystem::HandleBuffRemoved(const TSharedPtr<FJsonValue>& Data)
 {
+	if (!bReadyToProcess) return;
 	if (!Data.IsValid()) return;
 
 	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
@@ -733,6 +645,7 @@ static TMap<int32, TWeakObjectPtr<UParticleSystemComponent>>& GetCascadeGroundEf
 
 void USkillVFXSubsystem::HandleGroundEffectCreated(const TSharedPtr<FJsonValue>& Data)
 {
+	if (!bReadyToProcess) return;
 	if (!bVFXEnabled || !Data.IsValid()) return;
 
 	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
@@ -818,6 +731,7 @@ void USkillVFXSubsystem::HandleGroundEffectCreated(const TSharedPtr<FJsonValue>&
 
 void USkillVFXSubsystem::HandleGroundEffectRemoved(const TSharedPtr<FJsonValue>& Data)
 {
+	if (!bReadyToProcess) return;
 	if (!Data.IsValid()) return;
 
 	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
@@ -868,6 +782,7 @@ void USkillVFXSubsystem::HandleGroundEffectRemoved(const TSharedPtr<FJsonValue>&
 
 void USkillVFXSubsystem::HandleCombatHealthUpdate(const TSharedPtr<FJsonValue>& Data)
 {
+	if (!bReadyToProcess) return;
 	if (!bVFXEnabled || !Data.IsValid()) return;
 
 	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;

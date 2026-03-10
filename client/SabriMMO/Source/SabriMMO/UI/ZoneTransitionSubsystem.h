@@ -11,8 +11,6 @@
 #include "Dom/JsonObject.h"
 #include "ZoneTransitionSubsystem.generated.h"
 
-class USocketIOClientComponent;
-
 UCLASS()
 class SABRIMMO_API UZoneTransitionSubsystem : public UWorldSubsystem
 {
@@ -30,18 +28,17 @@ public:
 	// ---- public API ----
 	void RequestWarp(const FString& WarpId);
 
+	/** Snap a teleport location to the nearest walkable ground.
+	 *  NavMesh projection first, line trace fallback.
+	 *  Adds CapsuleHalfHeight offset so the character stands ON the surface. */
+	static FVector SnapLocationToGround(UWorld* World, const FVector& RawLocation, float CapsuleHalfHeight = 96.f);
+
 	// ---- lifecycle ----
 	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 	virtual void Deinitialize() override;
 
 private:
-	// ---- socket event wrapping ----
-	void TryWrapSocketEvents();
-	void WrapSingleEvent(const FString& EventName,
-		TFunction<void(const TSharedPtr<FJsonValue>&)> OurHandler);
-	USocketIOClientComponent* FindSocketIOComponent() const;
-
 	// ---- event handlers ----
 	void HandleZoneChange(const TSharedPtr<FJsonValue>& Data);
 	void HandleZoneError(const TSharedPtr<FJsonValue>& Data);
@@ -59,16 +56,12 @@ private:
 	void ForceCompleteTransition();
 
 	// ---- state ----
-	bool bEventsWrapped = false;
 	bool bPawnTeleported = false;
 	int32 LocalCharacterId = 0;
 	int32 TransitionCheckCount = 0;
-	FTimerHandle BindCheckTimer;
 	FTimerHandle TransitionCheckTimer;
 
 	TSharedPtr<SWidget> LoadingWidget;
 	TSharedPtr<SWidget> LoadingOverlay;
 	bool bLoadingShown = false;
-
-	TWeakObjectPtr<USocketIOClientComponent> CachedSIOComponent;
 };

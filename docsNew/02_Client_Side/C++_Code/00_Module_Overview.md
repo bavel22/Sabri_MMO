@@ -27,6 +27,9 @@
 | `HTTP` | HTTP request module |
 | `Json` | JSON parsing/serialization |
 | `JsonUtilities` | JSON utility functions |
+| `Niagara` | Niagara VFX system |
+| `NiagaraCore` | Core Niagara types |
+| `NavigationSystem` | NavMesh queries for ground-snap (`ProjectPointToNavigation`) |
 
 ## Include Paths
 
@@ -50,49 +53,50 @@ SabriMMO/UI/
 
 ## File Inventory
 
-### Core Module (23 files)
+### Core Module
 
-| File | Lines | Purpose |
-|------|-------|---------|
-| `SabriMMO.h` | 8 | Module header, declares `LogSabriMMO` log category |
-| `SabriMMO.cpp` | 8 | Module implementation, defines `LogSabriMMO` |
-| `SabriMMO.Build.cs` | 56 | Build configuration, dependencies |
-| `SabriMMO.Target.cs` | 16 | Game build target |
-| `SabriMMOEditor.Target.cs` | 16 | Editor build target |
-| `CharacterData.h` | 52 | `FCharacterData` USTRUCT |
-| `MMOGameInstance.h` | 79 | `UMMOGameInstance` header |
-| `MMOGameInstance.cpp` | 73 | `UMMOGameInstance` implementation |
-| `MMOHttpManager.h` | 53 | `UHttpManager` header |
-| `MMOHttpManager.cpp` | 537 | `UHttpManager` REST API client |
-| `SabriMMOCharacter.h` | 97 | `ASabriMMOCharacter` base character |
-| `SabriMMOCharacter.cpp` | 134 | Base character implementation |
-| `SabriMMOPlayerController.h` | 53 | `ASabriMMOPlayerController` header |
-| `SabriMMOPlayerController.cpp` | 68 | Player controller implementation |
-| `SabriMMOGameMode.h` | 25 | `ASabriMMOGameMode` header |
-| `SabriMMOGameMode.cpp` | 9 | Game mode stub |
-| `OtherCharacterMovementComponent.h` | 18 | Empty CharacterMovementComponent subclass |
-| `OtherCharacterMovementComponent.cpp` | 6 | Empty implementation |
+| File | Purpose |
+|------|---------|
+| `SabriMMO.h/.cpp` | Module header, declares `LogSabriMMO` log category |
+| `SabriMMO.Build.cs` | Build configuration, 16 module dependencies (incl. NavigationSystem) |
+| `CharacterData.h` | 6 USTRUCTs (FCharacterData 32 fields, FInventoryItem 31 fields, FDraggedItem, FShopItem, FCartItem, FServerInfo), 2 UENUMs |
+| `MMOGameInstance.h/.cpp` | Auth state, server selection, zone state, 9 delegates, 13 UFUNCTIONs |
+| `MMOHttpManager.h/.cpp` | Static REST API client (9 endpoints + 2 bridge functions), configurable URL |
+| `SabriMMOCharacter.h/.cpp` | Base player pawn — movement, socket events, stats, input bindings, BeginPlay ground-snap |
+| `SabriMMOPlayerController.h/.cpp` | **Dead code** — not used at runtime (Blueprint PC inherits APlayerController) |
+| `SabriMMOGameMode.h/.cpp` | Base GameMode — sets DefaultPawnClass=nullptr |
+| `OtherCharacterMovementComponent.h/.cpp` | Remote player movement — per-tick floor-snap via line trace (Z correction >50 units) |
+| `WarpPortal.h/.cpp` | Overlap trigger actor for zone warp portals |
+| `KafraNPC.h/.cpp` | Clickable Kafra NPC actor |
+| `ShopNPC.h/.cpp` | Clickable shop NPC actor |
+| `CastingCircleActor.h/.cpp` | Ground casting circle VFX actor |
 
-### UI Subsystems (12 files)
+### UI Subsystems (14 subsystems + 18 Slate widgets)
 
-| File | Lines | Purpose |
-|------|-------|---------|
-| `UI/SBasicInfoWidget.h` | 74 | Slate widget header (draggable HUD panel) |
-| `UI/SBasicInfoWidget.cpp` | 560 | Slate widget implementation |
-| `UI/BasicInfoSubsystem.h` | 90 | UWorldSubsystem header (data + socket wrapping) |
-| `UI/BasicInfoSubsystem.cpp` | 613 | Subsystem implementation |
-| `UI/SDamageNumberOverlay.h` | 95 | Slate overlay header (RO-style damage numbers) |
-| `UI/SDamageNumberOverlay.cpp` | 349 | Custom OnPaint rendering with per-digit fan-out |
-| `UI/DamageNumberSubsystem.h` | 65 | UWorldSubsystem header (combat events + projection) |
-| `UI/DamageNumberSubsystem.cpp` | 346 | Subsystem implementation |
-| `UI/SSkillTreeWidget.h` | — | Slate skill tree widget header |
-| `UI/SSkillTreeWidget.cpp` | — | Slate skill tree widget implementation |
-| `UI/SkillTreeSubsystem.h` | 303 | UWorldSubsystem header (skill data + targeting) |
-| `UI/SkillTreeSubsystem.cpp` | — | Subsystem implementation |
-| `UI/SSkillTargetingOverlay.h` | — | Slate targeting cursor overlay header |
-| `UI/SSkillTargetingOverlay.cpp` | — | Targeting overlay implementation |
-| `UI/SkillDragDropOperation.h` | — | Skill drag-drop operation header |
-| `UI/SkillDragDropOperation.cpp` | — | Skill drag-drop implementation |
+| Subsystem | Widget | Z | Toggle | Socket Events |
+|-----------|--------|---|--------|---------------|
+| `LoginFlowSubsystem` | SLoginWidget, SServerSelectWidget, SCharacterSelectWidget, SCharacterCreateWidget, SLoadingOverlayWidget | 5, 50 | — | GameInstance delegates |
+| `BasicInfoSubsystem` | SBasicInfoWidget | 10 | — | combat:damage, skill:effect_damage, exp:gain, combat:health_update |
+| `CombatStatsSubsystem` | SCombatStatsWidget | 12 | F8 | player:stats |
+| `InventorySubsystem` | SInventoryWidget | 14 | F6 | inventory:data/equipped/dropped/used/error |
+| `EquipmentSubsystem` | SEquipmentWidget | 15 | F7 | inventory:data |
+| `HotbarSubsystem` | SHotbarRowWidget ×4, SHotbarKeybindWidget | 16, 30 | F5 | hotbar:alldata |
+| `ShopSubsystem` | SShopWidget | 18 | — | shop:data/bought/sold/error |
+| `KafraSubsystem` | SKafraWidget | 19 | — | kafra:data/saved/teleported/error |
+| `SkillTreeSubsystem` | SSkillTreeWidget, SSkillTargetingOverlay | 20 | K | skill:data/learned/refresh/error |
+| `DamageNumberSubsystem` | SDamageNumberOverlay | 20 | — | combat:damage, skill:effect_damage |
+| `CastBarSubsystem` | SCastBarOverlay | 25 | — | skill:cast_start/complete/interrupted |
+| `WorldHealthBarSubsystem` | SWorldHealthBarOverlay | 8 | — | combat:health_update, enemy:health_update |
+| `ZoneTransitionSubsystem` | SLoadingOverlayWidget | 50 | — | zone:change/error, player:teleport. Static `SnapLocationToGround()` for NavMesh+trace ground correction |
+| `SkillVFXSubsystem` | — (Niagara/Cascade) | — | — | skill:effect_damage, skill:buff_applied/removed, skill:ground_effect_* |
+
+### Additional UI Files
+
+| File | Purpose |
+|------|---------|
+| `UI/SkillDragDropOperation.h/.cpp` | Skill drag-drop operation for hotbar |
+| `VFX/SkillVFXData.h/.cpp` | Skill VFX configuration data (BuildSkillVFXConfigs) |
+| `VFX/SkillVFXSubsystem.h/.cpp` | VFX subsystem (patterns A-E: Bolt, AoE Projectile, Multi-Hit, Persistent Buff, Ground AoE Rain) |
 
 ### Variant_Combat (42 files)
 
@@ -130,10 +134,21 @@ UObject
 │   └── UMMOGameInstance              # Auth state, character data, delegates
 ├── UBlueprintFunctionLibrary
 │   └── UHttpManager                  # Static REST API functions
-├── UWorldSubsystem
-│   ├── UBasicInfoSubsystem          # Basic Info Slate HUD manager
-│   ├── UDamageNumberSubsystem       # RO-style floating damage numbers
-│   └── USkillTreeSubsystem          # Skill tree panel + targeting
+├── UWorldSubsystem (14 subsystems)
+│   ├── ULoginFlowSubsystem          # Login flow state machine + 5 widgets
+│   ├── UBasicInfoSubsystem          # HP/SP/EXP bars
+│   ├── UCombatStatsSubsystem        # Detailed stats panel (F8)
+│   ├── UInventorySubsystem          # Inventory grid (F6)
+│   ├── UEquipmentSubsystem          # Equipment slots (F7)
+│   ├── UHotbarSubsystem             # 4×9 hotbar (F5)
+│   ├── UShopSubsystem               # NPC shop buy/sell
+│   ├── UKafraSubsystem              # Kafra NPC services
+│   ├── USkillTreeSubsystem          # Skill tree + targeting (K)
+│   ├── UDamageNumberSubsystem       # Floating damage numbers
+│   ├── UCastBarSubsystem            # Cast bars for all players
+│   ├── UWorldHealthBarSubsystem     # Floating HP/SP bars
+│   ├── UZoneTransitionSubsystem     # Zone warp + loading overlay
+│   └── USkillVFXSubsystem           # Niagara/Cascade VFX
 ├── UUserWidget
 │   └── UCombatLifeBar                # Life bar widget (abstract)
 ├── UCharacterMovementComponent
@@ -169,4 +184,4 @@ AAIController
 
 ---
 
-**Last Updated**: 2026-02-26
+**Last Updated**: 2026-03-09

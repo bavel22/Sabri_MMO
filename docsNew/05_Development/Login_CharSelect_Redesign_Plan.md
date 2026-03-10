@@ -1,4 +1,6 @@
-# Login, Character Select & Game Entry — Complete Redesign Plan
+> **COMPLETED** — This redesign plan has been fully implemented. The pure C++ Slate login flow (`LoginFlowSubsystem` + 5 Slate widgets) is live and replaces the old Blueprint-based `BP_GameFlow` + `WBP_LoginScreen` system. See `docsNew/02_Client_Side/C++_Code/` for current subsystem docs.
+
+# Login, Character Select & Game Entry — Complete Redesign Plan (Historical)
 
 ## Table of Contents
 1. [Executive Summary](#1-executive-summary)

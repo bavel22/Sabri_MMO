@@ -39,13 +39,14 @@ Sabri_MMO uses **JWT (JSON Web Tokens)** for authentication. The flow spans thre
                                   │
                                   ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│ 5. BLUEPRINT receives OnLoginSuccess                                │
-│    → BP_GameFlow calls UHttpManager::GetCharacters()               │
+│ 5. LoginFlowSubsystem receives OnLoginSuccess                       │
+│    → Transitions to ServerSelect state, then CharacterSelect       │
+│    → Calls UHttpManager::GetCharacters()                           │
 │    → Passes Authorization: Bearer <token> header                   │
 │    → Server validates JWT, returns character list                  │
 │    → C++ calls GameInstance->SetCharacterList()                    │
 │    → GameInstance broadcasts OnCharacterListReceived               │
-│    → WBP_CharacterSelect populates UI                             │
+│    → SCharacterSelectWidget (Slate) populates UI                   │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -116,9 +117,9 @@ WBP_LoginScreen (Register button)
 ## Security Considerations
 
 - **Rate Limiting**: 100 requests / 15 minutes per IP on `/api/*`
-- **No Socket.io Auth**: Socket.io connections currently don't validate JWT (token is sent in `player:join` but not verified server-side)
-- **Production TODO**: Enable HTTPS, validate JWT on Socket.io handshake, add CSRF protection
+- **Socket.io Auth via player:join**: JWT is validated on `player:join` — the server verifies the token and checks character ownership (character's user_id must match JWT user_id). However, the Socket.io handshake itself does not require a token.
+- **Production TODO**: Enable HTTPS, validate JWT on Socket.io handshake (not just player:join), add CSRF protection
 
 ---
 
-**Last Updated**: 2026-02-17
+**Last Updated**: 2026-03-09

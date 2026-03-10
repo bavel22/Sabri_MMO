@@ -26,7 +26,8 @@ public class SabriMMO : ModuleRules
 			"Json",
 			"JsonUtilities",
 			"Niagara",
-			"NiagaraCore"
+			"NiagaraCore",
+			"NavigationSystem"
 		});
 
 		// Exclude NetworkPrediction module due to UE 5.7 compiler bug

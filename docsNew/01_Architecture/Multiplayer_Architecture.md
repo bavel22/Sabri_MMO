@@ -39,37 +39,72 @@ Server → Validates credentials, returns JWT token
 Client → Stores token in UMMOGameInstance
 ```
 
-### 2. Socket.io Connection
+### 2. Socket.io Connection (Phase 4 — Persistent Socket)
+
+The socket connection is established **once** during login and persists for the entire play session. It lives on `UMMOGameInstance` as a `TSharedPtr<FSocketIONative>` (getnamo's SocketIOClient plugin), which survives `OpenLevel()` calls.
+
 ```
-Client → Connects to ws://localhost:3001 via SocketIOClient plugin
-Server → io.on('connection') fires
+LoginFlowSubsystem::OnPlayCharacter()
+  → GI->ConnectSocket("http://server:3001")
+  → FSocketIONative settings:
+      bUnbindEventsOnDisconnect = false  (handlers survive network blips)
+      bCallbackOnGameThread = true       (safe for UObject access)
+      Infinite reconnection              (auto-reconnects on network loss)
+  → On connect callback: emit player:join
+  → OpenLevel(TargetMap)
 ```
+
+**Pre-Phase 4 (Legacy)**: Socket lived on `BP_SocketManager`'s SocketIO component in each level. Every `OpenLevel()` destroyed the socket, causing disconnect/reconnect cycles, `player:left`/`player:joined` spam, and requiring `reconnectBuffCache` on the server.
 
 ### 3. Player Join
 ```
 Client → socket.emit('player:join', {characterId, token, characterName})
+Server → Validates JWT token, checks character ownership
 Server → Loads character data from DB (position, health, stats, weapon)
 Server → Caches position in Redis
 Server → Stores player in connectedPlayers Map
 Server → socket.emit('player:joined', {success: true})
 Server → socket.emit('combat:health_update', {health, maxHealth, mana, maxMana})
 Server → socket.emit('player:stats', {stats, derived})
+Server → socket.emit('buff:list', {buffs: [...]})
 Server → Sends existing enemies to joining player
 Server → socket.broadcast.emit('player:moved', {...}) for initial position
 ```
 
 ### 4. Position Synchronization
 ```
-Client → socket.emit('player:position', {characterId, x, y, z}) at ~30Hz
+PositionBroadcastSubsystem (30Hz timer, UWorldSubsystem)
+  → Every 33.3ms: GI->EmitSocketEvent('player:position', {characterId, x, y, z, yaw})
 Server → Cache in Redis (setEx with 300s TTL)
 Server → socket.broadcast.emit('player:moved', {characterId, characterName, x, y, z, health, maxHealth, timestamp})
 ```
 
-### 5. Disconnect
+### 5. Zone Transition (Socket Stays Connected)
 ```
-Client → Disconnects (browser close, network loss, etc.)
+Client → Warp portal / Kafra teleport / Fly Wing triggered
+Client → GI->EmitSocketEvent('zone:change', {characterId, targetZone, warpId})
+Server → Moves player between zone Socket.io rooms (no disconnect)
+Client → OpenLevel(NewMap)
+         ↓ Old level destroyed — old UWorldSubsystems Deinitialize()
+         ↓ Socket SURVIVES on GameInstance
+         ↓ New level loads — new UWorldSubsystems Initialize()
+         ↓ MultiplayerEventSubsystem re-registers with SocketEventRouter
+         ↓ PositionBroadcastSubsystem restarts 30Hz timer
+Client → emit zone:ready
+Server → Sends zone-specific data (enemies, ground effects, players)
+```
+
+No `player:left`/`player:joined` spam. Buffs persist in-memory. No `reconnectBuffCache` needed.
+
+### 6. Disconnect (Logout or Shutdown)
+```
+Client → GI->Logout() or GI->Shutdown()
+Client → emit player:leave
+Client → GI->DisconnectSocket()
+Client → NativeSocket.Reset()
+
 Server → socket.on('disconnect')
-Server → Save health/mana to DB
+Server → Save health/mana/zone/position to DB
 Server → Save stats to DB
 Server → Clear auto-attack state
 Server → Clear from enemy combat sets
@@ -199,17 +234,124 @@ For each enemy:
       Broadcast final position with isMoving=false
 ```
 
-## Blueprint Client Architecture
+## Client Socket Architecture (Phase 4 — Persistent Socket)
 
-### BP_SocketManager
-- Singleton actor spawned in game level
-- Holds Socket.io connection reference
-- Binds all socket events to Blueprint functions
-- Each binding uses `Bind Event to Function` with param named `Data` (String type)
-- Parses JSON strings into usable data
+### Architecture Overview
+
+```
+┌───────────────────────────────────────────────────────────────────┐
+│                     UMMOGameInstance                               │
+│                     (Survives OpenLevel)                          │
+│                                                                   │
+│  TSharedPtr<FSocketIONative> NativeSocket ←── THE connection     │
+│  USocketEventRouter* EventRouter ←── multi-handler dispatch       │
+│  ConnectSocket() / DisconnectSocket() / EmitSocketEvent()        │
+│  IsSocketConnected() → bool                                      │
+│                                                                   │
+│  ┌─────────────────────────────────────────────────────────────┐  │
+│  │                  USocketEventRouter                         │  │
+│  │                                                             │  │
+│  │  TMap<EventName, TArray<TSharedPtr<FEntry>>>                │  │
+│  │    "combat:damage" → [BasicInfoSub, DmgNumSub, VFXSub]    │  │
+│  │    "player:moved"  → [MultiplayerEventSub]                 │  │
+│  │    "buff:list"     → [BuffBarSub, BasicInfoSub]            │  │
+│  │                                                             │  │
+│  │  FEntry = { TWeakObjectPtr Owner, Callback }               │  │
+│  │  TSharedPtr<FEntry> for stable lambda captures              │  │
+│  └─────────────────────────────────────────────────────────────┘  │
+└───────────────────────────────────────────────────────────────────┘
+         │                    │                    │
+    RegisterHandler     DispatchEvent        UnregisterAll
+         │                    │                    │
+┌────────┴────────────────────┴────────────────────┴────────────────┐
+│                    UWorldSubsystems (per-level)                    │
+│                    (Destroyed/recreated on OpenLevel)              │
+│                                                                    │
+│  ┌──────────────────┐  ┌──────────────────┐  ┌─────────────────┐  │
+│  │MultiplayerEvent  │  │PositionBroadcast │  │ BasicInfoSub    │  │
+│  │  Subsystem       │  │  Subsystem       │  │ DamageNumSub    │  │
+│  │                  │  │                  │  │ CombatStatsSub  │  │
+│  │ Bridges ~30      │  │ 30Hz timer       │  │ BuffBarSub      │  │
+│  │ events to        │  │ emits position   │  │ SkillVFXSub     │  │
+│  │ BP_SocketManager │  │ via GI socket    │  │ CastBarSub      │  │
+│  │ via FindFunction │  │                  │  │ etc.            │  │
+│  └──────────────────┘  └──────────────────┘  └─────────────────┘  │
+│                                                                    │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │                    BP_SocketManager                           │  │
+│  │    (Handler Shell — SocketIO component NOT connected)        │  │
+│  │                                                              │  │
+│  │    BeginPlay: Set auth vars + actor refs + HUD init          │  │
+│  │    NO Connect / NO Bind / NO Timer                           │  │
+│  │    Handler functions called by MultiplayerEventSubsystem     │  │
+│  │    Emit functions use K2_EmitSocketEvent on GameInstance     │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+### USocketEventRouter
+
+Solves the problem of multiple C++ subsystems needing to listen to the same Socket.io event. The native Socket.io API only supports one callback per event name, so the router multiplexes.
+
+```cpp
+// Registration (in subsystem Initialize)
+Router->RegisterHandler("combat:damage", this, [this](auto Payload) {
+    // Handle damage event
+});
+
+// Unregistration (in subsystem Deinitialize)
+Router->UnregisterAllForOwner(this);
+
+// Internal dispatch (called by FSocketIONative callback)
+Router->DispatchEvent("combat:damage", Payload);
+// → Iterates all handlers, skips expired WeakOwner entries
+```
+
+### MultiplayerEventSubsystem (Blueprint Bridge)
+
+Bridges ~30 inbound Socket.io events to `BP_SocketManager` handler functions. On `Initialize()`, registers with the `SocketEventRouter` for all events that `BP_SocketManager` previously bound directly. Each handler finds the BP_SocketManager actor and calls its handler function via `FindFunction()` + `ProcessEvent()`.
+
+**BlueprintCallable emit methods** for Blueprints that need to send events:
+- `EmitCombatAttack(TargetId, IsEnemy)` — starts auto-attack
+- `EmitStopAttack()` — stops auto-attack
+- `RequestRespawn()` — respawn after death
+- `EmitChatMessage(Channel, Message)` — send chat
+
+### PositionBroadcastSubsystem
+
+Replaces the per-frame position broadcasting that was previously in `BP_SocketManager`'s Event Tick. Runs a 30Hz timer (33.3ms interval) and emits `player:position` with `{characterId, x, y, z, yaw}` via `GI->EmitSocketEvent()`.
+
+### Widget Visibility Gating
+
+All HUD subsystem widgets are gated behind `GI->IsSocketConnected()`. This prevents widgets from appearing during the login flow or in editor previews. Each subsystem checks this in its `Initialize()` or widget creation path. Only when the socket is connected (i.e., player is in a game level) do widgets get added to the viewport.
+
+### Blueprint Emit Pattern
+
+**Old pattern** (pre-Phase 4):
+```
+Get SocketIO Component → Emit(EventName, SIOJsonObject)
+```
+
+**New pattern** (Phase 4):
+```
+Get Game Instance → Cast To MMOGameInstance → Emit Socket Event(EventName, SIOJsonObject*)
+```
+
+### BP_SocketManager (Handler Shell Status)
+
+`BP_SocketManager` still exists as an actor in game levels but its role has changed:
+
+| Aspect | Pre-Phase 4 | Phase 4 |
+|--------|-------------|---------|
+| **SocketIO Component** | Connected, binds events | Present but NOT connected |
+| **BeginPlay** | Connect + Bind + Start Timer | Set auth vars + actor refs + HUD init |
+| **Event Binding** | Direct Blueprint bindings | Handlers called by MultiplayerEventSubsystem |
+| **Event Emit** | Via SocketIO component | Via `K2_EmitSocketEvent` on GameInstance |
+| **Position Timer** | Event Tick at variable rate | Removed (PositionBroadcastSubsystem handles) |
+| **Destroyed on OpenLevel** | Yes (and socket dies) | Yes (but socket survives on GI) |
 
 ### BP_OtherPlayerManager
-- Maintains `Map<characterId, BP_OtherPlayerCharacter>` 
+- Maintains `Map<characterId, BP_OtherPlayerCharacter>`
 - `SpawnOrUpdatePlayer(charId, name, x, y, z)` — creates or updates remote actors
 - `RemovePlayer(charId)` — destroys remote player actor
 - Called from BP_SocketManager on `player:moved` and `player:left` events
@@ -227,6 +369,27 @@ For each enemy:
 - Updates positions from `enemy:move` events
 - Handles death/respawn lifecycle
 
+## Zone Transition Flow (Socket Perspective)
+
+```
+Pre-Phase 4:                          Phase 4:
+─────────────────                     ──────────────────────
+Socket on BP_SocketManager            Socket on GameInstance
+  ↓ Warp portal triggered              ↓ Warp portal triggered
+  ↓ emit zone:change                   ↓ emit zone:change
+  ↓ OpenLevel() destroys level         ↓ OpenLevel() destroys level
+  ↓ Socket DESTROYED                   ↓ Socket SURVIVES (on GI)
+  ↓ Server sees disconnect             ↓ No disconnect event
+  ↓ player:left broadcast              ↓ No player:left spam
+  ↓ New level loads                    ↓ New level loads
+  ↓ BP_SocketManager connects again    ↓ Subsystems re-register with router
+  ↓ player:join re-sent               ↓ zone:ready emitted
+  ↓ reconnectBuffCache restore         ↓ Buffs persist in-memory (no cache)
+  ↓ Full re-sync from DB              ↓ Seamless transition
+```
+
+**Server-side simplification**: The `reconnectBuffCache` (which cached buffs/statuses on disconnect for 30s TTL and restored them on `player:join`) is no longer needed. Since the socket never disconnects during zone transitions, buffs remain in the server's in-memory `connectedPlayers` data structures throughout.
+
 ## Server Authority Rules
 
 | Action | Client Does | Server Validates |
@@ -238,7 +401,8 @@ For each enemy:
 | **Equip** | Sends inventory ID | Checks level requirement, slot, updates stats |
 | **Stat Alloc** | Sends stat name | Checks available points, updates DB |
 | **Chat** | Sends message | Validates non-empty, routes to channel |
+| **Zone Change** | Sends target zone | Validates zone exists, player not dead |
 
 ---
 
-**Last Updated**: 2026-02-17
+**Last Updated**: 2026-03-10

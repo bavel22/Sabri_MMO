@@ -3,7 +3,13 @@
 #include "CoreMinimal.h"
 #include "Engine/GameInstance.h"
 #include "CharacterData.h"
+#include "Dom/JsonValue.h"
+#include "Dom/JsonObject.h"
 #include "MMOGameInstance.generated.h"
+
+class FSocketIONative;
+class USocketEventRouter;
+class USIOJsonObject;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnLoginSuccess);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnLoginFailed);
@@ -131,6 +137,40 @@ public:
     void Logout();
 
     virtual void Init() override;
+    virtual void Shutdown() override;
+
+    // ---- Persistent Socket Connection (Phase 4) ----
+
+    // Connect the persistent socket to the server. Call after character selection.
+    UFUNCTION(BlueprintCallable, Category = "MMO Socket")
+    void ConnectSocket();
+
+    // Disconnect the persistent socket. Called on logout.
+    UFUNCTION(BlueprintCallable, Category = "MMO Socket")
+    void DisconnectSocket();
+
+    // Check if the persistent socket is currently connected.
+    UFUNCTION(BlueprintPure, Category = "MMO Socket")
+    bool IsSocketConnected() const;
+
+    // Emit a socket event with a JSON object payload (C++ only).
+    void EmitSocketEvent(const FString& EventName, const TSharedPtr<FJsonObject>& Payload);
+
+    // Emit a socket event with a string payload (C++ only).
+    void EmitSocketEvent(const FString& EventName, const FString& StringPayload);
+
+    // Emit a socket event from Blueprint using SIOJsonObject (same type BP_SocketManager uses).
+    UFUNCTION(BlueprintCallable, Category = "MMO Socket", meta = (DisplayName = "Emit Socket Event"))
+    void K2_EmitSocketEvent(const FString& EventName, USIOJsonObject* Payload);
+
+    // Emit player:join with current character data and auth token.
+    void EmitPlayerJoin();
+
+    // Get the event router for registering socket event handlers.
+    USocketEventRouter* GetEventRouter() const { return EventRouter; }
+
+    // Get the raw native socket (rarely needed — prefer EmitSocketEvent).
+    TSharedPtr<FSocketIONative> GetNativeSocket() const { return NativeSocket; }
 
     // ---- Zone System (survives level transitions) ----
     UPROPERTY(BlueprintReadWrite, Category = "MMO Zone")
@@ -154,4 +194,14 @@ private:
 
     UPROPERTY()
     FCharacterData SelectedCharacter;
+
+    // ---- Persistent Socket (Phase 4) ----
+    TSharedPtr<FSocketIONative> NativeSocket;
+
+    UPROPERTY()
+    TObjectPtr<USocketEventRouter> EventRouter;
+
+    void OnSocketConnected(const FString& SocketId, const FString& SessionId);
+    void OnSocketDisconnected(int32 Reason);
+    void OnSocketReconnecting(const uint32 AttemptCount, const uint32 DelayInMs);
 };

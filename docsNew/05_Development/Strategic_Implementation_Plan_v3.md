@@ -12,7 +12,7 @@
 | Phase 1: Server Extraction | DEFERRED | — | New modules created instead (ro_status_effects.js, ro_buff_system.js); full extraction deferred — AI-assisted dev neutralizes monolith pain |
 | Phase 2: Status Effects + Buffs | **COMPLETE** | 2026-03-09 | 10 status effects, buff system, BuffBarWidget, AI CC lock, reconnect cache |
 | Phase 3: Element Table + Formula Audit | **COMPLETE** | 2026-03-09 | Replaced entire ELEMENT_TABLE (100+ wrong values), verified SIZE_PENALTY (all correct), fixed card modifier stacking, added element immunity/heal hit types, 537 tests passing |
-| Phase 4: Persistent Socket Connection | NOT STARTED | — | Move socket to GameInstance, eliminate disconnect/reconnect on zone change |
+| Phase 4: Persistent Socket Connection | **COMPLETE** | 2026-03-10 | Persistent socket on GameInstance, SocketEventRouter, MultiplayerEventSubsystem bridge, PositionBroadcastSubsystem, reconnectBuffCache removed, all 14+ subsystems migrated |
 | Phase 5: Passive Skills + Classes | NOT STARTED | — | Passive engine + 4 new classes (Archer, Acolyte, Thief, Merchant) |
 | Phase 6: Party System | NOT STARTED | — | Party create/invite/leave, EXP sharing, HP broadcasting |
 | Phase 7: Chat Expansion | NOT STARTED | — | Whisper, party chat, chat channels |
@@ -131,7 +131,21 @@ The project has a **solid foundation**: auth, 15 C++ UI subsystems, 4 working zo
 
 ---
 
-## Phase 4: Persistent Socket Connection (1-1.5 weeks)
+## Phase 4: Persistent Socket Connection (1-1.5 weeks) — COMPLETE ✓
+
+> **Completed 2026-03-10.** All deliverables met. See `CLAUDE.md` "Persistent Socket Architecture (Phase 4)" section and `memory/persistent-socket.md` for implementation details.
+>
+> **What was built**:
+> - `MMOGameInstance` owns `TSharedPtr<FSocketIONative> NativeSocket` — survives `OpenLevel()`, no disconnect on zone change
+> - `USocketEventRouter` — multi-handler dispatch (multiple subsystems can register for the same event)
+> - All 14+ C++ subsystems migrated from `FindSocketIOComponent()` actor iteration to `Router->RegisterHandler()` / `Router->UnregisterAllForOwner(this)` pattern
+> - `MultiplayerEventSubsystem` — bridges 30+ inbound socket events to BP_SocketManager handler functions via `ProcessEvent`
+> - `PositionBroadcastSubsystem` — 30Hz position broadcasting via persistent socket (replaces BP_SocketManager timer)
+> - Server `zone:ready` event sends zone data without requiring `player:join` re-emit
+> - `reconnectBuffCache` removed — buffs persist naturally in server memory across zone transitions
+> - All subsystem widgets gated behind `GI->IsSocketConnected()` (only show in game levels, not login screen)
+>
+> **New files**: `SocketEventRouter.h/.cpp`, `MultiplayerEventSubsystem.h/.cpp`, `PositionBroadcastSubsystem.h/.cpp`
 
 **Why now**: Every zone change currently causes a full socket disconnect → reconnect → `player:join` cycle. This is wrong architecturally — every real MMO (WoW, FFXIV, rAthena/Hercules) uses persistent connections. Doing this BEFORE Phase 5 means every new subsystem built for the 4 new classes (Archer, Acolyte, Thief, Merchant) uses the clean GameInstance socket pattern from day one, instead of building with the old actor-search pattern and then migrating.
 
@@ -542,9 +556,9 @@ Phase 2: Status Effects + Buff System .... 1.5-2 weeks   ✓ DONE
   |
 Phase 3: Element Table Audit ............. 0.5 days      ✓ DONE
   |
-Phase 4: Persistent Socket Connection .... 1-1.5 weeks   ← NEXT
+Phase 4: Persistent Socket Connection .... 1-1.5 weeks   ✓ DONE
   |
-Phase 5: Passive Skills + 6 First Classes  2 weeks
+Phase 5: Passive Skills + 6 First Classes  2 weeks       ← NEXT
   |
   +---> Phase 6: Party System ............ 1-1.5 weeks
   |       |
@@ -616,11 +630,7 @@ Phase 5: Passive Skills + 6 First Classes  2 weeks
 
 ## What MUST Be Refactored Now vs Later
 
-### Refactor NOW (Phase 4):
-
-1. **Persistent socket connection** — The disconnect/reconnect cycle is architectural debt that compounds. Every future social feature (party, guild, chat) needs state persistence across zones. Building `reconnectXxxCache` band-aids for each one is unsustainable. Fix the root cause once.
-
-### Already Refactored (Phases 0, 2, 3):
+### Already Refactored (Phases 0, 2, 3, 4):
 
 1. **Element table correction** ✓ — Replaced entire 400-value table with rAthena canonical, fixed card modifier stacking, 537 tests passing.
 
@@ -631,6 +641,8 @@ Phase 5: Passive Skills + 6 First Classes  2 weeks
 5. **SP deduction timing** ✓ — Fixed while only 17 skills exist.
 
 6. **Security fixes** ✓ — JWT auth, DB transactions, rate limiting all fixed.
+
+7. **Persistent socket connection** ✓ — Socket on GameInstance survives zone changes. SocketEventRouter for multi-handler dispatch. All 14+ subsystems migrated. reconnectBuffCache removed. BP event bridge via MultiplayerEventSubsystem.
 
 ### Refactor LATER (Fine to defer):
 
@@ -650,7 +662,7 @@ Phase 5: Passive Skills + 6 First Classes  2 weeks
 
 After completing Phases 3-8, the game should have:
 - ✓ Correct element table matching rAthena pre-renewal (DONE — Phase 3)
-- Persistent socket connection (no disconnect on zone change)
+- ✓ Persistent socket connection, no disconnect on zone change (DONE — Phase 4)
 - 6 fully playable first classes with all skills working
 - 5 playable second classes (Knight, Priest, Wizard, Assassin, Hunter)
 - ~90+ executable skills (from current 17)

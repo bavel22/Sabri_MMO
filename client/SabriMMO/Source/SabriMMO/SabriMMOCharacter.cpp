@@ -22,6 +22,7 @@
 #include "UI/ShopSubsystem.h"
 #include "ShopNPC.h"
 #include "KafraNPC.h"
+#include "UI/ZoneTransitionSubsystem.h"
 #include "Framework/Application/SlateApplication.h"
 
 ASabriMMOCharacter::ASabriMMOCharacter()
@@ -80,11 +81,15 @@ void ASabriMMOCharacter::BeginPlay()
 
 	// Immediately place pawn at the DB-loaded position during zone transitions / initial login.
 	// BeginPlay runs before the first frame renders, so the player never sees the wrong position.
+	// Ground-snap ensures the capsule sits on the walkable surface.
 	if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetGameInstance()))
 	{
 		if (GI->bIsZoneTransitioning && !GI->PendingSpawnLocation.IsNearlyZero())
 		{
-			SetActorLocation(GI->PendingSpawnLocation);
+			FVector Snapped = UZoneTransitionSubsystem::SnapLocationToGround(
+				GetWorld(), GI->PendingSpawnLocation,
+				GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
+			SetActorLocation(Snapped);
 		}
 	}
 }

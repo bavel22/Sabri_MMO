@@ -1,3 +1,5 @@
+> **DEPRECATED** — `BP_GameFlow` has been **replaced** by the pure C++ `LoginFlowSubsystem` (UWorldSubsystem) with 5 Slate widgets: `SLoginWidget`, `SServerSelectWidget`, `SCharacterSelectWidget`, `SCharacterCreateWidget`, `SLoadingOverlayWidget`. The Blueprint still exists in the level but is no longer the active login flow. This doc is preserved for historical reference only.
+
 # BP_GameFlow
 
 **Path**: `/Game/SabriMMO/Blueprints/BP_GameFlow`  

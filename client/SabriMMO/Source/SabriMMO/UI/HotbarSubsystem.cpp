@@ -1,4 +1,4 @@
-// HotbarSubsystem.cpp — Manages hotbar slot data, Socket.io events, keybinds, and widget lifecycle.
+// HotbarSubsystem.cpp — Manages hotbar slot data, keybinds, and widget lifecycle.
 
 #include "HotbarSubsystem.h"
 #include "SHotbarRowWidget.h"
@@ -6,11 +6,9 @@
 #include "InventorySubsystem.h"
 #include "SkillTreeSubsystem.h"
 #include "MMOGameInstance.h"
-#include "SocketIOClientComponent.h"
-#include "SocketIONative.h"
+#include "SocketEventRouter.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
 #include "Framework/Application/SlateApplication.h"
@@ -64,28 +62,67 @@ void UHotbarSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
 	Super::OnWorldBeginPlay(InWorld);
 
-	if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(InWorld.GetGameInstance()))
-	{
-		FCharacterData SelChar = GI->GetSelectedCharacter();
-		LocalCharacterId = SelChar.CharacterId;
-	}
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(InWorld.GetGameInstance());
+	if (!GI) return;
+
+	FCharacterData SelChar = GI->GetSelectedCharacter();
+	LocalCharacterId = SelChar.CharacterId;
 
 	InitializeDefaultKeybinds();
 	LoadKeybinds();
 
-	InWorld.GetTimerManager().SetTimer(
-		BindCheckTimer,
-		FTimerDelegate::CreateUObject(this, &UHotbarSubsystem::TryWrapSocketEvents),
-		0.5f, true
-	);
+	// Register socket event handlers via persistent EventRouter
+	USocketEventRouter* Router = GI->GetEventRouter();
+	if (Router)
+	{
+		Router->RegisterHandler(TEXT("hotbar:alldata"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleHotbarAllData(D); });
+	}
 
-	UE_LOG(LogHotbar, Log, TEXT("HotbarSubsystem started — waiting for SocketIO bindings..."));
+	// Only show hotbar and request data if socket is connected (game level, not login)
+	if (GI->IsSocketConnected())
+	{
+		// Request fresh hotbar data (delayed to allow SkillTreeSubsystem to also register first)
+		InWorld.GetTimerManager().SetTimer(HotbarRequestTimer, [this]()
+		{
+			if (UWorld* W = GetWorld())
+			{
+				if (UMMOGameInstance* GI2 = Cast<UMMOGameInstance>(W->GetGameInstance()))
+				{
+					GI2->EmitSocketEvent(TEXT("hotbar:request"), TEXT("{}"));
+					UE_LOG(LogHotbar, Log, TEXT("Emitted hotbar:request (delayed after registration)"));
+				}
+			}
+		}, 1.0f, false);
+
+		// Poll for viewport availability to show initial rows
+		InWorld.GetTimerManager().SetTimer(
+			ViewportCheckTimer,
+			FTimerDelegate::CreateLambda([this]()
+			{
+				if (bInitialRowsShown) return;
+				UWorld* World = GetWorld();
+				UGameViewportClient* VC = World ? World->GetGameViewport() : nullptr;
+				if (VC)
+				{
+					CachedViewportClient = VC;
+					ShowRows();
+					bInitialRowsShown = true;
+					UE_LOG(LogHotbar, Log, TEXT("Initial rows shown. CachedVC=%p World=%p"), VC, World);
+					if (World) World->GetTimerManager().ClearTimer(ViewportCheckTimer);
+				}
+			}),
+			0.5f, true
+		);
+	}
+
+	UE_LOG(LogHotbar, Log, TEXT("HotbarSubsystem started — events registered via EventRouter. LocalCharId=%d"), LocalCharacterId);
 }
 
 void UHotbarSubsystem::Deinitialize()
 {
-	UE_LOG(LogHotbar, Log, TEXT("Deinitialize: World=%p CharId=%d bEventsWrapped=%s RowsAdded=[%d,%d,%d,%d]"),
-		GetWorld(), LocalCharacterId, bEventsWrapped ? TEXT("true") : TEXT("false"),
+	UE_LOG(LogHotbar, Log, TEXT("Deinitialize: World=%p CharId=%d RowsAdded=[%d,%d,%d,%d]"),
+		GetWorld(), LocalCharacterId,
 		RowWidgets[0].bIsAdded ? 1 : 0, RowWidgets[1].bIsAdded ? 1 : 0,
 		RowWidgets[2].bIsAdded ? 1 : 0, RowWidgets[3].bIsAdded ? 1 : 0);
 
@@ -94,169 +131,21 @@ void UHotbarSubsystem::Deinitialize()
 
 	if (UWorld* World = GetWorld())
 	{
-		World->GetTimerManager().ClearTimer(BindCheckTimer);
-	}
+		World->GetTimerManager().ClearTimer(HotbarRequestTimer);
+		World->GetTimerManager().ClearTimer(ViewportCheckTimer);
 
-	bEventsWrapped = false;
-	bInitialRowsShown = false;
-	CachedSIOComponent = nullptr;
-	CachedViewportClient = nullptr;
-	Super::Deinitialize();
-}
-
-// ============================================================
-// Find SocketIO component
-// ============================================================
-
-USocketIOClientComponent* UHotbarSubsystem::FindSocketIOComponent() const
-{
-	UWorld* World = GetWorld();
-	if (!World) return nullptr;
-
-	for (TActorIterator<AActor> It(World); It; ++It)
-	{
-		if (USocketIOClientComponent* Comp = It->FindComponentByClass<USocketIOClientComponent>())
+		if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance()))
 		{
-			return Comp;
-		}
-	}
-	return nullptr;
-}
-
-// ============================================================
-// Timer callback — wrap events when ready
-// ============================================================
-
-void UHotbarSubsystem::TryWrapSocketEvents()
-{
-	// Phase 1: Wrap socket events (runs once)
-	if (!bEventsWrapped)
-	{
-		USocketIOClientComponent* SIOComp = FindSocketIOComponent();
-		if (!SIOComp) return;
-
-		TSharedPtr<FSocketIONative> NativeClient = SIOComp->GetNativeClient();
-		if (!NativeClient.IsValid() || !NativeClient->bIsConnected) return;
-
-		// Wait for BP to bind events first
-		if (!NativeClient->EventFunctionMap.Contains(TEXT("combat:health_update"))) return;
-
-		CachedSIOComponent = SIOComp;
-
-		if (LocalCharacterId == 0)
-		{
-			if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance()))
+			if (USocketEventRouter* Router = GI->GetEventRouter())
 			{
-				FCharacterData SelChar = GI->GetSelectedCharacter();
-				LocalCharacterId = SelChar.CharacterId;
+				Router->UnregisterAllForOwner(this);
 			}
 		}
-
-		// Wrap hotbar:alldata — chains after SkillTreeSubsystem's handler (both parse independently)
-		WrapExistingEvent(TEXT("hotbar:alldata"),
-			[this](const TSharedPtr<FJsonValue>& D) { HandleHotbarAllData(D); });
-
-		bEventsWrapped = true;
-
-		// Request fresh hotbar data (initial events may have fired before wrapping)
-		// Use a delay to allow SkillTreeSubsystem to also wrap first
-		if (UWorld* World = GetWorld())
-		{
-			FTimerHandle RequestTimer;
-			World->GetTimerManager().SetTimer(RequestTimer, [this]()
-			{
-				if (CachedSIOComponent.IsValid())
-				{
-					CachedSIOComponent->EmitNative(TEXT("hotbar:request"), TEXT("{}"));
-					UE_LOG(LogHotbar, Log, TEXT("Emitted hotbar:request (delayed after wrap)"));
-				}
-			}, 1.0f, false);
-		}
-
-		UE_LOG(LogHotbar, Log, TEXT("HotbarSubsystem — events wrapped. LocalCharId=%d World=%p VC=%p"),
-			LocalCharacterId, GetWorld(), GetWorld() ? GetWorld()->GetGameViewport() : nullptr);
 	}
 
-	// Phase 2: Show initial rows (retries until viewport is available)
-	if (bEventsWrapped && !bInitialRowsShown)
-	{
-		UWorld* World = GetWorld();
-		UGameViewportClient* VC = World ? World->GetGameViewport() : nullptr;
-		if (VC)
-		{
-			// Cache this VC for the lifetime of this subsystem.
-			// World->GetGameViewport() returns GEngine->GameViewport which is a global
-			// that changes when other PIE instances transition levels. We must always
-			// use the VC we first added widgets to for all subsequent add/remove calls.
-			CachedViewportClient = VC;
-			ShowRows();
-			bInitialRowsShown = true;
-			UE_LOG(LogHotbar, Log, TEXT("Initial rows shown. CachedVC=%p World=%p"), VC, World);
-		}
-		else
-		{
-			UE_LOG(LogHotbar, Log, TEXT("Viewport not ready yet — will retry (World=%p)"), World);
-		}
-	}
-
-	// Only stop timer when BOTH phases are complete
-	if (bEventsWrapped && bInitialRowsShown)
-	{
-		if (UWorld* World = GetWorld())
-		{
-			World->GetTimerManager().ClearTimer(BindCheckTimer);
-		}
-	}
-}
-
-// ============================================================
-// Event wrapping (same pattern as other subsystems)
-// ============================================================
-
-void UHotbarSubsystem::WrapExistingEvent(
-	const FString& EventName,
-	TFunction<void(const TSharedPtr<FJsonValue>&)> OurHandler)
-{
-	if (!CachedSIOComponent.IsValid()) return;
-
-	TSharedPtr<FSocketIONative> NativeClient = CachedSIOComponent->GetNativeClient();
-	if (!NativeClient.IsValid()) return;
-
-	TFunction<void(const FString&, const TSharedPtr<FJsonValue>&)> OriginalCallback;
-	FSIOBoundEvent* Existing = NativeClient->EventFunctionMap.Find(EventName);
-	if (Existing)
-	{
-		OriginalCallback = Existing->Function;
-	}
-
-	NativeClient->OnEvent(EventName,
-		[OriginalCallback, OurHandler](const FString& Event, const TSharedPtr<FJsonValue>& Message)
-		{
-			if (OriginalCallback) OriginalCallback(Event, Message);
-			if (OurHandler) OurHandler(Message);
-		},
-		TEXT("/"),
-		ESIOThreadOverrideOption::USE_GAME_THREAD
-	);
-}
-
-void UHotbarSubsystem::BindNewEvent(
-	const FString& EventName,
-	TFunction<void(const TSharedPtr<FJsonValue>&)> Handler)
-{
-	if (!CachedSIOComponent.IsValid()) return;
-
-	TSharedPtr<FSocketIONative> NativeClient = CachedSIOComponent->GetNativeClient();
-	if (!NativeClient.IsValid()) return;
-
-	NativeClient->OnEvent(EventName,
-		[Handler](const FString& Event, const TSharedPtr<FJsonValue>& Message)
-		{
-			if (Handler) Handler(Message);
-		},
-		TEXT("/"),
-		ESIOThreadOverrideOption::USE_GAME_THREAD
-	);
+	bInitialRowsShown = false;
+	CachedViewportClient = nullptr;
+	Super::Deinitialize();
 }
 
 // ============================================================
@@ -476,41 +365,44 @@ void UHotbarSubsystem::ActivateSlot(int32 RowIndex, int32 SlotIndex)
 
 void UHotbarSubsystem::EmitSaveItem(int32 RowIndex, int32 SlotIndex, int32 InventoryId, int32 ItemId, const FString& ItemName)
 {
-	if (!CachedSIOComponent.IsValid()) return;
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
+	if (!GI) return;
 
-	TSharedPtr<FJsonObject> Payload = MakeShareable(new FJsonObject());
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 	Payload->SetNumberField(TEXT("rowIndex"), RowIndex);
 	Payload->SetNumberField(TEXT("slotIndex"), SlotIndex);
 	Payload->SetNumberField(TEXT("inventoryId"), InventoryId);
 	Payload->SetNumberField(TEXT("itemId"), ItemId);
 	Payload->SetStringField(TEXT("itemName"), ItemName);
 
-	CachedSIOComponent->EmitNative(TEXT("hotbar:save"), Payload);
+	GI->EmitSocketEvent(TEXT("hotbar:save"), Payload);
 }
 
 void UHotbarSubsystem::EmitSaveSkill(int32 RowIndex, int32 SlotIndex, int32 SkillId, const FString& SkillName)
 {
-	if (!CachedSIOComponent.IsValid()) return;
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
+	if (!GI) return;
 
-	TSharedPtr<FJsonObject> Payload = MakeShareable(new FJsonObject());
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 	Payload->SetNumberField(TEXT("rowIndex"), RowIndex);
 	Payload->SetNumberField(TEXT("slotIndex"), SlotIndex);
 	Payload->SetNumberField(TEXT("skillId"), SkillId);
 	Payload->SetStringField(TEXT("skillName"), SkillName);
 	Payload->SetBoolField(TEXT("zeroBased"), true); // Tell server slotIndex is 0-based
 
-	CachedSIOComponent->EmitNative(TEXT("hotbar:save_skill"), Payload);
+	GI->EmitSocketEvent(TEXT("hotbar:save_skill"), Payload);
 }
 
 void UHotbarSubsystem::EmitClearSlot(int32 RowIndex, int32 SlotIndex)
 {
-	if (!CachedSIOComponent.IsValid()) return;
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
+	if (!GI) return;
 
-	TSharedPtr<FJsonObject> Payload = MakeShareable(new FJsonObject());
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 	Payload->SetNumberField(TEXT("rowIndex"), RowIndex);
 	Payload->SetNumberField(TEXT("slotIndex"), SlotIndex);
 
-	CachedSIOComponent->EmitNative(TEXT("hotbar:clear"), Payload);
+	GI->EmitSocketEvent(TEXT("hotbar:clear"), Payload);
 }
 
 // ============================================================

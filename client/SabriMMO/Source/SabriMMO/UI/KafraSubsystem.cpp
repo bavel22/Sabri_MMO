@@ -1,14 +1,12 @@
 // KafraSubsystem.cpp — Manages Kafra NPC service state, save point + teleport,
-// Socket.io event wrapping, and SKafraWidget overlay lifecycle.
+// and SKafraWidget overlay lifecycle.
 
 #include "KafraSubsystem.h"
 #include "SKafraWidget.h"
 #include "MMOGameInstance.h"
-#include "SocketIOClientComponent.h"
-#include "SocketIONative.h"
+#include "SocketEventRouter.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
-#include "EngineUtils.h"
 #include "TimerManager.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Widgets/SWeakWidget.h"
@@ -34,13 +32,24 @@ void UKafraSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
 	Super::OnWorldBeginPlay(InWorld);
 
-	InWorld.GetTimerManager().SetTimer(
-		BindCheckTimer,
-		FTimerDelegate::CreateUObject(this, &UKafraSubsystem::TryWrapSocketEvents),
-		0.5f, true
-	);
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(InWorld.GetGameInstance());
+	if (!GI) return;
 
-	UE_LOG(LogKafra, Log, TEXT("KafraSubsystem started — waiting for SocketIO bindings..."));
+	// Register socket event handlers via persistent EventRouter
+	USocketEventRouter* Router = GI->GetEventRouter();
+	if (Router)
+	{
+		Router->RegisterHandler(TEXT("kafra:data"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleKafraData(D); });
+		Router->RegisterHandler(TEXT("kafra:saved"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleKafraSaved(D); });
+		Router->RegisterHandler(TEXT("kafra:teleported"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleKafraTeleported(D); });
+		Router->RegisterHandler(TEXT("kafra:error"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleKafraError(D); });
+	}
+
+	UE_LOG(LogKafra, Log, TEXT("KafraSubsystem started — events registered via EventRouter."));
 }
 
 void UKafraSubsystem::Deinitialize()
@@ -49,95 +58,16 @@ void UKafraSubsystem::Deinitialize()
 
 	if (UWorld* World = GetWorld())
 	{
-		World->GetTimerManager().ClearTimer(BindCheckTimer);
-	}
-
-	bEventsWrapped = false;
-	CachedSIOComponent = nullptr;
-	Super::Deinitialize();
-}
-
-// ============================================================
-// Find SocketIO component
-// ============================================================
-
-USocketIOClientComponent* UKafraSubsystem::FindSocketIOComponent() const
-{
-	UWorld* World = GetWorld();
-	if (!World) return nullptr;
-
-	for (TActorIterator<AActor> It(World); It; ++It)
-	{
-		if (USocketIOClientComponent* Comp = It->FindComponentByClass<USocketIOClientComponent>())
+		if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance()))
 		{
-			return Comp;
+			if (USocketEventRouter* Router = GI->GetEventRouter())
+			{
+				Router->UnregisterAllForOwner(this);
+			}
 		}
 	}
-	return nullptr;
-}
 
-// ============================================================
-// Event wrapping
-// ============================================================
-
-void UKafraSubsystem::TryWrapSocketEvents()
-{
-	if (bEventsWrapped) return;
-
-	USocketIOClientComponent* SIOComp = FindSocketIOComponent();
-	if (!SIOComp) return;
-
-	TSharedPtr<FSocketIONative> NativeClient = SIOComp->GetNativeClient();
-	if (!NativeClient.IsValid() || !NativeClient->bIsConnected) return;
-
-	if (!NativeClient->EventFunctionMap.Contains(TEXT("combat:health_update"))) return;
-
-	CachedSIOComponent = SIOComp;
-
-	WrapSingleEvent(TEXT("kafra:data"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleKafraData(D); });
-	WrapSingleEvent(TEXT("kafra:saved"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleKafraSaved(D); });
-	WrapSingleEvent(TEXT("kafra:teleported"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleKafraTeleported(D); });
-	WrapSingleEvent(TEXT("kafra:error"),
-		[this](const TSharedPtr<FJsonValue>& D) { HandleKafraError(D); });
-
-	bEventsWrapped = true;
-
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().ClearTimer(BindCheckTimer);
-	}
-
-	UE_LOG(LogKafra, Log, TEXT("KafraSubsystem — events wrapped."));
-}
-
-void UKafraSubsystem::WrapSingleEvent(
-	const FString& EventName,
-	TFunction<void(const TSharedPtr<FJsonValue>&)> OurHandler)
-{
-	if (!CachedSIOComponent.IsValid()) return;
-
-	TSharedPtr<FSocketIONative> NativeClient = CachedSIOComponent->GetNativeClient();
-	if (!NativeClient.IsValid()) return;
-
-	TFunction<void(const FString&, const TSharedPtr<FJsonValue>&)> OriginalCallback;
-	FSIOBoundEvent* Existing = NativeClient->EventFunctionMap.Find(EventName);
-	if (Existing)
-	{
-		OriginalCallback = Existing->Function;
-	}
-
-	NativeClient->OnEvent(EventName,
-		[OriginalCallback, OurHandler](const FString& Event, const TSharedPtr<FJsonValue>& Message)
-		{
-			if (OriginalCallback) OriginalCallback(Event, Message);
-			if (OurHandler) OurHandler(Message);
-		},
-		TEXT("/"),
-		ESIOThreadOverrideOption::USE_GAME_THREAD
-	);
+	Super::Deinitialize();
 }
 
 // ============================================================
@@ -249,33 +179,36 @@ void UKafraSubsystem::HandleKafraError(const TSharedPtr<FJsonValue>& Data)
 
 void UKafraSubsystem::RequestOpenKafra(const FString& KafraId)
 {
-	if (!CachedSIOComponent.IsValid()) return;
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
+	if (!GI) return;
 
-	TSharedPtr<FJsonObject> Payload = MakeShareable(new FJsonObject());
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 	Payload->SetStringField(TEXT("kafraId"), KafraId);
 
-	CachedSIOComponent->EmitNative(TEXT("kafra:open"), Payload);
+	GI->EmitSocketEvent(TEXT("kafra:open"), Payload);
 	UE_LOG(LogKafra, Log, TEXT("Requesting Kafra: %s"), *KafraId);
 }
 
 void UKafraSubsystem::RequestSave()
 {
-	if (!CachedSIOComponent.IsValid()) return;
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
+	if (!GI) return;
 
-	TSharedPtr<FJsonObject> Payload = MakeShareable(new FJsonObject());
-	CachedSIOComponent->EmitNative(TEXT("kafra:save"), Payload);
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+	GI->EmitSocketEvent(TEXT("kafra:save"), Payload);
 	UE_LOG(LogKafra, Log, TEXT("Requesting save point."));
 }
 
 void UKafraSubsystem::RequestTeleport(const FString& DestZone)
 {
-	if (!CachedSIOComponent.IsValid()) return;
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
+	if (!GI) return;
 
-	TSharedPtr<FJsonObject> Payload = MakeShareable(new FJsonObject());
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 	Payload->SetStringField(TEXT("kafraId"), CurrentKafraId);
 	Payload->SetStringField(TEXT("destZone"), DestZone);
 
-	CachedSIOComponent->EmitNative(TEXT("kafra:teleport"), Payload);
+	GI->EmitSocketEvent(TEXT("kafra:teleport"), Payload);
 	UE_LOG(LogKafra, Log, TEXT("Requesting Kafra teleport to %s"), *DestZone);
 }
 

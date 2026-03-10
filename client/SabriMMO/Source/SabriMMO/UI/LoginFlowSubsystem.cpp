@@ -13,7 +13,6 @@
 #include "Widgets/SWeakWidget.h"
 #include "Framework/Application/SlateApplication.h"
 #include "GenericPlatform/GenericPlatformMisc.h"
-#include "EngineUtils.h"
 
 // ============================================================
 // Lifecycle
@@ -28,9 +27,8 @@ bool ULoginFlowSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 	if (World->WorldType != EWorldType::Game && World->WorldType != EWorldType::PIE)
 		return false;
 
-	// Check if this is the login level by looking for the game-level socket manager
-	// If BP_SocketManager exists, this is the game level — don't create here.
-	// This is a simple heuristic. The subsystem will also check in OnWorldBeginPlay.
+	// The subsystem creates in all game worlds, but OnWorldBeginPlay will skip
+	// initialization if the persistent socket is already connected (game level).
 	return true;
 }
 
@@ -38,14 +36,13 @@ void ULoginFlowSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
 	Super::OnWorldBeginPlay(InWorld);
 
-	// Check if this world has a GameMode with socket manager (game level).
-	// The login level should NOT have BP_SocketManager.
-	// If we detect we're in the game level, skip initialization.
-	for (TActorIterator<AActor> It(&InWorld); It; ++It)
+	// If the persistent socket is already connected, this is a game level — skip login UI.
+	// (Login level is loaded before ConnectSocket() is called from OnPlayCharacter.)
+	if (UMMOGameInstance* DetectGI = Cast<UMMOGameInstance>(InWorld.GetGameInstance()))
 	{
-		if (It->GetName().Contains(TEXT("SocketManager")))
+		if (DetectGI->IsSocketConnected())
 		{
-			UE_LOG(LogTemp, Log, TEXT("[LoginFlow] Game level detected (SocketManager found). Skipping login UI."));
+			UE_LOG(LogTemp, Log, TEXT("[LoginFlow] Game level detected (socket already connected). Skipping login UI."));
 			return;
 		}
 	}
@@ -311,6 +308,9 @@ void ULoginFlowSubsystem::OnPlayCharacter(const FCharacterData& Character)
 	GI->CurrentZoneName = Character.ZoneName;
 	GI->PendingSpawnLocation = FVector(Character.X, Character.Y, Character.Z);
 	GI->bIsZoneTransitioning = true;
+
+	// Connect persistent socket before level transition — survives OpenLevel
+	GI->ConnectSocket();
 
 	TransitionTo(ELoginFlowState::EnteringWorld);
 }

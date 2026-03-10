@@ -1,5 +1,5 @@
-// KafraSubsystem.h — UWorldSubsystem managing Kafra NPC service state,
-// Socket.io event wrapping (kafra:data/saved/teleported/error), and SKafraWidget lifecycle.
+// KafraSubsystem.h — UWorldSubsystem managing Kafra NPC service state
+// and SKafraWidget lifecycle. Registers Socket.io event handlers via the persistent EventRouter.
 // RO Classic: Save point + teleport service with zeny costs.
 
 #pragma once
@@ -10,7 +10,6 @@
 #include "Dom/JsonObject.h"
 #include "KafraSubsystem.generated.h"
 
-class USocketIOClientComponent;
 class SKafraWidget;
 
 USTRUCT()
@@ -54,12 +53,6 @@ public:
 	bool IsWidgetVisible() const;
 
 private:
-	// ---- socket event wrapping ----
-	void TryWrapSocketEvents();
-	void WrapSingleEvent(const FString& EventName,
-		TFunction<void(const TSharedPtr<FJsonValue>&)> OurHandler);
-	USocketIOClientComponent* FindSocketIOComponent() const;
-
 	// ---- event handlers ----
 	void HandleKafraData(const TSharedPtr<FJsonValue>& Data);
 	void HandleKafraSaved(const TSharedPtr<FJsonValue>& Data);
@@ -67,13 +60,10 @@ private:
 	void HandleKafraError(const TSharedPtr<FJsonValue>& Data);
 
 	// ---- state ----
-	bool bEventsWrapped = false;
 	bool bWidgetAdded = false;
-	FTimerHandle BindCheckTimer;
 
 	TSharedPtr<SKafraWidget> KafraWidget;
 	TSharedPtr<SWidget> AlignmentWrapper;
 	TSharedPtr<SWidget> ViewportOverlay;
 
-	TWeakObjectPtr<USocketIOClientComponent> CachedSIOComponent;
 };
