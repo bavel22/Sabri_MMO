@@ -19,6 +19,37 @@
 DEFINE_LOG_CATEGORY_STATIC(LogDamageNumbers, Log, All);
 
 // ============================================================
+// File-local health check state (heap-allocated for Live Coding safety)
+// ============================================================
+namespace DamageNumberHealth
+{
+	struct FState
+	{
+		bool bWasConnected = false;
+		int32 ReconnectStabilityTicks = 0;
+		int32 SocketReadyTicks = 0;
+		double LastEventReceivedTime = 0.0;
+		int32 EventsReceivedSinceWrap = 0;
+	};
+
+	static TMap<UWorld*, FState>& GetStateMap()
+	{
+		static auto* Map = new TMap<UWorld*, FState>();
+		return *Map;
+	}
+
+	static FState& Get(UWorld* World)
+	{
+		return GetStateMap().FindOrAdd(World);
+	}
+
+	static void Remove(UWorld* World)
+	{
+		GetStateMap().Remove(World);
+	}
+}
+
+// ============================================================
 // Lifecycle
 // ============================================================
 
@@ -63,6 +94,7 @@ void UDamageNumberSubsystem::Deinitialize()
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(BindCheckTimer);
+		DamageNumberHealth::Remove(World);
 	}
 
 	bEventsWrapped = false;
@@ -97,12 +129,88 @@ USocketIOClientComponent* UDamageNumberSubsystem::FindSocketIOComponent() const
 
 void UDamageNumberSubsystem::TryWrapSocketEvents()
 {
-	if (bEventsWrapped) return;
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	auto& Health = DamageNumberHealth::Get(World);
+
+	// ============================================================
+	// Phase 2: Health check (already wrapped — detect broken handlers)
+	// ============================================================
+	if (bEventsWrapped)
+	{
+		// Check if socket component is still valid
+		if (!CachedSIOComponent.IsValid())
+		{
+			UE_LOG(LogDamageNumbers, Warning, TEXT("HealthCheck: Socket component destroyed — will re-wrap."));
+			bEventsWrapped = false;
+			Health.bWasConnected = false;
+			Health.ReconnectStabilityTicks = 0;
+			Health.SocketReadyTicks = 0;
+			// Fall through to Phase 1
+		}
+		else
+		{
+			TSharedPtr<FSocketIONative> NC = CachedSIOComponent->GetNativeClient();
+			const bool bCurrentlyConnected = NC.IsValid() && NC->bIsConnected;
+
+			if (!bCurrentlyConnected)
+			{
+				// Socket disconnected — mark for re-wrap on reconnect
+				if (Health.bWasConnected)
+				{
+					UE_LOG(LogDamageNumbers, Warning, TEXT("HealthCheck: Socket disconnected — will re-wrap on reconnect."));
+				}
+				Health.bWasConnected = false;
+				Health.ReconnectStabilityTicks = 0;
+				return; // Can't do anything while disconnected
+			}
+
+			if (!Health.bWasConnected)
+			{
+				// Was disconnected, now reconnected — wait for BP to re-bind first
+				++Health.ReconnectStabilityTicks;
+				if (Health.ReconnectStabilityTicks < 4) // ~2 seconds at 0.5s interval
+				{
+					UE_LOG(LogDamageNumbers, Log, TEXT("HealthCheck: Reconnected — stabilizing (%d/4)..."),
+						Health.ReconnectStabilityTicks);
+					return;
+				}
+
+				// Stabilized — force re-wrap
+				UE_LOG(LogDamageNumbers, Warning,
+					TEXT("HealthCheck: Reconnection stabilized — re-wrapping events. (events received before reset: %d)"),
+					Health.EventsReceivedSinceWrap);
+				bEventsWrapped = false;
+				Health.bWasConnected = true;
+				Health.ReconnectStabilityTicks = 0;
+				Health.SocketReadyTicks = 0;
+				Health.EventsReceivedSinceWrap = 0;
+				// Fall through to Phase 1
+			}
+			else
+			{
+				// Connected and was connected — verify overlay is still valid
+				if (!OverlayWidget.IsValid() || !bOverlayAdded)
+				{
+					UE_LOG(LogDamageNumbers, Warning, TEXT("HealthCheck: Overlay lost — re-creating."));
+					bOverlayAdded = false;
+					ShowOverlay();
+				}
+				return; // All good
+			}
+		}
+	}
+
+	// ============================================================
+	// Phase 1: Initial wrapping (not yet wrapped)
+	// ============================================================
 
 	USocketIOClientComponent* SIOComp = FindSocketIOComponent();
 	if (!SIOComp)
 	{
 		UE_LOG(LogDamageNumbers, Verbose, TEXT("TryWrap: SocketIOComponent not found yet."));
+		Health.SocketReadyTicks = 0;
 		return;
 	}
 
@@ -110,6 +218,7 @@ void UDamageNumberSubsystem::TryWrapSocketEvents()
 	if (!NativeClient.IsValid() || !NativeClient->bIsConnected)
 	{
 		UE_LOG(LogDamageNumbers, Verbose, TEXT("TryWrap: NativeClient not connected yet."));
+		Health.SocketReadyTicks = 0;
 		return;
 	}
 
@@ -117,6 +226,18 @@ void UDamageNumberSubsystem::TryWrapSocketEvents()
 	if (!NativeClient->EventFunctionMap.Contains(TEXT("combat:health_update")))
 	{
 		UE_LOG(LogDamageNumbers, Verbose, TEXT("TryWrap: BP events not bound yet (waiting for combat:health_update)."));
+		Health.SocketReadyTicks = 0;
+		return;
+	}
+
+	// Wait for socket to be stable for 5 seconds (10 ticks at 0.5s each).
+	// This ensures ALL other subsystems (BasicInfo, WorldHealthBar, SkillTree,
+	// CastBar, SkillVFX at 6 ticks, etc.) have bound their event handlers FIRST.
+	// The NativeClient only supports one handler per event name, so we must
+	// wrap AFTER everyone else to avoid our handler being overwritten.
+	if (++Health.SocketReadyTicks < 10)
+	{
+		UE_LOG(LogDamageNumbers, Verbose, TEXT("TryWrap: Waiting for stability (%d/10)..."), Health.SocketReadyTicks);
 		return;
 	}
 
@@ -125,7 +246,7 @@ void UDamageNumberSubsystem::TryWrapSocketEvents()
 	// Re-resolve character ID (may have been set after initial OnWorldBeginPlay)
 	if (LocalCharacterId == 0)
 	{
-		if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance()))
+		if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance()))
 		{
 			FCharacterData SelChar = GI->GetSelectedCharacter();
 			LocalCharacterId = SelChar.CharacterId;
@@ -146,17 +267,17 @@ void UDamageNumberSubsystem::TryWrapSocketEvents()
 		[this](const TSharedPtr<FJsonValue>& D) { HandleCombatDamage(D); });
 
 	bEventsWrapped = true;
+	Health.bWasConnected = true;
+	Health.EventsReceivedSinceWrap = 0;
 
-	// Stop the polling timer
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().ClearTimer(BindCheckTimer);
-	}
+	// NOTE: Do NOT clear the BindCheckTimer — keep it running for health checks.
+	// This allows us to detect disconnection/reconnection and re-wrap if needed.
 
 	// Show the overlay
 	ShowOverlay();
 
-	UE_LOG(LogDamageNumbers, Log, TEXT("DamageNumberSubsystem — combat:damage wrapped, overlay active. LocalCharId=%d"), LocalCharacterId);
+	UE_LOG(LogDamageNumbers, Log, TEXT("DamageNumberSubsystem — events wrapped after %d stable ticks, overlay active. LocalCharId=%d"),
+		Health.SocketReadyTicks, LocalCharacterId);
 }
 
 // ============================================================
@@ -276,6 +397,14 @@ bool UDamageNumberSubsystem::ProjectWorldToScreen(const FVector& WorldPos, FVect
 
 void UDamageNumberSubsystem::HandleCombatDamage(const TSharedPtr<FJsonValue>& Data)
 {
+	// Track that we're receiving events (for health check diagnostics)
+	if (UWorld* World = GetWorld())
+	{
+		auto& Health = DamageNumberHealth::Get(World);
+		Health.LastEventReceivedTime = FPlatformTime::Seconds();
+		++Health.EventsReceivedSinceWrap;
+	}
+
 	if (!Data.IsValid())
 	{
 		UE_LOG(LogDamageNumbers, Warning, TEXT("HandleCombatDamage: Data is invalid!"));

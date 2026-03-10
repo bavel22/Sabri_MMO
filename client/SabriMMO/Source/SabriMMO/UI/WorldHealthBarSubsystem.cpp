@@ -22,6 +22,34 @@
 DEFINE_LOG_CATEGORY_STATIC(LogWorldHealthBar, Log, All);
 
 // ============================================================
+// File-local health check state (heap-allocated for Live Coding safety)
+// ============================================================
+namespace WorldHealthBarHealth
+{
+	struct FState
+	{
+		bool bWasConnected = false;
+		int32 ReconnectStabilityTicks = 0;
+	};
+
+	static TMap<UWorld*, FState>& GetStateMap()
+	{
+		static auto* Map = new TMap<UWorld*, FState>();
+		return *Map;
+	}
+
+	static FState& Get(UWorld* World)
+	{
+		return GetStateMap().FindOrAdd(World);
+	}
+
+	static void Remove(UWorld* World)
+	{
+		GetStateMap().Remove(World);
+	}
+}
+
+// ============================================================
 // Lifecycle
 // ============================================================
 
@@ -57,6 +85,7 @@ void UWorldHealthBarSubsystem::Deinitialize()
 	{
 		World->GetTimerManager().ClearTimer(BindCheckTimer);
 		World->GetTimerManager().ClearTimer(ActorCacheTimer);
+		WorldHealthBarHealth::Remove(World);
 	}
 
 	bEventsWrapped = false;
@@ -91,7 +120,64 @@ USocketIOClientComponent* UWorldHealthBarSubsystem::FindSocketIOComponent() cons
 
 void UWorldHealthBarSubsystem::TryWrapSocketEvents()
 {
-	if (bEventsWrapped) return;
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	auto& Health = WorldHealthBarHealth::Get(World);
+
+	// ============================================================
+	// Phase 2: Health check (already wrapped — detect broken handlers)
+	// ============================================================
+	if (bEventsWrapped)
+	{
+		if (!CachedSIOComponent.IsValid())
+		{
+			UE_LOG(LogWorldHealthBar, Warning, TEXT("HealthCheck: Socket component destroyed — will re-wrap."));
+			bEventsWrapped = false;
+			Health.bWasConnected = false;
+			Health.ReconnectStabilityTicks = 0;
+		}
+		else
+		{
+			TSharedPtr<FSocketIONative> NC = CachedSIOComponent->GetNativeClient();
+			const bool bCurrentlyConnected = NC.IsValid() && NC->bIsConnected;
+
+			if (!bCurrentlyConnected)
+			{
+				if (Health.bWasConnected)
+				{
+					UE_LOG(LogWorldHealthBar, Warning, TEXT("HealthCheck: Socket disconnected — will re-wrap on reconnect."));
+				}
+				Health.bWasConnected = false;
+				Health.ReconnectStabilityTicks = 0;
+				return;
+			}
+
+			if (!Health.bWasConnected)
+			{
+				++Health.ReconnectStabilityTicks;
+				if (Health.ReconnectStabilityTicks < 4)
+				{
+					UE_LOG(LogWorldHealthBar, Log, TEXT("HealthCheck: Reconnected — stabilizing (%d/4)..."),
+						Health.ReconnectStabilityTicks);
+					return;
+				}
+
+				UE_LOG(LogWorldHealthBar, Warning, TEXT("HealthCheck: Reconnection stabilized — re-wrapping events."));
+				bEventsWrapped = false;
+				Health.bWasConnected = true;
+				Health.ReconnectStabilityTicks = 0;
+			}
+			else
+			{
+				return; // All good
+			}
+		}
+	}
+
+	// ============================================================
+	// Phase 1: Initial wrapping
+	// ============================================================
 
 	USocketIOClientComponent* SIOComp = FindSocketIOComponent();
 	if (!SIOComp) return;
@@ -107,7 +193,7 @@ void UWorldHealthBarSubsystem::TryWrapSocketEvents()
 	// Resolve local character ID
 	if (LocalCharacterId == 0)
 	{
-		if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance()))
+		if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance()))
 		{
 			FCharacterData SelChar = GI->GetSelectedCharacter();
 			LocalCharacterId = SelChar.CharacterId;
@@ -148,18 +234,15 @@ void UWorldHealthBarSubsystem::TryWrapSocketEvents()
 		[this](const TSharedPtr<FJsonValue>& D) { HandleEnemyDeath(D); });
 
 	bEventsWrapped = true;
+	Health.bWasConnected = true;
+	Health.ReconnectStabilityTicks = 0;
 
-	// Stop polling timer
-	if (UWorld* World = GetWorld())
-	{
-		World->GetTimerManager().ClearTimer(BindCheckTimer);
-	}
+	// NOTE: Do NOT clear the BindCheckTimer — keep running for health checks.
 
 	// Show the overlay
 	ShowOverlay();
 
 	// Start periodic actor caching (match enemy data to actual world actors for smooth position tracking)
-	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().SetTimer(
 			ActorCacheTimer,
