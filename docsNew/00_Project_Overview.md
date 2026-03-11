@@ -156,7 +156,7 @@
 ### Status Effect & Buff System (Phase 2)
 - **10 generic status effects**: Stun, Freeze, Stone, Sleep, Poison, Blind, Silence, Confusion, Bleeding, Curse
 - `ro_status_effects.js` — resistance formulas, apply/remove/cleanse/tick, periodic drains, damage-break mechanics
-- `ro_buff_system.js` — generic buff system (Provoke, Endure, Sight + 20 future types), stacking rules, stat modifiers
+- `ro_buff_system.js` — generic buff system (24 types: Provoke, Endure, Sight, Blessing, Increase/Decrease AGI, Angelus, Hiding, Ruwach, Energy Coat, Loud Exclamation, Improve Concentration, Auto Berserk, Signum Crucis, Pneuma + 9 future 2nd-class types), stacking rules, stat modifiers
 - `getCombinedModifiers(target)` merges status + buff modifiers for damage/combat calculations
 - Server enforcement: movement lock during CC, AI CC lock (enemies can't move/attack), skill/attack prevention, regen blocking
 - `checkDamageBreakStatuses()` breaks freeze/stone/sleep/confusion on ANY damage (replaces per-skill fire-breaks-freeze)
@@ -264,15 +264,15 @@ UMG, Slate, HTTP, Json, JsonUtilities
 
 **Last Updated**: 2026-03-10
 
-- **Completed**: Foundation, Multiplayer, Combat, Stats, Inventory, Equipment, Hotbar, NPC Shops, Zone System, Skill VFX, Status Effect & Buff System (Phase 2), Element Table & Formula Audit (Phase 3)
-- **In Progress**: Persistent Socket Connection (planning stage — see `docsNew/05_Development/Persistent_Socket_Connection_Plan.md`)
-- **Monsters**: 509 RO templates loaded, 46 spawns active (zones 1-3), full AI state machine with CC lock
+- **Completed**: Foundation, Multiplayer, Combat, Stats, Inventory, Equipment, Hotbar, NPC Shops, Zone System, Skill VFX, Status Effect & Buff System (Phase 2), Element Table & Formula Audit (Phase 3), Persistent Socket Connection (Phase 4), Passive Skills & First Class Completion (Phase 5)
+- **Monsters**: 509 RO templates loaded, 46 spawns active (zones 1-3), full AI state machine with CC lock + hidden player detection
 - **Items**: 148 items in database (22 original + 126 RO drops)
-- **Skills**: 17 active skills with VFX, 7 passive skill stubs, 10 status effects, 3 active buffs
-- **Combat Data**: Element table (10×10×4 = 400 values) verified against rAthena pre-renewal `attr_fix.yml`, size penalty table (18 weapons × 3 sizes) verified, card modifier stacking fixed (per-category multiplicative)
-- **UI**: 15 C++ Slate subsystems + 18 Blueprint widgets, BuffBar with timer icons
+- **Skills**: 151 total skill definitions (68 first-class + 83 second-class), 43 active skill handlers implemented, 12 passive skills with stat bonuses, 24 buff types, 10 status effects, 31 VFX configs
+- **Classes**: All 6 first classes fully playable — Swordsman (10 skills), Mage (14 skills), Archer (7 skills), Acolyte (14 skills), Thief (10 skills), Merchant (10 skills)
+- **Combat Data**: Element table (10×10×4 = 400 values) verified against rAthena pre-renewal `attr_fix.yml`, size penalty table (18 weapons × 3 sizes) verified, card modifier stacking fixed (per-category multiplicative), race ATK/DEF passive bonuses (Demon Bane, Divine Protection)
+- **UI**: 17 C++ Slate subsystems + 18 Blueprint widgets, BuffBar with timer icons
 - **Zones**: 4 zones (prontera, prt_south, prt_north, prt_dungeon_01)
-- **Next**: Phase 4 (Persistent Socket Connection) per Strategic Plan v3
+- **Next**: Phase 6 (Party System) per Strategic Plan v3
 - **Roadmap**: See `docsNew/05_Development/Strategic_Implementation_Plan_v3.md`
 
 ---

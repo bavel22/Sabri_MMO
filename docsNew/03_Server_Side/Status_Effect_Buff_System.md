@@ -98,25 +98,27 @@ Each entry defines metadata and stacking behavior. Currently registered types:
 | `provoke` | debuff | PRV | refresh | Active |
 | `endure` | buff | END | refresh | Active |
 | `sight` | buff | SGT | refresh | Active |
-| `blessing` | buff | BLS | refresh | Future |
-| `increase_agi` | buff | AGI | refresh | Future |
-| `decrease_agi` | debuff | DAG | refresh | Future |
-| `angelus` | buff | ANG | refresh | Future |
-| `pneuma` | buff | PNE | refresh | Future |
-| `signum_crucis` | debuff | SCR | refresh | Future |
-| `auto_berserk` | buff | BRK | refresh | Future |
-| `hiding` | buff | HID | refresh | Future |
-| `improve_concentration` | buff | CON | refresh | Future |
-| `two_hand_quicken` | buff | THQ | refresh | Future |
-| `kyrie_eleison` | buff | KYR | refresh | Future |
-| `magnificat` | buff | MAG | refresh | Future |
-| `gloria` | buff | GLO | refresh | Future |
-| `lex_aeterna` | debuff | LEX | refresh | Future |
-| `aspersio` | buff | ASP | refresh | Future |
-| `energy_coat` | buff | ENC | refresh | Future |
-| `enchant_poison` | buff | EPO | refresh | Future |
-| `cloaking` | buff | CLK | refresh | Future |
-| `quagmire` | debuff | QUA | refresh | Future |
+| `blessing` | buff | BLS | refresh | Active (Phase 5) |
+| `increase_agi` | buff | AGI | refresh | Active (Phase 5) |
+| `decrease_agi` | debuff | DAG | refresh | Active (Phase 5) |
+| `angelus` | buff | ANG | refresh | Active (Phase 5) |
+| `pneuma` | buff | PNE | refresh | Active (Phase 5) |
+| `signum_crucis` | debuff | SCR | refresh | Active (Phase 5) |
+| `auto_berserk` | buff | BRK | refresh | Active (Phase 5) — +32% ATK / -25% DEF below 25% HP, emits `player:stats` on toggle |
+| `hiding` | buff | HID | refresh | Active (Phase 5) — breaks on damage/skill use |
+| `improve_concentration` | buff | CON | refresh | Active (Phase 5) |
+| `loud_exclamation` | buff | LXC | refresh | Active (Phase 5) |
+| `ruwach` | buff | RUW | refresh | Active (Phase 5) |
+| `energy_coat` | buff | ENC | refresh | Active (Phase 5) |
+| `two_hand_quicken` | buff | THQ | refresh | Future (2nd class) |
+| `kyrie_eleison` | buff | KYR | refresh | Future (2nd class) |
+| `magnificat` | buff | MAG | refresh | Future (2nd class) |
+| `gloria` | buff | GLO | refresh | Future (2nd class) |
+| `lex_aeterna` | debuff | LEX | refresh | Future (2nd class) |
+| `aspersio` | buff | ASP | refresh | Future (2nd class) |
+| `enchant_poison` | buff | EPO | refresh | Future (2nd class) |
+| `cloaking` | buff | CLK | refresh | Future (2nd class) |
+| `quagmire` | debuff | QUA | refresh | Future (2nd class) |
 
 ### stackRule Options
 
@@ -146,6 +148,7 @@ The function applies per-buff-name logic:
 - **blessing**: `strBonus`, `dexBonus`, `intBonus`
 - **increase_agi**: `agiBonus`, `moveSpeedBonus`
 - **decrease_agi**: subtracts `agiReduction`, `moveSpeedReduction`
+- **auto_berserk**: `atkMultiplier *= 1.32`, `defMultiplier *= 0.75` (when `atkIncrease > 0`)
 - **angelus**: `defPercent`
 - **gloria**: `lukBonus`
 - **improve_concentration**: `agiBonus`, `dexBonus`
@@ -195,6 +198,23 @@ function getBuffStatModifiers(target) {
 ```
 
 Backward-compatible alias. All existing skill handlers call `getBuffStatModifiers()` for CC checks; internally this now returns merged status + buff modifiers.
+
+### buildFullStatsPayload() — Buff Multipliers in Stats Panel
+
+The `buildFullStatsPayload()` function applies `buffAtkMultiplier` and `buffDefMultiplier` from `getEffectiveStats()` to the derived stats sent via `player:stats`:
+
+```js
+statusATK: Math.floor(derived.statusATK * (effectiveStats.buffAtkMultiplier || 1)),
+softDEF: Math.floor(derived.softDEF * (effectiveStats.buffDefMultiplier || 1)),
+```
+
+This means all buffs with ATK/DEF multipliers (Auto Berserk, Provoke, etc.) are reflected in the CombatStatsWidget in real-time.
+
+### checkAutoBerserk() — Stats Emit on Toggle
+
+`checkAutoBerserk(player, characterId, zone)` monitors the HP ratio. When HP drops below 25%, it activates the buff (+32% ATK, -25% DEF). When HP rises to >= 25%, it deactivates (sets `atkIncrease = 0`). On each toggle, it emits `player:stats` via `io.sockets.sockets.get(player.socketId)` so the CombatStatsWidget updates ATK/DEF immediately.
+
+Called from all HP-changing paths: enemy damage, heal, HP regen, skill regen, First Aid, item/potion use, Fire Wall tick on players, PvP auto-attack.
 
 ### Movement Lock (`player:position` handler)
 

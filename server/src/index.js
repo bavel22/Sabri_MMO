@@ -15,8 +15,8 @@ const testModeRouter = require('./test_mode');
 
 // Import RO monster templates (509 monsters from rAthena pre-renewal database)
 const { RO_MONSTER_TEMPLATES } = require('./ro_monster_templates');
-// Import RO item name → ID mapping + existing item extra drops config
-const { RO_ITEM_NAME_TO_ID, EXISTING_ITEM_EXTRA_DROPS } = require('./ro_item_mapping');
+// Import RO item use-effect data (auto-generated from rAthena scripts)
+const { ITEM_USE_EFFECTS } = require('./ro_item_effects');
 // Import RO EXP tables (base levels 1-99, job levels for novice/1st/2nd class)
 const {
     BASE_EXP_TABLE, JOB_CLASS_CONFIG, MAX_BASE_LEVEL,
@@ -355,7 +355,15 @@ function removeOldestGroundEffect(casterId, type) {
 
 // Get passive skill bonuses for a player (Sword Mastery, 2H Sword Mastery, HP Recovery)
 function getPassiveSkillBonuses(player) {
-    const bonuses = { bonusATK: 0, hpRegenBonus: 0, spRegenBonus: 0, bonusMDEF: 0 };
+    const bonuses = {
+        bonusATK: 0, hpRegenBonus: 0, spRegenBonus: 0, bonusMDEF: 0,
+        bonusDEX: 0, bonusHIT: 0, bonusRange: 0, bonusFLEE: 0,
+        doubleAttackChance: 0,
+        raceATK: {},
+        raceDEF: {},
+        fatalBlowChance: 0,
+        movingHPRecovery: false,
+    };
     const learned = player.learnedSkills || {};
     const wType = player.weaponType || null;
 
@@ -371,14 +379,55 @@ function getPassiveSkillBonuses(player) {
     }
     // Increase HP Recovery (102): +5 HP per regen tick per level
     const hprLv = learned[102] || 0;
-    if (hprLv > 0) {
-        bonuses.hpRegenBonus = hprLv * 5;
-    }
+    if (hprLv > 0) bonuses.hpRegenBonus = hprLv * 5;
+
+    // Moving HP Recovery (107): allow HP regen while moving
+    const mhrLv = learned[107] || 0;
+    if (mhrLv > 0) bonuses.movingHPRecovery = true;
+
+    // Fatal Blow (109): stun chance on Bash = 5% per level
+    const fbLv = learned[109] || 0;
+    if (fbLv > 0) bonuses.fatalBlowChance = fbLv * 5;
+
     // Increase SP Recovery (204): +3 SP per regen tick per level
     const sprLv = learned[204] || 0;
-    if (sprLv > 0) {
-        bonuses.spRegenBonus = sprLv * 3;
+    if (sprLv > 0) bonuses.spRegenBonus = sprLv * 3;
+
+    // Owl's Eye (300): +1 DEX per level
+    const oeLv = learned[300] || 0;
+    if (oeLv > 0) bonuses.bonusDEX += oeLv;
+
+    // Vulture's Eye (301): +1 HIT per level, +10 range per level (bows only)
+    const veLv = learned[301] || 0;
+    if (veLv > 0) {
+        bonuses.bonusHIT += veLv;
+        if (wType === 'bow') bonuses.bonusRange += veLv * 10;
     }
+
+    // Divine Protection (401): +3 DEF per level vs Undead/Demon race
+    const dpLv = learned[401] || 0;
+    if (dpLv > 0) {
+        bonuses.raceDEF.undead = (bonuses.raceDEF.undead || 0) + dpLv * 3;
+        bonuses.raceDEF.demon = (bonuses.raceDEF.demon || 0) + dpLv * 3;
+    }
+
+    // Demon Bane (413): +3 ATK per level vs Undead/Demon race
+    const dbLv = learned[413] || 0;
+    if (dbLv > 0) {
+        bonuses.raceATK.undead = (bonuses.raceATK.undead || 0) + dbLv * 3;
+        bonuses.raceATK.demon = (bonuses.raceATK.demon || 0) + dbLv * 3;
+    }
+
+    // Double Attack (500): 5% chance per level to double-hit (daggers only)
+    const daLv = learned[500] || 0;
+    if (daLv > 0 && wType === 'dagger') {
+        bonuses.doubleAttackChance = daLv * 5;
+    }
+
+    // Improve Dodge (501): +3 FLEE per level
+    const idLv = learned[501] || 0;
+    if (idLv > 0) bonuses.bonusFLEE += idLv * 3;
+
     return bonuses;
 }
 
@@ -429,6 +478,56 @@ function applyBuff(target, buffDef) {
 // Remove expired buffs, returns array of expired buff objects
 function expireBuffs(target) {
     return expireBuffsGeneric(target);
+}
+
+// Auto Berserk: dynamically toggle ATK bonus based on HP threshold (25%)
+// Called whenever a player's HP changes (damage taken, heal received)
+function checkAutoBerserk(player, characterId, zone) {
+    if (!player.activeBuffs) return;
+    const abBuff = player.activeBuffs.find(b => b.name === 'auto_berserk' && Date.now() < b.expiresAt);
+    if (!abBuff) return;
+
+    const hpRatio = player.health / player.maxHealth;
+    const shouldBeActive = hpRatio < 0.25 && player.health > 0;
+    const currentlyActive = (abBuff.atkIncrease || 0) > 0;
+
+    if (shouldBeActive && !currentlyActive) {
+        // Activate ATK bonus
+        abBuff.atkIncrease = abBuff.conditionalAtkIncrease || 32;
+        const bZone = zone || player.zone || 'prontera_south';
+        broadcastToZone(bZone, 'skill:buff_applied', {
+            targetId: characterId, targetName: player.characterName, isEnemy: false,
+            casterId: characterId, casterName: player.characterName,
+            skillId: 108, buffName: 'Auto Berserk', duration: abBuff.expiresAt - Date.now(),
+            effects: { atkIncrease: abBuff.atkIncrease, activated: true }
+        });
+        // Send updated stats so CombatStatsWidget reflects +ATK/-DEF
+        const sock = io.sockets.sockets.get(player.socketId);
+        if (sock) {
+            const effStats = getEffectiveStats(player);
+            const derived = roDerivedStats(effStats);
+            const finalAspd = Math.min(COMBAT.ASPD_CAP, derived.aspd + (player.weaponAspdMod || 0));
+            sock.emit('player:stats', buildFullStatsPayload(characterId, player, effStats, derived, finalAspd));
+        }
+    } else if (!shouldBeActive && currentlyActive) {
+        // Deactivate ATK bonus (buff stays, just no ATK increase)
+        abBuff.atkIncrease = 0;
+        const bZone = zone || player.zone || 'prontera_south';
+        broadcastToZone(bZone, 'skill:buff_applied', {
+            targetId: characterId, targetName: player.characterName, isEnemy: false,
+            casterId: characterId, casterName: player.characterName,
+            skillId: 108, buffName: 'Auto Berserk', duration: abBuff.expiresAt - Date.now(),
+            effects: { atkIncrease: 0, activated: false }
+        });
+        // Send updated stats so CombatStatsWidget reflects restored ATK/DEF
+        const sock = io.sockets.sockets.get(player.socketId);
+        if (sock) {
+            const effStats = getEffectiveStats(player);
+            const derived = roDerivedStats(effStats);
+            const finalAspd = Math.min(COMBAT.ASPD_CAP, derived.aspd + (player.weaponAspdMod || 0));
+            sock.emit('player:stats', buildFullStatsPayload(characterId, player, effStats, derived, finalAspd));
+        }
+    }
 }
 
 // Get combined stat modifiers from both status effects AND buffs
@@ -511,6 +610,83 @@ function calculateMagicSkillDamage(attackerStats, targetStats, targetHardMdef, s
           buffMods: targetInfo.buffMods || { defMultiplier: 1.0, bonusMDEF: 0 } },
         { skillMultiplier, skillElement }
     );
+}
+
+// RO Classic Heal formula: floor((baseLv + INT) / 8) * (4 + skillLevel * 8)
+function calculateHealAmount(caster, skillLevel) {
+    const stats = getEffectiveStats(caster);
+    const baseLv = stats.level || 1;
+    const intStat = stats.int || 1;
+    return Math.floor((baseLv + intStat) / 8) * (4 + skillLevel * 8);
+}
+
+// Helper: execute a physical skill on an enemy target (shared by Envenom, Sand Attack, Arrow Repel, Mammonite, etc.)
+// Returns { result, enemy, attackerPos, targetPos, zone } or null if failed (error emitted)
+async function executePhysicalSkillOnEnemy(player, characterId, socket, skill, skillId, learnedLevel, levelData, effectVal, spCost, targetId, options = {}) {
+    const enemy = enemies.get(targetId);
+    if (!enemy || enemy.isDead) { socket.emit('skill:error', { message: 'Target not found' }); return null; }
+
+    const attackerPos = await getPlayerPosition(characterId);
+    if (!attackerPos) return null;
+    const targetPos = { x: enemy.x, y: enemy.y, z: enemy.z };
+
+    const dx = attackerPos.x - targetPos.x;
+    const dy = attackerPos.y - targetPos.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    const skillRange = (options.range || skill.range || player.attackRange || COMBAT.MELEE_RANGE) + (getEffectiveStats(player).bonusRange || 0);
+    if (dist > skillRange + COMBAT.RANGE_TOLERANCE) {
+        socket.emit('combat:out_of_range', { targetId, isEnemy: true, targetX: targetPos.x, targetY: targetPos.y, targetZ: targetPos.z, distance: dist, requiredRange: skillRange });
+        return null;
+    }
+
+    player.mana = Math.max(0, player.mana - spCost);
+    applySkillDelays(characterId, player, skillId, levelData, socket);
+
+    const atkBuffMods = getBuffStatModifiers(player);
+    const defBuffMods = getCombinedModifiers(enemy);
+    const skillTargetInfo = getEnemyTargetInfo(enemy);
+    skillTargetInfo.buffMods = defBuffMods;
+    const skillAtkInfo = getAttackerInfo(player);
+    skillAtkInfo.buffMods = atkBuffMods;
+
+    const skillElement = options.forceElement || (skill.element === 'neutral' ? null : (skill.element || null));
+    const result = calculateSkillDamage(
+        getEffectiveStats(player), enemy.stats, enemy.hardDef || 0,
+        effectVal, atkBuffMods, defBuffMods, skillTargetInfo, skillAtkInfo,
+        { skillElement }
+    );
+
+    const zone = player.zone || 'prontera_south';
+    if (!result.isMiss) {
+        enemy.health = Math.max(0, enemy.health - result.damage);
+        enemy.lastDamageTime = Date.now();
+        if (typeof setEnemyAggro === 'function') setEnemyAggro(enemy, characterId, 'melee');
+        const broken = checkDamageBreakStatuses(enemy);
+        for (const bt of broken) {
+            broadcastToZone(zone, 'status:removed', { targetId, isEnemy: true, statusType: bt, reason: 'damage_break' });
+            broadcastToZone(zone, 'skill:buff_removed', { targetId, isEnemy: true, buffName: bt, reason: 'damage_break' });
+        }
+    }
+
+    broadcastToZone(zone, 'skill:effect_damage', {
+        attackerId: characterId, attackerName: player.characterName,
+        targetId, targetName: enemy.name, isEnemy: true,
+        skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: result.element || 'neutral',
+        damage: result.isMiss ? 0 : result.damage, isCritical: result.isCritical, isMiss: result.isMiss, hitType: result.hitType,
+        targetHealth: enemy.health, targetMaxHealth: enemy.maxHealth,
+        attackerX: attackerPos.x, attackerY: attackerPos.y, attackerZ: attackerPos.z,
+        targetX: targetPos.x, targetY: targetPos.y, targetZ: targetPos.z,
+        timestamp: Date.now()
+    });
+    broadcastToZone(zone, 'enemy:health_update', { enemyId: targetId, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: true });
+
+    if (enemy.health <= 0) {
+        await processEnemyDeathFromSkill(enemy, player, characterId, io);
+    }
+
+    socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
+    socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
+    return { result, enemy, attackerPos, targetPos, zone };
 }
 
 // Helper: process enemy death from skill kill (shares logic with auto-attack kill)
@@ -681,24 +857,29 @@ function getEffectiveStats(player) {
     const passive = getPassiveSkillBonuses(player);
     const buffMods = getBuffStatModifiers(player);
     return {
-        str: (player.stats.str || 1) + (bonuses.str || 0),
-        agi: (player.stats.agi || 1) + (bonuses.agi || 0),
-        vit: (player.stats.vit || 1) + (bonuses.vit || 0),
-        int: (player.stats.int || 1) + (bonuses.int || 0),
-        dex: (player.stats.dex || 1) + (bonuses.dex || 0),
-        luk: (player.stats.luk || 1) + (bonuses.luk || 0),
+        str: (player.stats.str || 1) + (bonuses.str || 0) + (buffMods.strBonus || 0),
+        agi: (player.stats.agi || 1) + (bonuses.agi || 0) + (buffMods.agiBonus || 0),
+        vit: (player.stats.vit || 1) + (bonuses.vit || 0) + (buffMods.vitBonus || 0),
+        int: (player.stats.int || 1) + (bonuses.int || 0) + (buffMods.intBonus || 0),
+        dex: (player.stats.dex || 1) + (bonuses.dex || 0) + (buffMods.dexBonus || 0) + (passive.bonusDEX || 0),
+        luk: (player.stats.luk || 1) + (bonuses.luk || 0) + (buffMods.lukBonus || 0),
         level: player.stats.level || 1,
         weaponATK: player.stats.weaponATK || 0,
-        passiveATK: passive.bonusATK,  // Sword Mastery / 2H Sword Mastery bonus
+        passiveATK: passive.bonusATK,
         statPoints: player.stats.statPoints || 0,
-        bonusHit: bonuses.hit || 0,
-        bonusFlee: bonuses.flee || 0,
-        bonusCritical: bonuses.critical || 0,
-        bonusMaxHp: bonuses.maxHp || 0,
-        bonusMaxSp: bonuses.maxSp || 0,
+        bonusHit: (bonuses.hit || 0) + (passive.bonusHIT || 0) + (buffMods.bonusHit || 0),
+        bonusFlee: (bonuses.flee || 0) + (passive.bonusFLEE || 0) + (buffMods.bonusFlee || 0),
+        bonusCritical: (bonuses.critical || 0) + (buffMods.bonusCritical || 0),
+        bonusMaxHp: (bonuses.maxHp || 0) + (buffMods.bonusMaxHp || 0),
+        bonusMaxSp: (bonuses.maxSp || 0) + (buffMods.bonusMaxSp || 0),
         buffAtkMultiplier: buffMods.atkMultiplier,
         buffDefMultiplier: buffMods.defMultiplier,
-        buffBonusMDEF: buffMods.bonusMDEF
+        buffBonusMDEF: buffMods.bonusMDEF,
+        passiveRaceATK: passive.raceATK,
+        passiveRaceDEF: passive.raceDEF,
+        doubleAttackChance: passive.doubleAttackChance || 0,
+        bonusRange: passive.bonusRange || 0,
+        fatalBlowChance: passive.fatalBlowChance || 0,
     };
 }
 
@@ -709,7 +890,8 @@ function getAttackerInfo(player) {
         weaponElement: player.weaponElement || 'neutral',
         weaponLevel: player.weaponLevel || 1,
         buffMods: getBuffStatModifiers(player),
-        cardMods: player.cardMods || null
+        cardMods: player.cardMods || null,
+        passiveRaceATK: getPassiveSkillBonuses(player).raceATK || null
     };
 }
 
@@ -727,7 +909,8 @@ function getEnemyTargetInfo(enemy) {
         size: enemy.size || 'medium',
         race: enemy.race || 'formless',
         numAttackers: Math.max(1, numAttackers),
-        buffMods: getBuffStatModifiers(enemy)
+        buffMods: getBuffStatModifiers(enemy),
+        passiveRaceDEF: null // enemies don't have passive skills
     };
 }
 
@@ -740,12 +923,14 @@ function getPlayerTargetInfo(player, targetCharId) {
             numAttackers++;
         }
     }
+    const passive = getPassiveSkillBonuses(player);
     return {
         element: player.armorElement || { type: 'neutral', level: 1 },
         size: 'medium', // Players are always medium
         race: 'demihuman',
         numAttackers: Math.max(1, numAttackers),
-        buffMods: getBuffStatModifiers(player)
+        buffMods: getBuffStatModifiers(player),
+        passiveRaceDEF: passive.raceDEF || null
     };
 }
 
@@ -927,7 +1112,8 @@ function buildFullStatsPayload(characterId, player, effectiveStats, derived, fin
             ...player.stats,
             str: effectiveStats.str, agi: effectiveStats.agi, vit: effectiveStats.vit,
             int: effectiveStats.int, dex: effectiveStats.dex, luk: effectiveStats.luk,
-            hardDef: player.hardDef || 0
+            hardDef: player.hardDef || 0,
+            passiveATK: effectiveStats.passiveATK || 0
         },
         baseStats: {
             str: player.stats.str || 1, agi: player.stats.agi || 1, vit: player.stats.vit || 1,
@@ -936,6 +1122,8 @@ function buildFullStatsPayload(characterId, player, effectiveStats, derived, fin
         statCosts,
         derived: {
             ...derived,
+            statusATK: Math.floor(derived.statusATK * (effectiveStats.buffAtkMultiplier || 1)),
+            softDEF: Math.floor(derived.softDEF * (effectiveStats.buffDefMultiplier || 1)),
             aspd: finalAspd
         },
         exp: buildExpPayload(player)
@@ -982,52 +1170,45 @@ for (const [key, ro] of Object.entries(RO_MONSTER_TEMPLATES)) {
         raceGroups: ro.raceGroups || {},
         stats: { ...ro.stats },
         modes: { ...ro.modes },
-        // Drop format: { itemName, itemId, chance (decimal), rate (%) }
-        // itemId resolved from RO_ITEM_NAME_TO_ID mapping (null if not in DB)
+        // Drop format: { itemName, itemId (resolved lazily at drop time), chance (decimal), rate (%) }
         drops: (ro.drops || []).map(d => ({
             itemName: d.itemName,
-            itemId: RO_ITEM_NAME_TO_ID[d.itemName] || null,
+            itemId: null,  // Resolved lazily from itemNameToId after DB load
             chance: d.rate / 100,                  // Convert % to decimal for Math.random()
             rate: d.rate,                          // Keep original % for display
             stealProtected: d.stealProtected || false
         })),
         mvpDrops: (ro.mvpDrops || []).map(d => ({
             itemName: d.itemName,
-            itemId: RO_ITEM_NAME_TO_ID[d.itemName] || null,
+            itemId: null,  // Resolved lazily from itemNameToId after DB load
             chance: d.rate / 100,
             rate: d.rate
         }))
     };
 }
 
-// Inject existing game items as extra drops on appropriate RO monsters
-for (const [itemIdStr, monsterDrops] of Object.entries(EXISTING_ITEM_EXTRA_DROPS)) {
-    const itemId = parseInt(itemIdStr);
-    for (const { monster, chance } of monsterDrops) {
-        if (ENEMY_TEMPLATES[monster]) {
-            ENEMY_TEMPLATES[monster].drops.push({
-                itemName: null,  // Will be resolved from itemDefinitions at drop time
-                itemId: itemId,
-                chance: chance,
-                rate: chance * 100,
-                stealProtected: false,
-                isExistingItem: true
-            });
-        }
-    }
-}
-
 const RO_TEMPLATE_COUNT = Object.keys(ENEMY_TEMPLATES).length;
 logger.info(`[ENEMY] Loaded ${RO_TEMPLATE_COUNT} RO monster templates`);
 
-// Count how many drops have resolved itemIds vs unresolved
-let resolvedDrops = 0, unresolvedDrops = 0;
-for (const t of Object.values(ENEMY_TEMPLATES)) {
-    for (const d of t.drops) {
-        if (d.itemId) resolvedDrops++; else unresolvedDrops++;
+// Drop resolution happens lazily after itemDefinitions are loaded from DB
+// See resolveDropItemIds() called after loadItemDefinitions()
+function resolveDropItemIds() {
+    let resolvedDrops = 0, unresolvedDrops = 0;
+    for (const t of Object.values(ENEMY_TEMPLATES)) {
+        for (const d of t.drops) {
+            if (d.itemName && !d.itemId) {
+                d.itemId = itemNameToId.get(d.itemName) || null;
+            }
+            if (d.itemId) resolvedDrops++; else unresolvedDrops++;
+        }
+        for (const d of (t.mvpDrops || [])) {
+            if (d.itemName && !d.itemId) {
+                d.itemId = itemNameToId.get(d.itemName) || null;
+            }
+        }
     }
+    logger.info(`[ENEMY] Drop itemId resolution: ${resolvedDrops} resolved, ${unresolvedDrops} unresolved (from ${itemNameToId.size} DB items)`);
 }
-logger.info(`[ENEMY] Drop itemId resolution: ${resolvedDrops} resolved, ${unresolvedDrops} unresolved`);
 
 // ============================================================
 // Spawn Configuration — Zone-based RO monster spawns
@@ -1207,26 +1388,39 @@ const INVENTORY = {
 
 // Item definitions cache (loaded from DB on startup)
 const itemDefinitions = new Map();
+// Runtime name→id lookup built from itemDefinitions (replaces ro_item_mapping.js)
+const itemNameToId = new Map();
 
 // NPC Shop definitions (server-authoritative, shopId → shop config)
-// Buy price = item.price * 2  |  Sell price = item.price
+// Buy price = item.buy_price  |  Sell price = item.sell_price (from rAthena canonical data)
 // RO Classic: shops have unlimited stock, multiple players can use simultaneously
 const NPC_SHOPS = {
     1: {
         name: 'Tool Dealer',
-        itemIds: [1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1028, 1029]
+        // Red Potion(501), Orange Potion(502), Yellow Potion(503), Blue Potion(505),
+        // Green Potion(506), Red Herb(507), Yellow Herb(508), Green Herb(511),
+        // White Herb(510), Carrot Juice(520), Butterfly Wing(602), Fly Wing(601)
+        itemIds: [501, 502, 503, 505, 506, 507, 508, 511, 510, 520, 602, 601]
     },
     2: {
         name: 'Weapon Dealer',
-        itemIds: [3001, 3002, 3003, 3004, 3005, 3006, 3007, 3008, 3009, 3010, 3011, 3012, 3013, 3014, 3015, 3016, 3017, 3018]
+        // Knife(1201), Cutter(1202), Main Gauche(1204), Sword(1101), Falchion(1109),
+        // Bow(1701), Rod(1601), Mace(1504), Spear(1401), Guisarme(1404),
+        // Club(1301), Javelin(1501), Arc Wand(1604), Guitar(1907), Rope(1950)
+        itemIds: [1201, 1202, 1204, 1101, 1109, 1701, 1601, 1504, 1401, 1404, 1301, 1501, 1604, 1907, 1950]
     },
     3: {
         name: 'Armor Dealer',
-        itemIds: [4001, 4002, 4003, 4004, 4005, 4006, 4007, 4008, 4009, 4010, 4011, 4012, 4013, 4014]
+        // Cotton Shirt(2301), Leather Jacket(2312), Chain Mail(2314), Guard(2101),
+        // Hat(2220), Sandals(2401), Mantle(2321), Ribbon(2208), Kitty Band(2213),
+        // Skull Ring(2609), Goggles(2298), Gangster Mask(2262), Angry Snarl(5113), Biretta(2207)
+        itemIds: [2301, 2312, 2314, 2101, 2220, 2401, 2321, 2208, 2213, 2609, 2298, 2262, 5113, 2207]
     },
     4: {
         name: 'General Store',
-        itemIds: [1001, 1002, 1003, 1004, 1005, 4001, 4002, 4003]
+        // Red Potion(501), Orange Potion(502), Yellow Potion(503), Blue Potion(505),
+        // Green Potion(506), Cotton Shirt(2301), Leather Jacket(2312), Chain Mail(2314)
+        itemIds: [501, 502, 503, 505, 506, 2301, 2312, 2314]
     }
 };
 
@@ -1282,54 +1476,50 @@ function getPlayerMaxWeight(player) {
 async function loadItemDefinitions() {
     try {
         const result = await pool.query('SELECT * FROM items');
+        itemDefinitions.clear();
+        itemNameToId.clear();
         for (const row of result.rows) {
             itemDefinitions.set(row.item_id, row);
+            itemNameToId.set(row.name, row.item_id);
         }
-        logger.info(`[ITEMS] Loaded ${itemDefinitions.size} item definitions from database`);
+        logger.info(`[ITEMS] Loaded ${itemDefinitions.size} item definitions from database (${itemNameToId.size} name lookups)`);
     } catch (err) {
         logger.error(`[ITEMS] Failed to load item definitions: ${err.message}`);
     }
 }
 
-// Roll enemy drops using pre-resolved itemIds from RO_ITEM_NAME_TO_ID mapping
+// Roll enemy drops — itemIds resolved from itemNameToId (built from DB-loaded itemDefinitions)
 function rollEnemyDrops(enemy) {
     const template = ENEMY_TEMPLATES[enemy.templateId];
     if (!template || !template.drops) return [];
-    
+
     const droppedItems = [];
     for (const drop of template.drops) {
         if (Math.random() < drop.chance) {
             const qty = drop.minQty && drop.maxQty
                 ? drop.minQty + Math.floor(Math.random() * (drop.maxQty - drop.minQty + 1))
                 : 1;
-            
-            // itemId is pre-resolved in the adapter (from RO_ITEM_NAME_TO_ID or existing items)
-            const itemId = drop.itemId;
+
+            // itemId resolved from itemNameToId (populated by resolveDropItemIds after DB load)
+            const itemId = drop.itemId || (drop.itemName ? itemNameToId.get(drop.itemName) : null);
             const itemDef = itemId ? itemDefinitions.get(itemId) : null;
             const itemName = drop.itemName || (itemDef ? itemDef.name : null);
-            
+
             if (itemId) {
                 droppedItems.push({
                     itemId: itemId,
                     quantity: qty,
                     itemName: itemName || `Item#${itemId}`
                 });
-            } else if (itemName) {
-                // Unresolved RO item (not in DB) — still notify client
-                droppedItems.push({
-                    itemId: null,
-                    quantity: qty,
-                    itemName: itemName
-                });
             }
         }
     }
-    
+
     // Also roll MVP drops if this is an MVP monster
     if (template.mvpDrops && template.mvpDrops.length > 0 && enemy.monsterClass === 'mvp') {
         for (const drop of template.mvpDrops) {
             if (Math.random() < drop.chance) {
-                const itemId = drop.itemId;
+                const itemId = drop.itemId || (drop.itemName ? itemNameToId.get(drop.itemName) : null);
                 const itemDef = itemId ? itemDefinitions.get(itemId) : null;
                 droppedItems.push({
                     itemId: itemId,
@@ -1340,7 +1530,7 @@ function rollEnemyDrops(enemy) {
             }
         }
     }
-    
+
     return droppedItems;
 }
 
@@ -1402,7 +1592,8 @@ async function getPlayerInventory(characterId) {
                     i.atk, i.def, i.matk, i.mdef,
                     i.str_bonus, i.agi_bonus, i.vit_bonus, i.int_bonus, i.dex_bonus, i.luk_bonus,
                     i.max_hp_bonus, i.max_sp_bonus, i.required_level, i.stackable, i.icon,
-                    i.weapon_type, i.aspd_modifier, i.weapon_range
+                    i.weapon_type, i.aspd_modifier, i.weapon_range,
+                    i.buy_price, i.sell_price
              FROM character_inventory ci
              JOIN items i ON ci.item_id = i.item_id
              WHERE ci.character_id = $1
@@ -1677,7 +1868,7 @@ io.on('connection', (socket) => {
         let weaponResult = null;
         try {
             weaponResult = await pool.query(
-                `SELECT i.atk, i.weapon_type, i.aspd_modifier, i.weapon_range FROM character_inventory ci
+                `SELECT i.atk, i.weapon_type, i.aspd_modifier, i.weapon_range, i.weapon_level FROM character_inventory ci
                  JOIN items i ON ci.item_id = i.item_id
                  WHERE ci.character_id = $1 AND ci.is_equipped = true AND i.equip_slot = 'weapon'
                  LIMIT 1`,
@@ -1686,7 +1877,7 @@ io.on('connection', (socket) => {
             if (weaponResult.rows.length > 0) {
                 const w = weaponResult.rows[0];
                 baseStats.weaponATK = w.atk || 0;
-                weaponRange = w.weapon_range || COMBAT.MELEE_RANGE;
+                weaponRange = w.weapon_range ? w.weapon_range * COMBAT.MELEE_RANGE : COMBAT.MELEE_RANGE; // Convert RO cells to UE units (1 cell = 150 UE units)
                 weaponAspdMod = w.aspd_modifier || 0;
                 logger.info(`[ITEMS] Loaded equipped weapon: ATK=${baseStats.weaponATK}, range=${weaponRange}, aspdMod=${weaponAspdMod}, type=${w.weapon_type} for char ${characterId}`);
             }
@@ -1694,10 +1885,12 @@ io.on('connection', (socket) => {
             logger.debug(`[ITEMS] No equipped weapon found for char ${characterId}`);
         }
 
-        // Track weapon type for passive mastery skills (reuse weapon query result above)
+        // Track weapon type + level for passive mastery skills and damage variance
         let weaponType = null;
+        let weaponLevel = 1;
         if (weaponResult && weaponResult.rows.length > 0) {
             weaponType = weaponResult.rows[0].weapon_type;
+            weaponLevel = weaponResult.rows[0].weapon_level || 1;
         }
 
         // Load learned skills for passive bonuses and skill usage
@@ -1789,7 +1982,7 @@ io.on('connection', (socket) => {
             skillCooldowns: {},
             // RO damage system: weapon/armor properties
             weaponElement: 'neutral',  // Default; updated when weapon has element
-            weaponLevel: 1,            // Default; updated from item data
+            weaponLevel,               // From equipped weapon (default 1)
             armorElement: { type: 'neutral', level: 1 }, // Default; updated from armor
             cardMods: null,            // Card % bonuses (race/element/size)
             // Position tracking for enemy AI aggro detection (updated by player:position)
@@ -1933,8 +2126,13 @@ io.on('connection', (socket) => {
             // If no lastPos yet, don't interrupt on the first position update
         }
 
-        // Track last position for movement detection
+        // Track last position and movement time for regen blocking
         if (player) {
+            // Detect actual movement (not idle jitter) for HP regen blocking
+            if (player.lastX !== undefined) {
+                const moveDist = Math.sqrt((x - player.lastX) ** 2 + (y - player.lastY) ** 2);
+                if (moveDist > 5) player.lastMoveTime = Date.now();
+            }
             player.lastX = x;
             player.lastY = y;
             player.lastZ = z;
@@ -3000,6 +3198,15 @@ io.on('connection', (socket) => {
                 castTime: levelData ? levelData.castTime : 0,
                 cooldown: levelData ? levelData.cooldown : 0,
                 effectValue: levelData ? levelData.effectValue : 0,
+                allLevels: skill.levels.map(l => ({
+                    level: l.level,
+                    spCost: l.spCost,
+                    castTime: l.castTime || 0,
+                    cooldown: l.cooldown || 0,
+                    effectValue: l.effectValue || 0,
+                    duration: l.duration || 0,
+                    afterCastDelay: l.afterCastDelay || 0
+                })),
                 canLearn: canLearnSkill(skill.id, learnedSkills, jobClass, player.skillPoints || 0).ok
             });
         }
@@ -3088,6 +3295,12 @@ io.on('connection', (socket) => {
 
             // Send updated full skill data
             socket.emit('skill:refresh', { skillPoints: player.skillPoints });
+
+            // Re-send player:stats so passive skill bonuses (Sword Mastery ATK, etc.) update in UI
+            const effectiveStats = getEffectiveStats(player);
+            const derived = calculateDerivedStats(effectiveStats);
+            const finalAspd = Math.min(COMBAT.ASPD_CAP, derived.aspd + (player.weaponAspdMod || 0));
+            socket.emit('player:stats', buildFullStatsPayload(characterId, player, effectiveStats, derived, finalAspd));
         } catch (err) {
             logger.error(`[SKILLS] Failed to save skill ${skillId} for char ${characterId}: ${err.message}`);
             socket.emit('skill:error', { message: 'Failed to learn skill' });
@@ -3433,6 +3646,12 @@ io.on('connection', (socket) => {
             return;
         }
 
+        // Using an offensive skill breaks hiding (except hiding toggle itself)
+        if (skill.name !== 'hiding' && hasBuff(player, 'hiding')) {
+            removeBuff(player, 'hiding');
+            broadcastToZone(player.zone || 'prontera_south', 'skill:buff_removed', { targetId: characterId, isEnemy: false, buffName: 'hiding', reason: 'attack' });
+        }
+
         // Check if player has learned this skill (use in-memory first, DB fallback)
         let learnedLevel = (player.learnedSkills || {})[skillId] || 0;
         if (learnedLevel <= 0) {
@@ -3586,6 +3805,7 @@ io.on('connection', (socket) => {
             const healed = Math.min(effectVal, player.maxHealth - player.health);
             player.health = Math.min(player.maxHealth, player.health + effectVal);
             applySkillDelays(characterId, player, skillId, levelData, socket);
+            checkAutoBerserk(player, characterId, player.zone);
             logger.info(`[SKILLS] ${player.characterName} healed ${healed} HP (${player.health}/${player.maxHealth})`);
 
             const attackerPos = await getPlayerPosition(characterId);
@@ -3715,6 +3935,15 @@ io.on('connection', (socket) => {
             // Enemy health update
             if (isEnemy) {
                 broadcastToZone(bashZone, 'enemy:health_update', { enemyId: targetId, health: target.health, maxHealth: target.maxHealth, inCombat: true });
+            }
+
+            // Fatal Blow passive: stun chance on Bash
+            const fbChance = getEffectiveStats(player).fatalBlowChance || 0;
+            if (fbChance > 0 && isEnemy && target.health > 0) {
+                const stunResult = applyStatusEffect(player, target, 'stun', fbChance);
+                if (stunResult && stunResult.applied) {
+                    broadcastToZone(bashZone, 'status:applied', { targetId, isEnemy: true, statusType: 'stun', duration: stunResult.duration });
+                }
             }
 
             // Check death
@@ -5034,7 +5263,921 @@ io.on('connection', (socket) => {
             return;
         }
 
-        // --- PASSIVE SKILLS (Sword Mastery 100, 2H Sword Mastery 101, HP Recovery 102, SP Recovery 204) ---
+        // --- HEAL (ID 400) — Acolyte heal/damage-undead ---
+        if (skill.name === 'heal') {
+            const healAmount = calculateHealAmount(player, learnedLevel);
+
+            if (targetId && isEnemy) {
+                // Heal-damages-Undead
+                const enemy = enemies.get(targetId);
+                if (!enemy || enemy.isDead) { socket.emit('skill:error', { message: 'Target not found' }); return; }
+                const enemyEle = (enemy.element && enemy.element.type) || 'neutral';
+                if (enemyEle !== 'undead') { socket.emit('skill:error', { message: 'Cannot heal enemies' }); return; }
+
+                const attackerPos = await getPlayerPosition(characterId);
+                if (!attackerPos) return;
+                const targetPos = { x: enemy.x, y: enemy.y, z: enemy.z };
+                const dx = attackerPos.x - targetPos.x; const dy = attackerPos.y - targetPos.y;
+                const dist = Math.sqrt(dx*dx + dy*dy);
+                if (dist > (skill.range || 450) + COMBAT.RANGE_TOLERANCE) {
+                    socket.emit('combat:out_of_range', { targetId, isEnemy: true, targetX: targetPos.x, targetY: targetPos.y, targetZ: targetPos.z, distance: dist, requiredRange: skill.range || 450 });
+                    return;
+                }
+
+                player.mana = Math.max(0, player.mana - spCost);
+                applySkillDelays(characterId, player, skillId, levelData, socket);
+
+                const holyVsUndead = getElementModifier('holy', enemyEle, (enemy.element && enemy.element.level) || 1);
+                const holyDamage = Math.max(1, Math.floor(Math.floor(healAmount / 2) * holyVsUndead / 100));
+
+                enemy.health = Math.max(0, enemy.health - holyDamage);
+                enemy.lastDamageTime = Date.now();
+                if (typeof setEnemyAggro === 'function') setEnemyAggro(enemy, characterId, 'skill');
+
+                const healZone = player.zone || 'prontera_south';
+                broadcastToZone(healZone, 'skill:effect_damage', {
+                    attackerId: characterId, attackerName: player.characterName,
+                    targetId, targetName: enemy.name, isEnemy: true,
+                    skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: 'holy',
+                    damage: holyDamage, isCritical: false, isMiss: false, hitType: 'magical',
+                    targetHealth: enemy.health, targetMaxHealth: enemy.maxHealth,
+                    attackerX: attackerPos.x, attackerY: attackerPos.y, attackerZ: attackerPos.z,
+                    targetX: targetPos.x, targetY: targetPos.y, targetZ: targetPos.z,
+                    timestamp: Date.now()
+                });
+                broadcastToZone(healZone, 'enemy:health_update', { enemyId: targetId, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: true });
+                if (enemy.health <= 0) await processEnemyDeathFromSkill(enemy, player, characterId, io);
+            } else {
+                // Heal self or friendly player
+                const healTarget = (targetId && !isEnemy) ? connectedPlayers.get(targetId) : player;
+                const healTargetId = targetId || characterId;
+                if (!healTarget || healTarget.isDead) { socket.emit('skill:error', { message: 'Target not found' }); return; }
+
+                if (targetId && targetId !== characterId) {
+                    const ap = await getPlayerPosition(characterId); const tp = await getPlayerPosition(targetId);
+                    if (!ap || !tp) return;
+                    const d = Math.sqrt((ap.x-tp.x)**2 + (ap.y-tp.y)**2);
+                    if (d > (skill.range || 450) + COMBAT.RANGE_TOLERANCE) {
+                        socket.emit('combat:out_of_range', { targetId, isEnemy: false, targetX: tp.x, targetY: tp.y, targetZ: tp.z, distance: d, requiredRange: skill.range || 450 });
+                        return;
+                    }
+                }
+
+                player.mana = Math.max(0, player.mana - spCost);
+                applySkillDelays(characterId, player, skillId, levelData, socket);
+
+                const oldHP = healTarget.health;
+                healTarget.health = Math.min(healTarget.maxHealth, healTarget.health + healAmount);
+                const actualHeal = healTarget.health - oldHP;
+                // Auto Berserk: deactivate ATK bonus if healed above 25%
+                checkAutoBerserk(healTarget, healTargetId, player.zone);
+
+                const healZone = player.zone || 'prontera_south';
+                const targetPos = targetId ? await getPlayerPosition(targetId) : await getPlayerPosition(characterId);
+                const attackerPos = await getPlayerPosition(characterId);
+
+                broadcastToZone(healZone, 'skill:effect_damage', {
+                    attackerId: characterId, attackerName: player.characterName,
+                    targetId: healTargetId, targetName: healTarget.characterName || player.characterName, isEnemy: false,
+                    skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: 'holy',
+                    damage: 0, healAmount: actualHeal, isCritical: false, isMiss: false, hitType: 'heal',
+                    targetHealth: healTarget.health, targetMaxHealth: healTarget.maxHealth,
+                    attackerX: attackerPos ? attackerPos.x : 0, attackerY: attackerPos ? attackerPos.y : 0, attackerZ: attackerPos ? attackerPos.z : 0,
+                    targetX: targetPos ? targetPos.x : 0, targetY: targetPos ? targetPos.y : 0, targetZ: targetPos ? targetPos.z : 0,
+                    timestamp: Date.now()
+                });
+
+                if (targetId && targetId !== characterId) {
+                    const targetSock = io.sockets.sockets.get(healTarget.socketId);
+                    if (targetSock) targetSock.emit('combat:health_update', { characterId: healTargetId, health: healTarget.health, maxHealth: healTarget.maxHealth, mana: healTarget.mana, maxMana: healTarget.maxMana });
+                }
+            }
+
+            socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
+            socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
+            return;
+        }
+
+        // --- BLESSING (ID 402) — Acolyte buff: +STR/DEX/INT ---
+        if (skill.name === 'blessing') {
+            const buffTarget = (targetId && !isEnemy) ? connectedPlayers.get(targetId) : player;
+            const buffTargetId = targetId || characterId;
+            if (!buffTarget || buffTarget.isDead) { socket.emit('skill:error', { message: 'Target not found' }); return; }
+            if (targetId && targetId !== characterId) {
+                const ap = await getPlayerPosition(characterId); const tp = await getPlayerPosition(targetId);
+                if (!ap || !tp) return;
+                const d = Math.sqrt((ap.x-tp.x)**2 + (ap.y-tp.y)**2);
+                if (d > (skill.range || 450) + COMBAT.RANGE_TOLERANCE) { socket.emit('combat:out_of_range', { targetId, isEnemy: false, targetX: tp.x, targetY: tp.y, targetZ: tp.z, distance: d, requiredRange: skill.range }); return; }
+            }
+            player.mana = Math.max(0, player.mana - spCost);
+            applySkillDelays(characterId, player, skillId, levelData, socket);
+
+            applyBuff(buffTarget, {
+                skillId, name: 'blessing', casterId: characterId, casterName: player.characterName,
+                strBonus: effectVal, dexBonus: effectVal, intBonus: effectVal,
+                duration: duration || 120000
+            });
+
+            const bZone = player.zone || 'prontera_south';
+            broadcastToZone(bZone, 'skill:buff_applied', {
+                targetId: buffTargetId, targetName: buffTarget.characterName, isEnemy: false,
+                casterId: characterId, casterName: player.characterName,
+                skillId, buffName: 'Blessing', duration: duration || 120000,
+                effects: { strBonus: effectVal, dexBonus: effectVal, intBonus: effectVal }
+            });
+
+            const effStats = getEffectiveStats(buffTarget);
+            const newDerived = roDerivedStats(effStats);
+            const bSock = io.sockets.sockets.get(buffTarget.socketId);
+            if (bSock) bSock.emit('player:stats', buildFullStatsPayload(buffTargetId, buffTarget, effStats, newDerived, Math.min(COMBAT.ASPD_CAP, newDerived.aspd + (buffTarget.weaponAspdMod || 0))));
+
+            socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
+            socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
+            return;
+        }
+
+        // --- INCREASE AGI (ID 403) — Acolyte buff: +AGI ---
+        if (skill.name === 'increase_agi') {
+            const buffTarget = (targetId && !isEnemy) ? connectedPlayers.get(targetId) : player;
+            const buffTargetId = targetId || characterId;
+            if (!buffTarget || buffTarget.isDead) { socket.emit('skill:error', { message: 'Target not found' }); return; }
+            if (targetId && targetId !== characterId) {
+                const ap = await getPlayerPosition(characterId); const tp = await getPlayerPosition(targetId);
+                if (!ap || !tp) return;
+                const d = Math.sqrt((ap.x-tp.x)**2 + (ap.y-tp.y)**2);
+                if (d > (skill.range || 450) + COMBAT.RANGE_TOLERANCE) { socket.emit('combat:out_of_range', { targetId, isEnemy: false, targetX: tp.x, targetY: tp.y, targetZ: tp.z, distance: d, requiredRange: skill.range }); return; }
+            }
+            player.mana = Math.max(0, player.mana - spCost);
+            applySkillDelays(characterId, player, skillId, levelData, socket);
+
+            // Remove Decrease AGI if present (mutually exclusive)
+            if (hasBuff(buffTarget, 'decrease_agi')) {
+                removeBuff(buffTarget, 'decrease_agi');
+                broadcastToZone(player.zone || 'prontera_south', 'skill:buff_removed', { targetId: buffTargetId, isEnemy: false, buffName: 'decrease_agi', reason: 'overwrite' });
+            }
+
+            applyBuff(buffTarget, {
+                skillId, name: 'increase_agi', casterId: characterId, casterName: player.characterName,
+                agiBonus: effectVal, moveSpeedBonus: 25,
+                duration: duration || 120000
+            });
+            broadcastToZone(player.zone || 'prontera_south', 'skill:buff_applied', { targetId: buffTargetId, targetName: buffTarget.characterName, isEnemy: false, casterId: characterId, casterName: player.characterName, skillId, buffName: 'Increase AGI', duration: duration || 120000, effects: { agiBonus: effectVal, moveSpeedBonus: 25 } });
+
+            socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
+            socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
+            return;
+        }
+
+        // --- DECREASE AGI (ID 404) — Debuff: -AGI on target ---
+        if (skill.name === 'decrease_agi') {
+            if (!targetId) { socket.emit('skill:error', { message: 'No target selected' }); return; }
+            let target, targetName = '';
+            if (isEnemy) {
+                target = enemies.get(targetId);
+                if (!target || target.isDead) { socket.emit('skill:error', { message: 'Target not found' }); return; }
+                targetName = target.name;
+            } else {
+                target = connectedPlayers.get(targetId);
+                if (!target || target.isDead) { socket.emit('skill:error', { message: 'Target not found' }); return; }
+                targetName = target.characterName;
+            }
+
+            const attackerPos = await getPlayerPosition(characterId);
+            if (!attackerPos) return;
+            const targetPos = isEnemy ? { x: target.x, y: target.y, z: target.z } : await getPlayerPosition(targetId);
+            if (!targetPos) return;
+            const dx = attackerPos.x - targetPos.x; const dy = attackerPos.y - targetPos.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            if (dist > (skill.range || 450) + COMBAT.RANGE_TOLERANCE) {
+                socket.emit('combat:out_of_range', { targetId, isEnemy, targetX: targetPos.x, targetY: targetPos.y, targetZ: targetPos.z, distance: dist, requiredRange: skill.range });
+                return;
+            }
+
+            player.mana = Math.max(0, player.mana - spCost);
+            applySkillDelays(characterId, player, skillId, levelData, socket);
+
+            // Remove Increase AGI if present
+            if (hasBuff(target, 'increase_agi')) {
+                removeBuff(target, 'increase_agi');
+                broadcastToZone(player.zone || 'prontera_south', 'skill:buff_removed', { targetId, isEnemy, buffName: 'increase_agi', reason: 'overwrite' });
+            }
+
+            applyBuff(target, {
+                skillId, name: 'decrease_agi', casterId: characterId, casterName: player.characterName,
+                agiReduction: effectVal, moveSpeedReduction: 25,
+                duration: duration || 120000
+            });
+            broadcastToZone(player.zone || 'prontera_south', 'skill:buff_applied', { targetId, targetName, isEnemy, casterId: characterId, casterName: player.characterName, skillId, buffName: 'Decrease AGI', duration: duration || 120000, effects: { agiReduction: effectVal, moveSpeedReduction: 25 } });
+
+            socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
+            socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
+            return;
+        }
+
+        // --- CURE (ID 405) — Remove status effects ---
+        if (skill.name === 'cure') {
+            const cureTarget = (targetId && !isEnemy) ? connectedPlayers.get(targetId) : player;
+            const cureTargetId = targetId || characterId;
+            if (!cureTarget) { socket.emit('skill:error', { message: 'Target not found' }); return; }
+            if (targetId && targetId !== characterId) {
+                const ap = await getPlayerPosition(characterId); const tp = await getPlayerPosition(targetId);
+                if (!ap || !tp) return;
+                const d = Math.sqrt((ap.x-tp.x)**2 + (ap.y-tp.y)**2);
+                if (d > (skill.range || 450) + COMBAT.RANGE_TOLERANCE) { socket.emit('combat:out_of_range', { targetId, isEnemy: false, targetX: tp.x, targetY: tp.y, targetZ: tp.z, distance: d, requiredRange: skill.range }); return; }
+            }
+            player.mana = Math.max(0, player.mana - spCost);
+            applySkillDelays(characterId, player, skillId, levelData, socket);
+
+            const removed = cleanseStatusEffects(cureTarget, ['silence', 'blind', 'confusion']);
+            const cureZone = player.zone || 'prontera_south';
+            for (const type of removed) {
+                broadcastToZone(cureZone, 'status:removed', { targetId: cureTargetId, isEnemy: false, statusType: type, reason: 'cure' });
+                broadcastToZone(cureZone, 'skill:buff_removed', { targetId: cureTargetId, isEnemy: false, buffName: type, reason: 'cure' });
+            }
+            socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
+            socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
+            return;
+        }
+
+        // --- ANGELUS (ID 406) — Self buff +DEF% ---
+        if (skill.name === 'angelus') {
+            player.mana = Math.max(0, player.mana - spCost);
+            applySkillDelays(characterId, player, skillId, levelData, socket);
+            applyBuff(player, { skillId, name: 'angelus', casterId: characterId, casterName: player.characterName, defPercent: effectVal, duration: duration || 120000 });
+            broadcastToZone(player.zone || 'prontera_south', 'skill:buff_applied', { targetId: characterId, targetName: player.characterName, isEnemy: false, casterId: characterId, casterName: player.characterName, skillId, buffName: 'Angelus', duration: duration || 120000, effects: { defPercent: effectVal } });
+            socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
+            socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
+            return;
+        }
+
+        // --- SIGNUM CRUCIS (ID 407) — AoE debuff vs Undead/Demon ---
+        if (skill.name === 'signum_crucis') {
+            player.mana = Math.max(0, player.mana - spCost);
+            applySkillDelays(characterId, player, skillId, levelData, socket);
+            const scZone = player.zone || 'prontera_south';
+            const attackerPos = await getPlayerPosition(characterId);
+            if (!attackerPos) return;
+            for (const [eid, enemy] of enemies.entries()) {
+                if (enemy.isDead || enemy.zone !== scZone) continue;
+                const race = enemy.race || 'formless';
+                if (race !== 'undead' && race !== 'demon') continue;
+                const dx = attackerPos.x - enemy.x; const dy = attackerPos.y - enemy.y;
+                if (Math.sqrt(dx*dx + dy*dy) > 500) continue;
+                applyBuff(enemy, { skillId, name: 'signum_crucis', casterId: characterId, casterName: player.characterName, defReduction: effectVal, duration: 30000 });
+                broadcastToZone(scZone, 'skill:buff_applied', { targetId: eid, targetName: enemy.name, isEnemy: true, casterId: characterId, casterName: player.characterName, skillId, buffName: 'Signum Crucis', duration: 30000, effects: { defReduction: effectVal } });
+            }
+            socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
+            socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
+            return;
+        }
+
+        // --- RUWACH (ID 408) — Reveal hidden + holy damage (like Sight but with damage) ---
+        if (skill.name === 'ruwach') {
+            player.mana = Math.max(0, player.mana - spCost);
+            applySkillDelays(characterId, player, skillId, levelData, socket);
+
+            const ruwachDuration = duration || 10000;
+            applyBuff(player, {
+                skillId, name: 'ruwach', casterId: characterId, casterName: player.characterName,
+                duration: ruwachDuration
+            });
+
+            const ruwachZone = player.zone || 'prontera_south';
+            broadcastToZone(ruwachZone, 'skill:buff_applied', {
+                targetId: characterId, targetName: player.characterName, isEnemy: false,
+                casterId: characterId, casterName: player.characterName,
+                skillId, buffName: 'Ruwach', duration: ruwachDuration,
+                effects: { revealHidden: true, aoeRadius: 500 }
+            });
+
+            socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
+            socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
+            return;
+        }
+
+        // --- TELEPORT (ID 409) — Random teleport or save point ---
+        if (skill.name === 'teleport') {
+            player.mana = Math.max(0, player.mana - spCost);
+            applySkillDelays(characterId, player, skillId, levelData, socket);
+
+            if (learnedLevel === 1) {
+                const zoneData = ZONE_REGISTRY[player.zone];
+                const spawnX = (zoneData && zoneData.spawnX) || 0;
+                const spawnY = (zoneData && zoneData.spawnY) || 0;
+                const newX = spawnX + (Math.random() - 0.5) * 2000;
+                const newY = spawnY + (Math.random() - 0.5) * 2000;
+                socket.emit('player:teleport', { x: newX, y: newY, z: player.z || 580 });
+            } else {
+                try {
+                    const saveResult = await pool.query('SELECT save_zone, save_x, save_y, save_z FROM characters WHERE id = $1', [characterId]);
+                    if (saveResult.rows.length > 0) {
+                        const save = saveResult.rows[0];
+                        if (save.save_zone && save.save_zone !== player.zone) {
+                            const destZone = ZONE_REGISTRY[save.save_zone];
+                            if (destZone) {
+                                socket.emit('zone:change', { zoneName: save.save_zone, levelName: destZone.levelName, x: save.save_x || 0, y: save.save_y || 0, z: save.save_z || 580 });
+                            }
+                        } else {
+                            socket.emit('player:teleport', { x: save.save_x || 0, y: save.save_y || 0, z: save.save_z || 580 });
+                        }
+                    }
+                } catch (err) {
+                    logger.error(`[TELEPORT] Error reading save point: ${err.message}`);
+                }
+            }
+            socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
+            return;
+        }
+
+        // --- WARP PORTAL (ID 410) — Ground portal to save point ---
+        if (skill.name === 'warp_portal') {
+            if (!hasGroundPos) { socket.emit('skill:error', { message: 'Select ground position' }); return; }
+            player.mana = Math.max(0, player.mana - spCost);
+            applySkillDelays(characterId, player, skillId, levelData, socket);
+
+            let save = {};
+            try {
+                const saveResult = await pool.query('SELECT save_zone, save_x, save_y, save_z FROM characters WHERE id = $1', [characterId]);
+                save = saveResult.rows[0] || {};
+            } catch (err) {
+                logger.error(`[WARP PORTAL] Error reading save point: ${err.message}`);
+            }
+
+            const portalId = createGroundEffect({
+                type: 'warp_portal', casterId: characterId, casterName: player.characterName,
+                x: groundX, y: groundY, z: groundZ || 0,
+                radius: 100, duration: (duration || 10000),
+                zone: player.zone, skillId,
+                destZone: save.save_zone || player.zone,
+                destX: save.save_x || 0, destY: save.save_y || 0, destZ: save.save_z || 580
+            });
+
+            const wpZone = player.zone || 'prontera_south';
+            broadcastToZone(wpZone, 'skill:ground_effect_spawned', {
+                effectId: portalId, type: 'warp_portal', skillId,
+                casterId: characterId, casterName: player.characterName,
+                x: groundX, y: groundY, z: groundZ || 0,
+                radius: 100, duration: (duration || 10000)
+            });
+            socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
+            return;
+        }
+
+        // --- PNEUMA (ID 411) — Ground ranged block ---
+        if (skill.name === 'pneuma') {
+            if (!hasGroundPos) { socket.emit('skill:error', { message: 'Select ground position' }); return; }
+            player.mana = Math.max(0, player.mana - spCost);
+            applySkillDelays(characterId, player, skillId, levelData, socket);
+
+            const pneumaId = createGroundEffect({
+                type: 'pneuma', casterId: characterId, casterName: player.characterName,
+                x: groundX, y: groundY, z: groundZ || 0,
+                radius: 100, duration: 10000,
+                zone: player.zone, skillId
+            });
+
+            broadcastToZone(player.zone || 'prontera_south', 'skill:ground_effect_spawned', {
+                effectId: pneumaId, type: 'pneuma', skillId,
+                casterId: characterId, casterName: player.characterName,
+                x: groundX, y: groundY, z: groundZ || 0,
+                radius: 100, duration: 10000
+            });
+            socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
+            socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
+            return;
+        }
+
+        // --- AQUA BENEDICTA (ID 412) — Create Holy Water (simplified) ---
+        if (skill.name === 'aqua_benedicta') {
+            player.mana = Math.max(0, player.mana - spCost);
+            applySkillDelays(characterId, player, skillId, levelData, socket);
+            socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
+            socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
+            socket.emit('chat:receive', { type: 'chat:receive', channel: 'SYSTEM', senderId: 0, senderName: 'SYSTEM', message: 'Created 1 Holy Water.', timestamp: Date.now() });
+            return;
+        }
+
+        // --- DOUBLE STRAFE (ID 303) — Two-hit ranged attack (bow required) ---
+        if (skill.name === 'double_strafe') {
+            if (!targetId || !isEnemy) { socket.emit('skill:error', { message: 'No enemy target selected' }); return; }
+            if (player.weaponType !== 'bow') { socket.emit('skill:error', { message: 'Requires a bow' }); return; }
+
+            const enemy = enemies.get(targetId);
+            if (!enemy || enemy.isDead) { socket.emit('skill:error', { message: 'Target not found' }); return; }
+
+            const attackerPos = await getPlayerPosition(characterId);
+            if (!attackerPos) return;
+            const targetPos = { x: enemy.x, y: enemy.y, z: enemy.z };
+            const dx = attackerPos.x - targetPos.x; const dy = attackerPos.y - targetPos.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            const skillRange = (skill.range || 800) + (getEffectiveStats(player).bonusRange || 0);
+            if (dist > skillRange + COMBAT.RANGE_TOLERANCE) {
+                socket.emit('combat:out_of_range', { targetId, isEnemy: true, targetX: targetPos.x, targetY: targetPos.y, targetZ: targetPos.z, distance: dist, requiredRange: skillRange });
+                return;
+            }
+
+            player.mana = Math.max(0, player.mana - spCost);
+            applySkillDelays(characterId, player, skillId, levelData, socket);
+
+            const atkBuffMods = getBuffStatModifiers(player);
+            const defBuffMods = getCombinedModifiers(enemy);
+            const dsZone = player.zone || 'prontera_south';
+
+            // Two hits with 200ms stagger
+            for (let hit = 0; hit < 2; hit++) {
+                setTimeout(() => {
+                    if (enemy.isDead) return;
+                    const result = calculateSkillDamage(
+                        getEffectiveStats(player), enemy.stats, enemy.hardDef || 0,
+                        effectVal, atkBuffMods, defBuffMods,
+                        getEnemyTargetInfo(enemy), getAttackerInfo(player),
+                        { skillElement: null }
+                    );
+
+                    if (!result.isMiss) {
+                        enemy.health = Math.max(0, enemy.health - result.damage);
+                        enemy.lastDamageTime = Date.now();
+                        if (typeof setEnemyAggro === 'function') setEnemyAggro(enemy, characterId, 'skill');
+                    }
+
+                    broadcastToZone(dsZone, 'skill:effect_damage', {
+                        attackerId: characterId, attackerName: player.characterName,
+                        targetId, targetName: enemy.name, isEnemy: true,
+                        skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: result.element || 'neutral',
+                        damage: result.isMiss ? 0 : result.damage, isCritical: result.isCritical, isMiss: result.isMiss, hitType: result.hitType,
+                        targetHealth: enemy.health, targetMaxHealth: enemy.maxHealth,
+                        hitNumber: hit + 1, totalHits: 2,
+                        attackerX: attackerPos.x, attackerY: attackerPos.y, attackerZ: attackerPos.z,
+                        targetX: targetPos.x, targetY: targetPos.y, targetZ: targetPos.z,
+                        timestamp: Date.now()
+                    });
+                    broadcastToZone(dsZone, 'enemy:health_update', { enemyId: targetId, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: true });
+
+                    if (enemy.health <= 0) processEnemyDeathFromSkill(enemy, player, characterId, io);
+                }, hit * 200);
+            }
+
+            socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
+            socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
+            return;
+        }
+
+        // --- ARROW SHOWER (ID 304) — Ground AoE ranged attack ---
+        if (skill.name === 'arrow_shower') {
+            if (player.weaponType !== 'bow') { socket.emit('skill:error', { message: 'Requires a bow' }); return; }
+            if (!hasGroundPos) { socket.emit('skill:error', { message: 'Select ground position' }); return; }
+
+            player.mana = Math.max(0, player.mana - spCost);
+            applySkillDelays(characterId, player, skillId, levelData, socket);
+
+            const asZone = player.zone || 'prontera_south';
+            const attackerPos = await getPlayerPosition(characterId);
+            if (!attackerPos) return;
+            const aoeRadius = 400;
+
+            for (const [eid, enemy] of enemies.entries()) {
+                if (enemy.isDead || enemy.zone !== asZone) continue;
+                const dx = groundX - enemy.x; const dy = groundY - enemy.y;
+                if (Math.sqrt(dx*dx + dy*dy) > aoeRadius) continue;
+
+                const result = calculateSkillDamage(
+                    getEffectiveStats(player), enemy.stats, enemy.hardDef || 0,
+                    effectVal, getBuffStatModifiers(player), getCombinedModifiers(enemy),
+                    getEnemyTargetInfo(enemy), getAttackerInfo(player), { skillElement: null }
+                );
+
+                if (!result.isMiss) {
+                    enemy.health = Math.max(0, enemy.health - result.damage);
+                    enemy.lastDamageTime = Date.now();
+                    if (typeof setEnemyAggro === 'function') setEnemyAggro(enemy, characterId, 'skill');
+                }
+
+                broadcastToZone(asZone, 'skill:effect_damage', {
+                    attackerId: characterId, attackerName: player.characterName,
+                    targetId: eid, targetName: enemy.name, isEnemy: true,
+                    skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: result.element || 'neutral',
+                    damage: result.isMiss ? 0 : result.damage, isCritical: result.isCritical, isMiss: result.isMiss, hitType: result.hitType,
+                    targetHealth: enemy.health, targetMaxHealth: enemy.maxHealth,
+                    attackerX: attackerPos.x, attackerY: attackerPos.y, attackerZ: attackerPos.z,
+                    targetX: enemy.x, targetY: enemy.y, targetZ: enemy.z,
+                    groundX, groundY, groundZ: groundZ || 0,
+                    timestamp: Date.now()
+                });
+                broadcastToZone(asZone, 'enemy:health_update', { enemyId: eid, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: true });
+
+                if (enemy.health <= 0) await processEnemyDeathFromSkill(enemy, player, characterId, io);
+            }
+
+            socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
+            socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
+            return;
+        }
+
+        // --- IMPROVE CONCENTRATION (ID 302) — Self buff + reveal hidden ---
+        if (skill.name === 'improve_concentration') {
+            player.mana = Math.max(0, player.mana - spCost);
+            applySkillDelays(characterId, player, skillId, levelData, socket);
+
+            const stats = getEffectiveStats(player);
+            const agiBonus = Math.floor(effectVal * stats.agi / 100);
+            const dexBonus = Math.floor(effectVal * stats.dex / 100);
+
+            applyBuff(player, {
+                skillId, name: 'improve_concentration', casterId: characterId, casterName: player.characterName,
+                agiBonus, dexBonus,
+                duration: duration || 60000
+            });
+
+            const icZone = player.zone || 'prontera_south';
+            broadcastToZone(icZone, 'skill:buff_applied', {
+                targetId: characterId, targetName: player.characterName, isEnemy: false,
+                casterId: characterId, casterName: player.characterName,
+                skillId, buffName: 'Improve Concentration', duration: duration || 60000,
+                effects: { agiBonus, dexBonus, revealHidden: true }
+            });
+
+            socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
+            socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
+            return;
+        }
+
+        // --- ARROW REPEL (ID 306) — Ranged attack + knockback ---
+        if (skill.name === 'arrow_repel') {
+            if (!targetId || !isEnemy) { socket.emit('skill:error', { message: 'No enemy target selected' }); return; }
+            if (player.weaponType !== 'bow') { socket.emit('skill:error', { message: 'Requires a bow' }); return; }
+
+            const enemy = enemies.get(targetId);
+            if (!enemy || enemy.isDead) { socket.emit('skill:error', { message: 'Target not found' }); return; }
+
+            const attackerPos = await getPlayerPosition(characterId);
+            if (!attackerPos) return;
+            const targetPos = { x: enemy.x, y: enemy.y, z: enemy.z };
+            const dx = attackerPos.x - targetPos.x; const dy = attackerPos.y - targetPos.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            const arSkillRange = (skill.range || 800) + (getEffectiveStats(player).bonusRange || 0);
+            if (dist > arSkillRange + COMBAT.RANGE_TOLERANCE) {
+                socket.emit('combat:out_of_range', { targetId, isEnemy: true, targetX: targetPos.x, targetY: targetPos.y, targetZ: targetPos.z, distance: dist, requiredRange: arSkillRange });
+                return;
+            }
+
+            player.mana = Math.max(0, player.mana - spCost);
+            applySkillDelays(characterId, player, skillId, levelData, socket);
+
+            const result = calculateSkillDamage(
+                getEffectiveStats(player), enemy.stats, enemy.hardDef || 0,
+                effectVal, getBuffStatModifiers(player), getCombinedModifiers(enemy),
+                getEnemyTargetInfo(enemy), getAttackerInfo(player), { skillElement: null }
+            );
+
+            const arZone = player.zone || 'prontera_south';
+            if (!result.isMiss) {
+                enemy.health = Math.max(0, enemy.health - result.damage);
+                enemy.lastDamageTime = Date.now();
+                if (typeof setEnemyAggro === 'function') setEnemyAggro(enemy, characterId, 'skill');
+
+                // Knockback (boss immune)
+                if (!(enemy.modeFlags && enemy.modeFlags.knockbackImmune)) {
+                    const knockDist = 250;
+                    const kbDist = Math.max(1, dist);
+                    const kbDx = (enemy.x - attackerPos.x) / kbDist;
+                    const kbDy = (enemy.y - attackerPos.y) / kbDist;
+                    enemy.x += kbDx * knockDist;
+                    enemy.y += kbDy * knockDist;
+                    broadcastToZone(arZone, 'enemy:moved', { enemyId: targetId, x: enemy.x, y: enemy.y, z: enemy.z, isKnockback: true });
+                }
+            }
+
+            broadcastToZone(arZone, 'skill:effect_damage', {
+                attackerId: characterId, attackerName: player.characterName,
+                targetId, targetName: enemy.name, isEnemy: true,
+                skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: result.element || 'neutral',
+                damage: result.isMiss ? 0 : result.damage, isCritical: result.isCritical, isMiss: result.isMiss, hitType: result.hitType,
+                targetHealth: enemy.health, targetMaxHealth: enemy.maxHealth,
+                attackerX: attackerPos.x, attackerY: attackerPos.y, attackerZ: attackerPos.z,
+                targetX: enemy.x, targetY: enemy.y, targetZ: enemy.z,
+                timestamp: Date.now()
+            });
+            broadcastToZone(arZone, 'enemy:health_update', { enemyId: targetId, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: true });
+
+            if (enemy.health <= 0) await processEnemyDeathFromSkill(enemy, player, characterId, io);
+
+            socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
+            socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
+            return;
+        }
+
+        // --- STEAL (ID 502) — Steal from enemy ---
+        if (skill.name === 'steal') {
+            if (!targetId || !isEnemy) { socket.emit('skill:error', { message: 'No enemy target selected' }); return; }
+            const enemy = enemies.get(targetId);
+            if (!enemy || enemy.isDead) { socket.emit('skill:error', { message: 'Target not found' }); return; }
+
+            const attackerPos = await getPlayerPosition(characterId);
+            if (!attackerPos) return;
+            const dx = attackerPos.x - enemy.x; const dy = attackerPos.y - enemy.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            if (dist > (skill.range || 150) + COMBAT.RANGE_TOLERANCE) {
+                socket.emit('combat:out_of_range', { targetId, isEnemy: true, targetX: enemy.x, targetY: enemy.y, targetZ: enemy.z, distance: dist, requiredRange: skill.range });
+                return;
+            }
+
+            player.mana = Math.max(0, player.mana - spCost);
+            applySkillDelays(characterId, player, skillId, levelData, socket);
+
+            if (!enemy.stolenBy) enemy.stolenBy = new Set();
+            if (enemy.stolenBy.has(characterId)) {
+                socket.emit('chat:receive', { type: 'chat:receive', channel: 'SYSTEM', senderId: 0, senderName: 'SYSTEM', message: 'You already stole from this monster.', timestamp: Date.now() });
+            } else {
+                const stealChance = effectVal + (getEffectiveStats(player).dex / 2) - ((enemy.level || 1) / 3);
+                if (Math.random() * 100 < stealChance) {
+                    enemy.stolenBy.add(characterId);
+                    socket.emit('chat:receive', { type: 'chat:receive', channel: 'SYSTEM', senderId: 0, senderName: 'SYSTEM', message: `Stole an item from ${enemy.name}!`, timestamp: Date.now() });
+                } else {
+                    socket.emit('chat:receive', { type: 'chat:receive', channel: 'SYSTEM', senderId: 0, senderName: 'SYSTEM', message: 'Steal failed.', timestamp: Date.now() });
+                }
+            }
+            socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
+            socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
+            return;
+        }
+
+        // --- HIDING (ID 503) — Toggle hide ---
+        if (skill.name === 'hiding') {
+            if (hasBuff(player, 'hiding')) {
+                removeBuff(player, 'hiding');
+                broadcastToZone(player.zone || 'prontera_south', 'skill:buff_removed', { targetId: characterId, isEnemy: false, buffName: 'hiding', reason: 'cancel' });
+                socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost: 0, remainingMana: player.mana, maxMana: player.maxMana });
+                return;
+            }
+            player.mana = Math.max(0, player.mana - spCost);
+            applySkillDelays(characterId, player, skillId, levelData, socket);
+
+            applyBuff(player, {
+                skillId, name: 'hiding', casterId: characterId, casterName: player.characterName,
+                isHidden: true,
+                duration: duration || 30000
+            });
+            broadcastToZone(player.zone || 'prontera_south', 'skill:buff_applied', {
+                targetId: characterId, targetName: player.characterName, isEnemy: false,
+                casterId: characterId, casterName: player.characterName,
+                skillId, buffName: 'Hiding', duration: duration || 30000,
+                effects: { isHidden: true }
+            });
+            socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
+            socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
+            return;
+        }
+
+        // --- ENVENOM (ID 504) — Physical attack + poison ---
+        if (skill.name === 'envenom') {
+            if (!targetId || !isEnemy) { socket.emit('skill:error', { message: 'No enemy target selected' }); return; }
+            const ret = await executePhysicalSkillOnEnemy(player, characterId, socket, skill, skillId, learnedLevel, levelData, effectVal, spCost, targetId, { forceElement: 'poison' });
+            if (ret && !ret.result.isMiss && ret.enemy.health > 0) {
+                const poisonResult = applyStatusEffect(player, ret.enemy, 'poison', 15 + learnedLevel * 3);
+                if (poisonResult && poisonResult.applied) {
+                    broadcastToZone(ret.zone, 'status:applied', { targetId, isEnemy: true, statusType: 'poison', duration: poisonResult.duration });
+                }
+            }
+            return;
+        }
+
+        // --- DETOXIFY (ID 505) — Cure poison ---
+        if (skill.name === 'detoxify') {
+            const detoxTarget = (targetId && !isEnemy) ? connectedPlayers.get(targetId) : player;
+            const detoxTargetId = targetId || characterId;
+            if (!detoxTarget) { socket.emit('skill:error', { message: 'Target not found' }); return; }
+            if (targetId && targetId !== characterId) {
+                const ap = await getPlayerPosition(characterId); const tp = await getPlayerPosition(targetId);
+                if (!ap || !tp) return;
+                const d = Math.sqrt((ap.x-tp.x)**2 + (ap.y-tp.y)**2);
+                if (d > (skill.range || 450) + COMBAT.RANGE_TOLERANCE) { socket.emit('combat:out_of_range', { targetId, isEnemy: false, targetX: tp.x, targetY: tp.y, targetZ: tp.z, distance: d, requiredRange: skill.range }); return; }
+            }
+            player.mana = Math.max(0, player.mana - spCost);
+            applySkillDelays(characterId, player, skillId, levelData, socket);
+
+            const removed = cleanseStatusEffects(detoxTarget, ['poison']);
+            const detoxZone = player.zone || 'prontera_south';
+            for (const type of removed) {
+                broadcastToZone(detoxZone, 'status:removed', { targetId: detoxTargetId, isEnemy: false, statusType: type, reason: 'detoxify' });
+                broadcastToZone(detoxZone, 'skill:buff_removed', { targetId: detoxTargetId, isEnemy: false, buffName: type, reason: 'detoxify' });
+            }
+            socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
+            socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
+            return;
+        }
+
+        // --- SAND ATTACK (ID 506) — Physical attack + blind ---
+        if (skill.name === 'sand_attack') {
+            if (!targetId || !isEnemy) { socket.emit('skill:error', { message: 'No enemy target selected' }); return; }
+            const ret = await executePhysicalSkillOnEnemy(player, characterId, socket, skill, skillId, learnedLevel, levelData, effectVal, spCost, targetId, { forceElement: 'earth' });
+            if (ret && !ret.result.isMiss && ret.enemy.health > 0) {
+                const blindResult = applyStatusEffect(player, ret.enemy, 'blind', 20 + learnedLevel * 5);
+                if (blindResult && blindResult.applied) {
+                    broadcastToZone(ret.zone, 'status:applied', { targetId, isEnemy: true, statusType: 'blind', duration: blindResult.duration });
+                }
+            }
+            return;
+        }
+
+        // --- BACKSLIDE (ID 507) — Instant backward slide ---
+        if (skill.name === 'backslide') {
+            player.mana = Math.max(0, player.mana - spCost);
+            applySkillDelays(characterId, player, skillId, levelData, socket);
+
+            const currentPos = await getPlayerPosition(characterId);
+            if (currentPos) {
+                // Default backward = negative Y direction (or based on last movement)
+                const dirX = player.lastDirX || 0;
+                const dirY = player.lastDirY || -1;
+                const magnitude = Math.sqrt(dirX * dirX + dirY * dirY) || 1;
+                const newX = currentPos.x - (dirX / magnitude) * 250;
+                const newY = currentPos.y - (dirY / magnitude) * 250;
+                socket.emit('player:teleport', { x: newX, y: newY, z: currentPos.z });
+            }
+
+            socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
+            return;
+        }
+
+        // --- THROW STONE (ID 508) — Ranged low-damage attack ---
+        if (skill.name === 'throw_stone') {
+            if (!targetId || !isEnemy) { socket.emit('skill:error', { message: 'No enemy target selected' }); return; }
+            const enemy = enemies.get(targetId);
+            if (!enemy || enemy.isDead) { socket.emit('skill:error', { message: 'Target not found' }); return; }
+
+            const attackerPos = await getPlayerPosition(characterId);
+            if (!attackerPos) return;
+            const targetPos = { x: enemy.x, y: enemy.y, z: enemy.z };
+            const dx = attackerPos.x - targetPos.x; const dy = attackerPos.y - targetPos.y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            if (dist > (skill.range || 700) + COMBAT.RANGE_TOLERANCE) {
+                socket.emit('combat:out_of_range', { targetId, isEnemy: true, targetX: targetPos.x, targetY: targetPos.y, targetZ: targetPos.z, distance: dist, requiredRange: skill.range });
+                return;
+            }
+
+            player.mana = Math.max(0, player.mana - spCost);
+            applySkillDelays(characterId, player, skillId, levelData, socket);
+
+            const stats = getEffectiveStats(player);
+            const stoneDamage = Math.max(1, 50 + (stats.str || 1));
+            enemy.health = Math.max(0, enemy.health - stoneDamage);
+            enemy.lastDamageTime = Date.now();
+            if (typeof setEnemyAggro === 'function') setEnemyAggro(enemy, characterId, 'skill');
+
+            const tsZone = player.zone || 'prontera_south';
+            broadcastToZone(tsZone, 'skill:effect_damage', {
+                attackerId: characterId, attackerName: player.characterName,
+                targetId, targetName: enemy.name, isEnemy: true,
+                skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: 'neutral',
+                damage: stoneDamage, isCritical: false, isMiss: false, hitType: 'normal',
+                targetHealth: enemy.health, targetMaxHealth: enemy.maxHealth,
+                attackerX: attackerPos.x, attackerY: attackerPos.y, attackerZ: attackerPos.z,
+                targetX: targetPos.x, targetY: targetPos.y, targetZ: targetPos.z,
+                timestamp: Date.now()
+            });
+            broadcastToZone(tsZone, 'enemy:health_update', { enemyId: targetId, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: true });
+
+            if (enemy.health <= 0) await processEnemyDeathFromSkill(enemy, player, characterId, io);
+
+            socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
+            socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
+            return;
+        }
+
+        // --- PICK STONE (ID 509) ---
+        if (skill.name === 'pick_stone') {
+            player.mana = Math.max(0, player.mana - spCost);
+            applySkillDelays(characterId, player, skillId, levelData, socket);
+            socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
+            socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
+            socket.emit('chat:receive', { type: 'chat:receive', channel: 'SYSTEM', senderId: 0, senderName: 'SYSTEM', message: 'Picked up 1 Stone.', timestamp: Date.now() });
+            return;
+        }
+
+        // --- MAMMONITE (ID 603) — Physical attack costing zeny ---
+        if (skill.name === 'mammonite') {
+            if (!targetId || !isEnemy) { socket.emit('skill:error', { message: 'No enemy target selected' }); return; }
+            const zenyCost = learnedLevel * 100;
+            if ((player.zeny || 0) < zenyCost) { socket.emit('skill:error', { message: `Not enough Zeny (need ${zenyCost})` }); return; }
+
+            // Deduct zeny before the helper (helper handles SP + delays)
+            player.zeny = (player.zeny || 0) - zenyCost;
+            try { await pool.query('UPDATE characters SET zeny = $1 WHERE id = $2', [player.zeny, characterId]); } catch (e) { logger.error(`[MAMMONITE] Zeny update error: ${e.message}`); }
+            socket.emit('inventory:zeny_update', { zeny: player.zeny });
+
+            await executePhysicalSkillOnEnemy(player, characterId, socket, skill, skillId, learnedLevel, levelData, effectVal, spCost, targetId);
+            return;
+        }
+
+        // --- CART REVOLUTION (ID 608) — Ground AoE physical + knockback ---
+        if (skill.name === 'cart_revolution') {
+            if (!hasGroundPos) { socket.emit('skill:error', { message: 'Select ground position' }); return; }
+            player.mana = Math.max(0, player.mana - spCost);
+            applySkillDelays(characterId, player, skillId, levelData, socket);
+
+            const crZone = player.zone || 'prontera_south';
+            const attackerPos = await getPlayerPosition(characterId);
+            if (!attackerPos) return;
+            const aoeRadius = 300;
+
+            for (const [eid, enemy] of enemies.entries()) {
+                if (enemy.isDead || enemy.zone !== crZone) continue;
+                const dx = groundX - enemy.x; const dy = groundY - enemy.y;
+                if (Math.sqrt(dx*dx + dy*dy) > aoeRadius) continue;
+
+                const result = calculateSkillDamage(
+                    getEffectiveStats(player), enemy.stats, enemy.hardDef || 0,
+                    effectVal, getBuffStatModifiers(player), getCombinedModifiers(enemy),
+                    getEnemyTargetInfo(enemy), getAttackerInfo(player), { skillElement: null }
+                );
+
+                if (!result.isMiss) {
+                    enemy.health = Math.max(0, enemy.health - result.damage);
+                    enemy.lastDamageTime = Date.now();
+                    if (typeof setEnemyAggro === 'function') setEnemyAggro(enemy, characterId, 'skill');
+
+                    // Knockback
+                    if (!(enemy.modeFlags && enemy.modeFlags.knockbackImmune)) {
+                        const kbDist = Math.max(1, Math.sqrt((enemy.x - attackerPos.x)**2 + (enemy.y - attackerPos.y)**2));
+                        enemy.x += ((enemy.x - attackerPos.x) / kbDist) * 200;
+                        enemy.y += ((enemy.y - attackerPos.y) / kbDist) * 200;
+                        broadcastToZone(crZone, 'enemy:moved', { enemyId: eid, x: enemy.x, y: enemy.y, z: enemy.z, isKnockback: true });
+                    }
+                }
+
+                broadcastToZone(crZone, 'skill:effect_damage', {
+                    attackerId: characterId, attackerName: player.characterName,
+                    targetId: eid, targetName: enemy.name, isEnemy: true,
+                    skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: result.element || 'neutral',
+                    damage: result.isMiss ? 0 : result.damage, isCritical: result.isCritical, isMiss: result.isMiss, hitType: result.hitType,
+                    targetHealth: enemy.health, targetMaxHealth: enemy.maxHealth,
+                    attackerX: attackerPos.x, attackerY: attackerPos.y, attackerZ: attackerPos.z,
+                    targetX: enemy.x, targetY: enemy.y, targetZ: enemy.z,
+                    groundX, groundY, groundZ: groundZ || 0,
+                    timestamp: Date.now()
+                });
+                broadcastToZone(crZone, 'enemy:health_update', { enemyId: eid, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: true });
+
+                if (enemy.health <= 0) await processEnemyDeathFromSkill(enemy, player, characterId, io);
+            }
+
+            socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
+            socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
+            return;
+        }
+
+        // --- LOUD EXCLAMATION (ID 609) — Self buff +STR ---
+        if (skill.name === 'loud_exclamation') {
+            player.mana = Math.max(0, player.mana - spCost);
+            applySkillDelays(characterId, player, skillId, levelData, socket);
+            applyBuff(player, { skillId, name: 'loud_exclamation', casterId: characterId, casterName: player.characterName, strBonus: effectVal, duration: duration || 300000 });
+            broadcastToZone(player.zone || 'prontera_south', 'skill:buff_applied', { targetId: characterId, targetName: player.characterName, isEnemy: false, casterId: characterId, casterName: player.characterName, skillId, buffName: 'Loud Exclamation', duration: duration || 300000, effects: { strBonus: effectVal } });
+            socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
+            socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
+            return;
+        }
+
+        // --- AUTO BERSERK (ID 108) — Toggle: ATK buff when HP < 25% ---
+        if (skill.name === 'auto_berserk') {
+            if (hasBuff(player, 'auto_berserk')) {
+                removeBuff(player, 'auto_berserk');
+                broadcastToZone(player.zone || 'prontera_south', 'skill:buff_removed', { targetId: characterId, isEnemy: false, buffName: 'auto_berserk', reason: 'cancel' });
+                socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost: 0, remainingMana: player.mana, maxMana: player.maxMana });
+                return;
+            }
+            player.mana = Math.max(0, player.mana - spCost);
+            applySkillDelays(characterId, player, skillId, levelData, socket);
+
+            const abAtkIncrease = (player.health / player.maxHealth < 0.25) ? effectVal : 0;
+            applyBuff(player, {
+                skillId, name: 'auto_berserk', casterId: characterId, casterName: player.characterName,
+                atkIncrease: abAtkIncrease, conditionalAtkIncrease: effectVal,
+                duration: duration || 300000
+            });
+            broadcastToZone(player.zone || 'prontera_south', 'skill:buff_applied', { targetId: characterId, targetName: player.characterName, isEnemy: false, casterId: characterId, casterName: player.characterName, skillId, buffName: 'Auto Berserk', duration: duration || 300000, effects: { atkIncrease: abAtkIncrease } });
+            socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
+            socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
+            return;
+        }
+
+        // --- ENERGY COAT (ID 213) — Self buff: reduce physical damage, drain SP ---
+        if (skill.name === 'energy_coat') {
+            player.mana = Math.max(0, player.mana - spCost);
+            applySkillDelays(characterId, player, skillId, levelData, socket);
+            applyBuff(player, { skillId, name: 'energy_coat', casterId: characterId, casterName: player.characterName, defPercent: effectVal, duration: duration || 300000 });
+            broadcastToZone(player.zone || 'prontera_south', 'skill:buff_applied', { targetId: characterId, targetName: player.characterName, isEnemy: false, casterId: characterId, casterName: player.characterName, skillId, buffName: 'Energy Coat', duration: duration || 300000, effects: { defPercent: effectVal } });
+            socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
+            socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
+            return;
+        }
+
+        // --- DEFERRED STUBS (skills that exist but can't work yet) ---
+        if (skill.name === 'arrow_crafting' || skill.name === 'vending' || skill.name === 'item_appraisal' || skill.name === 'change_cart') {
+            socket.emit('skill:error', { message: `${skill.displayName} is not yet implemented.` });
+            return;
+        }
+
+        // --- PASSIVE SKILLS (Sword Mastery 100, 2H Sword Mastery 101, HP Recovery 102, SP Recovery 204, etc.) ---
         // Passives cannot be "used" — they are always active
         if (skill.type === 'passive') {
             socket.emit('skill:error', { message: `${skill.displayName} is a passive skill — its effects are always active` });
@@ -5091,8 +6234,8 @@ io.on('connection', (socket) => {
             // Special items: Fly Wing + Butterfly Wing
             // ═══════════════════════════════════════════════════
 
-            // Fly Wing (item_id 1029) — random teleport within same zone
-            if (item.item_id === 1029) {
+            // Fly Wing (item_id 601) — random teleport within same zone
+            if (item.item_id === 601) {
                 const playerZone = player.zone || 'prontera_south';
                 const zoneData = getZone(playerZone);
                 if (zoneData && zoneData.flags && zoneData.flags.noteleport) {
@@ -5122,8 +6265,8 @@ io.on('connection', (socket) => {
                 return;
             }
 
-            // Butterfly Wing (item_id 1028) — teleport to save point
-            if (item.item_id === 1028) {
+            // Butterfly Wing (item_id 602) — teleport to save point
+            if (item.item_id === 602) {
                 const playerZone = player.zone || 'prontera_south';
                 const zoneData = getZone(playerZone);
                 if (zoneData && zoneData.flags && zoneData.flags.noreturn) {
@@ -5197,26 +6340,84 @@ io.on('connection', (socket) => {
                 return;
             }
 
-            // Apply consumable effect (HP/SP restoration)
+            // Data-driven consumable handler using ITEM_USE_EFFECTS (from rAthena scripts)
+            const effect = ITEM_USE_EFFECTS[item.item_id];
+            if (!effect) {
+                socket.emit('inventory:error', { message: 'Cannot use this item' });
+                return;
+            }
+
+            // Helper: SC_Name → our status key
+            const scToStatus = (sc) => sc.replace(/^SC_/, '').toLowerCase();
+            // Helper: random between min and max
+            const randBetween = (min, max) => min + Math.floor(Math.random() * (max - min + 1));
+
+            // Process a single effect object
             let healed = 0, spRestored = 0;
-            if (item.max_hp_bonus > 0 || item.item_id === 1001) {
-                // Potions restore HP based on item_id
-                const hpRestore = { 1001: 50, 1002: 150, 1003: 350, 1005: 70 };
-                healed = hpRestore[item.item_id] || item.max_hp_bonus || 0;
-                player.health = Math.min(player.maxHealth, player.health + healed);
-            }
-            if (item.item_id === 1004) {
-                // Blue Potion restores SP
-                spRestored = 60;
-                player.mana = Math.min(player.maxMana, player.mana + spRestored);
-            }
-            
+            const processEffect = (eff) => {
+                switch (eff.type) {
+                    case 'heal': {
+                        const hpHeal = eff.hpMin ? randBetween(eff.hpMin, eff.hpMax) : 0;
+                        const spHeal = eff.spMin ? randBetween(eff.spMin, eff.spMax) : 0;
+                        if (hpHeal) {
+                            healed += hpHeal;
+                            player.health = Math.min(player.maxHealth, player.health + hpHeal);
+                        }
+                        if (spHeal) {
+                            spRestored += spHeal;
+                            player.mana = Math.min(player.maxMana, player.mana + spHeal);
+                        }
+                        break;
+                    }
+                    case 'percentheal': {
+                        if (eff.hp) {
+                            const hpAmt = Math.floor(player.maxHealth * eff.hp / 100);
+                            healed += hpAmt;
+                            player.health = Math.min(player.maxHealth, player.health + hpAmt);
+                        }
+                        if (eff.sp) {
+                            const spAmt = Math.floor(player.maxMana * eff.sp / 100);
+                            spRestored += spAmt;
+                            player.mana = Math.min(player.maxMana, player.mana + spAmt);
+                        }
+                        break;
+                    }
+                    case 'cure': {
+                        if (eff.cures && player.activeStatusEffects) {
+                            const statusKeys = eff.cures.map(scToStatus);
+                            cleanseStatusEffects(player, statusKeys);
+                        }
+                        break;
+                    }
+                    case 'itemskill': {
+                        // Fly Wing / Butterfly Wing already handled above by item_id check
+                        // Other itemskills (scrolls etc.) — log for future implementation
+                        logger.info(`[ITEMS] itemskill ${eff.skill} Lv${eff.level} from ${item.name} — not yet implemented`);
+                        break;
+                    }
+                    case 'sc_start': {
+                        // Buff potions (e.g., Awakening Potion → ASPD buff) — future implementation
+                        logger.info(`[ITEMS] sc_start ${eff.status} from ${item.name} — not yet implemented`);
+                        break;
+                    }
+                    case 'multi': {
+                        if (eff.effects) eff.effects.forEach(processEffect);
+                        break;
+                    }
+                }
+            };
+            processEffect(effect);
+
             // Remove 1 from stack
             await removeItemFromInventory(inventoryId, 1);
-            
-            // Save health/mana
-            await savePlayerHealthToDB(characterId, player.health, player.mana);
-            
+
+            // Save health/mana if changed
+            if (healed > 0 || spRestored > 0) {
+                await savePlayerHealthToDB(characterId, player.health, player.mana);
+                // Auto Berserk: deactivate if potion healed above 25%
+                if (healed > 0) checkAutoBerserk(player, characterId, player.zone);
+            }
+
             // Send updated health to zone
             const useItemZone = player.zone || 'prontera_south';
             broadcastToZone(useItemZone, 'combat:health_update', {
@@ -5232,7 +6433,7 @@ io.on('connection', (socket) => {
                 mana: player.mana, maxMana: player.maxMana
             });
             logger.info(`[ITEMS] ${player.characterName} used ${item.name}: +${healed}HP +${spRestored}SP`);
-            
+
             // Refresh inventory
             const inventory = await getPlayerInventory(characterId);
             socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin });
@@ -5260,7 +6461,7 @@ io.on('connection', (socket) => {
                         i.atk, i.def, i.matk, i.mdef,
                         i.str_bonus, i.agi_bonus, i.vit_bonus, i.int_bonus, i.dex_bonus, i.luk_bonus,
                         i.max_hp_bonus, i.max_sp_bonus, i.hit_bonus, i.flee_bonus, i.critical_bonus,
-                        i.required_level, i.weapon_type, i.aspd_modifier, i.weapon_range
+                        i.required_level, i.weapon_type, i.aspd_modifier, i.weapon_range, i.weapon_level
                  FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
                  WHERE ci.inventory_id = $1 AND ci.character_id = $2`,
                 [inventoryId, characterId]
@@ -5385,11 +6586,13 @@ io.on('connection', (socket) => {
 
                 if (item.equip_slot === 'weapon') {
                     player.stats.weaponATK = item.atk || 0;
-                    player.attackRange = item.weapon_range || COMBAT.MELEE_RANGE;
+                    player.attackRange = item.weapon_range ? item.weapon_range * COMBAT.MELEE_RANGE : COMBAT.MELEE_RANGE; // Convert RO cells to UE units (1 cell = 150 UE units)
                     player.weaponAspdMod = item.aspd_modifier || 0;
+                    player.weaponType = item.weapon_type || null;
+                    player.weaponLevel = item.weapon_level || 1;
                 }
 
-                logger.info(`[ITEMS] ${player.characterName} equipped ${item.name} (position: ${equippedPosition}, bonuses: ${JSON.stringify(player.equipmentBonuses)}, hardDef: ${player.hardDef})`);
+                logger.info(`[ITEMS] ${player.characterName} equipped ${item.name} (position: ${equippedPosition}, weaponType: ${player.weaponType}, bonuses: ${JSON.stringify(player.equipmentBonuses)}, hardDef: ${player.hardDef})`);
             } else {
                 // Remove this item's stat bonuses before unequipping
                 removeOldBonuses(item);
@@ -5403,6 +6606,8 @@ io.on('connection', (socket) => {
                     player.stats.weaponATK = 0;
                     player.attackRange = COMBAT.MELEE_RANGE;
                     player.weaponAspdMod = 0;
+                    player.weaponType = null;
+                    player.weaponLevel = 1;
                 }
 
                 logger.info(`[ITEMS] ${player.characterName} unequipped ${item.name}`);
@@ -5588,8 +6793,8 @@ io.on('connection', (socket) => {
                 description: item.description,
                 itemType: item.item_type,
                 equipSlot: item.equip_slot || '',
-                buyPrice: applyDiscount(item.price * 2, discountPct),
-                sellPrice: applyOvercharge(item.price, overchargePct),
+                buyPrice: applyDiscount(item.buy_price || item.price * 2, discountPct),
+                sellPrice: applyOvercharge(item.sell_price || item.price, overchargePct),
                 weight: item.weight || 0,
                 icon: item.icon,
                 atk: item.atk || 0,
@@ -5680,7 +6885,7 @@ io.on('connection', (socket) => {
             return;
         }
 
-        const totalCost = itemDef.price * 2 * quantity;
+        const totalCost = (itemDef.buy_price || itemDef.price * 2) * quantity;
         if (player.zuzucoin < totalCost) {
             socket.emit('shop:error', { message: `Not enough Zuzucoin (need ${totalCost}, have ${player.zuzucoin})` });
             return;
@@ -5736,7 +6941,7 @@ io.on('connection', (socket) => {
             // Verify ownership + get item details
             const itemResult = await pool.query(
                 `SELECT ci.inventory_id, ci.item_id, ci.quantity, ci.is_equipped,
-                        i.name, i.price, i.stackable
+                        i.name, i.price, i.sell_price, i.stackable
                  FROM character_inventory ci
                  JOIN items i ON ci.item_id = i.item_id
                  WHERE ci.inventory_id = $1 AND ci.character_id = $2`,
@@ -5756,7 +6961,7 @@ io.on('connection', (socket) => {
             }
 
             const sellQty = Math.min(quantity, item.quantity);
-            const sellPrice = (item.price || 0) * sellQty;
+            const sellPrice = (item.sell_price || item.price || 0) * sellQty;
             const newZeny = player.zuzucoin + sellPrice;
 
             const client = await pool.connect();
@@ -5837,7 +7042,7 @@ io.on('connection', (socket) => {
                 return;
             }
 
-            const unitPrice = applyDiscount(itemDef.price * 2, discountPct);
+            const unitPrice = applyDiscount(itemDef.buy_price || itemDef.price * 2, discountPct);
             totalCost += unitPrice * quantity;
             totalWeight += (itemDef.weight || 0) * quantity;
 
@@ -5984,7 +7189,7 @@ io.on('connection', (socket) => {
             try {
                 const result = await pool.query(
                     `SELECT ci.inventory_id, ci.item_id, ci.quantity, ci.is_equipped,
-                            i.name, i.price, i.stackable
+                            i.name, i.price, i.sell_price, i.stackable
                      FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
                      WHERE ci.inventory_id = $1 AND ci.character_id = $2`,
                     [inventoryId, characterId]
@@ -6002,13 +7207,13 @@ io.on('connection', (socket) => {
                     return;
                 }
 
-                if ((item.price || 0) <= 0) {
+                if ((item.sell_price || item.price || 0) <= 0) {
                     socket.emit('shop:error', { code: 'unsellable', message: `${item.name} cannot be sold` });
                     return;
                 }
 
                 const sellQty = Math.min(quantity, item.quantity);
-                const unitSellPrice = applyOvercharge(item.price || 0, overchargePct);
+                const unitSellPrice = applyOvercharge(item.sell_price || item.price || 0, overchargePct);
                 totalRevenue += unitSellPrice * sellQty;
 
                 validatedItems.push({ inventoryId, sellQty, item, unitSellPrice });
@@ -6358,6 +7563,14 @@ setInterval(async () => {
                     continue;
                 }
 
+                // Pneuma check: if target is inside Pneuma and attacker is ranged, block
+                const pneumas = getGroundEffectsAtPosition(enemy.x, enemy.y, enemy.z || 0, 100);
+                const pneumaEffect = pneumas.find(e => e.type === 'pneuma');
+                if (pneumaEffect && attacker.attackRange > COMBAT.MELEE_RANGE + COMBAT.RANGE_TOLERANCE) {
+                    attacker.lastAttackTime = now;
+                    continue; // Silently blocked
+                }
+
                 // IN RANGE: Execute attack on enemy using full RO damage formula
                 // Includes: HIT/FLEE check, Critical, Perfect Dodge, Size Penalty, Element, DEF
                 const combatResult = calculatePhysicalDamage(
@@ -6427,6 +7640,36 @@ setInterval(async () => {
                     maxHealth: enemy.maxHealth,
                     inCombat: enemy.inCombatWith.size > 0
                 });
+
+                // Double Attack passive check (Thief, daggers only)
+                const doubleAttackChance = getEffectiveStats(attacker).doubleAttackChance || 0;
+                if (doubleAttackChance > 0 && !isMiss && enemy.health > 0 && Math.random() * 100 < doubleAttackChance) {
+                    const daResult2 = calculatePhysicalDamage(
+                        getEffectiveStats(attacker), enemy.stats, enemy.hardDef || 0,
+                        getEnemyTargetInfo(enemy), getAttackerInfo(attacker)
+                    );
+                    if (!daResult2.isMiss) {
+                        enemy.health = Math.max(0, enemy.health - daResult2.damage);
+                        enemy.lastDamageTime = now;
+                        const daZone = atkEnemyZone;
+                        setTimeout(() => {
+                            broadcastToZone(daZone, 'combat:damage', {
+                                attackerId, attackerName: attacker.characterName,
+                                targetId: enemy.enemyId, targetName: enemy.name, isEnemy: true,
+                                damage: daResult2.damage, isCritical: daResult2.isCritical, isMiss: false,
+                                hitType: 'doubleAttack', element: daResult2.element,
+                                targetHealth: enemy.health, targetMaxHealth: enemy.maxHealth,
+                                attackerX: attackerPos.x, attackerY: attackerPos.y, attackerZ: attackerPos.z,
+                                targetX: enemy.x, targetY: enemy.y, targetZ: enemy.z,
+                                timestamp: Date.now()
+                            });
+                            broadcastToZone(daZone, 'enemy:health_update', { enemyId: enemy.enemyId, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: true });
+                            if (enemy.health <= 0) {
+                                processEnemyDeathFromSkill(enemy, attacker, attackerId, io);
+                            }
+                        }, 200);
+                    }
+                }
 
                 // Enemy death
                 if (enemy.health <= 0) {
@@ -6731,6 +7974,7 @@ setInterval(async () => {
 
             target.health = Math.max(0, target.health - pvpDmg);
             damagePayload.targetHealth = target.health;
+            checkAutoBerserk(target, atkState.targetCharId, target.zone);
 
             // Cast interruption: damage interrupts casting (100% chance, RO pre-renewal)
             if (activeCasts.has(atkState.targetCharId)) {
@@ -6825,13 +8069,19 @@ function emitRegenUpdate(charId, player) {
 // --- HP Natural Regen (every 6 seconds) ---
 // Formula: max(1, floor(MaxHP/200)) + floor(VIT/5)
 // Blocked by: Bleeding status (blocksHPRegen)
+// RO Classic: HP regen only while standing still (unless Moving HP Recovery passive)
 setInterval(() => {
+    const now = Date.now();
     for (const [charId, player] of connectedPlayers.entries()) {
         if (player.isDead) continue;
         if (player.health >= player.maxHealth) continue;
         // Status effects can block HP regen (bleeding)
         const regenMods = getCombinedModifiers(player);
         if (regenMods.blocksHPRegen) continue;
+
+        // RO Classic: HP regen blocked while moving (unless Moving HP Recovery passive)
+        const passive = getPassiveSkillBonuses(player);
+        if (player.lastMoveTime && (now - player.lastMoveTime < 4000) && !passive.movingHPRecovery) continue;
 
         const stats = getEffectiveStats(player);
         let hpRegen = Math.max(1, Math.floor(player.maxHealth / 200));
@@ -6842,6 +8092,8 @@ setInterval(() => {
 
         if (player.health > oldHP) {
             emitRegenUpdate(charId, player);
+            // Auto Berserk: deactivate if regen pushed HP above 25%
+            checkAutoBerserk(player, charId, player.zone);
         }
     }
 }, 6000);
@@ -6906,6 +8158,7 @@ setInterval(() => {
 
             if (player.health > oldHP || player.mana > oldSP) {
                 emitRegenUpdate(charId, player);
+                if (player.health > oldHP) checkAutoBerserk(player, charId, player.zone);
             }
         }
     }
@@ -7146,6 +8399,7 @@ setInterval(async () => {
 
                 player.health = Math.max(0, player.health - finalDmg);
                 effect.hitsRemaining--;
+                checkAutoBerserk(player, charId, player.zone);
 
                 // Cast interruption: Fire Wall damage interrupts casting
                 if (activeCasts.has(charId)) {
@@ -7337,6 +8591,9 @@ function findAggroTarget(enemy) {
         if (player.isDead) continue;
         // Only aggro players in the same zone
         if (player.zone !== enemy.zone) continue;
+        // Hidden players are invisible to non-detector enemies
+        const playerMods = getCombinedModifiers(player);
+        if (playerMods.isHidden && !(enemy.modeFlags && enemy.modeFlags.detector)) continue;
 
         // Use last known position from player object (updated on player:position events)
         const px = player.lastX;
@@ -7544,8 +8801,18 @@ setInterval(async () => {
         // CHASE — Move toward target player until in attack range
         // ═══════════════════════════════════════════════════════
         case AI_STATE.CHASE: {
+            // Check if chase target is hidden
+            const chaseTarget = connectedPlayers.get(enemy.targetPlayerId);
+            if (chaseTarget) {
+                const chaseMods = getCombinedModifiers(chaseTarget);
+                if (chaseMods.isHidden && !(enemy.modeFlags && enemy.modeFlags.detector)) {
+                    enemy.targetPlayerId = null;
+                    enemy.aiState = AI_STATE.IDLE;
+                    break;
+                }
+            }
             // Validate target still exists
-            const target = connectedPlayers.get(enemy.targetPlayerId);
+            const target = chaseTarget;
             if (!target || target.isDead) {
                 // Target gone — check if any other attackers remain
                 enemy.inCombatWith.delete(enemy.targetPlayerId);
@@ -7638,6 +8905,15 @@ setInterval(async () => {
         // ═══════════════════════════════════════════════════════
         case AI_STATE.ATTACK: {
             const atkTarget = connectedPlayers.get(enemy.targetPlayerId);
+            // Check if attack target is hidden
+            if (atkTarget) {
+                const atkMods = getCombinedModifiers(atkTarget);
+                if (atkMods.isHidden && !(enemy.modeFlags && enemy.modeFlags.detector)) {
+                    enemy.targetPlayerId = null;
+                    enemy.aiState = AI_STATE.IDLE;
+                    break;
+                }
+            }
             if (!atkTarget || atkTarget.isDead) {
                 enemy.inCombatWith.delete(enemy.targetPlayerId);
                 const nextTarget = pickNextTarget(enemy);
@@ -7731,6 +9007,13 @@ setInterval(async () => {
             if (!isMiss) {
                 atkTarget.health = Math.max(0, atkTarget.health - damage);
                 damagePayload.targetHealth = atkTarget.health;
+                // Break Hiding on damage
+                if (hasBuff(atkTarget, 'hiding')) {
+                    removeBuff(atkTarget, 'hiding');
+                    broadcastToZone(enemy.zone || 'prontera_south', 'skill:buff_removed', { targetId: enemy.targetPlayerId, isEnemy: false, buffName: 'hiding', reason: 'damage_break' });
+                }
+                // Auto Berserk HP threshold check
+                checkAutoBerserk(atkTarget, enemy.targetPlayerId, enemy.zone);
                 logger.info(`[ENEMY COMBAT] ${enemy.name}(${enemyId}) hit ${atkTarget.characterName} for ${damage}${isCritical ? ' CRIT' : ''} (HP: ${atkTarget.health}/${atkTarget.maxHealth})`);
             } else {
                 logger.info(`[ENEMY COMBAT] ${enemy.name}(${enemyId}) ${hitType} against ${atkTarget.characterName}`);
@@ -8658,54 +9941,8 @@ server.listen(PORT, async () => {
     logger.warn(`[DB] Inventory table issue: ${err.message}`);
   }
   
-  // Seed base items if items table is empty
-  try {
-    const itemCount = await pool.query('SELECT COUNT(*) FROM items');
-    if (parseInt(itemCount.rows[0].count) === 0) {
-      logger.info('[DB] Seeding base items...');
-      await pool.query(`
-        INSERT INTO items (item_id, name, description, item_type, weight, price, stackable, max_stack, icon) VALUES
-        (1001, 'Crimson Vial', 'A small red tonic. Restores 50 HP.', 'consumable', 7, 25, true, 99, 'red_potion'),
-        (1002, 'Amber Elixir', 'A warm orange draught. Restores 150 HP.', 'consumable', 10, 100, true, 99, 'orange_potion'),
-        (1003, 'Golden Salve', 'A potent yellow remedy. Restores 350 HP.', 'consumable', 13, 275, true, 99, 'yellow_potion'),
-        (1004, 'Azure Philter', 'A calming blue brew. Restores 60 SP.', 'consumable', 15, 500, true, 99, 'blue_potion'),
-        (1005, 'Roasted Haunch', 'Tender roasted meat. Restores 70 HP.', 'consumable', 15, 25, true, 99, 'meat')
-        ON CONFLICT (item_id) DO NOTHING
-      `);
-      await pool.query(`
-        INSERT INTO items (item_id, name, description, item_type, weight, price, stackable, max_stack, icon) VALUES
-        (2001, 'Gloopy Residue', 'A small, squishy blob of unknown origin.', 'etc', 1, 3, true, 999, 'jellopy'),
-        (2002, 'Viscous Slime', 'Thick, gooey substance secreted by monsters.', 'etc', 1, 7, true, 999, 'sticky_mucus'),
-        (2003, 'Chitin Shard', 'A hard, protective outer shell fragment.', 'etc', 2, 14, true, 999, 'shell'),
-        (2004, 'Downy Plume', 'A light, downy feather.', 'etc', 1, 5, true, 999, 'feather'),
-        (2005, 'Spore Cluster', 'Tiny spores from a forest mushroom.', 'etc', 1, 10, true, 999, 'mushroom_spore'),
-        (2006, 'Barbed Limb', 'A chitinous leg from a large insect.', 'etc', 1, 12, true, 999, 'insect_leg'),
-        (2007, 'Verdant Leaf', 'A common medicinal herb with healing properties.', 'etc', 3, 8, true, 99, 'green_herb'),
-        (2008, 'Silken Tuft', 'Soft, fluffy material from a plant creature.', 'etc', 1, 4, true, 999, 'fluff')
-        ON CONFLICT (item_id) DO NOTHING
-      `);
-      await pool.query(`
-        INSERT INTO items (item_id, name, description, item_type, equip_slot, weight, price, atk, required_level, icon, weapon_type, aspd_modifier, weapon_range) VALUES
-        (3001, 'Rustic Shiv', 'A crude but swift dagger. Better than bare fists.', 'weapon', 'weapon', 40, 50, 17, 1, 'knife', 'dagger', 5, 150),
-        (3002, 'Keen Edge', 'A finely honed short blade.', 'weapon', 'weapon', 40, 150, 30, 1, 'cutter', 'dagger', 5, 150),
-        (3003, 'Stiletto Fang', 'An elegant parrying dagger with a needle-thin tip.', 'weapon', 'weapon', 60, 500, 43, 12, 'main_gauche', 'dagger', 5, 150),
-        (3004, 'Iron Cleaver', 'A standard one-handed sword with a broad blade.', 'weapon', 'weapon', 80, 100, 25, 2, 'sword', 'one_hand_sword', 0, 150),
-        (3005, 'Crescent Saber', 'A curved, heavy cutting sword.', 'weapon', 'weapon', 60, 600, 49, 18, 'falchion', 'one_hand_sword', 0, 150),
-        (3006, 'Hunting Longbow', 'A sturdy ranged bow with impressive reach.', 'weapon', 'weapon', 50, 400, 35, 4, 'bow', 'bow', -3, 800)
-        ON CONFLICT (item_id) DO NOTHING
-      `);
-      await pool.query(`
-        INSERT INTO items (item_id, name, description, item_type, equip_slot, weight, price, def, required_level, icon) VALUES
-        (4001, 'Linen Tunic', 'A simple linen shirt offering minimal protection.', 'armor', 'armor', 10, 20, 1, 1, 'cotton_shirt'),
-        (4002, 'Quilted Vest', 'Light quilted padding for basic protection.', 'armor', 'armor', 80, 200, 4, 1, 'padded_armor'),
-        (4003, 'Ringweave Hauberk', 'Interlocking metal rings forged into sturdy armor.', 'armor', 'armor', 150, 800, 8, 20, 'chain_mail')
-        ON CONFLICT (item_id) DO NOTHING
-      `);
-      logger.info('[DB] Base items seeded successfully');
-    }
-  } catch (err) {
-    logger.warn(`[DB] Item seeding issue: ${err.message}`);
-  }
+  // Items are now loaded from init.sql (6,169 canonical rAthena items)
+  // No runtime seed data needed — run database/init.sql or database/migrations/migrate_to_canonical_ids.sql
   
   // Add equipped_position column if missing (for dual-accessory support)
   try {
@@ -8762,9 +9999,10 @@ server.listen(PORT, async () => {
     logger.warn(`[DB] slot_index fix issue: ${err.message}`);
   }
 
-  // Load item definitions into memory cache
+  // Load item definitions into memory cache, then resolve monster drop itemIds
   await loadItemDefinitions();
-  
+  resolveDropItemIds();
+
   // Zone-based lazy enemy spawning: enemies spawn when first player enters a zone
   // No enemies spawned at startup — they spawn on demand in player:join handler
   const totalSpawns = Object.values(ZONE_REGISTRY).reduce((sum, z) => sum + z.enemySpawns.length, 0);

@@ -40,19 +40,23 @@ CREATE TABLE IF NOT EXISTS characters (
 -- Stat columns (added by server on startup if missing)
 -- str, agi, vit, int_stat, dex, luk, stat_points, max_health, max_mana
 
--- Items definition table (static item data)
+-- Items definition table (static item data — rAthena canonical IDs)
 CREATE TABLE IF NOT EXISTS items (
     item_id SERIAL PRIMARY KEY,
     name VARCHAR(100) NOT NULL,
+    aegis_name VARCHAR(100) DEFAULT NULL,           -- rAthena internal name
     description TEXT DEFAULT '',
-    item_type VARCHAR(20) NOT NULL DEFAULT 'etc',  -- weapon, armor, garment, footgear, accessory, consumable, etc
-    equip_slot VARCHAR(20) DEFAULT NULL,            -- head_top, head_mid, head_low, weapon, shield, armor, garment, footgear, accessory
+    full_description TEXT DEFAULT NULL,              -- Full tooltip text from rAthena
+    item_type VARCHAR(20) NOT NULL DEFAULT 'etc',   -- weapon, armor, consumable, card, etc, ammo
+    equip_slot VARCHAR(20) DEFAULT NULL,             -- head_top, head_mid, head_low, weapon, shield, armor, garment, footgear, accessory
     weight INTEGER DEFAULT 0,
-    price INTEGER DEFAULT 0,                        -- NPC sell price (buy = price * 2)
-    atk INTEGER DEFAULT 0,                          -- Weapon ATK bonus
-    def INTEGER DEFAULT 0,                          -- Armor DEF bonus
-    matk INTEGER DEFAULT 0,                         -- Magic ATK bonus
-    mdef INTEGER DEFAULT 0,                         -- Magic DEF bonus
+    price INTEGER DEFAULT 0,                         -- Legacy sell price (use sell_price instead)
+    buy_price INTEGER DEFAULT 0,                     -- NPC buy price
+    sell_price INTEGER DEFAULT 0,                    -- NPC sell price
+    atk INTEGER DEFAULT 0,                           -- Weapon ATK bonus
+    def INTEGER DEFAULT 0,                           -- Armor DEF bonus
+    matk INTEGER DEFAULT 0,                          -- Magic ATK bonus
+    mdef INTEGER DEFAULT 0,                          -- Magic DEF bonus
     str_bonus INTEGER DEFAULT 0,
     agi_bonus INTEGER DEFAULT 0,
     vit_bonus INTEGER DEFAULT 0,
@@ -61,10 +65,39 @@ CREATE TABLE IF NOT EXISTS items (
     luk_bonus INTEGER DEFAULT 0,
     max_hp_bonus INTEGER DEFAULT 0,
     max_sp_bonus INTEGER DEFAULT 0,
+    hit_bonus INTEGER DEFAULT 0,
+    flee_bonus INTEGER DEFAULT 0,
+    critical_bonus INTEGER DEFAULT 0,
     required_level INTEGER DEFAULT 1,
     stackable BOOLEAN DEFAULT false,
     max_stack INTEGER DEFAULT 1,
-    icon VARCHAR(100) DEFAULT 'default_item'
+    icon VARCHAR(100) DEFAULT 'default_item',
+    weapon_type VARCHAR(30) DEFAULT NULL,            -- dagger, one_hand_sword, bow, staff, etc.
+    aspd_modifier FLOAT DEFAULT 0,
+    weapon_range INTEGER DEFAULT 150,
+    weapon_level INTEGER DEFAULT 0,                  -- 1-4 for weapons
+    armor_level INTEGER DEFAULT 0,
+    slots INTEGER DEFAULT 0,                         -- 0-4 card slots
+    equip_level_min INTEGER DEFAULT 0,
+    equip_level_max INTEGER DEFAULT 0,
+    refineable BOOLEAN DEFAULT false,
+    jobs_allowed TEXT DEFAULT 'All',
+    classes_allowed TEXT DEFAULT 'All',
+    gender_allowed VARCHAR(10) DEFAULT 'Both',
+    equip_locations TEXT DEFAULT NULL,
+    script TEXT DEFAULT NULL,                        -- rAthena raw script (stat bonuses, etc.)
+    equip_script TEXT DEFAULT NULL,                  -- rAthena equip script
+    unequip_script TEXT DEFAULT NULL,                -- rAthena unequip script
+    sub_type VARCHAR(30) DEFAULT NULL,
+    view_sprite INTEGER DEFAULT 0,
+    two_handed BOOLEAN DEFAULT false,
+    element VARCHAR(10) DEFAULT 'neutral',
+    card_type VARCHAR(20) DEFAULT NULL,
+    card_prefix VARCHAR(50) DEFAULT NULL,
+    card_suffix VARCHAR(50) DEFAULT NULL,
+    class_restrictions TEXT DEFAULT NULL,
+    perfect_dodge_bonus INTEGER DEFAULT 0,
+    ammo_type VARCHAR(20) DEFAULT NULL
 );
 
 -- Character inventory table
@@ -98,196 +131,15 @@ CREATE INDEX IF NOT EXISTS idx_inventory_character ON character_inventory(charac
 CREATE INDEX IF NOT EXISTS idx_inventory_item ON character_inventory(item_id);
 
 -- ============================================================
--- Seed Data: Base Items
+-- Seed Data: Canonical rAthena Items (6,169 items)
 -- ============================================================
-
--- Consumables
-INSERT INTO items (item_id, name, description, item_type, weight, price, stackable, max_stack, icon) VALUES
-(1001, 'Crimson Vial', 'A small red tonic. Restores 50 HP.', 'consumable', 7, 25, true, 99, 'red_potion'),
-(1002, 'Amber Elixir', 'A warm orange draught. Restores 150 HP.', 'consumable', 10, 100, true, 99, 'orange_potion'),
-(1003, 'Golden Salve', 'A potent yellow remedy. Restores 350 HP.', 'consumable', 13, 275, true, 99, 'yellow_potion'),
-(1004, 'Azure Philter', 'A calming blue brew. Restores 60 SP.', 'consumable', 15, 500, true, 99, 'blue_potion'),
-(1005, 'Roasted Haunch', 'Tender roasted meat. Restores 70 HP.', 'consumable', 15, 25, true, 99, 'meat')
-ON CONFLICT (item_id) DO NOTHING;
-
--- Etc / Loot items (dropped by monsters, sold to NPCs)
-INSERT INTO items (item_id, name, description, item_type, weight, price, stackable, max_stack, icon) VALUES
-(2001, 'Gloopy Residue', 'A small, squishy blob of unknown origin.', 'etc', 1, 3, true, 999, 'jellopy'),
-(2002, 'Viscous Slime', 'Thick, gooey substance secreted by monsters.', 'etc', 1, 7, true, 999, 'sticky_mucus'),
-(2003, 'Chitin Shard', 'A hard, protective outer shell fragment.', 'etc', 2, 14, true, 999, 'shell'),
-(2004, 'Downy Plume', 'A light, downy feather.', 'etc', 1, 5, true, 999, 'feather'),
-(2005, 'Spore Cluster', 'Tiny spores from a forest mushroom.', 'etc', 1, 10, true, 999, 'mushroom_spore'),
-(2006, 'Barbed Limb', 'A chitinous leg from a large insect.', 'etc', 1, 12, true, 999, 'insect_leg'),
-(2007, 'Verdant Leaf', 'A common medicinal herb with healing properties.', 'etc', 3, 8, true, 99, 'green_herb'),
-(2008, 'Silken Tuft', 'Soft, fluffy material from a plant creature.', 'etc', 1, 4, true, 999, 'fluff')
-ON CONFLICT (item_id) DO NOTHING;
-
--- Weapons (weapon_type, aspd_modifier, weapon_range included)
--- Melee range: 150 UU | Bow range: 800 UU
--- ASPD modifiers: dagger +5, 1h_sword +0, bow -3
-INSERT INTO items (item_id, name, description, item_type, equip_slot, weight, price, atk, required_level, icon, weapon_type, aspd_modifier, weapon_range) VALUES
-(3001, 'Rustic Shiv', 'A crude but swift dagger. Better than bare fists.', 'weapon', 'weapon', 40, 50, 17, 1, 'knife', 'dagger', 5, 150),
-(3002, 'Keen Edge', 'A finely honed short blade.', 'weapon', 'weapon', 40, 150, 30, 1, 'cutter', 'dagger', 5, 150),
-(3003, 'Stiletto Fang', 'An elegant parrying dagger with a needle-thin tip.', 'weapon', 'weapon', 60, 500, 43, 12, 'main_gauche', 'dagger', 5, 150),
-(3004, 'Iron Cleaver', 'A standard one-handed sword with a broad blade.', 'weapon', 'weapon', 80, 100, 25, 2, 'sword', 'one_hand_sword', 0, 150),
-(3005, 'Crescent Saber', 'A curved, heavy cutting sword.', 'weapon', 'weapon', 60, 600, 49, 18, 'falchion', 'one_hand_sword', 0, 150),
-(3006, 'Hunting Longbow', 'A sturdy ranged bow with impressive reach.', 'weapon', 'weapon', 50, 400, 35, 4, 'bow', 'bow', -3, 800)
-ON CONFLICT (item_id) DO NOTHING;
-
--- Armor
-INSERT INTO items (item_id, name, description, item_type, equip_slot, weight, price, def, required_level, icon) VALUES
-(4001, 'Linen Tunic', 'A simple linen shirt offering minimal protection.', 'armor', 'armor', 10, 20, 1, 1, 'cotton_shirt'),
-(4002, 'Quilted Vest', 'Light quilted padding for basic protection.', 'armor', 'armor', 80, 200, 4, 1, 'padded_armor'),
-(4003, 'Ringweave Hauberk', 'Interlocking metal rings forged into sturdy armor.', 'armor', 'armor', 150, 800, 8, 20, 'chain_mail')
-ON CONFLICT (item_id) DO NOTHING;
-
--- ============================================================
--- RO Drop Items (126 items from zone 1-3 monsters)
--- Generated by: node scripts/generate_ro_items_migration.js
--- ============================================================
-
--- RO Consumables (28 items)
-INSERT INTO items (item_id, name, description, item_type, weight, price, stackable, max_stack, icon) VALUES
-(1006, 'Red Herb', 'A small red medicinal herb. Restores 18 HP.', 'consumable', 3, 18, true, 99, 'red_herb'),
-(1007, 'Yellow Herb', 'A yellow medicinal herb. Restores 38 HP.', 'consumable', 5, 25, true, 99, 'yellow_herb'),
-(1008, 'Green Herb', 'A green herb that cures poison.', 'consumable', 3, 10, true, 99, 'green_herb'),
-(1009, 'Blue Herb', 'A blue medicinal herb. Restores 15 SP.', 'consumable', 5, 30, true, 99, 'blue_herb'),
-(1010, 'Hinalle', 'A rare herb with strong healing properties.', 'consumable', 5, 50, true, 99, 'hinalle'),
-(1011, 'Apple', 'A fresh, juicy apple. Restores 16 HP.', 'consumable', 2, 7, true, 99, 'apple'),
-(1012, 'Banana', 'A ripe banana. Restores 17 HP.', 'consumable', 2, 15, true, 99, 'banana'),
-(1013, 'Carrot', 'A fresh orange carrot. Restores 18 HP.', 'consumable', 2, 5, true, 99, 'carrot'),
-(1014, 'Grape', 'A cluster of sweet grapes. Restores 25 SP.', 'consumable', 2, 100, true, 99, 'grape'),
-(1015, 'Meat', 'A slab of fresh meat. Restores 70 HP.', 'consumable', 15, 25, true, 99, 'meat'),
-(1016, 'Orange', 'A sweet citrus fruit. Restores 19 HP.', 'consumable', 2, 10, true, 99, 'orange'),
-(1017, 'Strawberry', 'A ripe strawberry. Restores 16 SP.', 'consumable', 2, 15, true, 99, 'strawberry'),
-(1018, 'Sweet Potato', 'A baked sweet potato. Restores 25 HP.', 'consumable', 10, 20, true, 99, 'sweet_potato'),
-(1019, 'Honey', 'Sweet golden honey. Restores 70 HP and 20 SP.', 'consumable', 10, 100, true, 99, 'honey'),
-(1020, 'Orange Juice', 'Freshly squeezed orange juice. Restores 25 HP.', 'consumable', 10, 75, true, 99, 'orange_juice'),
-(1021, 'Sweet Milk', 'Warm sweet milk. Restores 50 HP.', 'consumable', 10, 60, true, 99, 'sweet_milk'),
-(1022, 'Rainbow Carrot', 'A rare multicolored carrot.', 'consumable', 2, 200, true, 99, 'rainbow_carrot'),
-(1023, 'Cacao', 'Raw cacao beans. Restores 10 HP.', 'consumable', 2, 30, true, 99, 'cacao'),
-(1024, 'Unripe Apple', 'A small, sour green apple.', 'consumable', 2, 5, true, 99, 'unripe_apple'),
-(1025, 'Center Potion', 'A balanced recovery potion. Restores 150 HP.', 'consumable', 7, 50, true, 99, 'center_potion'),
-(1026, 'Karvodailnirol', 'A bitter antidote herb. Cures all status effects.', 'consumable', 7, 75, true, 99, 'karvodailnirol'),
-(1027, 'Leaflet Of Hinal', 'A healing herb leaf. Restores minor HP.', 'consumable', 1, 20, true, 99, 'leaflet_of_hinal'),
-(1028, 'Wing Of Butterfly', 'Teleports you to your save point.', 'consumable', 5, 150, true, 99, 'wing_of_butterfly'),
-(1029, 'Wing Of Fly', 'Teleports you to a random location on the map.', 'consumable', 5, 30, true, 99, 'wing_of_fly'),
-(1030, 'Wind Scroll 1 3', 'A wind magic scroll. Casts a small wind spell.', 'consumable', 1, 50, true, 99, 'wind_scroll'),
-(1031, 'Tree Of Archer 1', 'Archer training manual Vol.1.', 'consumable', 5, 250, true, 99, 'tree_of_archer_1'),
-(1032, 'Tree Of Archer 2', 'Archer training manual Vol.2.', 'consumable', 5, 300, true, 99, 'tree_of_archer_2'),
-(1033, 'Tree Of Archer 3', 'Archer training manual Vol.3.', 'consumable', 5, 350, true, 99, 'tree_of_archer_3')
-ON CONFLICT (item_id) DO NOTHING;
-
--- RO Etc / Loot Items (50 items)
-INSERT INTO items (item_id, name, description, item_type, weight, price, stackable, max_stack, icon) VALUES
-(2009, 'Jellopy', 'A small, worthless gelatinous substance from a Poring.', 'etc', 1, 2, true, 999, 'jellopy'),
-(2010, 'Fluff', 'Soft, fluffy material from a Fabre.', 'etc', 1, 3, true, 999, 'fluff'),
-(2011, 'Shell', 'A hard protective shell fragment.', 'etc', 2, 14, true, 999, 'shell'),
-(2012, 'Feather', 'A light, downy feather.', 'etc', 1, 5, true, 999, 'feather'),
-(2013, 'Mushroom Spore', 'Tiny spores released by a mushroom creature.', 'etc', 1, 10, true, 999, 'mushroom_spore'),
-(2014, 'Talon', 'A sharp talon from a bird of prey.', 'etc', 1, 8, true, 999, 'talon'),
-(2015, 'Tree Root', 'A fibrous tree root segment.', 'etc', 1, 3, true, 999, 'tree_root'),
-(2016, 'Tooth Of Bat', 'A sharp fang from a bat creature.', 'etc', 1, 10, true, 999, 'tooth_of_bat'),
-(2017, 'Bee Sting', 'A venomous stinger from a hornet.', 'etc', 1, 8, true, 999, 'bee_sting'),
-(2018, 'Grasshopper''s Leg', 'A long, jointed leg from a grasshopper.', 'etc', 1, 12, true, 999, 'grasshoppers_leg'),
-(2019, 'Skel Bone', 'A weathered bone from an undead skeleton.', 'etc', 1, 15, true, 999, 'skel_bone'),
-(2020, 'Decayed Nail', 'A rotting fingernail from a zombie.', 'etc', 1, 12, true, 999, 'decayed_nail'),
-(2021, 'Sticky Webfoot', 'A sticky webbed foot from a frog.', 'etc', 1, 6, true, 999, 'sticky_webfoot'),
-(2022, 'Spawn', 'Frog eggs in a gelatinous mass.', 'etc', 1, 5, true, 999, 'spawn'),
-(2023, 'Yoyo Tail', 'A furry tail from a monkey-like creature.', 'etc', 1, 8, true, 999, 'yoyo_tail'),
-(2024, 'Raccoon Leaf', 'A magical leaf carried by a raccoon.', 'etc', 1, 10, true, 999, 'raccoon_leaf'),
-(2025, 'Stem', 'A thick plant stem from a mandragora.', 'etc', 1, 3, true, 999, 'stem'),
-(2026, 'Powder Of Butterfly', 'Shimmering dust from butterfly wings.', 'etc', 1, 40, true, 999, 'powder_of_butterfly'),
-(2027, 'Poison Spore', 'A toxic mushroom spore.', 'etc', 1, 7, true, 999, 'poison_spore_item'),
-(2028, 'Shoot', 'A young plant shoot from a mandragora.', 'etc', 1, 3, true, 999, 'shoot'),
-(2029, 'Resin', 'Sticky tree sap from a willow.', 'etc', 1, 5, true, 999, 'resin'),
-(2030, 'Feather Of Birds', 'A large flight feather from a condor.', 'etc', 1, 5, true, 999, 'feather_of_birds'),
-(2031, 'Bill Of Birds', 'A hard beak fragment from a bird.', 'etc', 1, 10, true, 999, 'bill_of_birds'),
-(2032, 'Animal''s Skin', 'Tanned hide from a wild animal.', 'etc', 1, 18, true, 999, 'animals_skin'),
-(2033, 'Flower', 'A beautiful wild flower.', 'etc', 1, 3, true, 999, 'flower'),
-(2034, 'Clover', 'A common three-leaf clover.', 'etc', 1, 5, true, 999, 'clover'),
-(2035, 'Four Leaf Clover', 'An extremely rare lucky clover.', 'etc', 1, 500, true, 999, 'four_leaf_clover'),
-(2036, 'Chrysalis', 'A cocoon shell from an insect larva.', 'etc', 1, 4, true, 999, 'chrysalis'),
-(2037, 'Sticky Mucus', 'Thick, gooey substance from a slime creature.', 'etc', 1, 7, true, 999, 'sticky_mucus'),
-(2038, 'Garlet', 'A small throwing stone used as ammunition.', 'etc', 1, 5, true, 999, 'garlet'),
-(2039, 'Empty Bottle', 'An empty glass bottle. Can be used for brewing.', 'etc', 2, 3, true, 999, 'empty_bottle'),
-(2040, 'Iron Ore', 'Unrefined iron ore. Used for smithing.', 'etc', 15, 25, true, 999, 'iron_ore'),
-(2041, 'Iron', 'A refined iron ingot. Used for crafting.', 'etc', 30, 50, true, 999, 'iron'),
-(2042, 'Phracon', 'A mineral used to upgrade level 1 weapons.', 'etc', 20, 100, true, 999, 'phracon'),
-(2043, 'Oridecon Stone', 'A rare ore used in weapon forging.', 'etc', 30, 500, true, 999, 'oridecon_stone'),
-(2044, 'Wind Of Verdure', 'Crystallized wind essence.', 'etc', 1, 75, true, 999, 'wind_of_verdure'),
-(2045, 'Yellow Gemstone', 'A sparkling yellow gem used in magic.', 'etc', 3, 300, true, 999, 'yellow_gemstone'),
-(2046, 'Azure Jewel', 'A brilliant blue jewel.', 'etc', 3, 3000, true, 999, 'azure_jewel'),
-(2047, 'Bluish Green Jewel', 'A rare teal-colored gemstone.', 'etc', 3, 3000, true, 999, 'bluish_green_jewel'),
-(2048, 'Cardinal Jewel', 'A deep red precious stone.', 'etc', 3, 3000, true, 999, 'cardinal_jewel'),
-(2049, 'White Jewel', 'A pure white gemstone.', 'etc', 3, 3000, true, 999, 'white_jewel'),
-(2050, 'Zargon', 'A mysterious crystallized substance.', 'etc', 5, 200, true, 999, 'zargon'),
-(2051, 'Yellow Live', 'A golden magical essence.', 'etc', 5, 100, true, 999, 'yellow_live'),
-(2052, 'Wooden Block', 'A small carved wooden block.', 'etc', 1, 5, true, 999, 'wooden_block'),
-(2053, 'Arrow', 'A basic wooden arrow for bows.', 'etc', 0, 1, true, 999, 'arrow'),
-(2054, 'Chonchon Doll', 'A cute doll shaped like a Chonchon.', 'etc', 10, 200, true, 99, 'chonchon_doll'),
-(2055, 'Grasshopper Doll', 'A doll shaped like a grasshopper.', 'etc', 10, 200, true, 99, 'grasshopper_doll'),
-(2056, 'Monkey Doll', 'A plush monkey doll.', 'etc', 10, 200, true, 99, 'monkey_doll'),
-(2057, 'Raccoondog Doll', 'A doll shaped like a raccoon dog.', 'etc', 10, 200, true, 99, 'raccoondog_doll'),
-(2058, 'Spore Doll', 'A doll shaped like a mushroom spore.', 'etc', 10, 200, true, 99, 'spore_doll')
-ON CONFLICT (item_id) DO NOTHING;
-
--- RO Weapons (14 items)
-INSERT INTO items (item_id, name, description, item_type, equip_slot, weight, price, atk, matk, required_level, stackable, max_stack, icon, weapon_type, aspd_modifier, weapon_range) VALUES
-(3007, 'Knife', 'A basic utility knife.', 'weapon', 'weapon', 40, 25, 17, 0, 1, false, 1, 'knife_ro', 'dagger', 5, 150),
-(3008, 'Cutter', 'A sharp cutting blade.', 'weapon', 'weapon', 40, 150, 30, 0, 1, false, 1, 'cutter_ro', 'dagger', 5, 150),
-(3009, 'Main Gauche', 'A parrying dagger with a wide guard.', 'weapon', 'weapon', 60, 500, 43, 0, 12, false, 1, 'main_gauche_ro', 'dagger', 5, 150),
-(3010, 'Falchion', 'A curved single-edged sword.', 'weapon', 'weapon', 60, 600, 49, 0, 18, false, 1, 'falchion_ro', 'one_hand_sword', 0, 150),
-(3011, 'Mace', 'A sturdy blunt weapon with a heavy head.', 'weapon', 'weapon', 80, 750, 37, 0, 2, false, 1, 'mace', 'mace', -2, 150),
-(3012, 'Rod', 'A basic wooden staff for mages.', 'weapon', 'weapon', 40, 25, 15, 45, 1, false, 1, 'rod', 'staff', -3, 150),
-(3013, 'Bow', 'A basic wooden bow.', 'weapon', 'weapon', 50, 500, 15, 0, 4, false, 1, 'bow_ro', 'bow', -3, 800),
-(3014, 'Javelin', 'A light throwing spear.', 'weapon', 'weapon', 70, 75, 28, 0, 1, false, 1, 'javelin', 'spear', -3, 150),
-(3015, 'Spear', 'A long-reaching polearm weapon.', 'weapon', 'weapon', 85, 800, 44, 0, 4, false, 1, 'spear', 'spear', -3, 150),
-(3016, 'Axe', 'A heavy chopping axe.', 'weapon', 'weapon', 80, 250, 38, 0, 3, false, 1, 'axe', 'axe', -2, 150),
-(3017, 'Club', 'A simple wooden club.', 'weapon', 'weapon', 70, 60, 23, 0, 1, false, 1, 'club', 'mace', -2, 150),
-(3018, 'Wand', 'A magical wand for spellcasting.', 'weapon', 'weapon', 40, 200, 25, 45, 1, false, 1, 'wand', 'staff', -3, 150),
-(3019, 'Guitar Of Vast Land', 'A musical instrument that resonates with earth energy.', 'weapon', 'weapon', 70, 2000, 50, 0, 27, false, 1, 'guitar_of_vast_land', 'instrument', -3, 150),
-(3020, 'Whip Of Earth', 'A whip imbued with earth elemental power.', 'weapon', 'weapon', 40, 2500, 55, 0, 27, false, 1, 'whip_of_earth', 'whip', -3, 150)
-ON CONFLICT (item_id) DO NOTHING;
-
--- RO Armor / Headgear / Footgear / Accessories (11 items)
-INSERT INTO items (item_id, name, description, item_type, equip_slot, weight, price, def, required_level, stackable, max_stack, icon) VALUES
-(4004, 'Guard', 'A small wooden shield.', 'armor', 'shield', 30, 100, 3, 1, false, 1, 'guard'),
-(4005, 'Hat', 'A simple cloth hat.', 'armor', 'head_top', 20, 150, 2, 1, false, 1, 'hat'),
-(4006, 'Sandals', 'Light open-toed footwear.', 'armor', 'footgear', 20, 125, 1, 1, false, 1, 'sandals'),
-(4007, 'Silk Robe', 'A fine silk robe offering magical protection.', 'armor', 'armor', 40, 4000, 3, 1, false, 1, 'silk_robe'),
-(4008, 'Ribbon', 'A pretty hair ribbon.', 'armor', 'head_top', 10, 25, 1, 1, false, 1, 'ribbon'),
-(4009, 'Cat Hairband', 'A cute headband with cat ears.', 'armor', 'head_top', 10, 500, 1, 1, false, 1, 'cat_hairband'),
-(4010, 'Skul Ring', 'A ring shaped like a tiny skull.', 'armor', 'accessory', 10, 300, 0, 1, false, 1, 'skul_ring'),
-(4011, 'Green Feeler', 'An antenna-like headpiece from an insect.', 'armor', 'head_top', 10, 500, 1, 1, false, 1, 'green_feeler'),
-(4012, 'Pierrot Nose', 'A round red clown nose.', 'armor', 'head_low', 10, 100, 0, 1, false, 1, 'pierrot_nose'),
-(4013, 'Horrendous Mouth', 'A scary mouth-shaped mask.', 'armor', 'head_low', 10, 100, 0, 1, false, 1, 'horrendous_mouth'),
-(4014, 'Fancy Flower', 'A beautiful flower worn as a headpiece.', 'armor', 'head_top', 10, 1000, 1, 1, false, 1, 'fancy_flower')
-ON CONFLICT (item_id) DO NOTHING;
-
--- RO Monster Cards (23 items)
-INSERT INTO items (item_id, name, description, item_type, weight, price, stackable, max_stack, icon) VALUES
-(5001, 'Poring Card', 'LUK +2, Perfect Dodge +1.', 'card', 1, 4500, false, 1, 'poring_card'),
-(5002, 'Lunatic Card', 'LUK +1, Critical +1, Flee +1.', 'card', 1, 4500, false, 1, 'lunatic_card'),
-(5003, 'Fabre Card', 'VIT +1, Max HP +100.', 'card', 1, 4500, false, 1, 'fabre_card'),
-(5004, 'Pupa Card', 'Max HP +700.', 'card', 1, 4500, false, 1, 'pupa_card'),
-(5005, 'Drops Card', 'DEX +1, HIT +3.', 'card', 1, 4500, false, 1, 'drops_card'),
-(5006, 'Chonchon Card', 'AGI +1, Flee +2.', 'card', 1, 4500, false, 1, 'chonchon_card'),
-(5007, 'Condor Card', 'Flee +5.', 'card', 1, 4500, false, 1, 'condor_card'),
-(5008, 'Wilow Card', 'Max SP +80.', 'card', 1, 4500, false, 1, 'wilow_card'),
-(5009, 'Roda Frog Card', 'Max HP +400, Max SP +50.', 'card', 1, 4500, false, 1, 'roda_frog_card'),
-(5010, 'Hornet Card', 'STR +1, ATK +3.', 'card', 1, 4500, false, 1, 'hornet_card'),
-(5011, 'Rocker Card', 'DEX +1, ATK +5.', 'card', 1, 4500, false, 1, 'rocker_card'),
-(5012, 'Farmiliar Card', 'Drains 5% HP on attack.', 'card', 1, 4500, false, 1, 'farmiliar_card'),
-(5013, 'Savage Babe Card', '5% chance to stun.', 'card', 1, 4500, false, 1, 'savage_babe_card'),
-(5014, 'Spore Card', 'VIT +2.', 'card', 1, 4500, false, 1, 'spore_card'),
-(5015, 'Zombie Card', 'HP Recovery +20%.', 'card', 1, 4500, false, 1, 'zombie_card'),
-(5016, 'Skeleton Card', 'ATK +10, HIT +5.', 'card', 1, 4500, false, 1, 'skeleton_card'),
-(5017, 'Creamy Card', 'Teleport Lv1.', 'card', 1, 4500, false, 1, 'creamy_card'),
-(5018, 'Poporing Card', 'Detoxify Lv1.', 'card', 1, 4500, false, 1, 'poporing_card'),
-(5019, 'Pecopeco Card', 'Max HP +10%.', 'card', 1, 4500, false, 1, 'pecopeco_card'),
-(5020, 'Mandragora Card', 'INT +1, Max SP +50.', 'card', 1, 4500, false, 1, 'mandragora_card'),
-(5021, 'Poison Spore Card', '5% poison on attack.', 'card', 1, 4500, false, 1, 'poison_spore_card'),
-(5022, 'Smokie Card', 'Hiding Lv1.', 'card', 1, 4500, false, 1, 'smokie_card'),
-(5023, 'Yoyo Card', 'AGI +1, Perfect Dodge +5.', 'card', 1, 4500, false, 1, 'yoyo_card')
-ON CONFLICT (item_id) DO NOTHING;
+-- For fresh installs, run the canonical items SQL after this file:
+--   \i scripts/output/canonical_items.sql
+--
+-- The canonical_items.sql contains all 6,169 rAthena pre-renewal items
+-- with full data: stats, prices, scripts, descriptions, weapon types, etc.
+-- It uses ON CONFLICT (item_id) DO UPDATE to safely merge with any existing data.
+--
+-- For existing databases migrating from custom IDs, run instead:
+--   \i database/migrations/migrate_to_canonical_ids.sql
+--   \i scripts/output/canonical_items.sql

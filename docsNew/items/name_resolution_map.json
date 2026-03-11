@@ -1,0 +1,3356 @@
+{
+  "resolved": [
+    {
+      "dropName": "Centimental Flower",
+      "rathenaName": "Romantic Flower",
+      "rathenaId": 2269,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Fruit Of Mastela",
+      "rathenaName": "Mastela Fruit",
+      "rathenaId": 522,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Centimental Leaf",
+      "rathenaName": "Romantic Leaf",
+      "rathenaId": 2270,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Leaflet Of Aloe",
+      "rathenaName": "Aloe Leaflet",
+      "rathenaId": 521,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Seed Of Yggdrasil",
+      "rathenaName": "Yggdrasil Seed",
+      "rathenaId": 608,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Yggdrasilberry",
+      "rathenaName": "Yggdrasil Berry",
+      "rathenaId": 607,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Alchol",
+      "rathenaName": "Alcohol",
+      "rathenaId": 970,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Boody Red",
+      "rathenaName": "Red Blood",
+      "rathenaId": 990,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Mushroom Of Thief 1",
+      "rathenaName": "Orange Net Mushroom",
+      "rathenaId": 1069,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Mushroom Of Thief 2",
+      "rathenaName": "Orange Gooey Mushroom",
+      "rathenaId": 1070,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Azure Jewel",
+      "rathenaName": "Emerald",
+      "rathenaId": 721,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Candy Striper",
+      "rathenaName": "Candy Cane",
+      "rathenaId": 530,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Gift Box 2",
+      "rathenaName": "Gift Box",
+      "rathenaId": 665,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Gift Box 4",
+      "rathenaName": "Gift Box",
+      "rathenaId": 667,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Gift Box 1",
+      "rathenaName": "Gift Box",
+      "rathenaId": 664,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Branch Of Dead Tree",
+      "rathenaName": "Dead Branch",
+      "rathenaId": 604,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Gift Box 3",
+      "rathenaName": "Gift Box",
+      "rathenaId": 666,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Snowy Horn",
+      "rathenaName": "Unicorn Horn",
+      "rathenaId": 2257,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Scarlet Jewel",
+      "rathenaName": "Pearl",
+      "rathenaId": 722,
+      "method": "aegis"
+    },
+    {
+      "dropName": "White Platter",
+      "rathenaName": "China",
+      "rathenaId": 736,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Pecopeco Egg Card",
+      "rathenaName": "Peco Peco Egg Card",
+      "rathenaId": 4007,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Pierrot Nose",
+      "rathenaName": "Clown Nose",
+      "rathenaId": 2262,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Tree Of Archer 3",
+      "rathenaName": "Barren Trunk",
+      "rathenaId": 1068,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Tree Of Archer 2",
+      "rathenaName": "Solid Trunk",
+      "rathenaId": 1067,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Tree Of Archer 1",
+      "rathenaName": "Fine-grained Trunk",
+      "rathenaId": 1066,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Wilow Card",
+      "rathenaName": "Willow Card",
+      "rathenaId": 4010,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Wing Of Fly",
+      "rathenaName": "Fly Wing",
+      "rathenaId": 601,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Worm Peelings",
+      "rathenaName": "Worm Peeling",
+      "rathenaId": 955,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Leather Jacket",
+      "rathenaName": "Jacket",
+      "rathenaId": 2303,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Fillet",
+      "rathenaName": "Cute Ribbon",
+      "rathenaId": 2250,
+      "method": "aegis"
+    },
+    {
+      "dropName": "White Jewel",
+      "rathenaName": "Opal",
+      "rathenaId": 727,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Center Potion",
+      "rathenaName": "Concentration Potion",
+      "rathenaId": 645,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Farmiliar Card",
+      "rathenaName": "Familiar Card",
+      "rathenaId": 4020,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Sweet Gents",
+      "rathenaName": "Sweet Gent",
+      "rathenaId": 2245,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Violet Jewel",
+      "rathenaName": "Amethyst",
+      "rathenaId": 719,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Lusty Iron",
+      "rathenaName": "Rusty Iron",
+      "rathenaId": 625,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Guitar Of Vast Land",
+      "rathenaName": "Green Acre Guitar",
+      "rathenaId": 1916,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Leaflet Of Hinal",
+      "rathenaName": "Hinalle Leaflet",
+      "rathenaId": 520,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Grasshopper Doll",
+      "rathenaName": "Rocker Doll",
+      "rathenaId": 752,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Desert Wolf Babe Card",
+      "rathenaName": "Baby Desert Wolf Card",
+      "rathenaId": 4023,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Thief Bug Female Card",
+      "rathenaName": "Female Thief Bug Card",
+      "rathenaId": 4026,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Skel Bone",
+      "rathenaName": "Skel-Bone",
+      "rathenaId": 932,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Skul Ring",
+      "rathenaName": "Skull Ring",
+      "rathenaId": 2609,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Bluish Green Jewel",
+      "rathenaName": "Zircon",
+      "rathenaId": 729,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Kiss Of Angel",
+      "rathenaName": "Angel's Kiss",
+      "rathenaId": 5125,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Red Socks With Holes",
+      "rathenaName": "Red Stocking",
+      "rathenaId": 7034,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Well Baked Cookie",
+      "rathenaName": "Well-baked Cookie",
+      "rathenaId": 538,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Yellow Live",
+      "rathenaName": "Green Live",
+      "rathenaId": 993,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Whip Of Earth",
+      "rathenaName": "Gaia Whip",
+      "rathenaId": 1967,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Elunium Stone",
+      "rathenaName": "Rough Elunium",
+      "rathenaId": 757,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Worm Tail Card",
+      "rathenaName": "Wormtail Card",
+      "rathenaId": 4034,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Cardinal Jewel",
+      "rathenaName": "Ruby",
+      "rathenaId": 723,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Scale Of Snakes",
+      "rathenaName": "Snake Scale",
+      "rathenaId": 926,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Posionous Canine",
+      "rathenaName": "Venom Canine",
+      "rathenaId": 937,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Shining Scales",
+      "rathenaName": "Shining Scale",
+      "rathenaId": 954,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Flesh Of Clam",
+      "rathenaName": "Clam Flesh",
+      "rathenaId": 966,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Sparkling Dust",
+      "rathenaName": "Star Dust",
+      "rathenaId": 1001,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Shellfish Card",
+      "rathenaName": "Shell Fish Card",
+      "rathenaId": 4273,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Cold Scroll 2 1",
+      "rathenaName": "Level 1 Frost Diver",
+      "rathenaId": 700,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Skyblue Jewel",
+      "rathenaName": "Aquamarine",
+      "rathenaId": 720,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Meat Dumpling Doll",
+      "rathenaName": "Rice Ball Doll",
+      "rathenaId": 7272,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Soft Leaf",
+      "rathenaName": "Soft Blade of Grass",
+      "rathenaId": 7194,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Great Leaf",
+      "rathenaName": "Huge Leaf",
+      "rathenaId": 7198,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Wing Of Butterfly",
+      "rathenaName": "Butterfly Wing",
+      "rathenaId": 602,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Wind Scroll 1 3",
+      "rathenaName": "Level 3 Lightening Bolt",
+      "rathenaId": 692,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Colorful Shell",
+      "rathenaName": "Rainbow Shell",
+      "rathenaId": 1013,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Root Of Maneater",
+      "rathenaName": "Maneater Root",
+      "rathenaId": 1033,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Cat Hairband",
+      "rathenaName": "Kitty Band",
+      "rathenaId": 2213,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Raccoondog Doll",
+      "rathenaName": "Raccoon Doll",
+      "rathenaId": 754,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Guitar Of Gentle Breeze",
+      "rathenaName": "Gentle Breeze Guitar",
+      "rathenaId": 1917,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Transparent Cloth",
+      "rathenaName": "Fabric",
+      "rathenaId": 1059,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Ghost Scroll 1 5",
+      "rathenaName": "Level 5 Soul Strike",
+      "rathenaId": 695,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Moustache Of Mole",
+      "rathenaName": "Mole Whiskers",
+      "rathenaId": 1017,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Nail Of Mole",
+      "rathenaName": "Mole Claw",
+      "rathenaId": 1018,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Goggle",
+      "rathenaName": "Goggles",
+      "rathenaId": 2224,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Pecopeco Card",
+      "rathenaName": "Peco Peco Card",
+      "rathenaId": 4031,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Thief Bug Male Card",
+      "rathenaName": "Male Thief Bug Card",
+      "rathenaId": 4050,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Monkey Doll",
+      "rathenaName": "Yoyo Doll",
+      "rathenaId": 753,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Fire Scroll 1 3",
+      "rathenaName": "Level 3 Fire Bolt",
+      "rathenaId": 690,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Elder Wilow Card",
+      "rathenaName": "Elder Willow Card",
+      "rathenaId": 4052,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Crap Shell",
+      "rathenaName": "Crab Shell",
+      "rathenaId": 964,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Angelic Chain",
+      "rathenaName": "Angel Wing",
+      "rathenaId": 2254,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Leaf Of Yggdrasil",
+      "rathenaName": "Yggdrasil Leaf",
+      "rathenaId": 610,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Spirit Chain",
+      "rathenaName": "Halo",
+      "rathenaId": 2282,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Oridecon Stone",
+      "rathenaName": "Rough Oridecon",
+      "rathenaId": 756,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Wing Of Moth",
+      "rathenaName": "Moth Wings",
+      "rathenaId": 1058,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Mistic Frozen",
+      "rathenaName": "Mystic Frozen",
+      "rathenaId": 995,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Viking Helm",
+      "rathenaName": "Orc Helm",
+      "rathenaId": 2299,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Milk Bottle",
+      "rathenaName": "Nursing Bottle",
+      "rathenaId": 7270,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Bib",
+      "rathenaName": "Pinafore",
+      "rathenaId": 7269,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Guitar Of Passion",
+      "rathenaName": "Burning Passion Guitar",
+      "rathenaId": 1914,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Goblin Mask 03",
+      "rathenaName": "Annoyed Mask",
+      "rathenaId": 5089,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Scales Shell",
+      "rathenaName": "Scale Shell",
+      "rathenaId": 936,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Porcupine Spike",
+      "rathenaName": "Porcupine Quill",
+      "rathenaId": 1027,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Goblin Mask 01",
+      "rathenaName": "Poker Face",
+      "rathenaId": 5087,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Gangster Patch",
+      "rathenaName": "Zorro Masque",
+      "rathenaId": 2263,
+      "method": "aegis"
+    },
+    {
+      "dropName": "G Strings",
+      "rathenaName": "Pantie",
+      "rathenaId": 2339,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Ganster Mask",
+      "rathenaName": "Gangster Mask",
+      "rathenaId": 2265,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Cuffs",
+      "rathenaName": "Shackles",
+      "rathenaId": 2408,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Spawns",
+      "rathenaName": "Bacillus",
+      "rathenaId": 7119,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Cigar",
+      "rathenaName": "Cigarette",
+      "rathenaId": 2267,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Rotten Scale",
+      "rathenaName": "Stinky Scale",
+      "rathenaId": 959,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Claw Of Wolves",
+      "rathenaName": "Wolf Claw",
+      "rathenaId": 920,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Golden Jewel",
+      "rathenaName": "Topaz",
+      "rathenaId": 728,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Indian Hair Piece",
+      "rathenaName": "Indian Fillet",
+      "rathenaId": 5010,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Goblini Mask",
+      "rathenaName": "Goblin Mask",
+      "rathenaId": 2297,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Goblin Mask 02",
+      "rathenaName": "Surprised Mask",
+      "rathenaId": 5088,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Nail Of Orc",
+      "rathenaName": "Orc Claw",
+      "rathenaId": 1043,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Packing Paper",
+      "rathenaName": "Wrapping Paper",
+      "rathenaId": 7175,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Packing Ribbon",
+      "rathenaName": "Wrapping Lace",
+      "rathenaId": 7174,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Stuffed Doll",
+      "rathenaName": "Puppet",
+      "rathenaId": 740,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Cookbook06",
+      "rathenaName": "Level 6 Cookbook",
+      "rathenaId": 7477,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Well Dried Bone",
+      "rathenaName": "Well-Dried Bone",
+      "rathenaId": 628,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Pirate Skel Card",
+      "rathenaName": "Pirate Skeleton Card",
+      "rathenaId": 4073,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Spiderweb",
+      "rathenaName": "Cobweb",
+      "rathenaId": 1025,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Short Leg",
+      "rathenaName": "Bug Leg",
+      "rathenaId": 1042,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Great Chef Orleans01",
+      "rathenaName": "Chef King Orleans Vol.1",
+      "rathenaId": 11002,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Holy Scroll 1 3",
+      "rathenaName": "Level 3 Heal",
+      "rathenaId": 12001,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Blossom Of Maneater",
+      "rathenaName": "Maneater Blossom",
+      "rathenaId": 1032,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Foolishness Of Blind",
+      "rathenaName": "Foolishness of the Blind",
+      "rathenaId": 7021,
+      "method": "aegis"
+    },
+    {
+      "dropName": "High end Cooking Kits",
+      "rathenaName": "Professional Cooking Kit",
+      "rathenaId": 12127,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Limb Of Mantis",
+      "rathenaName": "Mantis Scythe",
+      "rathenaId": 1031,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Animal Blood",
+      "rathenaName": "Animal Gore",
+      "rathenaId": 702,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Eagle Eyes",
+      "rathenaName": "Angled Glasses",
+      "rathenaId": 2276,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Tube",
+      "rathenaName": "Flexible Tube",
+      "rathenaId": 7325,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Screw",
+      "rathenaName": "Rusty Screw",
+      "rathenaId": 7317,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Bamboo Cut",
+      "rathenaName": "Piece of Bamboo",
+      "rathenaId": 7150,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Blade Of Pinwheel",
+      "rathenaName": "Vane",
+      "rathenaId": 7192,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Rice Cake Boy Card",
+      "rathenaName": "Dumpling Child Card",
+      "rathenaId": 4154,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Transparent Headgear",
+      "rathenaName": "Transparent Head Protector",
+      "rathenaId": 10003,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Orcish Cuspid",
+      "rathenaName": "Orc's Fang",
+      "rathenaId": 922,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Cold Scroll 1 3",
+      "rathenaName": "Level 3 Cold Bolt",
+      "rathenaId": 688,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Cookie XMAS Card",
+      "rathenaName": "Christmas Cookie Card",
+      "rathenaId": 4235,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Mementos",
+      "rathenaName": "Memento",
+      "rathenaId": 934,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Danggie",
+      "rathenaName": "Daenggie",
+      "rathenaId": 901,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Munak Turban",
+      "rathenaName": "Munak Hat",
+      "rathenaId": 2264,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Adventure Suit",
+      "rathenaName": "Adventurer's Suit",
+      "rathenaId": 2305,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Sword Fish Card",
+      "rathenaName": "Swordfish Card",
+      "rathenaId": 4089,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Lizard Scruff",
+      "rathenaName": "Frill",
+      "rathenaId": 1012,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Skel Worker Card",
+      "rathenaName": "Skeleton Worker Card",
+      "rathenaId": 4092,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Panda Cap",
+      "rathenaName": "Panda Hat",
+      "rathenaId": 5030,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Smooth Paper",
+      "rathenaName": "Slick Paper",
+      "rathenaId": 7111,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Saint Robe",
+      "rathenaName": "Saint's Robe",
+      "rathenaId": 2325,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Cobold Hair",
+      "rathenaName": "Blue Hair",
+      "rathenaId": 1034,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Chinese Ink",
+      "rathenaName": "Squid Ink",
+      "rathenaId": 1024,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Penetration",
+      "rathenaName": "Necklace of Wisdom",
+      "rathenaId": 1007,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Old Magic Book",
+      "rathenaName": "Old Magicbook",
+      "rathenaId": 1006,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Petite DiablOfs Wing",
+      "rathenaName": "Little Evil Wing",
+      "rathenaId": 1039,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Satanic Chain",
+      "rathenaName": "Evil Wing",
+      "rathenaId": 2255,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Ghost Scroll 1 3",
+      "rathenaName": "Level 3 Soul Strike",
+      "rathenaId": 694,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Bon Gun Card",
+      "rathenaName": "Bongun Card",
+      "rathenaId": 4212,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Aloebera",
+      "rathenaName": "Aloevera",
+      "rathenaId": 606,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Leopard Talon",
+      "rathenaName": "Leopard Claw",
+      "rathenaId": 7172,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Dokkaebi Horn",
+      "rathenaName": "Dokebi Horn",
+      "rathenaId": 1021,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Long Hair",
+      "rathenaName": "Black Hair",
+      "rathenaId": 1020,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Inspector Certificate",
+      "rathenaName": "Authoritative Badge",
+      "rathenaId": 662,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Ear Of Puppy",
+      "rathenaName": "Puppy Headband",
+      "rathenaId": 5118,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Old Japaness Clothes",
+      "rathenaName": "Worn-out Kimono",
+      "rathenaId": 7153,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Miyabi Ningyo Card",
+      "rathenaName": "Miyabi Doll Card",
+      "rathenaId": 4208,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Baked Yam",
+      "rathenaName": "Sweet Potato",
+      "rathenaId": 633,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Katar Of Thornbush",
+      "rathenaName": "Katar of Quaking",
+      "rathenaId": 1257,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Sand Man Card",
+      "rathenaName": "Sandman Card",
+      "rathenaId": 4101,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Whisper Boss Card",
+      "rathenaName": "Giant Whisper Card",
+      "rathenaId": 4303,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Solid Peeling",
+      "rathenaName": "Solid Husk",
+      "rathenaId": 7190,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Beetle Nipper",
+      "rathenaName": "Pincher of Beetle",
+      "rathenaId": 7202,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Kind Of Beetle Card",
+      "rathenaName": "Beetle King Card",
+      "rathenaId": 4307,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Holy Bonnet",
+      "rathenaName": "Monk Hat",
+      "rathenaId": 2251,
+      "method": "aegis"
+    },
+    {
+      "dropName": "The Garrison",
+      "rathenaName": "Garrison",
+      "rathenaId": 13104,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Steam Goblin Card",
+      "rathenaName": "Goblin Steamrider Card",
+      "rathenaId": 4156,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Mystery Iron Bit",
+      "rathenaName": "Strange Steel Piece",
+      "rathenaId": 7167,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Poisonous Gas",
+      "rathenaName": "Toxic Gas",
+      "rathenaId": 7322,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Air Pollutant",
+      "rathenaName": "Dust Pollutant",
+      "rathenaId": 7320,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Pumpkin Bucket",
+      "rathenaName": "Pumpkin Lantern",
+      "rathenaId": 7225,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Mole Card",
+      "rathenaName": "Holden Card",
+      "rathenaId": 4343,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Pumpkin Head",
+      "rathenaName": "Jack o' Pumpkin",
+      "rathenaId": 1062,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Frozen Heart",
+      "rathenaName": "Necklace of Oblivion",
+      "rathenaId": 1008,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Crystal Jewel",
+      "rathenaName": "1carat Diamond",
+      "rathenaId": 730,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Mystcase Card",
+      "rathenaName": "Myst Case Card",
+      "rathenaId": 4206,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Fruit Shell",
+      "rathenaName": "Nut Shell",
+      "rathenaId": 5037,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Prawn",
+      "rathenaName": "Shrimp",
+      "rathenaId": 567,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Leaf Clothes",
+      "rathenaName": "Fig Leaf",
+      "rathenaId": 7298,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Air Rifle",
+      "rathenaName": "Slingshot",
+      "rathenaId": 7195,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Flexible String",
+      "rathenaName": "Elastic Band",
+      "rathenaId": 7200,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Ghoul Leg",
+      "rathenaName": "Sharpened Legbone of Ghoul",
+      "rathenaId": 1260,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Sacred Masque",
+      "rathenaName": "Cultish Masque",
+      "rathenaId": 1045,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Mitten Of Presbyter",
+      "rathenaName": "Celebrant's Mitten",
+      "rathenaId": 2617,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Blessed Wand",
+      "rathenaName": "Wand of Occult",
+      "rathenaId": 1614,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Fire Scroll 1 5",
+      "rathenaName": "Level 5 Fire Bolt",
+      "rathenaId": 691,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Book Of Devil",
+      "rathenaName": "Book of the Devil",
+      "rathenaId": 642,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Jump Rope",
+      "rathenaName": "Skipping Rope",
+      "rathenaId": 1968,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Whip Of Ice Piece",
+      "rathenaName": "Icicle Whip",
+      "rathenaId": 1966,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Neraid Card",
+      "rathenaName": "Nereid Card",
+      "rathenaId": 4167,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Earth Scroll 1 3",
+      "rathenaName": "Level 3 Earth Spike",
+      "rathenaId": 686,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Poison Powder",
+      "rathenaName": "Poisonous Powder",
+      "rathenaId": 7154,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Fire Scroll 3 5",
+      "rathenaName": "Level 5 Fire Wall",
+      "rathenaId": 699,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Chrystal Pumps",
+      "rathenaName": "Crystal Pumps",
+      "rathenaId": 2407,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Guitar Of Blue Solo",
+      "rathenaName": "Loner's Guitar",
+      "rathenaId": 1915,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Shoulder Protection",
+      "rathenaName": "Shoulder Protector",
+      "rathenaId": 7196,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Waghnakh",
+      "rathenaName": "Waghnak",
+      "rathenaId": 1801,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Ragamuffin Cape",
+      "rathenaName": "Ragamuffin Manteau",
+      "rathenaId": 2508,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Worn Out Prison Uniform",
+      "rathenaName": "Worn-out Prison Uniform",
+      "rathenaId": 1099,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Solid Twig",
+      "rathenaName": "Strong Branch",
+      "rathenaId": 7203,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Browny Root",
+      "rathenaName": "Brown Root",
+      "rathenaId": 7188,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Novus Card",
+      "rathenaName": "Red Novus Card",
+      "rathenaId": 4383,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Ice Heart",
+      "rathenaName": "Glacial Heart",
+      "rathenaId": 7561,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Side Winder Card",
+      "rathenaName": "Sidewinder Card",
+      "rathenaId": 4117,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Starsand Of Witch",
+      "rathenaName": "Witched Starsand",
+      "rathenaId": 1061,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Cold Scroll 1 5",
+      "rathenaName": "Level 5 Cold Bolt",
+      "rathenaId": 689,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Sageworm Card",
+      "rathenaName": "Sage Worm Card",
+      "rathenaId": 4219,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Blazzer Card",
+      "rathenaName": "Blazer Card",
+      "rathenaId": 4215,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Old Steel Plate",
+      "rathenaName": "Used Iron Plate",
+      "rathenaId": 7319,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Headlamp",
+      "rathenaName": "Flashlight",
+      "rathenaId": 7327,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Dark Red Jewel",
+      "rathenaName": "Garnet",
+      "rathenaId": 718,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Star Sparkling",
+      "rathenaName": "Wizard Hat",
+      "rathenaId": 2252,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Dragon Train",
+      "rathenaName": "Dragon Tail",
+      "rathenaId": 1037,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Petit Card",
+      "rathenaName": "Earth Petite Card",
+      "rathenaId": 4118,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Old Violet Box",
+      "rathenaName": "Old Purple Box",
+      "rathenaId": 617,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Petite DiablOfs Horn",
+      "rathenaName": "Little Evil Horn",
+      "rathenaId": 1038,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Sacred Marks",
+      "rathenaName": "Hand of God",
+      "rathenaId": 1009,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Hot Hair",
+      "rathenaName": "Burning Hair",
+      "rathenaId": 7122,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Poison Toad Card",
+      "rathenaName": "Poisonous Toad Card",
+      "rathenaId": 4175,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Wild Ginseng Card",
+      "rathenaName": "Hermit Plant Card",
+      "rathenaId": 4232,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Tooth Of Ancient Fish",
+      "rathenaName": "Ancient Tooth",
+      "rathenaId": 1053,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Lip Of Ancient Fish",
+      "rathenaName": "Ancient Lips",
+      "rathenaId": 1054,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Antenna",
+      "rathenaName": "Aerial",
+      "rathenaId": 5011,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Katar Of Cold Icicle",
+      "rathenaName": "Katar of Frozen Icicle",
+      "rathenaId": 1256,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Nice Sweet Potato",
+      "rathenaName": "Yam",
+      "rathenaId": 549,
+      "method": "aegis"
+    },
+    {
+      "dropName": "The Cyclone",
+      "rathenaName": "Cyclone",
+      "rathenaId": 13151,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Antique Firelock Card",
+      "rathenaName": "Firelock Soldier Card",
+      "rathenaId": 4160,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Granpa Beard",
+      "rathenaName": "Grampa Beard",
+      "rathenaId": 2241,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Thimble Of Archer",
+      "rathenaName": "Bow Thimble",
+      "rathenaId": 2619,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Silence Arrow",
+      "rathenaName": "Mute Arrow",
+      "rathenaId": 1769,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Tiger Skin Panties",
+      "rathenaName": "Tiger Panty",
+      "rathenaId": 7267,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Little Blacky Ghost",
+      "rathenaName": "Little Ghost Doll",
+      "rathenaId": 7268,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Li Me Mang Ryang Card",
+      "rathenaName": "Jing Guai Card",
+      "rathenaId": 4265,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Sharpened Cuspid",
+      "rathenaName": "Fang",
+      "rathenaId": 1063,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Germinating Sprout",
+      "rathenaName": "Sprout",
+      "rathenaId": 7193,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Thin Stem",
+      "rathenaName": "Thin Trunk",
+      "rathenaId": 7186,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Rante",
+      "rathenaName": "Rante Whip",
+      "rathenaId": 1956,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Bladed Whip",
+      "rathenaName": "Blade Whip",
+      "rathenaId": 1969,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Hora",
+      "rathenaName": "Studded Knuckles",
+      "rathenaId": 1805,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Tantanmen",
+      "rathenaName": "Tantan Noodle",
+      "rathenaId": 12395,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Hat Of Cake",
+      "rathenaName": "Cake Hat",
+      "rathenaId": 5024,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Hair Protector",
+      "rathenaName": "Bao Bao",
+      "rathenaId": 5042,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Chemeti",
+      "rathenaName": "Chemeti Whip",
+      "rathenaId": 1964,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Bamboo Basket",
+      "rathenaName": "Straw Basket",
+      "rathenaId": 7299,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Chilli",
+      "rathenaName": "Red Chile",
+      "rathenaId": 7286,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Fox Tail",
+      "rathenaName": "Nine Tails",
+      "rathenaId": 1022,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Booby Trap",
+      "rathenaName": "Trap",
+      "rathenaId": 1065,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Spectacles",
+      "rathenaName": "Magnifier",
+      "rathenaId": 611,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Plate Armor",
+      "rathenaName": "Full Plate",
+      "rathenaId": 2316,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Prohibition Red Candle",
+      "rathenaName": "Forbidden Red Candle",
+      "rathenaId": 660,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Wind Scroll 1 5",
+      "rathenaName": "Level 5 Lightening Bolt",
+      "rathenaId": 693,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Bone Wand",
+      "rathenaName": "Evil Bone Wand",
+      "rathenaId": 1615,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Spiky Heel",
+      "rathenaName": "High Heels",
+      "rathenaId": 2409,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Heart Of Tree",
+      "rathenaName": "Wooden Heart",
+      "rathenaId": 7189,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Needle Pouch",
+      "rathenaName": "Needle Packet",
+      "rathenaId": 7213,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Dried Sand",
+      "rathenaName": "Dry Sand",
+      "rathenaId": 7264,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Increase Soil Card",
+      "rathenaName": "Mi Gao Card",
+      "rathenaId": 4231,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Two Handed Axe",
+      "rathenaName": "Two-Handed Axe",
+      "rathenaId": 1360,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Iron Cane",
+      "rathenaName": "Iron Cain",
+      "rathenaId": 2266,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Two Hand Sword",
+      "rathenaName": "Two-Handed Sword",
+      "rathenaId": 1157,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Patriotism Marks",
+      "rathenaName": "Chivalry Emblem",
+      "rathenaId": 1004,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Daydric Card",
+      "rathenaName": "Raydric Card",
+      "rathenaId": 4133,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Skel Prisoner Card",
+      "rathenaName": "Skeleton Prisoner Card",
+      "rathenaId": 4222,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Incisive Arrow",
+      "rathenaName": "Sharp Arrow",
+      "rathenaId": 1764,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Sword Accessory",
+      "rathenaName": "Tassel",
+      "rathenaId": 7301,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Broken Armor Piece",
+      "rathenaName": "Destroyed Armor",
+      "rathenaId": 7069,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Hard Peach",
+      "rathenaName": "Solid Peach",
+      "rathenaId": 7164,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Live Peach Tree Card",
+      "rathenaName": "Enchanted Peach Tree Card",
+      "rathenaId": 4217,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Will Of Darkness",
+      "rathenaName": "Will of the Darkness",
+      "rathenaId": 7340,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Dragon Fang",
+      "rathenaName": "Denture from Dragon Mask",
+      "rathenaId": 7266,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Dancing Dragon Card",
+      "rathenaName": "Zhu Po Long Card",
+      "rathenaId": 4272,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Green Iguana Card",
+      "rathenaName": "Grove Card",
+      "rathenaId": 4377,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Sharp Feeler",
+      "rathenaName": "Hard Feeler",
+      "rathenaId": 7163,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Great Wing",
+      "rathenaName": "Giant Butterfly Wing",
+      "rathenaId": 7168,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Lariat",
+      "rathenaName": "Lariat Whip",
+      "rathenaId": 1962,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Blood Butterfly Card",
+      "rathenaName": "Bloody Butterfly Card",
+      "rathenaId": 4327,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Tangled Chain",
+      "rathenaName": "Tangled Chains",
+      "rathenaId": 7221,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Fedora",
+      "rathenaName": "Bucket Hat",
+      "rathenaId": 5114,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Removal Card",
+      "rathenaName": "Remover Card",
+      "rathenaId": 4353,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Burnt Parts",
+      "rathenaName": "Burnt Part",
+      "rathenaId": 7512,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Sturdy Iron Piece",
+      "rathenaName": "Solid Iron Piece",
+      "rathenaId": 7507,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Nail Of Loki",
+      "rathenaName": "Loki's Nail",
+      "rathenaId": 1262,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Giant Honet Card",
+      "rathenaName": "Giant Hornet Card",
+      "rathenaId": 4271,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Holy Scroll 1 5",
+      "rathenaName": "Level 5 Heal",
+      "rathenaId": 12002,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Fright Paper Blade",
+      "rathenaName": "Sharp Paper",
+      "rathenaId": 7112,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Cloud Piece",
+      "rathenaName": "Cloud Crumb",
+      "rathenaId": 7162,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Popped Rice",
+      "rathenaName": "Rice Cake",
+      "rathenaId": 550,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Evil Cloud Hermit Card",
+      "rathenaName": "Cloud Hermit Card",
+      "rathenaId": 4262,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Hyegun Card",
+      "rathenaName": "Yao Jun Card",
+      "rathenaId": 4328,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Fragment Of Crystal",
+      "rathenaName": "Crystal Fragment",
+      "rathenaId": 7321,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Contracts In Shadow",
+      "rathenaName": "Contract in Shadow",
+      "rathenaId": 641,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Cookbook07",
+      "rathenaName": "Level 7 Cookbook",
+      "rathenaId": 7478,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Peco Wing Feather",
+      "rathenaName": "Peco Peco Feather",
+      "rathenaId": 7101,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Hanging Doll",
+      "rathenaName": "Hung Doll",
+      "rathenaId": 7212,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Rotten Rope",
+      "rathenaName": "Decomposed Rope",
+      "rathenaId": 7218,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Tree Knot",
+      "rathenaName": "Wooden Gnarl",
+      "rathenaId": 7222,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Lab Staff Record",
+      "rathenaName": "Research Chart",
+      "rathenaId": 7347,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Ygnizem Card",
+      "rathenaName": "Egnigem Cenia Card",
+      "rathenaId": 4346,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Arclouse Card",
+      "rathenaName": "Arclouze Card",
+      "rathenaId": 4240,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Sea Otter Leather",
+      "rathenaName": "Sea-Otter Fur",
+      "rathenaId": 7065,
+      "method": "aegis"
+    },
+    {
+      "dropName": "See Otter Card",
+      "rathenaName": "Sea-Otter Card",
+      "rathenaId": 4326,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Chung E Card",
+      "rathenaName": "Green Maiden Card",
+      "rathenaId": 4373,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Armlet Of Prisoner",
+      "rathenaName": "Handcuffs",
+      "rathenaId": 7345,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Erend Card",
+      "rathenaName": "Errende Ebecee Card",
+      "rathenaId": 4349,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Underground Key",
+      "rathenaName": "Key of Underground",
+      "rathenaId": 7027,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Archangeling Card",
+      "rathenaName": "Arc Angeling Card",
+      "rathenaId": 4241,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Kakkung",
+      "rathenaName": "Gakkung Bow",
+      "rathenaId": 1714,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Steel Arrow Container",
+      "rathenaName": "Steel Arrow Quiver",
+      "rathenaId": 12006,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Kavac Card",
+      "rathenaName": "Kavach Icarus Card",
+      "rathenaId": 4351,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Fricco Shoes",
+      "rathenaName": "Fricco's Shoes",
+      "rathenaId": 2417,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Vroken Sword",
+      "rathenaName": "Broken Sword",
+      "rathenaId": 7110,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Honey Jar",
+      "rathenaName": "Honey Pot",
+      "rathenaId": 7121,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Dragon Fly Wing",
+      "rathenaName": "Wing of Dragonfly",
+      "rathenaId": 7064,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Cold Scroll 2 5",
+      "rathenaName": "Level 5 Frost Diver",
+      "rathenaId": 12000,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Garm Baby Card",
+      "rathenaName": "Hatii Babe Card",
+      "rathenaId": 4323,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Staff Of Wing",
+      "rathenaName": "Wing Staff",
+      "rathenaId": 1616,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Rawrel Card",
+      "rathenaName": "Laurell Weinder Card",
+      "rathenaId": 4350,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Pair Of Red Ribbon",
+      "rathenaName": "Small Ribbons",
+      "rathenaId": 5085,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Imperial Cooking Kits",
+      "rathenaName": "Royal Cooking Kit",
+      "rathenaId": 12128,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Icarus Wing",
+      "rathenaName": "Icarus Wings",
+      "rathenaId": 2726,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Cremy Fear Card",
+      "rathenaName": "Creamy Fear Card",
+      "rathenaId": 4298,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Tatters Clothes",
+      "rathenaName": "Tattered Clothes",
+      "rathenaId": 7071,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Dullahan Armor",
+      "rathenaName": "Armor Piece of Dullahan",
+      "rathenaId": 7210,
+      "method": "aegis"
+    },
+    {
+      "dropName": "An Eye Of Dullahan",
+      "rathenaName": "Eye of Dullahan",
+      "rathenaId": 2614,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Fan",
+      "rathenaName": "Folding Fan of Cat Ghost",
+      "rathenaId": 7262,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Cat Eyed Stone",
+      "rathenaName": "Cat's Eye",
+      "rathenaId": 7263,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Civil Servant Card",
+      "rathenaName": "Mao Guai Card",
+      "rathenaId": 4202,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Forturn Sword",
+      "rathenaName": "Fortune Sword",
+      "rathenaId": 1223,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Ring Of Rogue",
+      "rathenaName": "Rogue's Treasure",
+      "rathenaId": 2620,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Coward",
+      "rathenaName": "Cowardice Blade",
+      "rathenaId": 13003,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Whikebain Card",
+      "rathenaName": "Wickebine Tres Card",
+      "rathenaId": 4348,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Memorize Book",
+      "rathenaName": "Memory Book",
+      "rathenaId": 2109,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Executioner\\",
+      "rathenaName": "Executioner",
+      "rathenaId": 1179,
+      "method": "fuzzy(100%)"
+    },
+    {
+      "dropName": "Zherlthsh Card",
+      "rathenaName": "Zealotus Card",
+      "rathenaId": 4277,
+      "method": "aegis"
+    },
+    {
+      "dropName": "C Tower Manager Card",
+      "rathenaName": "Tower Keeper Card",
+      "rathenaId": 4229,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Magic Study Vol1",
+      "rathenaName": "Magic Bible Vol1",
+      "rathenaId": 2131,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Fur Seal Card",
+      "rathenaName": "Seal Card",
+      "rathenaId": 4312,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Limpid Celestial Robe",
+      "rathenaName": "Transparent Celestial Robe",
+      "rathenaId": 7165,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Soft Silk Cloth",
+      "rathenaName": "Soft Silk",
+      "rathenaId": 7166,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Wicked Nymph Card",
+      "rathenaName": "Evil Nymph Card",
+      "rathenaId": 4258,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Golden Bug Card",
+      "rathenaName": "Golden Thief Bug Card",
+      "rathenaId": 4128,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Goblin Mask 04",
+      "rathenaName": "Goblin Leader Mask",
+      "rathenaId": 5090,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Twilight Desert",
+      "rathenaName": "Desert Twilight",
+      "rathenaId": 13034,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Old Magic Circle",
+      "rathenaName": "Worn-out Magic Scroll",
+      "rathenaId": 7099,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Rent Spell Book",
+      "rathenaName": "Torn Magic Book",
+      "rathenaId": 7117,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Rent Scroll",
+      "rathenaName": "Torn Scroll",
+      "rathenaId": 7118,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Wizardy Staff",
+      "rathenaName": "Wizardry Staff",
+      "rathenaId": 1473,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Fire Brand",
+      "rathenaName": "Fireblend",
+      "rathenaId": 1133,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Smoking Pipe",
+      "rathenaName": "Pipe",
+      "rathenaId": 2268,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Tiger Footskin",
+      "rathenaName": "Tiger's Footskin",
+      "rathenaId": 1030,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Krieg",
+      "rathenaName": "Krierg",
+      "rathenaId": 13046,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Lapier",
+      "rathenaName": "Rapier",
+      "rathenaId": 1110,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Scimiter",
+      "rathenaName": "Scimitar",
+      "rathenaId": 1113,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Mutant Dragon Card",
+      "rathenaName": "Mutant Dragonoid Card",
+      "rathenaId": 4203,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Water Of Darkness",
+      "rathenaName": "Cursed Water",
+      "rathenaId": 12020,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Fake Angel Card",
+      "rathenaName": "False Angel Card",
+      "rathenaId": 4316,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Deleter Card",
+      "rathenaName": "Earth Deleter Card",
+      "rathenaId": 4279,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Broken Wine Vessel",
+      "rathenaName": "Broken Liquor Jar",
+      "rathenaId": 7158,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Huuma Giant Wheel",
+      "rathenaName": "Huuma Giant Wheel Shuriken",
+      "rathenaId": 13301,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Earth Scroll 1 5",
+      "rathenaName": "Level 5 Earth Spike",
+      "rathenaId": 687,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Legend Of Kafra01",
+      "rathenaName": "Kafra Legend Vol.1",
+      "rathenaId": 11003,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Cookbook08",
+      "rathenaName": "Level 8 Cookbook",
+      "rathenaId": 7479,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Cookbook09",
+      "rathenaName": "Level 9 Cookbook",
+      "rathenaId": 7480,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Deathword Card",
+      "rathenaName": "Death Word Card",
+      "rathenaId": 4388,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Broken Steel Piece",
+      "rathenaName": "Metal Fragment",
+      "rathenaId": 7095,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Mystery Piece",
+      "rathenaName": "Fragment",
+      "rathenaId": 7094,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Wheel",
+      "rathenaName": "Cogwheel",
+      "rathenaId": 7093,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Apocalips Card",
+      "rathenaName": "Apocalipse Card",
+      "rathenaId": 4242,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Flying Deleter Card",
+      "rathenaName": "Sky Deleter Card",
+      "rathenaId": 4158,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Armaia Card",
+      "rathenaName": "Armeyer Dinze Card",
+      "rathenaId": 4347,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Moonlight Sword",
+      "rathenaName": "Moonlight Dagger",
+      "rathenaId": 1234,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Silver Knife Of Chaste",
+      "rathenaName": "Silver Knife of Chastity",
+      "rathenaId": 638,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Sand Lump",
+      "rathenaName": "Sand Clump",
+      "rathenaId": 7124,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Fire Scroll 2 5",
+      "rathenaName": "Level 5 Fire Ball",
+      "rathenaId": 697,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Burn Tree",
+      "rathenaName": "Burnt Tree",
+      "rathenaId": 7068,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Jaws Of Ant",
+      "rathenaName": "Ant Jaw",
+      "rathenaId": 1014,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Mr Scream",
+      "rathenaName": "Mr. Scream",
+      "rathenaId": 2288,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Black Mask",
+      "rathenaName": "Dark Mask",
+      "rathenaId": 7157,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Long Limb",
+      "rathenaName": "Insect Leg",
+      "rathenaId": 7316,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Olivine",
+      "rathenaName": "Peridot",
+      "rathenaId": 7289,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Delicious Fish",
+      "rathenaName": "Fresh Fish",
+      "rathenaId": 579,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Dragonball Green",
+      "rathenaName": "Green Bijou",
+      "rathenaId": 7445,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Ferus Card",
+      "rathenaName": "Red Ferus Card",
+      "rathenaId": 4380,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Sway Apron",
+      "rathenaName": "Soft Apron",
+      "rathenaId": 661,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Orleans Server",
+      "rathenaName": "Orleans's Server",
+      "rathenaId": 2123,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Cutlas",
+      "rathenaName": "Cutlus",
+      "rathenaId": 1135,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Slender Snake",
+      "rathenaName": "Horrendous Hair",
+      "rathenaId": 1048,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Citrine",
+      "rathenaName": "Citrin",
+      "rathenaId": 7295,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Stone Piece",
+      "rathenaName": "Stone Fragment",
+      "rathenaId": 7067,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Dragonball Red",
+      "rathenaName": "Red Bijou",
+      "rathenaId": 7447,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Magni Cap",
+      "rathenaName": "Magni's Cap",
+      "rathenaId": 5122,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Tirfing Card",
+      "rathenaName": "Ogretooth Card",
+      "rathenaId": 4254,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Rust Suriken",
+      "rathenaName": "Old Shuriken",
+      "rathenaId": 7072,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Huuma Bird Wing",
+      "rathenaName": "Huuma Wing Shuriken",
+      "rathenaId": 13300,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Assulter Card",
+      "rathenaName": "Assaulter Card",
+      "rathenaId": 4246,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Huuma Blaze",
+      "rathenaName": "Huuma Blaze Shuriken",
+      "rathenaId": 13303,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Incant Samurai Card",
+      "rathenaName": "Samurai Spector Card",
+      "rathenaId": 4263,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Black Kitty Doll",
+      "rathenaName": "Black Cat Doll",
+      "rathenaId": 7206,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Striped Socks",
+      "rathenaName": "Striped Sock",
+      "rathenaId": 7219,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Cursed Lucky Brooch",
+      "rathenaName": "Goddess of Fortune's Cursed Brooch",
+      "rathenaId": 2652,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Sharp Gear",
+      "rathenaName": "Spiky Band",
+      "rathenaId": 2258,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Talon Of Griffin",
+      "rathenaName": "Talon of Griffon",
+      "rathenaId": 7048,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Distorted Portrait",
+      "rathenaName": "Contorted Self-Portrait",
+      "rathenaId": 7223,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Rusty Cleaver",
+      "rathenaName": "Rusty Kitchen Knife",
+      "rathenaId": 7208,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Piece Of Crest1",
+      "rathenaName": "Crest Piece",
+      "rathenaId": 7356,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Yellow Slim Potion",
+      "rathenaName": "Condensed Yellow Potion",
+      "rathenaId": 546,
+      "method": "aegis"
+    },
+    {
+      "dropName": "White Slim Potion",
+      "rathenaName": "Condensed White Potion",
+      "rathenaId": 547,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Stone Of Intelligence",
+      "rathenaName": "Stone of Sage",
+      "rathenaId": 7224,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Gemini Card",
+      "rathenaName": "Gemini-S58 Card",
+      "rathenaId": 4354,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Fang Of Garm",
+      "rathenaName": "Fang of Hatii",
+      "rathenaId": 7036,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Ice Falchon",
+      "rathenaName": "Ice Falchion",
+      "rathenaId": 1131,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Claw Of Garm",
+      "rathenaName": "Hatii Claw",
+      "rathenaId": 1815,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Garm Card",
+      "rathenaName": "Hatii Card",
+      "rathenaId": 4324,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Taegeuk Plate",
+      "rathenaName": "Ba Gua",
+      "rathenaId": 7169,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Sword Of Grave Keeper",
+      "rathenaName": "Grave Keeper's Sword",
+      "rathenaId": 10020,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Hell Fire",
+      "rathenaName": "Hellfire",
+      "rathenaId": 1471,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Dark Snake Lord Card",
+      "rathenaName": "Evil Snake Lord Card",
+      "rathenaId": 4330,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Brood Axe",
+      "rathenaName": "Bloody Axe",
+      "rathenaId": 1363,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Loard Circlet",
+      "rathenaName": "Grand Circlet",
+      "rathenaId": 5007,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Orc Load Card",
+      "rathenaName": "Orc Lord Card",
+      "rathenaId": 4135,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Voucher Of Orcish Hero",
+      "rathenaName": "Heroic Emblem",
+      "rathenaId": 968,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Wander Man Card",
+      "rathenaName": "Wanderer Card",
+      "rathenaId": 4210,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Staff Of Soul",
+      "rathenaName": "Soul Staff",
+      "rathenaId": 1472,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Walking Stick",
+      "rathenaName": "Gentleman's Staff",
+      "rathenaId": 1629,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Inccubus Horn",
+      "rathenaName": "Incubus Horn",
+      "rathenaId": 5072,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Base Guitar",
+      "rathenaName": "Bass Guitar",
+      "rathenaId": 1919,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Piece Of Crest4",
+      "rathenaName": "Crest Piece",
+      "rathenaId": 7359,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Hyper Changer",
+      "rathenaName": "Armor Charm",
+      "rathenaId": 2656,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Falcon Robe",
+      "rathenaName": "Falcon Muffler",
+      "rathenaId": 2516,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Cat O Nine Tail Card",
+      "rathenaName": "Cat O' Nine Tails Card",
+      "rathenaId": 4290,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Dragonball Blue",
+      "rathenaName": "Blue Bijou",
+      "rathenaId": 7446,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Acidus Card",
+      "rathenaName": "Gold Acidus Card",
+      "rathenaId": 4378,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Flaming Ice",
+      "rathenaName": "Ice Fireworks",
+      "rathenaId": 12374,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Right Epsilon",
+      "rathenaName": "Light Epsilon",
+      "rathenaId": 1366,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Knight Windstorm Card",
+      "rathenaName": "Stormy Knight Card",
+      "rathenaId": 4318,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Cold Magma",
+      "rathenaName": "Lava",
+      "rathenaId": 7096,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Solace Card",
+      "rathenaName": "Lady Solace Card",
+      "rathenaId": 4394,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Assasin Dagger",
+      "rathenaName": "Assassin Dagger",
+      "rathenaId": 1232,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Spinx Helm",
+      "rathenaName": "Sphinx Hat",
+      "rathenaId": 5053,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Cakram",
+      "rathenaName": "Chakram",
+      "rathenaId": 1285,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Burning Horse Shoe",
+      "rathenaName": "Burning Horseshoe",
+      "rathenaId": 7120,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Piece Of Crest3",
+      "rathenaName": "Crest Piece",
+      "rathenaId": 7358,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Whip Of Red Flame",
+      "rathenaName": "Red Flame Whip",
+      "rathenaId": 1965,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Sea Witch Foot",
+      "rathenaName": "Sea Witch's Foot",
+      "rathenaId": 1973,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Glittering Clothes",
+      "rathenaName": "Glittering Jacket",
+      "rathenaId": 2319,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Clothes Of The Lord",
+      "rathenaName": "Lord's Clothes",
+      "rathenaId": 2318,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Knight Of Abyss Card",
+      "rathenaName": "Abysmal Knight Card",
+      "rathenaId": 4140,
+      "method": "aegis"
+    },
+    {
+      "dropName": "B Ygnizem Card",
+      "rathenaName": "General Egnigem Cenia Card",
+      "rathenaId": 4352,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Gate KeeperDD",
+      "rathenaName": "Gate Keeper-DD",
+      "rathenaId": 13167,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Transparent Plate01",
+      "rathenaName": "Transparent Plate",
+      "rathenaId": 7352,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Retribution Card",
+      "rathenaName": "Baroness of Retribution Card",
+      "rathenaId": 4391,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Cape Of Ancient Lord",
+      "rathenaName": "Ancient Cape",
+      "rathenaId": 2507,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Blue Coif",
+      "rathenaName": "Coif",
+      "rathenaId": 5092,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Transparent Plate03",
+      "rathenaName": "Transparent Plate",
+      "rathenaId": 7354,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Piece Of Crest2",
+      "rathenaName": "Crest Piece",
+      "rathenaId": 7357,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Shelter Card",
+      "rathenaName": "Mistress of Shelter Card",
+      "rathenaId": 4393,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Orleans Glove",
+      "rathenaName": "Orleans's Glove",
+      "rathenaId": 2701,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Magestic Goat",
+      "rathenaName": "Majestic Goat",
+      "rathenaId": 2256,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Cookbook10",
+      "rathenaName": "Level 10 Cookbook",
+      "rathenaId": 7481,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Maya Puple Card",
+      "rathenaName": "Maya Purple Card",
+      "rathenaId": 4198,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Golden Bracelet",
+      "rathenaName": "Golden Ornament",
+      "rathenaId": 7435,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Observation Card",
+      "rathenaName": "Dame of Sentinel Card",
+      "rathenaId": 4392,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Imma Arrow Container",
+      "rathenaName": "Immaterial Arrow Quiver",
+      "rathenaId": 12014,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Ori Arrow Container",
+      "rathenaName": "Oridecon Arrow Quiver",
+      "rathenaId": 12007,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Shecil Card",
+      "rathenaName": "Cecil Damon Card",
+      "rathenaId": 4368,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Transparent Plate04",
+      "rathenaName": "Transparent Plate",
+      "rathenaId": 7355,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Ulle Cap",
+      "rathenaName": "Ulle's Cap",
+      "rathenaId": 5123,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Altas Weapon",
+      "rathenaName": "Atlas Weapon",
+      "rathenaId": 1175,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Grave",
+      "rathenaName": "Greaves",
+      "rathenaId": 2411,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Full Plate Armor",
+      "rathenaName": "Legion Plate Armor",
+      "rathenaId": 2341,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Celestial Robe",
+      "rathenaName": "Heavenly Maiden Robe",
+      "rathenaId": 2513,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Survival Rod2",
+      "rathenaName": "Survivor's Rod",
+      "rathenaId": 1619,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Anti Spell Bead",
+      "rathenaName": "Countermagic Crystal",
+      "rathenaId": 7578,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Harword Card",
+      "rathenaName": "Howard Alt-Eisen Card",
+      "rathenaId": 4362,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Piece Of Memory Purple",
+      "rathenaName": "Fragment of Misery",
+      "rathenaId": 7437,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Tha Maero Card",
+      "rathenaName": "Maero of Thanatos Card",
+      "rathenaId": 4395,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Piece Of Memory Green",
+      "rathenaName": "Fragment of Agony",
+      "rathenaId": 7436,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Tha Dolor Card",
+      "rathenaName": "Dolor of Thanatos Card",
+      "rathenaId": 4398,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Horn Of Succubus",
+      "rathenaName": "Succubus Horn",
+      "rathenaId": 5066,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Balistar",
+      "rathenaName": "Ballista",
+      "rathenaId": 1722,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Bacsojin Card",
+      "rathenaName": "White Lady Card",
+      "rathenaId": 4372,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Flame Sprits Armor",
+      "rathenaName": "Lucius's Fierce Armor of Volcano",
+      "rathenaId": 2344,
+      "method": "aegis"
+    },
+    {
+      "dropName": "House Auger",
+      "rathenaName": "Ice Pick",
+      "rathenaId": 1230,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Counter Dagger",
+      "rathenaName": "Dagger of Counter",
+      "rathenaId": 1242,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Spanner",
+      "rathenaName": "Wrench",
+      "rathenaId": 1531,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Rsx 0806 Card",
+      "rathenaName": "RSX-0806 Card",
+      "rathenaId": 4342,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Dark Blindfold",
+      "rathenaName": "Dark Blinder",
+      "rathenaId": 5104,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Agi Dish07",
+      "rathenaName": "Steamed Alligator with Vegetable",
+      "rathenaId": 12087,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Various Jur",
+      "rathenaName": "Specialty Jur",
+      "rathenaId": 1264,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Eremes Card",
+      "rathenaName": "Eremes Guile Card",
+      "rathenaId": 4360,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Rojerta Piece",
+      "rathenaName": "Fragment of Rossata Stone",
+      "rathenaId": 7211,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Piece Of Memory Red",
+      "rathenaName": "Fragment of Despair",
+      "rathenaId": 7439,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Tha Despero Card",
+      "rathenaName": "Despero of Thanatos Card",
+      "rathenaId": 4397,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Transparent Plate02",
+      "rathenaName": "Transparent Plate",
+      "rathenaId": 7353,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Agi Dish10",
+      "rathenaName": "Steamed Desert Scorpions",
+      "rathenaId": 12090,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Fantastic Cooking Kits",
+      "rathenaName": "Fantastic Cooking Kit",
+      "rathenaId": 12129,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Dex Dish10",
+      "rathenaName": "Hwergelmir's Tonic",
+      "rathenaId": 12095,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Tri Headed Dragon Head",
+      "rathenaName": "Three-Headed Dragon's Head",
+      "rathenaId": 7443,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Vit Dish10",
+      "rathenaName": "Immortal Stew",
+      "rathenaId": 12085,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Fricca Circlet",
+      "rathenaName": "Fricca's Circlet",
+      "rathenaId": 5124,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Hydro Card",
+      "rathenaName": "Hydrolancer Card",
+      "rathenaId": 4384,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Hurricane Fury",
+      "rathenaName": "Hurricane's Fury",
+      "rathenaId": 1377,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Hardback",
+      "rathenaName": "Hardcover Book",
+      "rathenaId": 1561,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Magaleta Card",
+      "rathenaName": "Margaretha Sorin Card",
+      "rathenaId": 4364,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Scale Of Red Dragon",
+      "rathenaName": "Fire Dragon Scale",
+      "rathenaId": 7451,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Int Dish10",
+      "rathenaName": "Dragon Breath Cocktail",
+      "rathenaId": 12080,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Gemmed Crown",
+      "rathenaName": "Jewel Crown",
+      "rathenaId": 5002,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Detale Card",
+      "rathenaName": "Detardeurus Card",
+      "rathenaId": 4386,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Survival Rod",
+      "rathenaName": "Survivor's Rod",
+      "rathenaId": 1617,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Kiel Card",
+      "rathenaName": "Kiel-D-01 Card",
+      "rathenaId": 4403,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Seyren Card",
+      "rathenaName": "Seyren Windsor Card",
+      "rathenaId": 4358,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Katrinn Card",
+      "rathenaName": "Kathryne Keyron Card",
+      "rathenaId": 4366,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Piece Of Memory Blue",
+      "rathenaName": "Fragment of Hatred",
+      "rathenaId": 7438,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Tha Odium Card",
+      "rathenaName": "Odium of Thanatos Card",
+      "rathenaId": 4396,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Broken Pharaoh Symbol",
+      "rathenaName": "Broken Pharaoh Emblem",
+      "rathenaId": 7113,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Boroken Shiled Piece",
+      "rathenaName": "Piece of Shield",
+      "rathenaId": 7108,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Shine Spear Blade",
+      "rathenaName": "Shining Spear Blade",
+      "rathenaId": 7109,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Lord Of Death Card",
+      "rathenaName": "Lord of The Dead Card",
+      "rathenaId": 4276,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Vesper Core01",
+      "rathenaName": "Vesper Core 01",
+      "rathenaId": 2659,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Vesper Core02",
+      "rathenaName": "Vesper Core 02",
+      "rathenaId": 2660,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Vesper Core03",
+      "rathenaName": "Vesper Core 03",
+      "rathenaId": 2661,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Vesper Core04",
+      "rathenaName": "Vesper Core 04",
+      "rathenaId": 2662,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Apocalips H Card",
+      "rathenaName": "Vesper Card",
+      "rathenaId": 4374,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Clack Of Servival",
+      "rathenaName": "Survivor's Manteau",
+      "rathenaId": 2509,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Herald Of GOD",
+      "rathenaName": "Sacred Mission",
+      "rathenaId": 2111,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Water Sprits Armor",
+      "rathenaName": "Saphien's Armor of Ocean",
+      "rathenaId": 2346,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Earth Sprits Armor",
+      "rathenaName": "Claytos Cracking Earth Armor",
+      "rathenaId": 2350,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Wind Sprits Armor",
+      "rathenaName": "Aebecee's Raging Typhoon Armor",
+      "rathenaId": 2348,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Skewer",
+      "rathenaName": "Brocca",
+      "rathenaId": 1415,
+      "method": "aegis"
+    },
+    {
+      "dropName": "B Seyren Card",
+      "rathenaName": "Lord Knight Card",
+      "rathenaId": 4357,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Exercise",
+      "rathenaName": "Exorciser",
+      "rathenaId": 1233,
+      "method": "aegis"
+    },
+    {
+      "dropName": "B Eremes Card",
+      "rathenaName": "Assassin Cross Card",
+      "rathenaId": 4359,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Byeorrun Gum",
+      "rathenaName": "Byeollungum",
+      "rathenaId": 1140,
+      "method": "aegis"
+    },
+    {
+      "dropName": "B Harword Card",
+      "rathenaName": "MasterSmith Card",
+      "rathenaId": 4361,
+      "method": "aegis"
+    },
+    {
+      "dropName": "B Magaleta Card",
+      "rathenaName": "High Priest Card",
+      "rathenaId": 4363,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Bow Of Rudra",
+      "rathenaName": "Rudra Bow",
+      "rathenaId": 1720,
+      "method": "aegis"
+    },
+    {
+      "dropName": "B Shecil Card",
+      "rathenaName": "Sniper Card",
+      "rathenaId": 4367,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Robe Of Casting",
+      "rathenaName": "Robe of Cast",
+      "rathenaId": 2343,
+      "method": "aegis"
+    },
+    {
+      "dropName": "B Katrinn Card",
+      "rathenaName": "High Wizard Card",
+      "rathenaId": 4365,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Piece Of Bone Armor",
+      "rathenaName": "Skeletal Armor Piece",
+      "rathenaId": 7450,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Wing Of Eagle",
+      "rathenaName": "Eagle Wing",
+      "rathenaId": 2515,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Thanatos Card",
+      "rathenaName": "Memory of Thanatos Card",
+      "rathenaId": 4399,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Valhalla Flower",
+      "rathenaName": "Valhalla's Flower",
+      "rathenaId": 7510,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Valkyrie Armor",
+      "rathenaName": "Valkyrian Armor",
+      "rathenaId": 2357,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Valkyrie Manteau",
+      "rathenaName": "Valkyrian Manteau",
+      "rathenaId": 2524,
+      "method": "aegis"
+    },
+    {
+      "dropName": "Valkyrie Shoes",
+      "rathenaName": "Valkyrian Shoes",
+      "rathenaId": 2421,
+      "method": "aegis"
+    },
+    {
+      "dropName": "New Year Rice Cake 1",
+      "rathenaName": "New Year Rice Cake",
+      "rathenaId": 12238,
+      "method": "aegis"
+    },
+    {
+      "dropName": "New Year Rice Cake 2",
+      "rathenaName": "New Year Rice Cake",
+      "rathenaId": 12239,
+      "method": "aegis"
+    }
+  ],
+  "unresolved": [
+    "Adventurere\\",
+    "Alice\\",
+    "Angel\\",
+    "Animal\\",
+    "Bear\\",
+    "Big Sis\\",
+    "Black Bear\\",
+    "Boy\\",
+    "Cone Hat",
+    "Dragon\\",
+    "Dullahan\\",
+    "Elder Pixie\\",
+    "Gaoat\\",
+    "Girl\\",
+    "Goat\\",
+    "Goibne\\",
+    "Grasshopper\\",
+    "Hae Dong Gum",
+    "Harpy\\",
+    "Hypnotist\\",
+    "La\\",
+    "Loki\\",
+    "Longinus\\",
+    "Mama\\",
+    "Matyr\\",
+    "Monster\\",
+    "Morpheus\\",
+    "Morrigane\\",
+    "Mother\\",
+    "Odin\\",
+    "Oldman\\",
+    "Poison Toad\\",
+    "Queen\\",
+    "Santa\\",
+    "Scorpion\\",
+    "Scropion\\",
+    "Shinobi\\",
+    "Snail\\",
+    "Tengu\\",
+    "Thin N\\",
+    "Tiger\\",
+    "Tooth Of",
+    "Tutankhamen\\",
+    "Vali\\",
+    "Vidar\\",
+    "Wild Boar\\"
+  ],
+  "totalDropNames": 1494,
+  "directMatches": 898,
+  "additionalResolved": 550,
+  "stillUnresolved": 46
+}

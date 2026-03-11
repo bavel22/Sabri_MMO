@@ -102,6 +102,7 @@ void UCombatStatsSubsystem::HandlePlayerStats(const TSharedPtr<FJsonValue>& Data
 		if ((*StatsObj)->TryGetNumberField(TEXT("luk"), Val)) LUK = (int32)Val;
 		if ((*StatsObj)->TryGetNumberField(TEXT("level"), Val)) BaseLevel = (int32)Val;
 		if ((*StatsObj)->TryGetNumberField(TEXT("weaponATK"), Val)) WeaponATK = (int32)Val;
+		if ((*StatsObj)->TryGetNumberField(TEXT("passiveATK"), Val)) PassiveATK = (int32)Val;
 		if ((*StatsObj)->TryGetNumberField(TEXT("hardDef"), Val)) HardDEF = (int32)Val;
 		if ((*StatsObj)->TryGetNumberField(TEXT("statPoints"), Val)) StatPoints = (int32)Val;
 	}
@@ -148,8 +149,8 @@ void UCombatStatsSubsystem::HandlePlayerStats(const TSharedPtr<FJsonValue>& Data
 		if ((*DerivedObj)->TryGetNumberField(TEXT("aspd"), Val)) ASPD = (int32)Val;
 	}
 
-	UE_LOG(LogCombatStats, Log, TEXT("Stats updated: ATK=%d+%d MATK=%d HIT=%d FLEE=%d CRI=%d PD=%d DEF=%d+%d MDEF=%d ASPD=%d StatPts=%d"),
-		StatusATK, WeaponATK, StatusMATK, HIT, FLEE, Critical, PerfectDodge, HardDEF, SoftDEF, SoftMDEF, ASPD, StatPoints);
+	UE_LOG(LogCombatStats, Log, TEXT("Stats updated: ATK=%d+%d(+%d passive) MATK=%d HIT=%d FLEE=%d CRI=%d PD=%d DEF=%d+%d MDEF=%d ASPD=%d StatPts=%d"),
+		StatusATK, WeaponATK, PassiveATK, StatusMATK, HIT, FLEE, Critical, PerfectDodge, HardDEF, SoftDEF, SoftMDEF, ASPD, StatPoints);
 }
 
 // ============================================================

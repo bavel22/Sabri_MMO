@@ -295,6 +295,48 @@ All Clients ◄─────────────────────�
 Killer ◄──────────────────────────────────────┘
 ```
 
+## Phase 5 Additions
+
+### Race ATK/DEF Passive Bonuses (ro_damage_formulas.js)
+
+Two new steps in the physical damage pipeline:
+- **Step 6b** (after card modifiers): `attacker.passiveRaceATK[targetRace]` — flat ATK bonus from Demon Bane (413) and similar passives. Applied per target race (undead, demon, etc.).
+- **After soft DEF subtraction**: `target.passiveRaceDEF[attacker.race]` — flat DEF bonus from Divine Protection (401). Subtracts from damage, minimum 1.
+
+These are passed through `getAttackerInfo()` (passiveRaceATK) and `getPlayerTargetInfo()` (passiveRaceDEF).
+
+### Double Attack (Auto-Attack Tick)
+
+After normal auto-attack damage on enemy, checks `getEffectiveStats(attacker).doubleAttackChance` (from Thief Double Attack passive, dagger only). If random roll succeeds, calculates second hit with `setTimeout(200ms)`, broadcasts `hitType: 'doubleAttack'`. Can trigger enemy death.
+
+### Pneuma Ranged Block (Auto-Attack Tick)
+
+After Safety Wall check: `getGroundEffectsAtPosition()` for `type === 'pneuma'`. If enemy is inside Pneuma and attacker is ranged (`attackRange > MELEE_RANGE + TOLERANCE`), silently blocks attack. Melee attacks pass through.
+
+### Heal Damages Undead
+
+`calculateHealAmount(caster, skillLevel)`: `floor((baseLv+INT)/8) * (4+skillLv*8)`.
+When targeting an undead-element enemy: `holyDamage = floor(healAmount/2) * getElementModifier('holy', 'undead', eleLv) / 100`.
+
+### HP Regen Movement Blocking
+
+`player.lastMoveTime` set in `player:position` handler when movement > 5 UE units. HP natural regen (6s) skips players who moved within 4s unless they have `movingHPRecovery` passive (Swordsman 107).
+
+### Auto Berserk Dynamic Toggle
+
+`checkAutoBerserk(player, characterId, zone)` monitors HP ratio. When HP < 25%: activates +32% ATK (`atkIncrease`) and -25% DEF (`defMultiplier *= 0.75` in `getBuffModifiers`). When HP >= 25%: deactivates (sets `atkIncrease = 0`). On each toggle, emits `player:stats` via `io.sockets.sockets.get(player.socketId)` so the CombatStatsWidget updates ATK/DEF in real-time. Called on: enemy damage, heal, HP regen, skill regen, First Aid, item/potion use, Fire Wall tick on players, PvP auto-attack.
+
+### buildFullStatsPayload() Buff Multipliers
+
+The `derived` stats in `player:stats` now apply `buffAtkMultiplier` and `buffDefMultiplier` to `statusATK` and `softDEF`. This means all buffs with ATK/DEF multipliers (Auto Berserk, Provoke, etc.) are reflected in the stats panel.
+
+### Hidden Player Interaction
+
+- AI skips hidden players in `findAggroTarget()` (unless detector flag)
+- CHASE/ATTACK states drop target and return to IDLE if target becomes hidden
+- Hiding breaks on: taking damage, using offensive skills (except Hiding toggle)
+
 ---
 
-**Last Updated**: 2026-02-18
+**Last Updated**: 2026-03-11 (Auto Berserk DEF reduction + stats emit, buildFullStatsPayload buff multipliers, checkAutoBerserk on all HP-changing paths)
+**Previous**: 2026-03-10 (Phase 5: race ATK/DEF, Double Attack, Pneuma, Heal-Undead, movement regen, Auto Berserk, Hidden AI)

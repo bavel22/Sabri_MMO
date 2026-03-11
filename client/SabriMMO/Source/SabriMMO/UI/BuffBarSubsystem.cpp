@@ -34,6 +34,14 @@ static FString GetBuffAbbrev(const FString& Name)
 	if (Name == TEXT("increase_agi")) return TEXT("AGI");
 	if (Name == TEXT("angelus"))    return TEXT("ANG");
 	if (Name == TEXT("decrease_agi")) return TEXT("DAG");
+	if (Name == TEXT("auto berserk") || Name == TEXT("auto_berserk")) return TEXT("BRK");
+	if (Name == TEXT("energy coat") || Name == TEXT("energy_coat")) return TEXT("ENC");
+	if (Name == TEXT("hiding"))     return TEXT("HID");
+	if (Name == TEXT("improve concentration") || Name == TEXT("improve_concentration")) return TEXT("CON");
+	if (Name == TEXT("loud exclamation") || Name == TEXT("loud_exclamation")) return TEXT("LXC");
+	if (Name == TEXT("ruwach"))     return TEXT("RUW");
+	if (Name == TEXT("signum crucis") || Name == TEXT("signum_crucis")) return TEXT("SCR");
+	if (Name == TEXT("pneuma"))     return TEXT("PNE");
 	// Default: first 3 chars uppercase
 	FString Upper = Name.ToUpper();
 	return Upper.Left(3);
@@ -202,8 +210,9 @@ void UBuffBarSubsystem::HandleBuffApplied(const TSharedPtr<FJsonValue>& Data)
 	double DurationD = 0;
 	Obj->TryGetNumberField(TEXT("duration"), DurationD);
 
-	// Skip if this is a status effect (Frozen, Stone Curse) — handled by status:applied
-	FString BuffNameLower = BuffName.ToLower();
+	// Normalize: server sends both "Auto Berserk" (display) and "auto_berserk" (internal)
+	// Convert underscores to spaces so both formats match the same key
+	FString BuffNameLower = BuffName.ToLower().Replace(TEXT("_"), TEXT(" "));
 	if (BuffNameLower == TEXT("frozen") || BuffNameLower == TEXT("stone curse"))
 		return;
 
@@ -240,7 +249,7 @@ void UBuffBarSubsystem::HandleBuffRemoved(const TSharedPtr<FJsonValue>& Data)
 
 	FString BuffName;
 	Obj->TryGetStringField(TEXT("buffName"), BuffName);
-	FString BuffNameLower = BuffName.ToLower();
+	FString BuffNameLower = BuffName.ToLower().Replace(TEXT("_"), TEXT(" "));
 
 	// Remove from buffs
 	ActiveBuffs.RemoveAll([&BuffNameLower](const FActiveBuffInfo& B) { return B.Name == BuffNameLower; });
@@ -276,6 +285,7 @@ void UBuffBarSubsystem::HandleBuffList(const TSharedPtr<FJsonValue>& Data)
 
 			FActiveBuffInfo Info;
 			(*BObj)->TryGetStringField(TEXT("name"), Info.Name);
+			Info.Name = Info.Name.ToLower().Replace(TEXT("_"), TEXT(" "));
 			(*BObj)->TryGetStringField(TEXT("displayName"), Info.DisplayName);
 			if (Info.DisplayName.IsEmpty()) Info.DisplayName = Info.Name;
 			(*BObj)->TryGetStringField(TEXT("abbrev"), Info.Abbrev);

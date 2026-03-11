@@ -167,6 +167,9 @@ namespace GroundAoE
 			float EffectSec = FMath::Max(1, SkillLevel - 1) * 0.3f + 0.5f;
 			return { 500.f, FColor(180, 220,  80), EffectSec };
 		}
+		case 304: return { 400.f, FColor(180, 140,  60), 0.f  };  // Arrow Shower — neutral AoE
+		case 407: return { 500.f, FColor(255, 255, 200), 0.f  };  // Signum Crucis — holy AoE
+		case 608: return { 300.f, FColor(160, 110,  60), 0.f  };  // Cart Revolution — neutral AoE
 		default:  return { 200.f, FColor(100, 200, 255), 2.0f };  // Default
 		}
 	}
@@ -357,6 +360,7 @@ void USkillTreeSubsystem::Deinitialize()
 	// Clear icon caches — release GC-rooted textures and brush memory
 	IconBrushCache.Empty();
 	IconTextureCache.Empty();
+	DynamicIconPaths.Empty();
 
 	if (UWorld* World = GetWorld())
 	{
@@ -736,53 +740,44 @@ FString USkillTreeSubsystem::ResolveIconContentPath(const FString& IconName) con
 {
 	if (IconName.IsEmpty()) return FString();
 
-	// Explicit mapping for icons whose asset names don't match the server icon name
-	static TMap<FString, FString> ExplicitMap;
-	if (ExplicitMap.Num() == 0)
+	// Already a full content path (e.g. from drag-to-hotbar which passes IconPath, not icon name)
+	if (IconName.StartsWith(TEXT("/Game/")))
 	{
-		ExplicitMap.Add(TEXT("first_aid"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/RO_Skill_Icon_Heal"));
-		ExplicitMap.Add(TEXT("heal"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/RO_Skill_Icon_Heal"));
-		// Swordsman skill icons
-		ExplicitMap.Add(TEXT("sword_mastery"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Swordsman/sword_mastery_icon"));
-		ExplicitMap.Add(TEXT("two_handed_sword_mastery"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Swordsman/two_handed_sword_mastery_icon"));
-		ExplicitMap.Add(TEXT("increase_hp_recovery"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Swordsman/increase_hp_recovery_icon"));
-		ExplicitMap.Add(TEXT("bash"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Swordsman/Bash_Icon"));
-		ExplicitMap.Add(TEXT("provoke"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Swordsman/Provoke_Icon"));
-		ExplicitMap.Add(TEXT("magnum_break"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Swordsman/Magnum_Break_Icon"));
-		ExplicitMap.Add(TEXT("endure"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Swordsman/endure_icon"));
-		// Mage skill icons
-		ExplicitMap.Add(TEXT("cold_bolt"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Mage/cold_bolt_icon"));
-		ExplicitMap.Add(TEXT("fire_bolt"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Mage/fire_bolt_icon"));
-		ExplicitMap.Add(TEXT("lightning_bolt"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Mage/lightning_bolt_icon"));
-		ExplicitMap.Add(TEXT("napalm_beat"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Mage/napalm_beat_icon"));
-		ExplicitMap.Add(TEXT("increase_sp_recovery"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Mage/increase_SP_recovery_icon"));
-		ExplicitMap.Add(TEXT("sight"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Mage/sight_icon"));
-		ExplicitMap.Add(TEXT("stone_curse"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Mage/stone_curse_icon"));
-		ExplicitMap.Add(TEXT("fire_ball"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Mage/fire_ball_icon"));
-		ExplicitMap.Add(TEXT("frost_diver"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Mage/frost_diver_icon"));
-		ExplicitMap.Add(TEXT("fire_wall"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Mage/firewall_icon"));
-		ExplicitMap.Add(TEXT("safety_wall"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Mage/safety_wall_icon"));
-		ExplicitMap.Add(TEXT("soul_strike"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Mage/soul_strike_icon"));
-		ExplicitMap.Add(TEXT("thunderstorm"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Mage/thunderstorm_icon"));
+		return IconName;
 	}
 
-	if (const FString* Found = ExplicitMap.Find(IconName))
+	// Explicit overrides for server icon names that don't match PNG filenames
+	static TMap<FString, FString> NameOverrides;
+	if (NameOverrides.Num() == 0)
+	{
+		NameOverrides.Add(TEXT("backslide"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Thief/back_slide"));
+		NameOverrides.Add(TEXT("two_handed_sword_mastery"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Swordsman/two_hand_sword_mastery"));
+		NameOverrides.Add(TEXT("auto_guard"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Crusader/guard"));
+		NameOverrides.Add(TEXT("dodge"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Monk/dodge_monk"));
+		NameOverrides.Add(TEXT("flasher"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Hunter/flasher_trap"));
+		NameOverrides.Add(TEXT("sandman"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Hunter/sandman_trap"));
+		NameOverrides.Add(TEXT("siegfried"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Bard/invulnerable_siegfried"));
+		NameOverrides.Add(TEXT("nibelungen"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Bard/ring_of_nibelungen"));
+		NameOverrides.Add(TEXT("a_poem_of_bragi"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Bard/poem_of_bragi"));
+		NameOverrides.Add(TEXT("drum_battlefield"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Bard/drum_on_battlefield"));
+		NameOverrides.Add(TEXT("smith_two_handed_sword"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Blacksmith/smith_ths"));
+		NameOverrides.Add(TEXT("rest"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Alchemist/rest_homunculus"));
+		NameOverrides.Add(TEXT("investigate"), TEXT("/Game/SabriMMO/Assets/Skill_Icons/Monk/investigate"));
+	}
+
+	if (const FString* Override = NameOverrides.Find(IconName))
+	{
+		return *Override;
+	}
+
+	// Check dynamic map (populated from server skill data in HandleSkillData)
+	if (const FString* Found = DynamicIconPaths.Find(IconName))
 	{
 		return *Found;
 	}
 
-	// Convention fallback: /Game/SabriMMO/Assets/Skill_Icons/RO_Skill_Icon_<PascalName>
-	FString PascalName = IconName;
-	PascalName = PascalName.Replace(TEXT("_"), TEXT(" "));
-	// Capitalize each word
-	bool bCapNext = true;
-	for (int32 i = 0; i < PascalName.Len(); ++i)
-	{
-		if (PascalName[i] == ' ') { bCapNext = true; continue; }
-		if (bCapNext) { PascalName[i] = FChar::ToUpper(PascalName[i]); bCapNext = false; }
-	}
-	PascalName = PascalName.Replace(TEXT(" "), TEXT("_"));
-	return FString::Printf(TEXT("/Game/SabriMMO/Assets/Skill_Icons/RO_Skill_Icon_%s"), *PascalName);
+	// Fallback: try Novice folder (for skills resolved before skill data arrives)
+	return FString::Printf(TEXT("/Game/SabriMMO/Assets/Skill_Icons/Novice/%s"), *IconName);
 }
 
 FSlateBrush* USkillTreeSubsystem::GetOrCreateIconBrush(const FString& ContentPath)
@@ -892,7 +887,16 @@ void USkillTreeSubsystem::HandleSkillData(const TSharedPtr<FJsonValue>& Data)
 					Tmp = 0; S->TryGetNumberField(TEXT("range"), Tmp); Entry.Range = (int32)Tmp;
 					S->TryGetStringField(TEXT("description"), Entry.Description);
 					S->TryGetStringField(TEXT("icon"), Entry.Icon);
-					Entry.IconPath = ResolveIconContentPath(Entry.Icon);
+					// Build icon path: /Game/SabriMMO/Assets/Skill_Icons/<ClassFolder>/<icon>
+					{
+						FString ClassFolder = Group.ClassId;
+						if (ClassFolder.Len() > 0) ClassFolder[0] = FChar::ToUpper(ClassFolder[0]);
+						Entry.IconPath = FString::Printf(TEXT("/Game/SabriMMO/Assets/Skill_Icons/%s/%s"), *ClassFolder, *Entry.Icon);
+						if (!DynamicIconPaths.Contains(Entry.Icon))
+						{
+							DynamicIconPaths.Add(Entry.Icon, Entry.IconPath);
+						}
+					}
 					Tmp = 0; S->TryGetNumberField(TEXT("treeRow"), Tmp); Entry.TreeRow = (int32)Tmp;
 					Tmp = 0; S->TryGetNumberField(TEXT("treeCol"), Tmp); Entry.TreeCol = (int32)Tmp;
 					Tmp = 0; S->TryGetNumberField(TEXT("spCost"), Tmp); Entry.SpCost = (int32)Tmp;
@@ -919,6 +923,28 @@ void USkillTreeSubsystem::HandleSkillData(const TSharedPtr<FJsonValue>& Data)
 								Prereq.RequiredLevel = (int32)PLevel;
 								Entry.Prerequisites.Add(Prereq);
 							}
+						}
+					}
+
+					// Parse per-level data for tooltip
+					const TArray<TSharedPtr<FJsonValue>>* LevelsArray = nullptr;
+					if (S->TryGetArrayField(TEXT("allLevels"), LevelsArray))
+					{
+						for (const TSharedPtr<FJsonValue>& LevelVal : *LevelsArray)
+						{
+							const TSharedPtr<FJsonObject>* LevelObjPtr = nullptr;
+							if (!LevelVal->TryGetObject(LevelObjPtr) || !LevelObjPtr) continue;
+							const TSharedPtr<FJsonObject>& L = *LevelObjPtr;
+							FSkillLevelInfo Info;
+							double T = 0;
+							T = 0; L->TryGetNumberField(TEXT("level"), T); Info.Level = (int32)T;
+							T = 0; L->TryGetNumberField(TEXT("spCost"), T); Info.SpCost = (int32)T;
+							T = 0; L->TryGetNumberField(TEXT("castTime"), T); Info.CastTime = (int32)T;
+							T = 0; L->TryGetNumberField(TEXT("cooldown"), T); Info.Cooldown = (int32)T;
+							T = 0; L->TryGetNumberField(TEXT("effectValue"), T); Info.EffectValue = (int32)T;
+							T = 0; L->TryGetNumberField(TEXT("duration"), T); Info.Duration = (int32)T;
+							T = 0; L->TryGetNumberField(TEXT("afterCastDelay"), T); Info.AfterCastDelay = (int32)T;
+							Entry.AllLevels.Add(Info);
 						}
 					}
 

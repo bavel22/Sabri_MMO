@@ -459,6 +459,16 @@ function calculatePhysicalDamage(attacker, target, options = {}) {
     }
 
     // ─────────────────────────────────────────────────────
+    // Step 6b: Passive race ATK bonuses (Demon Bane, etc.)
+    // ─────────────────────────────────────────────────────
+    if (attacker.passiveRaceATK) {
+        const raceBonus = attacker.passiveRaceATK[targetRace] || 0;
+        if (raceBonus > 0) {
+            totalATK += raceBonus;
+        }
+    }
+
+    // ─────────────────────────────────────────────────────
     // Step 7: Element modifier
     // ─────────────────────────────────────────────────────
     const eleModifier = getElementModifier(atkElement, targetElement, targetElementLevel);
@@ -491,6 +501,14 @@ function calculatePhysicalDamage(attacker, target, options = {}) {
     // Apply soft DEF (flat reduction)
     const effectiveSoftDef = Math.floor(defDerived.softDEF * defMultiplier);
     totalATK = totalATK - effectiveSoftDef;
+
+    // Passive race DEF bonuses (Divine Protection)
+    if (target.passiveRaceDEF && attacker.race) {
+        const raceDEFBonus = target.passiveRaceDEF[attacker.race] || 0;
+        if (raceDEFBonus > 0) {
+            totalATK = Math.max(1, totalATK - raceDEFBonus);
+        }
+    }
 
     // ─────────────────────────────────────────────────────
     // Step 9: Final result

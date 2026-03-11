@@ -1,6 +1,6 @@
 // SSkillTreeWidget.h — Draggable Slate Skill Tree panel (RO Classic style)
-// REWRITE v2: Deferred rebuilds prevent widget-tree mutation during Slate event processing.
-// All subsystem references use TWeakObjectPtr to prevent dangling pointer crashes.
+// REWRITE v3: Grid layout with prerequisite lines, compact cells, hover tooltips.
+// Inner SSkillGridPanel (cpp-local) handles OnPaint for connecting lines.
 
 #pragma once
 
@@ -13,6 +13,7 @@ class SBox;
 class SVerticalBox;
 class SHorizontalBox;
 class SScrollBox;
+class SSkillGridPanel;  // file-local in .cpp
 
 class SSkillTreeWidget : public SCompoundWidget
 {
@@ -35,15 +36,13 @@ public:
 private:
 	// --- safe subsystem access ---
 	TWeakObjectPtr<USkillTreeSubsystem> OwningSubsystem;
-
-	/** Returns subsystem pointer if still valid, nullptr otherwise. */
 	USkillTreeSubsystem* GetSub() const;
 
-	// --- deferred rebuild flags (set by public methods, consumed by Tick) ---
+	// --- deferred rebuild flags ---
 	bool bPendingFullRebuild = false;
 	bool bPendingGridRebuild = false;
 
-	// --- actual rebuild implementations (called only from Tick) ---
+	// --- actual rebuild implementations ---
 	void DoRebuildSkillContent();
 	void DoRebuildSkillGrid();
 
@@ -52,7 +51,7 @@ private:
 	FVector2D DragOffset = FVector2D::ZeroVector;
 	FVector2D DragStartWidgetPos = FVector2D::ZeroVector;
 	FVector2D WidgetPosition = FVector2D(300.0, 100.0);
-	FVector2D CurrentSize = FVector2D(460.0, 500.0);
+	FVector2D CurrentSize = FVector2D(540.0, 560.0);
 
 	// --- skill drag state (drag skill icon to hotbar) ---
 	bool bSkillDragInitiated = false;
@@ -70,8 +69,18 @@ private:
 
 	// --- widget refs for dynamic rebuild ---
 	TSharedPtr<SVerticalBox> ClassTabsContainer;
-	TSharedPtr<SVerticalBox> SkillContentBox;
+	TSharedPtr<SScrollBox> SkillScrollBox;
+
+	// --- grid panel (inner widget that draws prerequisite lines) ---
+	TSharedPtr<SSkillGridPanel> GridPanel;
 
 	// --- active class tab ---
 	int32 ActiveClassTab = 0;
+
+	// --- grid layout constants ---
+	static constexpr float CELL_WIDTH   = 78.f;
+	static constexpr float CELL_HEIGHT  = 88.f;
+	static constexpr float CELL_HGAP    = 14.f;
+	static constexpr float CELL_VGAP    = 24.f;
+	static constexpr float GRID_PADDING = 8.f;
 };

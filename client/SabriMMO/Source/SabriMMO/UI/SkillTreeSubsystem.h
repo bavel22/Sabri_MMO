@@ -35,6 +35,20 @@ struct FSkillPrerequisite
 	int32 RequiredLevel = 0;
 };
 
+// Per-level data for tooltip display
+USTRUCT(BlueprintType)
+struct FSkillLevelInfo
+{
+	GENERATED_BODY()
+	UPROPERTY(BlueprintReadOnly) int32 Level = 0;
+	UPROPERTY(BlueprintReadOnly) int32 SpCost = 0;
+	UPROPERTY(BlueprintReadOnly) int32 CastTime = 0;
+	UPROPERTY(BlueprintReadOnly) int32 Cooldown = 0;
+	UPROPERTY(BlueprintReadOnly) int32 EffectValue = 0;
+	UPROPERTY(BlueprintReadOnly) int32 Duration = 0;
+	UPROPERTY(BlueprintReadOnly) int32 AfterCastDelay = 0;
+};
+
 // Single skill entry parsed from server data
 USTRUCT(BlueprintType)
 struct FSkillEntry
@@ -103,6 +117,9 @@ struct FSkillEntry
 
 	UPROPERTY(BlueprintReadOnly)
 	TArray<FSkillPrerequisite> Prerequisites;
+
+	UPROPERTY(BlueprintReadOnly)
+	TArray<FSkillLevelInfo> AllLevels;
 };
 
 // A group of skills belonging to one class
@@ -210,6 +227,9 @@ public:
 	// ---- icon utilities ----
 	FString ResolveIconContentPath(const FString& IconName) const;
 	FSlateBrush* GetOrCreateIconBrush(const FString& ContentPath);
+
+	/** Cached icon name -> content path map, populated from server skill data */
+	TMap<FString, FString> DynamicIconPaths;
 
 	// ---- delegate for widget refresh ----
 	DECLARE_MULTICAST_DELEGATE(FOnSkillDataUpdated);

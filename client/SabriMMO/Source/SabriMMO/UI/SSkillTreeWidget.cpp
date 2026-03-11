@@ -1,15 +1,13 @@
 // SSkillTreeWidget.cpp — Draggable Slate Skill Tree HUD (RO Classic brown/gold theme)
-// REWRITE v2: Deferred rebuilds — tab clicks and data updates set flags, Tick() performs
-// the actual widget-tree mutation safely outside Slate event processing.
-// All lambda captures use TWeakObjectPtr<USkillTreeSubsystem> to prevent
-// dangling pointer crashes during Slate paint/layout when subsystem is GC'd.
+// REWRITE v3: Grid layout with prerequisite connecting lines, compact cells, hover tooltips.
+// Inner SSkillGridPanel handles OnPaint for line drawing relative to its own geometry.
 
 #include "SSkillTreeWidget.h"
+#include "SSkillTooltipWidget.h"
 #include "SkillTreeSubsystem.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SScrollBox.h"
-#include "Widgets/Layout/SWrapBox.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/SNullWidget.h"
 #include "Widgets/Text/STextBlock.h"
@@ -88,6 +86,26 @@ static FString PrettifyClassName(const FString& ClassId)
 }
 
 // ============================================================
+// SSkillGridPanel — simple container for the skill grid
+// ============================================================
+class SSkillGridPanel : public SCompoundWidget
+{
+public:
+	SLATE_BEGIN_ARGS(SSkillGridPanel) {}
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& InArgs)
+	{
+		ChildSlot
+		[
+			SAssignNew(ContentBox, SVerticalBox)
+		];
+	}
+
+	TSharedPtr<SVerticalBox> ContentBox;
+};
+
+// ============================================================
 // Safe subsystem access
 // ============================================================
 USkillTreeSubsystem* SSkillTreeWidget::GetSub() const
@@ -102,7 +120,6 @@ void SSkillTreeWidget::Construct(const FArguments& InArgs)
 {
 	OwningSubsystem = InArgs._Subsystem;
 
-	// Weak pointer captured by ALL lambdas in this widget — never a raw pointer
 	TWeakObjectPtr<USkillTreeSubsystem> WeakSub = OwningSubsystem;
 
 	ChildSlot
@@ -158,7 +175,7 @@ void SSkillTreeWidget::Construct(const FArguments& InArgs)
 									SNullWidget::NullWidget
 								]
 
-								// Skill points display (lambda uses weak ptr)
+								// Skill points display
 								+ SHorizontalBox::Slot()
 								.AutoWidth()
 								.VAlign(VAlign_Center)
@@ -208,16 +225,12 @@ void SSkillTreeWidget::Construct(const FArguments& InArgs)
 							MakeGoldDivider()
 						]
 
-						// --- Scrollable skill content ---
+						// --- Scrollable skill grid ---
 						+ SVerticalBox::Slot()
 						.FillHeight(1.f)
 						[
-							SNew(SScrollBox)
+							SAssignNew(SkillScrollBox, SScrollBox)
 							.Orientation(Orient_Vertical)
-							+ SScrollBox::Slot()
-							[
-								SAssignNew(SkillContentBox, SVerticalBox)
-							]
 						]
 
 						+ SVerticalBox::Slot()
@@ -291,12 +304,12 @@ void SSkillTreeWidget::Construct(const FArguments& InArgs)
 
 	ApplyLayout();
 
-	// Schedule initial build for next Tick (not during Construct)
+	// Schedule initial build for next Tick
 	bPendingFullRebuild = true;
 }
 
 // ============================================================
-// Public API — just set flags, actual work is deferred to Tick()
+// Public API — set flags, actual work deferred to Tick()
 // ============================================================
 void SSkillTreeWidget::RebuildSkillContent()
 {
@@ -313,7 +326,6 @@ void SSkillTreeWidget::RebuildSkillGrid()
 // ============================================================
 void SSkillTreeWidget::Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime)
 {
-	// Full rebuild supersedes grid-only rebuild
 	if (bPendingFullRebuild)
 	{
 		bPendingFullRebuild = false;
@@ -328,7 +340,7 @@ void SSkillTreeWidget::Tick(const FGeometry& AllottedGeometry, const double InCu
 }
 
 // ============================================================
-// DoRebuildSkillContent — full (tabs + grid), called from Tick only
+// DoRebuildSkillContent — full rebuild (tabs + grid), called from Tick only
 // ============================================================
 void SSkillTreeWidget::DoRebuildSkillContent()
 {
@@ -340,7 +352,6 @@ void SSkillTreeWidget::DoRebuildSkillContent()
 
 	if (!Sub || Sub->SkillGroups.Num() == 0)
 	{
-		// Show loading state
 		ClassTabsContainer->AddSlot()
 		.AutoHeight()
 		.Padding(4.f, 2.f)
@@ -353,7 +364,6 @@ void SSkillTreeWidget::DoRebuildSkillContent()
 	}
 	else
 	{
-		// Build class tabs using a TSharedRef to this widget for safe lambda capture
 		TSharedRef<SHorizontalBox> TabRow = SNew(SHorizontalBox);
 		TWeakPtr<SSkillTreeWidget> WeakSelf = SharedThis(this);
 
@@ -362,8 +372,6 @@ void SSkillTreeWidget::DoRebuildSkillContent()
 			const FString ClassName = PrettifyClassName(Sub->SkillGroups[i].ClassId);
 			const int32 TabIndex = i;
 
-			// Tab click: set flag + index, Tick() will call DoRebuildSkillGrid() next frame
-			// CRITICAL: Do NOT call DoRebuildSkillGrid() here — we are inside Slate event processing
 			TabRow->AddSlot()
 			.AutoWidth()
 			.Padding(1.f, 0.f)
@@ -422,18 +430,17 @@ void SSkillTreeWidget::DoRebuildSkillContent()
 }
 
 // ============================================================
-// DoRebuildSkillGrid — grid only, called from Tick or DoRebuildSkillContent
+// DoRebuildSkillGrid — grid layout with compact cells + prerequisite lines
 // ============================================================
 void SSkillTreeWidget::DoRebuildSkillGrid()
 {
-	if (!SkillContentBox.IsValid()) return;
-	SkillContentBox->ClearChildren();
+	if (!SkillScrollBox.IsValid()) return;
+	SkillScrollBox->ClearChildren();
 
 	USkillTreeSubsystem* Sub = GetSub();
 	if (!Sub || Sub->SkillGroups.Num() == 0)
 	{
-		SkillContentBox->AddSlot()
-		.AutoHeight()
+		SkillScrollBox->AddSlot()
 		.Padding(8.f)
 		[
 			SNew(STextBlock)
@@ -447,285 +454,245 @@ void SSkillTreeWidget::DoRebuildSkillGrid()
 	ActiveClassTab = FMath::Clamp(ActiveClassTab, 0, Sub->SkillGroups.Num() - 1);
 	const FSkillClassGroup& Group = Sub->SkillGroups[ActiveClassTab];
 
-	// Sort skills by treeRow, then treeCol
-	TArray<FSkillEntry> SortedSkills = Group.Skills;
-	SortedSkills.Sort([](const FSkillEntry& A, const FSkillEntry& B) {
-		if (A.TreeRow != B.TreeRow) return A.TreeRow < B.TreeRow;
-		return A.TreeCol < B.TreeCol;
-	});
+	// Build 2D lookup: SkillGrid[row][col] -> skill pointer
+	TMap<int32, TMap<int32, const FSkillEntry*>> SkillGrid;
+	int32 MaxRow = 0, MaxCol = 0;
+	for (const FSkillEntry& Skill : Group.Skills)
+	{
+		SkillGrid.FindOrAdd(Skill.TreeRow).Add(Skill.TreeCol, &Skill);
+		MaxRow = FMath::Max(MaxRow, Skill.TreeRow);
+		MaxCol = FMath::Max(MaxCol, Skill.TreeCol);
+	}
 
-	TSharedRef<SWrapBox> WrapBox = SNew(SWrapBox).UseAllottedSize(true);
+	// Create the grid panel
+	GridPanel = SNew(SSkillGridPanel);
+
 	TWeakObjectPtr<USkillTreeSubsystem> WeakSub = OwningSubsystem;
 	TWeakPtr<SSkillTreeWidget> WeakSelf = SharedThis(this);
 
-	for (const FSkillEntry& Skill : SortedSkills)
+	// Build grid rows
+	TSharedRef<SVerticalBox> GridVBox = SNew(SVerticalBox);
+
+	for (int32 Row = 0; Row <= MaxRow; ++Row)
 	{
-		const int32 SkillId = Skill.SkillId;
-		const bool bLearned = Skill.CurrentLevel > 0;
-		const bool bMaxed = Skill.CurrentLevel >= Skill.MaxLevel;
-		const bool bCanLearn = Skill.bCanLearn;
+		TSharedRef<SHorizontalBox> RowHBox = SNew(SHorizontalBox);
 
-		// Slot background color
-		FLinearColor SlotBg;
-		if (bMaxed)
-			SlotBg = SKColors::SkillMaxed;
-		else if (bLearned)
-			SlotBg = SKColors::SkillLearned;
-		else if (bCanLearn)
-			SlotBg = (Skill.Type == TEXT("passive")) ? SKColors::SkillPassive : SKColors::SkillActive;
-		else
-			SlotBg = SKColors::SkillLocked;
-
-		// Type label
-		FString TypeLabel;
-		if (Skill.Type == TEXT("passive")) TypeLabel = TEXT("[P]");
-		else if (Skill.Type == TEXT("toggle")) TypeLabel = TEXT("[T]");
-		else TypeLabel = TEXT("[A]");
-
-		FString LevelText = FString::Printf(TEXT("Lv %d/%d"), Skill.CurrentLevel, Skill.MaxLevel);
-		FString SpText;
-		if (Skill.Type != TEXT("passive") && Skill.SpCost > 0)
+		for (int32 Col = 0; Col <= MaxCol; ++Col)
 		{
-			SpText = FString::Printf(TEXT("SP: %d"), bLearned ? Skill.SpCost : Skill.NextSpCost);
-		}
+			const FSkillEntry* const* FoundPtr = SkillGrid.Contains(Row) ? SkillGrid[Row].Find(Col) : nullptr;
+			const FSkillEntry* Skill = FoundPtr ? *FoundPtr : nullptr;
 
-		// Try to load icon brush (safe — returns nullptr if subsystem gone)
-		FSlateBrush* IconBrush = Sub->GetOrCreateIconBrush(Skill.IconPath);
-
-		// Draggable icon (learned active/toggle skills only)
-		const bool bDraggableSkill = bLearned && Skill.Type != TEXT("passive") && IconBrush != nullptr;
-		const FString CapIconPath = Skill.IconPath;
-		const FString CapDisplayName = Skill.DisplayName;
-
-		// --- Build skill slot ---
-		TSharedRef<SVerticalBox> SlotContent = SNew(SVerticalBox)
-
-			// Row 1: Icon + Name
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			[
-				SNew(SHorizontalBox)
-
-				+ SHorizontalBox::Slot()
+			if (!Skill)
+			{
+				// Empty cell placeholder
+				RowHBox->AddSlot()
 				.AutoWidth()
-				.VAlign(VAlign_Center)
-				.Padding(0.f, 0.f, 3.f, 0.f)
+				.Padding(CELL_HGAP * 0.5f, 0.f)
 				[
-					IconBrush
-					? (bDraggableSkill
-						? TSharedRef<SWidget>(
-							SNew(SBox)
-							.WidthOverride(24.f)
-							.HeightOverride(24.f)
-							.Cursor(EMouseCursor::GrabHand)
-							[
-								SNew(SBorder)
-								.BorderImage(FCoreStyle::Get().GetBrush("NoBrush"))
-								.Padding(0)
-								.OnMouseButtonDown_Lambda([WeakSelf, SkillId, CapDisplayName, CapIconPath](const FGeometry&, const FPointerEvent& Event) -> FReply {
-									if (Event.GetEffectingButton() != EKeys::LeftMouseButton) return FReply::Unhandled();
-									TSharedPtr<SSkillTreeWidget> Pin = WeakSelf.Pin();
-									if (Pin.IsValid())
-									{
-										Pin->bSkillDragInitiated = true;
-										Pin->DragSourceSkillId = SkillId;
-										Pin->DragSourceSkillName = CapDisplayName;
-										Pin->DragSourceSkillIcon = CapIconPath;
-										Pin->SkillDragStartPos = Event.GetScreenSpacePosition();
-										return FReply::Handled().CaptureMouse(Pin.ToSharedRef());
-									}
-									return FReply::Unhandled();
-								})
-								[
-									SNew(SImage).Image(IconBrush)
-								]
-							]
-						)
-						: TSharedRef<SWidget>(
-							SNew(SBox)
-							.WidthOverride(24.f)
-							.HeightOverride(24.f)
+					SNew(SBox)
+					.WidthOverride(CELL_WIDTH)
+					.HeightOverride(CELL_HEIGHT)
+				];
+				continue;
+			}
+
+			const int32 SkillId = Skill->SkillId;
+			const bool bLearned = Skill->CurrentLevel > 0;
+			const bool bMaxed = Skill->CurrentLevel >= Skill->MaxLevel;
+			const bool bCanLearn = Skill->bCanLearn;
+
+			// Slot background color
+			FLinearColor SlotBg;
+			if (bMaxed)
+				SlotBg = SKColors::SkillMaxed;
+			else if (bLearned)
+				SlotBg = SKColors::SkillLearned;
+			else if (bCanLearn)
+				SlotBg = (Skill->Type == TEXT("passive")) ? SKColors::SkillPassive : SKColors::SkillActive;
+			else
+				SlotBg = SKColors::SkillLocked;
+
+			// Icon brush
+			FSlateBrush* IconBrush = Sub->GetOrCreateIconBrush(Skill->IconPath);
+
+			// Draggable skill (learned active/toggle only)
+			const bool bDraggableSkill = bLearned && Skill->Type != TEXT("passive") && IconBrush != nullptr;
+			const FString CapIconPath = Skill->IconPath;
+			const FString CapDisplayName = Skill->DisplayName;
+
+			// Build compact cell content
+			TSharedRef<SVerticalBox> CellContent = SNew(SVerticalBox);
+
+			// Row 1: Icon (centered, 32x32)
+			if (IconBrush)
+			{
+				TSharedRef<SWidget> IconWidget = bDraggableSkill
+					? TSharedRef<SWidget>(
+						SNew(SBox)
+						.WidthOverride(32.f)
+						.HeightOverride(32.f)
+						.Cursor(EMouseCursor::GrabHand)
+						[
+							SNew(SBorder)
+							.BorderImage(FCoreStyle::Get().GetBrush("NoBrush"))
+							.Padding(0)
+							.OnMouseButtonDown_Lambda([WeakSelf, SkillId, CapDisplayName, CapIconPath](const FGeometry&, const FPointerEvent& Event) -> FReply {
+								if (Event.GetEffectingButton() != EKeys::LeftMouseButton) return FReply::Unhandled();
+								TSharedPtr<SSkillTreeWidget> Pin = WeakSelf.Pin();
+								if (Pin.IsValid())
+								{
+									Pin->bSkillDragInitiated = true;
+									Pin->DragSourceSkillId = SkillId;
+									Pin->DragSourceSkillName = CapDisplayName;
+									Pin->DragSourceSkillIcon = CapIconPath;
+									Pin->SkillDragStartPos = Event.GetScreenSpacePosition();
+									return FReply::Handled().CaptureMouse(Pin.ToSharedRef());
+								}
+								return FReply::Unhandled();
+							})
 							[
 								SNew(SImage).Image(IconBrush)
 							]
-						)
+						]
 					)
 					: TSharedRef<SWidget>(
-						SNew(STextBlock)
-						.Text(FText::FromString(TypeLabel))
-						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 6))
-						.ColorAndOpacity(FSlateColor(SKColors::TextDim))
-					)
-				]
+						SNew(SBox)
+						.WidthOverride(32.f)
+						.HeightOverride(32.f)
+						[
+							SNew(SImage).Image(IconBrush)
+						]
+					);
 
-				+ SHorizontalBox::Slot()
-				.FillWidth(1.f)
-				.VAlign(VAlign_Center)
+				CellContent->AddSlot()
+				.AutoHeight()
+				.HAlign(HAlign_Center)
+				.Padding(0.f, 1.f, 0.f, 1.f)
 				[
-					SNew(STextBlock)
-					.Text(FText::FromString(Skill.DisplayName))
-					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 7))
-					.ColorAndOpacity(FSlateColor(SKColors::TextBright))
-					.AutoWrapText(true)
-				]
-			]
+					IconWidget
+				];
+			}
 
-			// Row 2: Level + SP
-			+ SVerticalBox::Slot()
+			// Row 2: Skill name (truncated)
+			CellContent->AddSlot()
 			.AutoHeight()
+			.HAlign(HAlign_Center)
+			[
+				SNew(STextBlock)
+				.Text(FText::FromString(Skill->DisplayName))
+				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 6))
+				.ColorAndOpacity(FSlateColor(bLearned ? SKColors::TextBright : (bCanLearn ? SKColors::TextPrimary : SKColors::TextDim)))
+				.Justification(ETextJustify::Center)
+				.AutoWrapText(true)
+				.WrapTextAt(CELL_WIDTH - 8.f)
+			];
+
+			// Row 3: Level text
+			CellContent->AddSlot()
+			.AutoHeight()
+			.HAlign(HAlign_Center)
 			.Padding(0.f, 1.f, 0.f, 0.f)
 			[
-				SNew(SHorizontalBox)
-
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				[
-					SNew(STextBlock)
-					.Text(FText::FromString(LevelText))
-					.Font(FCoreStyle::GetDefaultFontStyle("Regular", 7))
-					.ColorAndOpacity(FSlateColor(bMaxed ? SKColors::GoldHighlight : SKColors::TextPrimary))
-				]
-
-				+ SHorizontalBox::Slot()
-				.FillWidth(1.f)
-				[ SNullWidget::NullWidget ]
-
-				+ SHorizontalBox::Slot()
-				.AutoWidth()
-				[
-					SNew(STextBlock)
-					.Text(FText::FromString(SpText))
-					.Font(FCoreStyle::GetDefaultFontStyle("Regular", 6))
-					.ColorAndOpacity(FSlateColor(SKColors::TextDim))
-				]
-			]
-
-			// Row 3: Description
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.f, 2.f, 0.f, 0.f)
-			[
 				SNew(STextBlock)
-				.Text(FText::FromString(Skill.Description))
+				.Text(FText::FromString(FString::Printf(TEXT("%d/%d"), Skill->CurrentLevel, Skill->MaxLevel)))
 				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 6))
-				.ColorAndOpacity(FSlateColor(SKColors::TextDim))
-				.AutoWrapText(true)
-				.LineHeightPercentage(1.1f)
+				.ColorAndOpacity(FSlateColor(bMaxed ? SKColors::GoldHighlight : (bLearned ? SKColors::TextGreen : SKColors::TextDim)))
 			];
 
-		// Row 4: Learn button (only if can learn and not maxed)
-		if (bCanLearn && !bMaxed)
-		{
-			SlotContent->AddSlot()
-			.AutoHeight()
-			.Padding(0.f, 3.f, 0.f, 0.f)
-			[
-				SNew(SButton)
-				.ButtonStyle(FCoreStyle::Get(), "NoBorder")
-				.ContentPadding(FMargin(4.f, 1.f))
-				.OnClicked_Lambda([WeakSub, SkillId]() -> FReply {
-					if (USkillTreeSubsystem* S = WeakSub.Get()) S->LearnSkill(SkillId);
-					return FReply::Handled();
-				})
-				[
-					SNew(SBorder)
-					.BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
-					.BorderBackgroundColor(SKColors::ButtonLearn)
-					.Padding(FMargin(6.f, 1.f))
-					.HAlign(HAlign_Center)
-					[
-						SNew(STextBlock)
-						.Text(FText::FromString(bLearned ? TEXT("Level Up") : TEXT("Learn")))
-						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 7))
-						.ColorAndOpacity(FSlateColor(SKColors::TextBright))
-					]
-				]
-			];
-		}
-
-		// Row 5: Hotbar quick-assign [1]-[9] (only for learned active/toggle skills)
-		if (bLearned && Skill.Type != TEXT("passive"))
-		{
-			TSharedRef<SHorizontalBox> HotbarRow = SNew(SHorizontalBox);
-
-			HotbarRow->AddSlot()
-			.AutoWidth()
-			.VAlign(VAlign_Center)
-			.Padding(0.f, 0.f, 2.f, 0.f)
-			[
-				SNew(STextBlock)
-				.Text(FText::FromString(TEXT("Bar:")))
-				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 5))
-				.ColorAndOpacity(FSlateColor(SKColors::TextDim))
-			];
-
-			for (int32 Slot = 0; Slot < 9; ++Slot)
+			// Row 4: Learn button [+] (only if can learn and not maxed)
+			if (bCanLearn && !bMaxed)
 			{
-				const int32 SlotIndex = Slot + 1;
-				HotbarRow->AddSlot()
-				.AutoWidth()
-				.Padding(1.f, 0.f)
+				CellContent->AddSlot()
+				.AutoHeight()
+				.HAlign(HAlign_Center)
+				.Padding(0.f, 2.f, 0.f, 0.f)
 				[
 					SNew(SButton)
 					.ButtonStyle(FCoreStyle::Get(), "NoBorder")
 					.ContentPadding(FMargin(0.f))
-					.OnClicked_Lambda([WeakSub, SkillId, SlotIndex, CapDisplayName]() -> FReply {
-						if (USkillTreeSubsystem* S = WeakSub.Get())
-							S->AssignSkillToHotbar(SkillId, CapDisplayName, SlotIndex);
+					.OnClicked_Lambda([WeakSub, SkillId]() -> FReply {
+						if (USkillTreeSubsystem* S = WeakSub.Get()) S->LearnSkill(SkillId);
 						return FReply::Handled();
 					})
 					[
 						SNew(SBorder)
 						.BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
-						.BorderBackgroundColor(SKColors::PanelMedium)
-						.Padding(FMargin(3.f, 1.f))
+						.BorderBackgroundColor(SKColors::ButtonLearn)
+						.Padding(FMargin(6.f, 1.f))
 						[
 							SNew(STextBlock)
-							.Text(FText::FromString(FString::Printf(TEXT("%d"), SlotIndex)))
-							.Font(FCoreStyle::GetDefaultFontStyle("Bold", 6))
-							.ColorAndOpacity(FSlateColor(SKColors::GoldHighlight))
+							.Text(FText::FromString(TEXT("+")))
+							.Font(FCoreStyle::GetDefaultFontStyle("Bold", 8))
+							.ColorAndOpacity(FSlateColor(SKColors::TextBright))
 						]
 					]
 				];
 			}
 
-			SlotContent->AddSlot()
-			.AutoHeight()
-			.Padding(0.f, 2.f, 0.f, 0.f)
-			[
-				HotbarRow
-			];
-		}
-
-		// Wrap slot in borders
-		WrapBox->AddSlot()
-		.Padding(3.f)
-		[
-			SNew(SBox)
-			.WidthOverride(140.f)
-			[
-				SNew(SBorder)
-				.BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
-				.BorderBackgroundColor(SKColors::GoldDark)
-				.Padding(FMargin(1.f))
+			// Build the cell widget with tooltip
+			TSharedRef<SWidget> CellWidget =
+				SNew(SBox)
+				.WidthOverride(CELL_WIDTH)
+				.HeightOverride(CELL_HEIGHT)
 				[
 					SNew(SBorder)
 					.BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
-					.BorderBackgroundColor(SlotBg)
-					.Padding(FMargin(4.f, 3.f))
+					.BorderBackgroundColor(SKColors::GoldDark)
+					.Padding(FMargin(1.f))
 					[
-						SlotContent
+						SNew(SBorder)
+						.BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
+						.BorderBackgroundColor(SlotBg)
+						.Padding(FMargin(2.f, 1.f))
+						[
+							CellContent
+						]
 					]
+				];
+
+			// Attach tooltip
+			CellWidget->SetToolTip(
+				SNew(SToolTip)
+				.BorderImage(FCoreStyle::Get().GetBrush("NoBrush"))
+				[
+					SNew(SSkillTooltipWidget)
+					.SkillData(Skill)
+					.Subsystem(Sub)
 				]
-			]
+			);
+
+			RowHBox->AddSlot()
+			.AutoWidth()
+			.Padding(CELL_HGAP * 0.5f, 0.f)
+			[
+				CellWidget
+			];
+		}
+
+		GridVBox->AddSlot()
+		.AutoHeight()
+		.Padding(0.f, CELL_VGAP * 0.5f)
+		[
+			RowHBox
 		];
 	}
 
-	SkillContentBox->AddSlot()
-	.AutoHeight()
-	.Padding(4.f)
+	// Set the grid content into the panel
+	if (GridPanel->ContentBox.IsValid())
+	{
+		GridPanel->ContentBox->ClearChildren();
+		GridPanel->ContentBox->AddSlot()
+		.AutoHeight()
+		.Padding(GRID_PADDING)
+		[
+			GridVBox
+		];
+	}
+
+	// Add grid panel to scroll box
+	SkillScrollBox->AddSlot()
 	[
-		WrapBox
+		GridPanel.ToSharedRef()
 	];
 
 	Invalidate(EInvalidateWidgetReason::Layout);

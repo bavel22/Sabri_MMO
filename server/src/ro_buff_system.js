@@ -156,6 +156,18 @@ const BUFF_TYPES = {
         category: 'debuff',
         displayName: 'Quagmire',
         abbrev: 'QUA'
+    },
+    loud_exclamation: {
+        stackRule: 'refresh',
+        category: 'buff',
+        displayName: 'Loud Exclamation',
+        abbrev: 'LXC'
+    },
+    ruwach: {
+        stackRule: 'refresh',
+        category: 'buff',
+        displayName: 'Ruwach',
+        abbrev: 'RUW'
     }
 };
 
@@ -360,6 +372,27 @@ function getBuffModifiers(target) {
                 mods.agiBonus -= (buff.agiReduction || 0);
                 mods.dexBonus -= (buff.dexReduction || 0);
                 mods.moveSpeedBonus -= (buff.moveSpeedReduction || 0);
+                break;
+
+            case 'auto_berserk':
+                mods.atkMultiplier *= (1 + (buff.atkIncrease || 0) / 100);
+                if ((buff.atkIncrease || 0) > 0) mods.defMultiplier *= 0.75;
+                break;
+
+            case 'energy_coat':
+                mods.defPercent += (buff.defPercent || 0);
+                break;
+
+            case 'loud_exclamation':
+                mods.strBonus += (buff.strBonus || 0);
+                break;
+
+            case 'signum_crucis':
+                mods.defMultiplier *= (1 - (buff.defReduction || 0) / 100);
+                break;
+
+            case 'ruwach':
+                // Presence only — reveal check done separately
                 break;
 
             // Generic fallback: check for common stat fields

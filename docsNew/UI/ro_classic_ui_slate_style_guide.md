@@ -293,6 +293,21 @@ UI should feel mostly static.
 - Disable texture filtering blur
 - Use UI texture group
 
+### Icon / UI Texture Import Settings (MANDATORY)
+
+All imported icon and UI textures MUST have these settings to avoid blurriness:
+
+| Setting | Value |
+|---------|-------|
+| **Compression Settings** | `BC7 Compressed (BC7)` |
+| **Mip Gen Settings** | `NoMipmaps` |
+| **Texture Group** | `UI` |
+| **Never Stream** | `true` (checked) |
+
+**Bulk setup**: Select all textures → Right-click → Asset Actions → Bulk Edit via Property Matrix → set all 4 → Save All.
+
+See also: `/sabrimmo-generate-icons` skill for full icon generation + import workflow.
+
 ---
 
 # VISUAL IDENTITY SUMMARY

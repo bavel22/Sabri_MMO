@@ -160,6 +160,7 @@ Widget prefix: `WBP_`. Blueprint prefix: `BP_`. Interface prefix: `BPI_`.
 | Clickable NPCs, interactables | `/sabrimmo-click-interact` | — |
 | Zones, maps, warp portals | `/sabrimmo-zone` | `docsNew/05_Development/Zone_System_UE5_Setup_Guide.md` |
 | VFX, particles, Niagara | `/sabrimmo-skills-vfx` | `docsNew/05_Development/VFX_Asset_Reference.md` |
+| Skill icon art generation | `/sabrimmo-generate-icons` | — |
 | Stats, leveling, class system | `/sabrimmo-stats` | `RagnaCloneDocs/01_Stats_Leveling_JobSystem.md` |
 | Damage pipelines, combat formulas | `/sabrimmo-combat` | `RagnaCloneDocs/02_Combat_System.md` |
 | Buffs (Provoke, Blessing, etc.) | `/sabrimmo-buff` | `docsNew/03_Server_Side/Status_Effect_Buff_System.md` |
@@ -247,6 +248,7 @@ Invoke with `/skill-name`. Located at `C:/Users/pladr/.claude/skills/`.
 | `/sabrimmo-click-interact` | Left-click interactable actors (NPCs, chests, etc.) |
 | `/sabrimmo-skills-vfx` | Skill VFX, Niagara effects, casting circles, warp portal VFX |
 | `/sabrimmo-persistent-socket` | Persistent socket, EventRouter, BP event bridge, subsystem registration |
+| `/sabrimmo-generate-icons` | RO-style skill icon generation via local Stable Diffusion XL |
 
 ### Utility Skills
 | Skill | Use when |

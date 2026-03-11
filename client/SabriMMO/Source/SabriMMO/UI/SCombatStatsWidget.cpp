@@ -80,7 +80,7 @@ void SCombatStatsWidget::Construct(const FArguments& InArgs)
 								FText::FromString(TEXT("ATK")),
 								TAttribute<FText>::CreateLambda([this]() -> FText {
 									if (!Subsystem) return FText::GetEmpty();
-									return FText::FromString(FString::Printf(TEXT("%d + %d"), Subsystem->StatusATK, Subsystem->WeaponATK));
+									return FText::FromString(FString::Printf(TEXT("%d + %d"), Subsystem->StatusATK, Subsystem->WeaponATK + Subsystem->PassiveATK));
 								})
 							)
 						]

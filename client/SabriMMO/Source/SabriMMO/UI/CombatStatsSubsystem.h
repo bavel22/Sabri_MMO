@@ -49,6 +49,7 @@ public:
 	// Derived combat stats (from server)
 	int32 StatusATK = 0;
 	int32 WeaponATK = 0;
+	int32 PassiveATK = 0;
 	int32 StatusMATK = 0;
 	int32 HIT = 0;
 	int32 FLEE = 0;

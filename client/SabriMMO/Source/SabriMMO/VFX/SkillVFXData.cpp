@@ -319,6 +319,173 @@ static TMap<int32, FSkillVFXConfig> BuildSkillVFXConfigs()
 		AddConfig(Configs, C);
 	}
 
+	// Heal (400) — Green heal sparkle
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 400;
+		C.Template   = ESkillVFXTemplate::HealFlash;
+		C.PrimaryColor = FLinearColor(0.2f, 0.9f, 0.3f, 1.f);
+		C.Scale      = 250.f;
+		C.VFXOverridePath = TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Potion.NS_Potion");
+		AddConfig(Configs, C);
+	}
+
+	// Blessing (402) — Holy golden buff
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 402;
+		C.Template   = ESkillVFXTemplate::SelfBuff;
+		C.PrimaryColor = FLinearColor(1.f, 0.85f, 0.3f, 1.f);
+		C.Element    = TEXT("holy");
+		C.Duration   = 2.f;
+		AddConfig(Configs, C);
+	}
+
+	// Increase AGI (403) — Blue speed buff
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 403;
+		C.Template   = ESkillVFXTemplate::SelfBuff;
+		C.PrimaryColor = FLinearColor(0.3f, 0.7f, 1.f, 1.f);
+		C.Duration   = 1.5f;
+		AddConfig(Configs, C);
+	}
+
+	// Decrease AGI (404) — Purple debuff
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 404;
+		C.Template   = ESkillVFXTemplate::TargetDebuff;
+		C.PrimaryColor = FLinearColor(0.3f, 0.2f, 0.6f, 1.f);
+		C.Duration   = 1.5f;
+		AddConfig(Configs, C);
+	}
+
+	// Angelus (406) — Holy white buff
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 406;
+		C.Template   = ESkillVFXTemplate::SelfBuff;
+		C.PrimaryColor = FLinearColor(1.f, 1.f, 0.9f, 1.f);
+		C.Element    = TEXT("holy");
+		C.Duration   = 2.f;
+		AddConfig(Configs, C);
+	}
+
+	// Ruwach (408) — Holy reveal glow
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 408;
+		C.Template   = ESkillVFXTemplate::SelfBuff;
+		C.PrimaryColor = FLinearColor(1.f, 1.f, 0.8f, 1.f);
+		C.Element    = TEXT("holy");
+		C.Duration   = 1.f;
+		AddConfig(Configs, C);
+	}
+
+	// Double Strafe (303) — Two arrow projectiles
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 303;
+		C.Template   = ESkillVFXTemplate::Projectile;
+		C.PrimaryColor = FLinearColor(0.8f, 0.6f, 0.3f, 1.f);
+		C.ProjectileSpeed = 3000.f;
+		C.BoltCount  = 2;
+		C.BoltInterval = 0.2f;
+		AddConfig(Configs, C);
+	}
+
+	// Arrow Shower (304) — Arrow rain AoE
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 304;
+		C.Template   = ESkillVFXTemplate::GroundAoERain;
+		C.PrimaryColor = FLinearColor(0.7f, 0.5f, 0.2f, 1.f);
+		C.AoERadius  = 400.f;
+		C.bUseCastingCircle = true;
+		AddConfig(Configs, C);
+	}
+
+	// Arrow Repel (306) — Strong arrow knockback
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 306;
+		C.Template   = ESkillVFXTemplate::Projectile;
+		C.PrimaryColor = FLinearColor(0.9f, 0.7f, 0.3f, 1.f);
+		C.ProjectileSpeed = 2500.f;
+		AddConfig(Configs, C);
+	}
+
+	// Envenom (504) — Poison attack impact
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 504;
+		C.Template   = ESkillVFXTemplate::AoEImpact;
+		C.PrimaryColor = FLinearColor(0.5f, 0.1f, 0.6f, 1.f);
+		C.Element    = TEXT("poison");
+		AddConfig(Configs, C);
+	}
+
+	// Sand Attack (506) — Earth impact
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 506;
+		C.Template   = ESkillVFXTemplate::AoEImpact;
+		C.PrimaryColor = FLinearColor(0.7f, 0.6f, 0.3f, 1.f);
+		C.Element    = TEXT("earth");
+		AddConfig(Configs, C);
+	}
+
+	// Mammonite (603) — Golden strike
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 603;
+		C.Template   = ESkillVFXTemplate::AoEImpact;
+		C.PrimaryColor = FLinearColor(1.f, 0.85f, 0.f, 1.f);
+		C.Scale      = 1.5f;
+		AddConfig(Configs, C);
+	}
+
+	// Cart Revolution (608) — AoE impact
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 608;
+		C.Template   = ESkillVFXTemplate::AoEImpact;
+		C.PrimaryColor = FLinearColor(0.6f, 0.4f, 0.2f, 1.f);
+		C.AoERadius  = 300.f;
+		AddConfig(Configs, C);
+	}
+
+	// Energy Coat (213) — Blue mana shield
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 213;
+		C.Template   = ESkillVFXTemplate::SelfBuff;
+		C.PrimaryColor = FLinearColor(0.3f, 0.5f, 0.9f, 1.f);
+		C.Duration   = 2.f;
+		AddConfig(Configs, C);
+	}
+
+	// Loud Exclamation (609) — Orange STR buff
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 609;
+		C.Template   = ESkillVFXTemplate::SelfBuff;
+		C.PrimaryColor = FLinearColor(1.f, 0.5f, 0.f, 1.f);
+		C.Duration   = 1.f;
+		AddConfig(Configs, C);
+	}
+
+	// Improve Concentration (302) — Yellow focus buff
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 302;
+		C.Template   = ESkillVFXTemplate::SelfBuff;
+		C.PrimaryColor = FLinearColor(0.9f, 0.9f, 0.5f, 1.f);
+		C.Duration   = 1.5f;
+		AddConfig(Configs, C);
+	}
+
 	return Configs;
 }
 

@@ -215,23 +215,177 @@ Replaces the old `hotbar:data` event name to avoid C++ SocketIO event binding co
 
 | Category | Count |
 |----------|-------|
-| **Novice** | 3 skills |
-| **First Classes** (6) | 43 skills |
-| **Second Classes** (13) | 93 skills |
-| **Total** | **139 skills** |
+| **Novice** | 3 skills (IDs 1-3) |
+| **Swordsman** | 10 skills (IDs 100-109) |
+| **Mage** | 14 skills (IDs 200-213) |
+| **Archer** | 7 skills (IDs 300-306) |
+| **Acolyte** | 14 skills (IDs 400-413) |
+| **Thief** | 10 skills (IDs 500-509) |
+| **Merchant** | 10 skills (IDs 600-609) |
+| **First Class Total** | **68 skills** |
+| **Second Classes** (13) | 83 skills |
+| **Grand Total** | **151 skills** |
+
+## Implemented Skill Handlers (Phase 5)
+
+All 6 first classes are fully playable with working handlers:
+
+### Novice
+| ID | Name | Type | Handler |
+|----|------|------|---------|
+| 2 | First Aid | active (self heal) | Heals effectValue HP, green heal numbers |
+
+### Swordsman (10 skills: 7 active + 3 passive)
+| ID | Name | Type | Handler |
+|----|------|------|---------|
+| 100 | Sword Mastery | passive | +4 ATK/lv with dagger/1H sword |
+| 101 | 2H Sword Mastery | passive | +4 ATK/lv with 2H sword |
+| 102 | Increase HP Recovery | passive | +5 HP/regen tick/lv |
+| 103 | Bash | active (single) | Physical damage + Fatal Blow stun chance |
+| 104 | Provoke | active (single) | Debuff: -DEF%, +ATK% on target |
+| 105 | Magnum Break | active (ground AoE) | Fire AoE 300 radius centered on ground |
+| 106 | Endure | active (self buff) | +MDEF, walk through attacks |
+| 107 | Moving HP Recovery | passive | Allow HP regen while moving |
+| 108 | Auto Berserk | active (toggle) | +32% ATK when HP < 25%, dynamic toggle |
+| 109 | Fatal Blow | passive | +5% stun chance/lv on Bash hits |
+
+### Mage (14 skills: 12 active + 2 passive)
+| ID | Name | Type | Handler |
+|----|------|------|---------|
+| 200 | Cold Bolt | active (single, cast) | Water bolt ×N hits |
+| 201 | Fire Bolt | active (single, cast) | Fire bolt ×N hits |
+| 202 | Lightning Bolt | active (single, cast) | Wind bolt ×N hits |
+| 203 | Napalm Beat | active (single, cast) | Ghost AoE damage |
+| 204 | Increase SP Recovery | passive | +3 SP/regen tick/lv |
+| 205 | Sight | active (self buff) | Reveal hidden, 10s duration |
+| 206 | Stone Curse | active (single, cast) | Petrify target |
+| 207 | Fire Ball | active (single, cast) | Fire projectile + explosion |
+| 208 | Frost Diver | active (single, cast) | Freeze target |
+| 209 | Fire Wall | active (ground, cast) | Persistent fire zone, knockback |
+| 210 | Soul Strike | active (single, cast) | Ghost multi-hit projectile |
+| 211 | Safety Wall | active (ground, cast) | Block melee attacks, ground effect |
+| 212 | Thunderstorm | active (ground, cast) | Wind AoE rain ×N strikes |
+| 213 | Energy Coat | active (self buff) | +DEF%, 5min duration |
+
+### Archer (7 skills: 4 active + 2 passive + 1 deferred)
+| ID | Name | Type | Handler |
+|----|------|------|---------|
+| 300 | Owl's Eye | passive | +1 DEX/lv |
+| 301 | Vulture's Eye | passive | +1 HIT/lv, +10 range/lv (bow) |
+| 302 | Improve Concentration | active (self buff) | +AGI%/+DEX% of base stats, reveal hidden |
+| 303 | Double Strafe | active (single) | 2 hits with 200ms stagger, requires bow |
+| 304 | Arrow Shower | active (ground AoE) | Ranged AoE 400 radius, requires bow |
+| 305 | Arrow Crafting | deferred | "Not yet implemented" |
+| 306 | Arrow Repel | active (single) | Ranged attack + 250 unit knockback |
+
+### Acolyte (14 skills: 12 active + 2 passive)
+| ID | Name | Type | Handler |
+|----|------|------|---------|
+| 400 | Heal | active (single/self) | RO formula: floor((baseLv+INT)/8)×(4+Lv×8). Damages undead (holy) |
+| 401 | Divine Protection | passive | +3 raceDEF/lv vs undead/demon |
+| 402 | Blessing | active (single/self) | Buff +STR/DEX/INT, sends updated stats |
+| 403 | Increase AGI | active (single/self) | Buff +AGI +25% movespeed, removes Decrease AGI |
+| 404 | Decrease AGI | active (single) | Debuff -AGI -25% movespeed, removes Increase AGI |
+| 405 | Cure | active (single/self) | Cleanses silence/blind/confusion |
+| 406 | Angelus | active (self buff) | +DEF% |
+| 407 | Signum Crucis | active (AoE) | -DEF% on undead/demon in 500 radius |
+| 408 | Ruwach | active (self buff) | Reveal hidden, 10s duration |
+| 409 | Teleport | active (self) | Lv1: random in zone, Lv2: save point (zone change) |
+| 410 | Warp Portal | active (ground) | Portal to save point (ground effect) |
+| 411 | Pneuma | active (ground) | Block ranged attacks (ground effect, checked in auto-attack tick) |
+| 412 | Aqua Benedicta | active (self) | Simplified: creates Holy Water (chat msg) |
+| 413 | Demon Bane | passive | +3 raceATK/lv vs undead/demon |
+
+### Thief (10 skills: 8 active + 2 passive)
+| ID | Name | Type | Handler |
+|----|------|------|---------|
+| 500 | Double Attack | passive | +5% double-hit chance/lv (dagger only) |
+| 501 | Improve Dodge | passive | +3 FLEE/lv |
+| 502 | Steal | active (single) | Chance = effectVal + DEX/2 - enemyLv/3 |
+| 503 | Hiding | active (toggle) | Invisible, broken by damage/skill use/Sight/Ruwach |
+| 504 | Envenom | active (single) | Physical + poison element + apply poison status |
+| 505 | Detoxify | active (single/self) | Cleanses poison |
+| 506 | Sand Attack | active (single) | Physical + earth element + apply blind status |
+| 507 | Back Slide | active (self) | Teleport 250 units backward |
+| 508 | Throw Stone | active (single) | Fixed 50+STR damage, range 700 |
+| 509 | Pick Stone | active (self) | Simplified: picks up stone (chat msg) |
+
+### Merchant (10 skills: 5 active + 3 passive + 3 deferred)
+| ID | Name | Type | Handler |
+|----|------|------|---------|
+| 600 | Enlarge Weight Limit | passive | +200 weight/lv |
+| 601 | Discount | passive | Reduce NPC buy prices |
+| 602 | Overcharge | passive | Increase NPC sell prices |
+| 603 | Mammonite | active (single) | Physical + costs Lv×100 zeny, DB update |
+| 604 | Pushcart | passive | Cart storage |
+| 605 | Vending | deferred | "Not yet implemented" |
+| 606 | Item Appraisal | deferred | "Not yet implemented" |
+| 607 | Change Cart | deferred | "Not yet implemented" |
+| 608 | Cart Revolution | active (ground AoE) | AoE 300 radius + knockback |
+| 609 | Loud Exclamation | active (self buff) | +4 STR, 5min duration |
+
+## Passive Skill Engine
+
+`getPassiveSkillBonuses(player)` in `index.js` returns a bonuses object based on learned passive skills:
+
+| Passive | Effect | Weapon Gate |
+|---------|--------|-------------|
+| Sword Mastery (100) | +4 ATK/lv | dagger, one_hand_sword |
+| 2H Sword Mastery (101) | +4 ATK/lv | two_hand_sword |
+| HP Recovery (102) | +5 HP/regen tick/lv | — |
+| Moving HP Recovery (107) | Allow HP regen while moving | — |
+| Fatal Blow (109) | +5% stun chance/lv on Bash | — |
+| SP Recovery (204) | +3 SP/regen tick/lv | — |
+| Owl's Eye (300) | +1 DEX/lv | — |
+| Vulture's Eye (301) | +1 HIT/lv, +10 range/lv | bow only (range) |
+| Divine Protection (401) | +3 raceDEF/lv vs undead/demon | — |
+| Demon Bane (413) | +3 raceATK/lv vs undead/demon | — |
+| Double Attack (500) | +5% double-hit/lv | dagger only |
+| Improve Dodge (501) | +3 FLEE/lv | — |
+
+`getEffectiveStats(player)` merges equipment bonuses + passive bonuses + buff modifiers into a single stats object used by all combat/stat calculations.
+
+### Race ATK/DEF in Damage Formula
+
+`ro_damage_formulas.js` has two new steps:
+- **Step 6b** (after card modifiers): `attacker.passiveRaceATK[targetRace]` adds flat ATK bonus
+- **After soft DEF**: `target.passiveRaceDEF[attacker.race]` subtracts flat DEF bonus
+
+### Double Attack in Auto-Attack Tick
+
+After normal auto-attack damage on enemy, checks `doubleAttackChance` from passive. If triggered, calculates second hit with 200ms delay, broadcasts `hitType: 'doubleAttack'`.
+
+### HP Regen Movement Blocking (RO Classic)
+
+`player.lastMoveTime` is set on position updates when actual movement > 5 UE units is detected. HP natural regen tick (6s) skips players who moved within last 4 seconds UNLESS they have `movingHPRecovery` passive (Swordsman skill 107).
+
+### Hidden Player AI Integration
+
+- `findAggroTarget()`: skips hidden players unless enemy has `detector` mode flag
+- CHASE state: drops target and returns to IDLE if target becomes hidden
+- ATTACK state: drops target and returns to IDLE if target becomes hidden
+- Hiding breaks on: taking damage, using any offensive skill (except Hiding toggle itself)
+
+### Auto Berserk Dynamic Toggle
+
+`checkAutoBerserk(player, characterId, zone)` is called whenever player HP changes:
+- HP drops below 25% → activate ATK bonus (32%)
+- HP rises above 25% → deactivate ATK bonus
+- Called in: enemy damage handler, heal skill, HP natural regen, skill-based regen
+
+### executePhysicalSkillOnEnemy Helper
+
+Shared helper for single-target physical skills (Envenom, Sand Attack, Mammonite). Handles: enemy lookup, range check, SP deduct, damage calc, aggro, damage-break statuses, broadcast, death check. Returns `{ result, enemy, attackerPos, targetPos, zone }` for callers to add unique post-damage behavior.
 
 ## Future Expansion
 
-- **More skill effects**: Damage skills (Bash), buffs (Increase AGI, Blessing), AoE damage, status effects
-- **Cast time system**: Cast bar UI + interruptible casting
-- **Cooldown tracking**: Per-skill cooldown timers
-- **Skill icons in hotbar**: DataTable lookup (`DT_SkillIcons`) by skill ID for hotbar display
-- **Drag-drop from Slate to UMG hotbar**: `USkillDragDropOperation` created but UMG OnDrop needs Blueprint implementation
-- **Visual effects**: Particle/Niagara effects per skill
 - **Quest skills**: Skills learned through quests instead of skill points
 - **Skill point cost scaling**: Some RO skills cost more than 1 point at higher levels
+- **Second class skill handlers**: Knight, Wizard, Hunter, Priest, Assassin, Blacksmith, etc.
+- **Ground effect interactions**: Players entering Warp Portal, Pneuma blocking ranged skills
+- **Energy Coat SP drain**: Drain 3% SP per hit absorbed
 
 ---
 
-**Last Updated**: 2026-02-25 (Added skill:use effect application, hotbar:alldata event, quick-assign slot fix)  
-**Previous**: 2026-02-23
+**Last Updated**: 2026-03-10 (Phase 5: Passive Skills & First Class Completion — all 6 first classes playable)
+**Previous**: 2026-02-25
