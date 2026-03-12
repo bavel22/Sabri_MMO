@@ -385,11 +385,15 @@ function calculatePhysicalDamage(attacker, target, options = {}) {
     // HIT = 175 + BaseLv + DEX + bonuses
     // FLEE = 100 + BaseLv + AGI + bonuses
     // HitRate = 80 + HIT - FLEE, clamped 5-95%
+    // Status effects (Blind) apply multiplicative HIT/FLEE modifiers
     // ─────────────────────────────────────────────────────
     if (!isCritical && !forceHit) {
-        const effectiveHit = atkDerived.hit + skillHitBonus;
+        const atkHitMul = (attacker.buffMods && attacker.buffMods.hitMultiplier) || 1.0;
+        const defFleeMul = (target.buffMods && target.buffMods.fleeMultiplier) || 1.0;
+        const effectiveHit = Math.floor((atkDerived.hit + skillHitBonus) * atkHitMul);
+        const effectiveFlee = Math.floor(defDerived.flee * defFleeMul);
         const numAttackers = target.numAttackers || 1;
-        const hitRate = calculateHitRate(effectiveHit, defDerived.flee, numAttackers);
+        const hitRate = calculateHitRate(effectiveHit, effectiveFlee, numAttackers);
 
         if (Math.random() * 100 >= hitRate) {
             result.hitType = 'miss';
@@ -485,21 +489,24 @@ function calculatePhysicalDamage(attacker, target, options = {}) {
 
     // ─────────────────────────────────────────────────────
     // Step 8: DEF reduction
-    // Hard DEF (equipment): percentage reduction
+    // Hard DEF (equipment): percentage reduction — NOT affected by buff defMultiplier
+    //   (RO Classic: Provoke/Signum Crucis only reduce VIT soft DEF)
     //   damage = damage * (100 - hardDEF) / 100
-    // Soft DEF (VIT-based): flat subtraction
+    // Soft DEF (VIT-based): flat subtraction, affected by defMultiplier
     // ─────────────────────────────────────────────────────
     const hardDef = Math.min(99, target.hardDef || 0); // Cap at 99% reduction
     const defMultiplier = (target.buffMods && target.buffMods.defMultiplier) || 1.0;
 
-    // Apply hard DEF (percentage reduction)
+    // Apply hard DEF (percentage reduction) — unmodified by buffs
     if (hardDef > 0) {
-        const effectiveHardDef = Math.floor(hardDef * defMultiplier);
-        totalATK = Math.floor(totalATK * (100 - effectiveHardDef) / 100);
+        totalATK = Math.floor(totalATK * (100 - hardDef) / 100);
     }
 
-    // Apply soft DEF (flat reduction)
-    const effectiveSoftDef = Math.floor(defDerived.softDEF * defMultiplier);
+    // Apply soft DEF (flat reduction) — modified by Provoke/Signum Crucis defMultiplier
+    // Angelus: increases VIT-based soft DEF by defPercent%
+    const defPercentBonus = (target.buffMods && target.buffMods.defPercent) || 0;
+    const angelusMultiplier = defPercentBonus > 0 ? (1 + defPercentBonus / 100) : 1.0;
+    const effectiveSoftDef = Math.floor(defDerived.softDEF * defMultiplier * angelusMultiplier);
     totalATK = totalATK - effectiveSoftDef;
 
     // Passive race DEF bonuses (Divine Protection)
@@ -582,22 +589,27 @@ function calculateMagicalDamage(attacker, target, options = {}) {
     totalDamage = Math.floor(totalDamage * eleModifier / 100);
 
     // ── MDEF reduction ──
-    // Hard MDEF (equipment): percentage reduction
+    // Hard MDEF (equipment): percentage reduction — unmodified by buffs
     const hardMdef = Math.min(99, target.hardMdef || target.magicDefense || 0);
-    const defMultiplier = (target.buffMods && target.buffMods.defMultiplier) || 1.0;
 
     if (hardMdef > 0) {
-        const effectiveHardMdef = Math.floor(hardMdef * defMultiplier);
-        totalDamage = Math.floor(totalDamage * (100 - effectiveHardMdef) / 100);
+        totalDamage = Math.floor(totalDamage * (100 - hardMdef) / 100);
     }
 
     // Soft MDEF (INT-based): flat subtraction
-    const effectiveSoftMdef = Math.floor(defDerived.softMDEF * defMultiplier);
+    const effectiveSoftMdef = defDerived.softMDEF;
     totalDamage = totalDamage - effectiveSoftMdef;
 
     // ── Buff MDEF bonus (Endure etc.) ──
     const buffBonusMDEF = (target.buffMods && target.buffMods.bonusMDEF) || 0;
     totalDamage = totalDamage - buffBonusMDEF;
+
+    // ── Status MDEF multiplier (freeze/stone = 1.25 → take 125% magic damage) ──
+    // Applied as a final damage multiplier, not an MDEF modifier
+    const mdefMultiplier = (target.buffMods && target.buffMods.mdefMultiplier) || 1.0;
+    if (mdefMultiplier !== 1.0) {
+        totalDamage = Math.floor(totalDamage * mdefMultiplier);
+    }
 
     result.damage = Math.max(1, totalDamage);
     return result;

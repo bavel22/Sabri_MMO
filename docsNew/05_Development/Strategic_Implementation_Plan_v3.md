@@ -1,7 +1,7 @@
 # Sabri_MMO — Strategic Implementation Plan v3
 
 **Created**: 2026-03-09
-**Last Updated**: 2026-03-10
+**Last Updated**: 2026-03-11
 **Based on**: Full codebase audit, skills/VFX audit, all RagnaCloneDocs, all docsNew/, complete server + client C++ analysis, external architecture review, Persistent Socket Connection Plan
 
 ## Progress Tracker
@@ -13,8 +13,8 @@
 | Phase 2: Status Effects + Buffs | **COMPLETE** | 2026-03-09 | 10 status effects, buff system, BuffBarWidget, AI CC lock, reconnect cache |
 | Phase 3: Element Table + Formula Audit | **COMPLETE** | 2026-03-09 | Replaced entire ELEMENT_TABLE (100+ wrong values), verified SIZE_PENALTY (all correct), fixed card modifier stacking, added element immunity/heal hit types, 537 tests passing |
 | Phase 4: Persistent Socket Connection | **COMPLETE** | 2026-03-10 | Persistent socket on GameInstance, SocketEventRouter, MultiplayerEventSubsystem bridge, PositionBroadcastSubsystem, reconnectBuffCache removed, all 14+ subsystems migrated |
-| Phase 5: Passive Skills + Classes | NOT STARTED | — | Passive engine + 4 new classes (Archer, Acolyte, Thief, Merchant) |
-| Phase 6: Party System | NOT STARTED | — | Party create/invite/leave, EXP sharing, HP broadcasting |
+| Phase 5: Passive Skills + Classes | **COMPLETE** | 2026-03-10 | All 6 first classes playable (151 defs, 43 handlers, 12 passives, 31 VFX), canonical item migration (6,169 items), passive engine, heal formula, Auto Berserk |
+| Phase 6: Party System | NOT STARTED | — | Party create/invite/leave, EXP sharing, HP broadcasting ← **NEXT** |
 | Phase 7: Chat Expansion | NOT STARTED | — | Whisper, party chat, chat channels |
 | Phase 8: Second Classes | NOT STARTED | — | Knight, Priest, Wizard, Assassin, Hunter |
 | Phase 9: Monster Skills | NOT STARTED | — | Monster skill AI, MVP bosses |
@@ -26,11 +26,11 @@
 
 ## Executive Summary
 
-The project has a **solid foundation**: auth, 15 C++ UI subsystems, 4 working zones, auto-attack + 17 skills with VFX, RO damage formulas, 509 monster templates, inventory/equipment/hotbar, NPC shops, and a complete status effect + buff system. The architecture (server-authoritative, UWorldSubsystem pattern, event wrapping) is sound.
+The project has a **solid foundation**: auth, 17 C++ UI subsystems, 4 working zones, auto-attack + 43 active skill handlers with 31 VFX configs, RO damage formulas (element table + size penalties verified with 537 tests), 509 monster templates, inventory/equipment/hotbar, NPC shops, complete status effect system (10 statuses) + buff system (24 types), persistent socket surviving zone transitions, and all 6 first classes fully playable. The architecture (server-authoritative, UWorldSubsystem pattern, persistent socket + SocketEventRouter, event wrapping) is sound.
 
-**The core problem**: Only **10% of skills work**, only **2 of 13 classes are playable** (Swordsman, Mage), and **zero social systems exist** (no party, guild, chat channels, trading). The game is a tech demo, not an MMO.
+**Current state**: All 6 first classes are playable with 151 skill definitions, 43 active handlers, 12 passives, and 31 VFX configs. The server is ~10,000 lines (monolithic, working well with AI-assisted dev). Item database migrated to 6,169 canonical rAthena items. **Zero social systems exist** (no party, guild, chat channels, trading). The game has strong combat and class variety but is still a single-player experience.
 
-**The strategy**: Fix the element table (combat math is wrong), then lay the permanent networking foundation (persistent socket), then build **all 6 first classes** with passive skills, then add party play. Infrastructure before content. Correct data before more features.
+**The strategy going forward**: Add party play (the #1 feature that converts a tech demo to an MMO), expand chat, then build second-class skills for endgame progression. Social systems before more content.
 
 ---
 
@@ -70,10 +70,10 @@ The project has a **solid foundation**: auth, 15 C++ UI subsystems, 4 working zo
 
 ## Phase 1: Targeted Server Extraction — DEFERRED
 
-**Original rationale**: The server is ~8,800 lines in one file. Extract skill handlers into separate modules.
+**Original rationale**: The server is ~10,000 lines in one file (grown from ~8,800 at plan creation due to Phase 5 skill handlers). Extract skill handlers into separate modules.
 
 **Why deferred**: AI-assisted development neutralizes the core arguments:
-- "Can't find anything in 8,800 lines" — AI navigates any file size instantly
+- "Can't find anything in 10,000 lines" — AI navigates any file size instantly
 - "Merge conflicts" — solo developer + AI, no team contention
 - "No unit testing possible" — test suite deferred anyway, tests written alongside features
 - "Syntax error crashes everything" — real but mitigated by nodemon auto-restart (<2s)
@@ -184,7 +184,7 @@ UMMOGameInstance                          ← SURVIVES OpenLevel
   └── Auth token, character data, zone state
 ```
 
-All 15 C++ subsystems find the socket via `FindSocketIOComponent()` which iterates world actors looking for a `USocketIOClientComponent`. When the level changes, the actor is gone.
+All 17 C++ subsystems find the socket via `FindSocketIOComponent()` which iterates world actors looking for a `USocketIOClientComponent`. When the level changes, the actor is gone.
 
 ### Target Architecture
 
@@ -205,7 +205,7 @@ UE5 Level (any)
    - Disconnect on logout / return to login screen
    - Never disconnect on zone change
 
-2. **Update `FindSocketIOComponent()` in all 15 subsystems**
+2. **Update `FindSocketIOComponent()` in all 17 subsystems**
    - Change from actor iteration to: `Cast<UMMOGameInstance>(GetGameInstance())->GetSocketIOComponent()`
    - Single function in a shared header or on GameInstance itself
 
@@ -318,48 +318,38 @@ Phase 4a must come first. Phases 4b and 4c can run in parallel. Phase 4d comes l
 
 ---
 
-## Phase 5: Passive Skills & First Class Completion (2 weeks)
+## Phase 5: Passive Skills & First Class Completion (2 weeks) — COMPLETE ✓
 
-**Why now**: 7 passive skills do literally nothing (Sword Mastery, HP Recovery, Owl's Eye, etc.). Players can learn them, spend skill points, and get zero benefit. This is the most visible broken promise in the game. Additionally, completing all 6 first classes gives players real variety.
+> **Completed 2026-03-10.** All deliverables met. See `memory/phase5-skills.md` for full implementation details.
+>
+> **What was built**:
+> - **Passive engine**: `getPassiveSkillBonuses()` handles 12 passives, `getEffectiveStats()` merges buff+passive bonuses into derived stats
+> - **All 6 first classes fully playable**: Swordsman (10 skills), Mage (14), Archer (7), Acolyte (14), Thief (10), Merchant (10)
+> - **151 total skill definitions** (68 first-class + 83 second-class data-only), **43 active handlers**, **12 passives**, **31 VFX configs**
+> - **24 buff types** (provoke, endure, sight, blessing, increase_agi, decrease_agi, angelus, pneuma, signum_crucis, auto_berserk, hiding, improve_concentration, loud_exclamation, ruwach, energy_coat + 9 future 2nd-class)
+> - **Canonical item migration**: 6,169 rAthena canonical items (was 148), `ro_item_effects.js` with 490 consumable effects, `ro_item_mapping.js` DELETED (runtime `itemNameToId` Map from DB)
+> - **Combat formula additions**: Race ATK/DEF (Demon Bane, Divine Protection), weapon element for physical skills, heal-damages-undead (Holy element), `executePhysicalSkillOnEnemy()` shared helper
+> - **Double Attack** in auto-attack tick, **Pneuma** ranged block, **Hidden** AI checks (3 locations)
+> - **HP regen movement blocking** (RO Classic) + Moving HP Recovery bypass
+> - **Auto Berserk** dynamic HP threshold toggle (+32% ATK / -25% DEF below 25% HP), emits `player:stats` on toggle
+> - **Heal formula**: `floor((baseLv+INT)/8) * (4+skillLv*8)`, damages undead with holy element
+> - **16 new VFX configs** (31 total): Heal, Blessing, IncAGI, DecAGI, Angelus, Ruwach, DoubleStrafe, ArrowShower, ArrowRepel, Envenom, SandAttack, Mammonite, CartRev, EnergyCo, LoudExc, ImpConc
+> - **Deferred skill stubs**: Arrow Crafting, Vending, Item Appraisal, Change Cart (emit "not yet implemented")
+>
+> **Deferred to Phase 12**: Non-elemental vs Neutral distinction for monster auto-attacks, Boss/Normal card category
 
-**Benefit of doing this AFTER Phase 4**: Every new subsystem built for these 4 classes uses the clean GameInstance socket pattern. No actor-search `FindSocketIOComponent()`, no stability delay timers for reconnect handling, no migration needed later.
+**Original scope and rationale** (preserved for reference):
 
-**Server-side: Passive skill engine**:
-- Passive skills modify derived stats on learn/level (recalculate on equip/level/skill change)
-- Implementation: `applyPassiveSkills(player)` called during `calculateDerivedStats()`
-- Swordsman passives: Sword Mastery (+ATK with swords), Two-Hand Mastery (+ATK with 2H swords), HP Recovery (+HP regen rate), Moving HP Recovery (regen while moving)
-- Mage passives: Increase SP Recovery (+SP regen rate)
-- Archer passives: Owl's Eye (+DEX), Vulture's Eye (+range), Improve Concentration (+AGI/DEX)
-- Acolyte passives: Divine Protection (+DEF vs undead/demon), Demon Bane (+ATK vs undead/demon)
-- Thief passives: Increase Dodge (+FLEE), Double Attack (auto-attack chance for extra hit)
-- Merchant passives: Pushcart (enable cart), Loud Exclamation (+STR)
+Passive skills modified derived stats on learn/level. Completing all 6 first classes gave players real variety. Every new subsystem built after Phase 4 used the clean GameInstance socket pattern.
 
-**Server-side: Combat formula prerequisites** (from Phase 3 audit findings):
-- **Weapon element for physical skills**: Bash, Double Strafe, Arrow Shower, Mammonite, and other physical skills currently use forced `element: 'neutral'` in `ro_skill_data.js`. They should use weapon element (`element: 'weapon'`). Add `element: 'weapon'` support to `calculatePhysicalDamage` — if skill element is `'weapon'`, use `attacker.weaponElement` instead. Only skills with forced elements (bolts, Soul Strike, etc.) should override weapon element.
-- **Heal-damages-Undead mechanic**: Heal (403) must deal Holy damage to Undead element targets. Formula: `HealDamage = floor(HealAmount / 2)`, then apply element modifier (Holy vs Undead = 150-200%). Required for Acolyte class to function correctly vs undead monsters.
-- **Non-elemental vs Neutral distinction**: Monster auto-attacks are non-elemental in RO (bypass element table entirely, always 100%). Player neutral attacks ARE Neutral element and use the table. Currently both are treated as Neutral. Low priority — only matters for Ghost-armor players, which don't exist yet. Defer to Phase 12.
-
-**Server-side: Complete all 6 first classes**:
-
-| Class | Active Skills to Implement | Key Mechanics |
-|-------|---------------------------|---------------|
-| Swordsman | Fatal Blow (stun chance), Auto Berserk (low HP ATK boost) | Stun via status effect system |
-| Mage | Energy Coat (SP shield) | SP-to-DEF conversion |
-| **Archer** | Double Strafe (2-hit ranged), Arrow Shower (AoE ranged), Arrow Repel (knockback) | Ranged physical damage, arrow/weapon element |
-| **Acolyte** | Heal, Blessing, Increase AGI, Decrease AGI, Angelus, Cure, Pneuma, Teleport, Warp Portal, Ruwach, Signum Crucis, Aqua Benedicta | Healing (Holy damage vs Undead), party buffs, status cleanse, utility |
-| **Thief** | Steal, Hiding, Envenom (poison), Detoxify, Sand Attack (blind), Backslide, Throw Stone, Pick Stone | Stealth, poison via status system |
-| **Merchant** | Mammonite (zeny-cost attack), Cart Revolution (AoE), Vending (placeholder — full vending in Phase 14) | Zeny consumption, weapon element, cart attacks |
-
-**Client-side**:
-- Heal VFX (green light burst on target)
-- Buff VFX for Blessing, Increase AGI, Angelus (reuse SelfBuff pattern)
-- Arrow/ranged projectile VFX
-- Hiding visual (character becomes translucent)
-- Update skill tree tabs for all 6 classes
-
-**Deliverable**: All 6 first classes fully playable. ~40 new skills executable. Passive skills actually affect stats. Players can heal, buff, cure, teleport, steal, hide.
-
-**Refactor justification**: HIGH ROI. This quadruples the playable content (2 classes -> 6 classes) and enables party play roles (tank, healer, DPS, support). The Acolyte class alone is worth the entire phase — every group needs a healer. The status effect system from Phase 2 makes Thief skills (poison, blind) trivial to implement.
+| Class | Skills Implemented | Key Mechanics |
+|-------|-------------------|---------------|
+| Swordsman (10) | Bash, Magnum Break, Endure, Fatal Blow, Auto Berserk, Moving HP Recovery + 4 passives | Stun, self-buff, HP regen |
+| Mage (14) | Cold/Fire/Lightning Bolt, Fire Ball, Soul Strike, Thunderstorm, Frost Diver, Stone Curse, Sight, Napalm Beat, Fire Wall, Safety Wall, Energy Coat + 1 passive | AoE damage, freeze/petrify, SP shield |
+| Archer (7) | Double Strafe, Arrow Shower, Arrow Repel + 4 passives | Ranged physical, weapon element |
+| Acolyte (14) | Heal, Blessing, Inc AGI, Dec AGI, Angelus, Cure, Pneuma, Teleport, Warp Portal, Ruwach, Signum Crucis, Aqua Benedicta + 2 passives | Healing, buffs, status cleanse, utility |
+| Thief (10) | Steal, Hiding, Envenom, Detoxify, Sand Attack, Backslide, Throw Stone, Pick Stone + 2 passives | Stealth, poison, blind |
+| Merchant (10) | Mammonite, Cart Revolution + 2 passives + 4 stubs (Vending/etc) | Zeny cost, cart AoE |
 
 ---
 
@@ -511,7 +501,7 @@ Target: **15-20 zones** (from current 4). This creates a meaningful world with d
 
 ## Phase 12: Item & Equipment Deep Dive (2 weeks)
 
-**Why now**: With 5+ second classes, players need class-appropriate equipment. The current 148 items don't cover weapon types for all classes. Refining adds equipment progression. Cards add build diversity.
+**Why now**: With 5+ second classes, players need class-appropriate equipment. While the DB now has 6,169 canonical rAthena item definitions, most lack server-side effect handlers, and refining/card systems don't exist yet. Refining adds equipment progression. Cards add build diversity.
 
 **Server-side**:
 - Expand item DB to 500+ items (weapons for all weapon types, armor sets per level tier)
@@ -550,17 +540,17 @@ These phases are deferred because they don't block core gameplay. Plan them when
 ## Time Estimates & Dependency Graph
 
 ```
-Phase 0: Critical Fixes .................. 1-2 days      ✓ DONE
+Phase 0: Critical Fixes .................. 1-2 days      ✓ DONE (2026-03-09)
   |
-Phase 2: Status Effects + Buff System .... 1.5-2 weeks   ✓ DONE
+Phase 2: Status Effects + Buff System .... 1.5-2 weeks   ✓ DONE (2026-03-09)
   |
-Phase 3: Element Table Audit ............. 0.5 days      ✓ DONE
+Phase 3: Element Table Audit ............. 0.5 days      ✓ DONE (2026-03-09)
   |
-Phase 4: Persistent Socket Connection .... 1-1.5 weeks   ✓ DONE
+Phase 4: Persistent Socket Connection .... 1-1.5 weeks   ✓ DONE (2026-03-10)
   |
-Phase 5: Passive Skills + 6 First Classes  2 weeks       ← NEXT
+Phase 5: Passive Skills + 6 First Classes  2 weeks       ✓ DONE (2026-03-10)
   |
-  +---> Phase 6: Party System ............ 1-1.5 weeks
+  +---> Phase 6: Party System ............ 1-1.5 weeks   ← NEXT
   |       |
   |       +---> Phase 7: Chat Expansion .. 3-5 days
   |
@@ -575,15 +565,15 @@ Phase 5: Passive Skills + 6 First Classes  2 weeks       ← NEXT
                   +---> Phase 12: Items .. 2 weeks
 ```
 
-**Critical path**: 3 -> 4 -> 5 -> 8 -> 9 (combat depth)
-**Social path**: 3 -> 4 -> 5 -> 6 -> 7 (party play)
-**Content path**: 3 -> 4 -> 5 -> 10 -> 11 -> 12 (world + items)
+**Critical path**: 5 (DONE) -> 8 -> 9 (combat depth)
+**Social path**: 5 (DONE) -> 6 -> 7 (party play) ← **START HERE**
+**Content path**: 5 (DONE) -> 10 -> 11 -> 12 (world + items)
 
-**Phase 1 (Server Extraction) is DEFERRED** — revisit if index.js growth becomes painful during Phase 8.
+**Phase 1 (Server Extraction) is DEFERRED** — revisit if index.js growth (~10,000 lines) becomes painful during Phase 8.
 **Phases 6-7 can run in parallel with Phase 8.** They share no code dependencies.
-**Phase 10 can start as soon as Phase 5 is done** (zone creation doesn't need second-class skills).
+**Phase 10 can start immediately** (zone creation doesn't need second-class skills or party system).
 
-**Total estimated time for Phases 3-12**: ~17-24 weeks (4-6 months)
+**Total estimated time for remaining Phases 6-12**: ~13-19 weeks (3-5 months)
 
 ---
 
@@ -594,9 +584,9 @@ Phase 5: Passive Skills + 6 First Classes  2 weeks       ← NEXT
 | Phase | Cost | Benefit | ROI |
 |-------|------|---------|-----|
 | 3: Element Table Audit | 0.5 days | ✓ DONE — Fixed 100+ wrong element values, verified size penalties, fixed card stacking, 537 tests | **Extreme** — every hit in the game is affected |
-| 4: Persistent Socket | 1-1.5 weeks | Eliminates disconnect/reconnect cycle, enables party/guild state persistence, removes band-aid caches | **Very High** — foundational infrastructure for all social features |
-| 5: First Classes | 2 weeks | 6 playable classes (from 2), 40+ new skills, healing exists | **Very High** — 3x content, enables party roles |
-| 6: Party System | 1-1.5 weeks | Group play, EXP sharing, party HP bars | **Very High** — converts tech demo to MMO |
+| 4: Persistent Socket | 1-1.5 weeks | ✓ DONE — Eliminated disconnect/reconnect cycle, enables party/guild state persistence, removed band-aid caches | **Very High** — foundational infrastructure for all social features |
+| 5: First Classes | 2 weeks | ✓ DONE — 6 playable classes (from 2), 43 active skill handlers, 12 passives, 6,169 items, healing exists | **Very High** — 3x content, enables party roles |
+| 6: Party System | 1-1.5 weeks | Group play, EXP sharing, party HP bars | **Very High** — converts tech demo to MMO ← **NEXT** |
 
 ### Good ROI (Do After Core)
 
@@ -630,19 +620,25 @@ Phase 5: Passive Skills + 6 First Classes  2 weeks       ← NEXT
 
 ## What MUST Be Refactored Now vs Later
 
-### Already Refactored (Phases 0, 2, 3, 4):
+### Already Refactored (Phases 0, 2, 3, 4, 5):
 
 1. **Element table correction** ✓ — Replaced entire 400-value table with rAthena canonical, fixed card modifier stacking, 537 tests passing.
 
-3. **Status effect architecture** ✓ — Generic system built. Any future skill can apply/remove effects with 2-3 lines.
+2. **Status effect architecture** ✓ — Generic system built. Any future skill can apply/remove effects with 2-3 lines.
 
-4. **Buff system architecture** ✓ — Generic system built. Blessing, Increase AGI, Angelus, Kyrie Eleison all use it.
+3. **Buff system architecture** ✓ — Generic system built. 24 buff types all use it.
 
-5. **SP deduction timing** ✓ — Fixed while only 17 skills exist.
+4. **SP deduction timing** ✓ — Fixed while only 17 skills existed.
 
-6. **Security fixes** ✓ — JWT auth, DB transactions, rate limiting all fixed.
+5. **Security fixes** ✓ — JWT auth, DB transactions, rate limiting all fixed.
 
-7. **Persistent socket connection** ✓ — Socket on GameInstance survives zone changes. SocketEventRouter for multi-handler dispatch. All 14+ subsystems migrated. reconnectBuffCache removed. BP event bridge via MultiplayerEventSubsystem.
+6. **Persistent socket connection** ✓ — Socket on GameInstance survives zone changes. SocketEventRouter for multi-handler dispatch. All 17 subsystems migrated. reconnectBuffCache removed. BP event bridge via MultiplayerEventSubsystem.
+
+7. **Passive skill engine** ✓ — `getPassiveSkillBonuses()` for 12 passives, `getEffectiveStats()` merges buff+passive bonuses. Race ATK/DEF in damage formula.
+
+8. **Canonical item migration** ✓ — 6,169 rAthena items (was 148), 490 consumable effects data-driven, NPC shops using canonical IDs.
+
+9. **First class completion** ✓ — All 6 classes playable with 43 handlers. `executePhysicalSkillOnEnemy()` shared helper for physical skills.
 
 ### Refactor LATER (Fine to defer):
 
@@ -660,16 +656,21 @@ Phase 5: Passive Skills + 6 First Classes  2 weeks       ← NEXT
 
 ## Success Criteria
 
-After completing Phases 3-8, the game should have:
-- ✓ Correct element table matching rAthena pre-renewal (DONE — Phase 3)
-- ✓ Persistent socket connection, no disconnect on zone change (DONE — Phase 4)
-- 6 fully playable first classes with all skills working
-- 5 playable second classes (Knight, Priest, Wizard, Assassin, Hunter)
-- ~90+ executable skills (from current 17)
-- Generic status effect system with 10 core effects
-- Generic buff system with buff bar UI
+### Already achieved (Phases 0-5):
+- ✓ Correct element table matching rAthena pre-renewal (Phase 3)
+- ✓ Persistent socket connection, no disconnect on zone change (Phase 4)
+- ✓ 6 fully playable first classes with all skills working (Phase 5)
+- ✓ 151 skill definitions, 43 active handlers, 12 passives, 31 VFX configs (Phase 5)
+- ✓ Generic status effect system with 10 core effects (Phase 2)
+- ✓ Generic buff system (24 types) with buff bar UI (Phase 2)
+- ✓ 6,169 canonical rAthena items in database (Phase 5)
+- ✓ Security fixes: JWT auth, DB transactions, rate limiting (Phase 0)
+
+### After completing Phases 6-8, the game should also have:
 - Party system with EXP sharing
 - Whisper and party chat
+- 5 playable second classes (Knight, Priest, Wizard, Assassin, Hunter)
+- ~90+ executable skills (from current 43)
 - Still 4 zones (world expansion can start anytime)
 
 This represents a **true MMO prototype** where players can:
@@ -680,7 +681,7 @@ This represents a **true MMO prototype** where players can:
 - Progress from Novice to second class
 - Change zones without losing connection or state
 
-**Estimated time to reach this milestone: 11-15 weeks.**
+**Estimated time to reach this milestone: 5-7 weeks** (Phases 6-8 only — Phases 0-5 are done).
 
 ---
 
@@ -690,7 +691,7 @@ An external architecture review identified 5 problems. Here's how they map to th
 
 | Problem | Verdict | Action Taken |
 |---------|---------|-------------|
-| 8,800-line monolith server | **Overstated** — AI navigates it fine, solo dev has no merge conflicts | Phase 1 DEFERRED. No change. |
+| ~10,000-line monolith server | **Overstated** — AI navigates it fine, solo dev has no merge conflicts | Phase 1 DEFERRED. No change. |
 | Hardcoded skill handlers | **Overstated** — AI writes each handler in minutes; generic engine saves ~1-2 days total over 450 skills | No data-driven engine. Add skills incrementally. |
 | Element table WRONG | **CONFIRMED** — turned out to be 100+ wrong values, not just 8 | **Phase 3 COMPLETE.** Replaced entire table with rAthena canonical, fixed card stacking, 537 tests. Also identified 4 supplemental items for Phases 5 and 12. |
 | Client socket polling "time bomb" | **WRONG** — pattern is well-engineered with guards, health checks, stability delays | No change. Persistent socket (Phase 4) is the right evolution. |
@@ -702,49 +703,22 @@ An external architecture review identified 5 problems. Here's how they map to th
 
 For reference during Phases 5 and 8, here are the skills in priority order:
 
-### Phase 5 — First Class Skills (~40 skills)
+### Phase 5 — First Class Skills — ✓ COMPLETE
 ```
-PREREQUISITE — WEAPON ELEMENT SUPPORT (Phase 3 audit finding):
-  Fix ro_skill_data.js: Bash (103), Double Strafe (304), Arrow Shower (305),
-  Mammonite (603), and other physical skills → element: 'weapon' (not 'neutral')
-  Add 'weapon' element support to calculatePhysicalDamage
+All items below were implemented in Phase 5 (completed 2026-03-10).
 
-PREREQUISITE — HEAL-DAMAGES-UNDEAD (Phase 3 audit finding):
-  Heal (403) must deal Holy damage to Undead element targets
-  Formula: floor(HealAmount / 2), then apply element modifier (Holy vs Undead)
+✓ WEAPON ELEMENT SUPPORT — physical skills use weapon element
+✓ HEAL-DAMAGES-UNDEAD — Holy damage vs Undead element targets
+✓ PASSIVE ENGINE — 12 passives: Sword Mastery, Two-Hand Mastery, HP Recovery,
+  Owl's Eye, Vulture's Eye, Improve Concentration, Divine Protection, Demon Bane,
+  Increase Dodge, Double Attack, Increase SP Recovery, Loud Exclamation
+✓ SWORDSMAN — Fatal Blow, Auto Berserk, Moving HP Recovery (+ Bash, Magnum Break, Endure)
+✓ ARCHER — Double Strafe, Arrow Shower, Arrow Repel
+✓ ACOLYTE — Heal, Blessing, Inc AGI, Dec AGI, Angelus, Cure, Pneuma, Teleport, Warp Portal, Ruwach, Signum Crucis, Aqua Benedicta
+✓ THIEF — Steal, Hiding, Envenom, Detoxify, Sand Attack, Backslide, Throw Stone, Pick Stone
+✓ MERCHANT — Mammonite, Cart Revolution (Vending/Item Appraisal/Arrow Crafting/Change Cart = stubs)
 
-PASSIVE ENGINE (applies to all classes):
-  Sword Mastery (101), Two-Hand Mastery (102), HP Recovery (107)
-  Owl's Eye (301), Vulture's Eye (302), Improve Concentration (303)
-  Divine Protection (401), Demon Bane (402)
-  Increase Dodge (501), Double Attack (502)
-  Pushcart (601), Loud Exclamation (602)
-  Increase SP Recovery (204)
-
-SWORDSMAN remaining:
-  Fatal Blow (110) — stun chance
-  Auto Berserk (109) — low HP ATK boost
-  Moving HP Recovery (108) — regen while moving
-
-ARCHER (new class):
-  Double Strafe (304) — 2-hit ranged, uses WEAPON element
-  Arrow Shower (305) — AoE ranged, uses WEAPON element
-  Arrow Repel (306) — knockback ranged, uses WEAPON element
-
-ACOLYTE (new class — HIGHEST PRIORITY):
-  Heal (403) — Holy damage vs Undead, Blessing (404), Increase AGI (405)
-  Decrease AGI (406), Angelus (407), Cure (408)
-  Pneuma (409), Teleport (410), Warp Portal (411)
-  Ruwach (412), Signum Crucis (413), Aqua Benedicta (414)
-
-THIEF (new class):
-  Steal (503), Hiding (504), Envenom (505)
-  Detoxify (506), Sand Attack (507), Backslide (508)
-  Throw Stone (509), Pick Stone (510)
-
-MERCHANT (new class):
-  Mammonite (603) — zeny attack, uses WEAPON element
-  Cart Revolution (604) — cart AoE
+Total: 43 active handlers, 12 passives, 31 VFX configs
 ```
 
 ### Phase 8 — Second Class Skills (~50 skills)

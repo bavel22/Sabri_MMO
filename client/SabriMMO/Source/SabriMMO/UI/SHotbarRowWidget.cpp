@@ -416,9 +416,10 @@ void SHotbarRowWidget::Tick(const FGeometry& AllottedGeometry, const double InCu
 				}
 			}
 		}
-		// Center horizontally, near bottom, stacked up per row
-		WidgetPosition.X = (ViewportSize.X - TotalWidth) * 0.5;
-		WidgetPosition.Y = ViewportSize.Y - 100.0 - (RowIndex * (RowHeight + 4.0));
+		// Top-left quadrant, stacked down per row
+		const double RowSpacing = RowHeight + 4.0;
+		WidgetPosition.X = ViewportSize.X * 0.05;
+		WidgetPosition.Y = ViewportSize.Y * 0.15 + ((3 - RowIndex) * RowSpacing);
 		ApplyLayout();
 		bPositionInitialized = true;
 

@@ -284,6 +284,14 @@ FSlateBrush* UInventorySubsystem::GetOrCreateItemIconBrush(const FString& IconNa
 		return nullptr;
 	}
 
+	// Force UI-quality texture settings so icons stay crisp at small display sizes.
+	// Without this, UE5 defaults (DXT compression + mipmap chain + streaming) make
+	// 1024px icons look blurry/blocky when rendered at 28px in Slate.
+	Tex->LODGroup = TEXTUREGROUP_UI;
+	Tex->MipGenSettings = TMGS_NoMipmaps;
+	Tex->NeverStream = true;
+	Tex->UpdateResource();
+
 	// CRITICAL: Store texture in UPROPERTY TMap so GC sees it as referenced.
 	// Without this, UTexture2D is only reachable via FSlateBrush (inside a non-UPROPERTY
 	// TSharedPtr chain) — invisible to GC — gets garbage collected → crash during Paint.

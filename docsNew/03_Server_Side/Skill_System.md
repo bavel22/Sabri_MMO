@@ -265,7 +265,7 @@ All 6 first classes are fully playable with working handlers:
 | 210 | Soul Strike | active (single, cast) | Ghost multi-hit projectile |
 | 211 | Safety Wall | active (ground, cast) | Block melee attacks, ground effect |
 | 212 | Thunderstorm | active (ground, cast) | Wind AoE rain ×N strikes |
-| 213 | Energy Coat | active (self buff) | +DEF%, 5min duration |
+| 213 | Energy Coat | active (self buff) | Dynamic phys dmg reduction by SP% tier (-6% to -30%), SP drain per hit (1-3%), 5min |
 
 ### Archer (7 skills: 4 active + 2 passive + 1 deferred)
 | ID | Name | Type | Handler |
@@ -383,7 +383,7 @@ Shared helper for single-target physical skills (Envenom, Sand Attack, Mammonite
 - **Skill point cost scaling**: Some RO skills cost more than 1 point at higher levels
 - **Second class skill handlers**: Knight, Wizard, Hunter, Priest, Assassin, Blacksmith, etc.
 - **Ground effect interactions**: Players entering Warp Portal, Pneuma blocking ranged skills
-- **Energy Coat SP drain**: Drain 3% SP per hit absorbed
+- **Energy Coat SP drain**: ~~Drain 3% SP per hit absorbed~~ IMPLEMENTED — `applyEnergyCoat()` in index.js, dynamic SP% tiers
 
 ---
 

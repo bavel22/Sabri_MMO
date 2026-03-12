@@ -136,7 +136,7 @@ Each entry defines metadata and stacking behavior. Currently registered types:
 | `removeBuff` | `(target, buffName)` | Removes by name. Returns the removed buff object or `null`. |
 | `expireBuffs` | `(target)` | Removes all expired buffs. Returns array of expired buff objects. Called from 1s tick. |
 | `hasBuff` | `(target, buffName)` | Returns `boolean`. |
-| `getBuffModifiers` | `(target)` | Aggregates all active buff stat mods: multipliers (`defMultiplier`, `atkMultiplier`, `aspdMultiplier`), flat bonuses (`strBonus`..`lukBonus`, `defPercent`, `moveSpeedBonus`, `bonusHit`, `bonusFlee`, `bonusCritical`), special flags (`weaponElement`, `isHidden`, `doubleNextDamage`, `blockRanged`). |
+| `getBuffModifiers` | `(target)` | Aggregates all active buff stat mods: multipliers (`defMultiplier`, `atkMultiplier`, `aspdMultiplier`), flat bonuses (`strBonus`..`lukBonus`, `defPercent`, `moveSpeedBonus`, `bonusHit`, `bonusFlee`, `bonusCritical`), special flags (`weaponElement`, `isHidden`, `doubleNextDamage`, `blockRanged`, `energyCoatActive`). |
 | `getActiveBuffList` | `(target)` | Serializable array for `buff:list` event: `{ name, skillId, duration, remainingMs, category, displayName, abbrev }`. |
 
 ### getBuffModifiers Switch Cases
@@ -149,7 +149,7 @@ The function applies per-buff-name logic:
 - **increase_agi**: `agiBonus`, `moveSpeedBonus`
 - **decrease_agi**: subtracts `agiReduction`, `moveSpeedReduction`
 - **auto_berserk**: `atkMultiplier *= 1.32`, `defMultiplier *= 0.75` (when `atkIncrease > 0`)
-- **angelus**: `defPercent`
+- **angelus**: `defPercent` (increases VIT soft DEF by %. Applied in `ro_damage_formulas.js` as `softDEF * (1 + defPercent/100)`)
 - **gloria**: `lukBonus`
 - **improve_concentration**: `agiBonus`, `dexBonus`
 - **two_hand_quicken**: `aspdMultiplier *= (1 + aspdIncrease/100)`
@@ -157,6 +157,7 @@ The function applies per-buff-name logic:
 - **aspersio**: `weaponElement = 'holy'`
 - **enchant_poison**: `weaponElement = 'poison'`
 - **pneuma**: `blockRanged = true`
+- **energy_coat**: `energyCoatActive = true` (dynamic reduction handled by `applyEnergyCoat()` at damage time, not a flat modifier)
 - **hiding/cloaking**: `isHidden = true`
 - **quagmire**: subtracts `agiReduction`, `dexReduction`, `moveSpeedReduction`
 - **default**: generic fallback checks `defReduction`, `atkIncrease`, `mdefBonus`
@@ -187,7 +188,7 @@ Merges `getStatusModifiers(target)` and `getBuffModifiers(target)` into a single
 
 - **Multiplicative merge**: `defMultiplier = status.defMultiplier * buff.defMultiplier` (same for `atkMultiplier`)
 - **Pass-through from status**: `mdefMultiplier`, `hitMultiplier`, `fleeMultiplier`, `moveSpeedMultiplier`, `lukOverride`, `overrideElement`, all prevention flags, all individual `is*` flags
-- **Pass-through from buffs**: `aspdMultiplier`, `bonusMDEF`, all stat bonuses (`strBonus`..`lukBonus`), `defPercent`, `moveSpeedBonus`, `bonusHit`, `bonusFlee`, `bonusCritical`, `weaponElement`, `isHidden`, `doubleNextDamage`, `blockRanged`
+- **Pass-through from buffs**: `aspdMultiplier`, `bonusMDEF`, all stat bonuses (`strBonus`..`lukBonus`), `defPercent`, `moveSpeedBonus`, `bonusHit`, `bonusFlee`, `bonusCritical`, `weaponElement`, `isHidden`, `doubleNextDamage`, `blockRanged`, `energyCoatActive`
 
 ### getBuffStatModifiers(target) (Alias)
 

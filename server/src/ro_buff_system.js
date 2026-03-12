@@ -294,6 +294,7 @@ function getBuffModifiers(target) {
         isHidden: false,      // Hiding, Cloaking
         doubleNextDamage: false, // Lex Aeterna
         blockRanged: false,   // Pneuma
+        energyCoatActive: false, // Energy Coat: dynamic physical damage reduction based on SP%
     };
 
     if (!target.activeBuffs || target.activeBuffs.length === 0) {
@@ -380,7 +381,7 @@ function getBuffModifiers(target) {
                 break;
 
             case 'energy_coat':
-                mods.defPercent += (buff.defPercent || 0);
+                mods.energyCoatActive = true;
                 break;
 
             case 'loud_exclamation':

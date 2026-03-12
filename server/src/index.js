@@ -482,6 +482,34 @@ function expireBuffs(target) {
 
 // Auto Berserk: dynamically toggle ATK bonus based on HP threshold (25%)
 // Called whenever a player's HP changes (damage taken, heal received)
+// Energy Coat: reduce physical damage based on current SP%, drain SP on hit
+// RO Classic pre-renewal tiers:
+//   SP  0-20%: -6% damage,  1.0% of damage drained from SP
+//   SP 20-40%: -12% damage, 1.5% of damage drained from SP
+//   SP 40-60%: -18% damage, 2.0% of damage drained from SP
+//   SP 60-80%: -24% damage, 2.5% of damage drained from SP
+//   SP 80-100%: -30% damage, 3.0% of damage drained from SP
+// Returns the reduced damage amount. Only applies to physical damage.
+function applyEnergyCoat(player, damage) {
+    if (!hasBuff(player, 'energy_coat')) return damage;
+    if (player.maxMana <= 0) return damage;
+
+    const spRatio = player.mana / player.maxMana;
+    let reduction, spDrainPct;
+
+    if (spRatio > 0.8)      { reduction = 0.30; spDrainPct = 0.03; }
+    else if (spRatio > 0.6) { reduction = 0.24; spDrainPct = 0.025; }
+    else if (spRatio > 0.4) { reduction = 0.18; spDrainPct = 0.02; }
+    else if (spRatio > 0.2) { reduction = 0.12; spDrainPct = 0.015; }
+    else                    { reduction = 0.06; spDrainPct = 0.01; }
+
+    const reducedDamage = Math.max(1, Math.floor(damage * (1 - reduction)));
+    const spDrain = Math.max(1, Math.floor(damage * spDrainPct));
+    player.mana = Math.max(0, player.mana - spDrain);
+
+    return reducedDamage;
+}
+
 function checkAutoBerserk(player, characterId, zone) {
     if (!player.activeBuffs) return;
     const abBuff = player.activeBuffs.find(b => b.name === 'auto_berserk' && Date.now() < b.expiresAt);
@@ -572,6 +600,7 @@ function getCombinedModifiers(target) {
         isHidden: buffMods.isHidden || false,
         doubleNextDamage: buffMods.doubleNextDamage || false,
         blockRanged: buffMods.blockRanged || false,
+        energyCoatActive: buffMods.energyCoatActive || false,
         // Individual status flags (backward compat)
         isFrozen: statusMods.isFrozen || false,
         isStoned: statusMods.isStoned || false,
@@ -603,11 +632,12 @@ function calculateSkillDamage(attackerStats, targetStats, targetHardDef, skillMu
 
 // Calculate magic skill damage using the RO pre-renewal MATK system
 function calculateMagicSkillDamage(attackerStats, targetStats, targetHardMdef, skillMultiplier, skillElement, targetInfo = {}) {
+    const targetBuffMods = targetInfo.buffMods || { defMultiplier: 1.0, mdefMultiplier: 1.0, bonusMDEF: 0 };
     return roMagicalDamage(
         { stats: attackerStats, weaponMATK: 0, buffMods: { atkMultiplier: 1.0 } },
         { stats: targetStats, hardMdef: targetHardMdef,
           element: targetInfo.element || { type: 'neutral', level: 1 },
-          buffMods: targetInfo.buffMods || { defMultiplier: 1.0, bonusMDEF: 0 } },
+          buffMods: { ...targetBuffMods, mdefMultiplier: targetBuffMods.mdefMultiplier || 1.0 } },
         { skillMultiplier, skillElement }
     );
 }
@@ -835,7 +865,9 @@ function calculatePhysicalDamage(attackerStats, targetStats, targetHardDef = 0, 
         weaponElement: attackerInfo.weaponElement || 'neutral',
         weaponLevel: attackerInfo.weaponLevel || 1,
         buffMods: attackerInfo.buffMods || { atkMultiplier: attackerStats.buffAtkMultiplier || 1.0 },
-        cardMods: attackerInfo.cardMods || null
+        cardMods: attackerInfo.cardMods || null,
+        passiveRaceATK: attackerInfo.passiveRaceATK || attackerStats.passiveRaceATK || null,
+        race: attackerInfo.race || null
     };
 
     const target = {
@@ -845,7 +877,8 @@ function calculatePhysicalDamage(attackerStats, targetStats, targetHardDef = 0, 
         size: targetInfo.size || 'medium',
         race: targetInfo.race || 'formless',
         numAttackers: targetInfo.numAttackers || 1,
-        buffMods: targetInfo.buffMods || { defMultiplier: targetStats.buffDefMultiplier || 1.0 }
+        buffMods: targetInfo.buffMods || { defMultiplier: targetStats.buffDefMultiplier || 1.0 },
+        passiveRaceDEF: targetInfo.passiveRaceDEF || null
     };
 
     return roPhysicalDamage(attacker, target, options);
@@ -884,14 +917,16 @@ function getEffectiveStats(player) {
 }
 
 // Build attacker info object for the RO damage system
-function getAttackerInfo(player) {
+function getAttackerInfo(player, cachedPassive) {
+    const passive = cachedPassive || getPassiveSkillBonuses(player);
     return {
         weaponType: player.weaponType || 'bare_hand',
         weaponElement: player.weaponElement || 'neutral',
         weaponLevel: player.weaponLevel || 1,
         buffMods: getBuffStatModifiers(player),
         cardMods: player.cardMods || null,
-        passiveRaceATK: getPassiveSkillBonuses(player).raceATK || null
+        passiveRaceATK: passive.raceATK || null,
+        race: 'demihuman'
     };
 }
 
@@ -915,7 +950,7 @@ function getEnemyTargetInfo(enemy) {
 }
 
 // Build target info object for players
-function getPlayerTargetInfo(player, targetCharId) {
+function getPlayerTargetInfo(player, targetCharId, cachedPassive) {
     // Count how many entities are auto-attacking this player
     let numAttackers = 0;
     for (const [, atkState] of autoAttackState.entries()) {
@@ -923,7 +958,7 @@ function getPlayerTargetInfo(player, targetCharId) {
             numAttackers++;
         }
     }
-    const passive = getPassiveSkillBonuses(player);
+    const passive = cachedPassive || getPassiveSkillBonuses(player);
     return {
         element: player.armorElement || { type: 'neutral', level: 1 },
         size: 'medium', // Players are always medium
@@ -3937,10 +3972,12 @@ io.on('connection', (socket) => {
                 broadcastToZone(bashZone, 'enemy:health_update', { enemyId: targetId, health: target.health, maxHealth: target.maxHealth, inCombat: true });
             }
 
-            // Fatal Blow passive: stun chance on Bash
-            const fbChance = getEffectiveStats(player).fatalBlowChance || 0;
-            if (fbChance > 0 && isEnemy && target.health > 0) {
-                const stunResult = applyStatusEffect(player, target, 'stun', fbChance);
+            // Fatal Blow passive: stun chance on Bash Lv6+ only
+            // RO Classic: stun chance = (BashLevel - 5) * 5%, so Lv6=5%, Lv7=10%, ..., Lv10=25%
+            const hasFatalBlow = getEffectiveStats(player).fatalBlowChance > 0;
+            if (hasFatalBlow && learnedLevel >= 6 && isEnemy && target.health > 0) {
+                const stunChance = (learnedLevel - 5) * 5;
+                const stunResult = applyStatusEffect(player, target, 'stun', stunChance);
                 if (stunResult && stunResult.applied) {
                     broadcastToZone(bashZone, 'status:applied', { targetId, isEnemy: true, statusType: 'stun', duration: stunResult.duration });
                 }
@@ -4001,23 +4038,48 @@ io.on('connection', (socket) => {
             player.mana = Math.max(0, player.mana - spCost);
             applySkillDelays(characterId, player, skillId, levelData, socket);
 
-            // Apply provoke debuff: -effectVal% DEF, +effectVal% ATK, for duration ms
+            // RO Classic success rate: 50 + 3*level %
+            const provokeZone = player.zone || 'prontera_south';
+            const provokeSuccessRate = 50 + learnedLevel * 3;
+            if (Math.random() * 100 >= provokeSuccessRate) {
+                logger.info(`[SKILL-COMBAT] ${player.characterName} PROVOKE Lv${learnedLevel} → ${targetName} FAILED (${provokeSuccessRate}% chance)`);
+                broadcastToZone(provokeZone, 'skill:effect_damage', {
+                    attackerId: characterId, attackerName: player.characterName,
+                    targetId, targetName, isEnemy,
+                    skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: 'neutral',
+                    damage: 0, isCritical: false, isMiss: true, hitType: 'miss',
+                    targetHealth: target.health, targetMaxHealth: target.maxHealth,
+                    targetX: targetPos.x, targetY: targetPos.y, targetZ: targetPos.z,
+                    timestamp: Date.now()
+                });
+                socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
+                socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
+                return;
+            }
+
+            // RO Classic: ATK increase = 2+3*level (effectVal), DEF decrease = 5+5*level (separate formula)
+            const provokeAtkIncrease = effectVal;
+            const provokeDefReduction = 5 + learnedLevel * 5;
             const buffDef = {
                 skillId, name: 'provoke', casterId: characterId, casterName: player.characterName,
-                defReduction: effectVal, atkIncrease: effectVal, duration: duration || 30000,
+                defReduction: provokeDefReduction, atkIncrease: provokeAtkIncrease, duration: duration || 30000,
                 mdefBonus: 0
             };
             applyBuff(target, buffDef);
 
-            logger.info(`[SKILL-COMBAT] ${player.characterName} PROVOKE Lv${learnedLevel} → ${targetName} (-${effectVal}% DEF, +${effectVal}% ATK for ${(duration || 30000) / 1000}s)`);
+            // Force aggro: Provoke's primary purpose is to make the target attack the caster
+            if (isEnemy) {
+                setEnemyAggro(target, characterId, 'skill');
+            }
+
+            logger.info(`[SKILL-COMBAT] ${player.characterName} PROVOKE Lv${learnedLevel} → ${targetName} (-${provokeDefReduction}% DEF, +${provokeAtkIncrease}% ATK for ${(duration || 30000) / 1000}s)`);
 
             // Broadcast buff applied
-            const provokeZone = player.zone || 'prontera_south';
             const buffPayload = {
                 targetId, targetName, isEnemy,
                 casterId: characterId, casterName: player.characterName,
                 skillId, buffName: 'Provoke', duration: duration || 30000,
-                effects: { defReduction: effectVal, atkIncrease: effectVal }
+                effects: { defReduction: provokeDefReduction, atkIncrease: provokeAtkIncrease }
             };
             logger.info(`[SEND] skill:buff_applied to zone:${provokeZone}: ${JSON.stringify(buffPayload)}`);
             broadcastToZone(provokeZone, 'skill:buff_applied', buffPayload);
@@ -5115,6 +5177,7 @@ io.on('connection', (socket) => {
             if (casterBuffs.preventsCasting) { socket.emit('skill:error', { message: 'Cannot cast while incapacitated' }); return; }
 
             player.mana = Math.max(0, player.mana - spCost);
+            applySkillDelays(characterId, player, skillId, levelData, socket);
 
             const sightDuration = duration || 10000;
             applyBuff(player, {
@@ -6164,8 +6227,8 @@ io.on('connection', (socket) => {
         if (skill.name === 'energy_coat') {
             player.mana = Math.max(0, player.mana - spCost);
             applySkillDelays(characterId, player, skillId, levelData, socket);
-            applyBuff(player, { skillId, name: 'energy_coat', casterId: characterId, casterName: player.characterName, defPercent: effectVal, duration: duration || 300000 });
-            broadcastToZone(player.zone || 'prontera_south', 'skill:buff_applied', { targetId: characterId, targetName: player.characterName, isEnemy: false, casterId: characterId, casterName: player.characterName, skillId, buffName: 'Energy Coat', duration: duration || 300000, effects: { defPercent: effectVal } });
+            applyBuff(player, { skillId, name: 'energy_coat', casterId: characterId, casterName: player.characterName, duration: duration || 300000 });
+            broadcastToZone(player.zone || 'prontera_south', 'skill:buff_applied', { targetId: characterId, targetName: player.characterName, isEnemy: false, casterId: characterId, casterName: player.characterName, skillId, buffName: 'Energy Coat', duration: duration || 300000, effects: { energyCoat: true } });
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
             socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
             return;
@@ -7573,12 +7636,15 @@ setInterval(async () => {
 
                 // IN RANGE: Execute attack on enemy using full RO damage formula
                 // Includes: HIT/FLEE check, Critical, Perfect Dodge, Size Penalty, Element, DEF
+                // Cache effective stats and attacker info to avoid redundant passive/buff recalculations
+                const cachedEffStats = getEffectiveStats(attacker);
+                const cachedAtkInfo = getAttackerInfo(attacker, { raceATK: cachedEffStats.passiveRaceATK, bonusATK: cachedEffStats.passiveATK });
                 const combatResult = calculatePhysicalDamage(
-                    getEffectiveStats(attacker),
+                    cachedEffStats,
                     enemy.stats,
                     enemy.hardDef || 0,
                     getEnemyTargetInfo(enemy),
-                    getAttackerInfo(attacker)
+                    cachedAtkInfo
                 );
 
                 attacker.lastAttackTime = now;
@@ -7642,11 +7708,11 @@ setInterval(async () => {
                 });
 
                 // Double Attack passive check (Thief, daggers only)
-                const doubleAttackChance = getEffectiveStats(attacker).doubleAttackChance || 0;
+                const doubleAttackChance = cachedEffStats.doubleAttackChance || 0;
                 if (doubleAttackChance > 0 && !isMiss && enemy.health > 0 && Math.random() * 100 < doubleAttackChance) {
                     const daResult2 = calculatePhysicalDamage(
-                        getEffectiveStats(attacker), enemy.stats, enemy.hardDef || 0,
-                        getEnemyTargetInfo(enemy), getAttackerInfo(attacker)
+                        cachedEffStats, enemy.stats, enemy.hardDef || 0,
+                        getEnemyTargetInfo(enemy), cachedAtkInfo
                     );
                     if (!daResult2.isMiss) {
                         enemy.health = Math.max(0, enemy.health - daResult2.damage);
@@ -8645,6 +8711,7 @@ function calculateEnemyDamage(enemy, targetCharId) {
         weaponLevel: 1,
         buffMods: getBuffStatModifiers(enemy),
         cardMods: null,
+        race: enemy.race || 'formless'
     };
 
     return calculatePhysicalDamage(
@@ -9005,6 +9072,9 @@ setInterval(async () => {
             };
 
             if (!isMiss) {
+                // Energy Coat: reduce physical damage and drain SP
+                damage = applyEnergyCoat(atkTarget, damage);
+                damagePayload.damage = damage;
                 atkTarget.health = Math.max(0, atkTarget.health - damage);
                 damagePayload.targetHealth = atkTarget.health;
                 // Break Hiding on damage
