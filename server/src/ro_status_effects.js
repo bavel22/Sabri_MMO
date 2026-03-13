@@ -272,8 +272,16 @@ function calculateResistance(source, target, statusType, baseChance) {
     const srcLevel = source.level || (source.stats && source.stats.level) || 1;
     const tarLevel = (target.stats && target.stats.level) || target.level || 1;
 
+    // Phase 5: Card resistance (bResEff) — reduces chance before roll
+    // cardResEff values are in rAthena 1/10000 scale (10000 = 100%)
+    const cardResEff = (target.cardResEff && target.cardResEff[statusType]) || 0;
+    let cardResistReduction = 0;
+    if (cardResEff > 0) {
+        cardResistReduction = Math.floor(baseChance * cardResEff / 10000);
+    }
+
     // Final chance calculation
-    let finalChance = baseChance - (baseChance * resistStatValue / 100) + srcLevel - tarLevel - targetLuk;
+    let finalChance = baseChance - (baseChance * resistStatValue / 100) + srcLevel - tarLevel - targetLuk - cardResistReduction;
     finalChance = Math.max(5, Math.min(95, finalChance));
 
     // Roll

@@ -49,15 +49,18 @@ UnrealBuildTool SabriMMO Win64 Development "C:/Sabri_MMO/client/SabriMMO/SabriMM
 Single monolithic file (~2400 lines). Key sections:
 - **REST API** (`/api/auth/*`, `/api/characters/*`, `/api/servers`) — JWT-based auth, character CRUD, server list
 - **Socket.io events** — `player:join/position/moved/left`, `combat:*`, `inventory:*`, `chat:*`, `enemy:*`, `stats:*`, `skills:*`
-- **Combat tick loop** — 50ms interval, ASPD-based attack timing
+- **Combat tick loop** — 50ms interval, ASPD-based attack timing, dual wield dual-hit per cycle
+- **Dual wield helpers** — `canDualWield()`, `isDualWielding()`, `isValidLeftHandWeapon()`, `isKatar()`
 - **Enemy AI loop** — 509 RO monster templates, 46 active spawn points (zones 1-3 only, zones 4-9 disabled)
-- **Data modules** imported at top: `ro_monster_templates`, `ro_item_mapping`, `ro_exp_tables`, `ro_skill_data`, `ro_monster_ai_codes`, `ro_zone_data`
+- **Data modules** imported at top: `ro_monster_templates`, `ro_item_mapping`, `ro_exp_tables`, `ro_skill_data`, `ro_monster_ai_codes`, `ro_zone_data`, `ro_card_prefix_suffix`, `ro_card_effects`, `ro_item_groups`
+- **Card effect hooks** — 10+ functions: `processCardKillHooks`, `processCardDrainEffects`, `processCardStatusProcsOnAttack/WhenHit`, `processCardAutoSpellOnAttack/WhenHit`, `processAutobonusOnAttack/WhenHit`, `processCardDropBonuses`, `knockbackTarget`, `executeAutoSpellEffect`
+- **Card system constants** — `SKILL_CATALYSTS` (gem requirements per skill)
 - **JWT validation** on `player:join` socket event (character ownership check)
 
 ### Client C++ (`client/SabriMMO/Source/SabriMMO/`)
 | File | Role |
 |------|------|
-| `CharacterData.h` | `FCharacterData` (30+ fields), `FServerInfo`, `FInventoryItem`, drag-drop structs |
+| `CharacterData.h` | `FCharacterData` (30+ fields), `FServerInfo`, `FInventoryItem` (with `GetDisplayName()` card naming), drag-drop structs |
 | `MMOGameInstance.*` | Auth state, server selection, character list, persistent socket (ConnectSocket/EmitSocketEvent/EventRouter) |
 | `MMOHttpManager.*` | BlueprintFunctionLibrary — REST: login, register, servers, characters CRUD, position save |
 | `SabriMMOCharacter.*` | Base player pawn — movement, socket events, stats, BeginPlay ground-snap via `SnapLocationToGround` |
@@ -80,6 +83,10 @@ Single monolithic file (~2400 lines). Key sections:
 | `SocketEventRouter.*` | Multi-handler Socket.io event dispatch — allows multiple subsystems per event |
 | `UI/MultiplayerEventSubsystem.*` | Bridge: forwards persistent socket events to BP_SocketManager handler functions via ProcessEvent |
 | `UI/PositionBroadcastSubsystem.*` | 30Hz position broadcasting via persistent socket |
+| `UI/ItemInspectSubsystem.*` | Right-click item inspect window (Z=22), ShowInspect/HideInspect |
+| `UI/SItemInspectWidget.*` | Inspect popup: title bar, icon, formatted description, card slot footer |
+| `UI/ItemTooltipBuilder.*` | Shared hover tooltip builder for all item-showing widgets |
+| `UI/SCardCompoundPopup.*` | Double-click card compound popup: equipment list, slot diamonds, card:compound emit |
 
 ### Database (PostgreSQL)
 4 core tables: `users`, `characters`, `items` (static definitions), `character_inventory` (per-character).
@@ -120,6 +127,24 @@ Widget prefix: `WBP_`. Blueprint prefix: `BP_`. Interface prefix: `BPI_`.
 ## Persistent Socket Architecture (Phase 4)
 
 **Persistent socket on GameInstance** — `UMMOGameInstance` owns a `TSharedPtr<FSocketIONative>` that survives `OpenLevel()`. No disconnect/reconnect on zone transitions. `USocketEventRouter` provides multi-handler dispatch (multiple subsystems can register for the same event). All C++ subsystems use `Router->RegisterHandler()` in `OnWorldBeginPlay` and `Router->UnregisterAllForOwner(this)` in `Deinitialize`. Blueprint emit calls use `GI->K2_EmitSocketEvent()` (BlueprintCallable). `MultiplayerEventSubsystem` bridges 30 inbound events to BP_SocketManager's existing handler functions via `ProcessEvent`. `PositionBroadcastSubsystem` handles 30Hz position updates. BP_SocketManager still exists in levels as a handler shell — its SocketIO component is no longer connected, but its handler functions (OnCombatDamage, OnEnemySpawn, etc.) are still called by the bridge. All subsystem widgets are gated behind `GI->IsSocketConnected()` so they only show in game levels, not the login screen.
+
+---
+
+## Dual Wield System (Assassin/Assassin Cross)
+
+**Only Assassin and Assassin Cross can dual wield.** Left hand accepts daggers, 1H swords, and 1H axes. Katars are mutually exclusive with dual wield (they use both hand slots as a single weapon).
+
+**Server helpers** (`index.js`): `canDualWield(jobClass)`, `isDualWielding(player)`, `isValidLeftHandWeapon(weaponType)`, `isKatar(subType)`. Player object tracks `equippedWeaponRight` and `equippedWeaponLeft` (both are `{ atk, weaponType, element, weaponLevel, matk, refineLevel, itemId, subType }` or null).
+
+**Equip logic**: Right hand → left hand → replace right. Katar equip auto-unequips left-hand + shield. Shield equip unequips left-hand for Assassin. DB uses `equipped_position = 'weapon_left'`.
+
+**ASPD** (`ro_damage_formulas.js`): `calculateASPD()` accepts optional `weaponTypeLeft`. Dual wield WD = `floor((WD_right + WD_left) * 7/10)`. Cap 190 (vs 195 single). Assassin axe delay: 75.
+
+**Combat tick**: Both hands hit per attack cycle. Right hand = normal auto-attack (can miss/crit). Left hand = forceHit (always hits), noCrit (never crits independently), per-hand card mods (`cardModsRight`/`cardModsLeft`). Mastery penalties: right `50 + rightHandMasteryLv * 10`%, left `30 + leftHandMasteryLv * 10`%. Double Attack only procs on right-hand dagger. Skills use right-hand weapon only (no left-hand hit, no mastery penalty). Sonic Blow/Grimtooth require Katar.
+
+**`combat:damage` event extended**: `damage2` (left-hand damage), `isDualWield`, `isCritical2` (cosmetic mirror), `element2` (left-hand element). `buildFullStatsPayload()` includes `dualWield{}` object.
+
+**Client**: `EquipSlots::WeaponLeft` in `EquipmentSubsystem.h`. `SEquipmentWidget` shows "Left Hand" slot for Assassin (same position as Shield). `CombatStatsSubsystem` parses + displays ATK(R)/ATK(L). `DamageNumberSubsystem` spawns second damage number with Z offset for left-hand hit.
 
 ---
 
@@ -166,7 +191,9 @@ Widget prefix: `WBP_`. Blueprint prefix: `BP_`. Interface prefix: `BPI_`.
 | Buffs (Provoke, Blessing, etc.) | `/sabrimmo-buff` | `docsNew/03_Server_Side/Status_Effect_Buff_System.md` |
 | Status effects (stun, freeze, etc.) | `/sabrimmo-debuff` | `docsNew/03_Server_Side/Status_Effect_Buff_System.md` |
 | Skill trees, cast times, cooldowns | `/sabrimmo-skills` | `RagnaCloneDocs/03_Skills_Magic_System.md` |
-| Items, equipment, refining, cards | `/sabrimmo-items` | `RagnaCloneDocs/06_Items_Equipment.md` |
+| Items, equipment, refining | `/sabrimmo-items` | `RagnaCloneDocs/06_Items_Equipment.md` |
+| Weight thresholds, overweight penalties | `/sabrimmo-weight` | `docsNew/03_Server_Side/Inventory_System.md` |
+| Card compounding, card bonuses | `/sabrimmo-cards` | — |
 | NPCs, shops, quests, Kafra | `/sabrimmo-npcs` | `RagnaCloneDocs/08_NPCs_Quests.md` |
 | Party, guild, social systems | `/sabrimmo-party-guild` | `RagnaCloneDocs/07_Social_Systems.md` |
 | PvP, War of Emperium, siege | `/sabrimmo-pvp-woe` | `RagnaCloneDocs/05_PvP_GvG_WoE.md` |
@@ -197,6 +224,7 @@ Many tasks touch multiple systems. **Load ALL relevant skills.** Examples:
 - "Add a buff skill like Blessing" -> `/sabrimmo-buff` + `/sabrimmo-skills` + `/full-stack`
 - "Add a new monster with special attacks" -> `/enemy-ai` + `/sabrimmo-combat` + `/full-stack`
 - "Implement the inventory system" -> `/sabrimmo-items` + `/sabrimmo-economy` + `/full-stack` + `/sabrimmo-ui`
+- "Regen not working / can't attack" -> `/debugger` + `/sabrimmo-weight` + `/sabrimmo-buff`
 - "Add party EXP sharing" -> `/sabrimmo-party-guild` + `/sabrimmo-stats` + `/full-stack`
 - "Implement pet taming system" -> `/sabrimmo-companions` + `/sabrimmo-items` + `/full-stack`
 - "Set up WoE castle sieges" -> `/sabrimmo-pvp-woe` + `/sabrimmo-party-guild` + `/sabrimmo-combat`
@@ -206,6 +234,8 @@ Many tasks touch multiple systems. **Load ALL relevant skills.** Examples:
 - "Add a new socket event for party invites" -> `/sabrimmo-persistent-socket` + `/sabrimmo-party-guild` + `/full-stack`
 - "New subsystem listening to socket events" -> `/sabrimmo-persistent-socket` + `/sabrimmo-ui`
 - "Debug socket events not arriving" -> `/debugger` + `/sabrimmo-persistent-socket` + `/realtime`
+- "Card bonuses not applying in combat" -> `/sabrimmo-cards` + `/sabrimmo-combat` + `/debugger`
+- "Add card compound UI" -> `/sabrimmo-cards` + `/sabrimmo-items` + `/sabrimmo-ui`
 
 **Do NOT skip loading skills to save time.** The cost of reloading context is far less than the cost of implementing something wrong and having to redo it.
 
@@ -235,6 +265,7 @@ Invoke with `/skill-name`. Located at `C:/Users/pladr/.claude/skills/`.
 | `/sabrimmo-debuff` | Status effects (stun, freeze, poison, etc.), resistance formulas, CC, periodic drains, cleanse |
 | `/sabrimmo-skills` | Skill trees, cast times, cooldowns, SP costs, 86+ skill definitions |
 | `/sabrimmo-items` | Inventory, equipment slots, weapon types, refining, card system, weight |
+| `/sabrimmo-weight` | Weight thresholds (50%/90%/100%), regen/attack/skill blocks, cached weight, `weight:status` event |
 | `/sabrimmo-npcs` | NPC types, dialogue trees, shops, Kafra, quests, job change |
 | `/sabrimmo-party-guild` | Party (12 max), guild (Emperium), EXP sharing, guild skills |
 | `/sabrimmo-pvp-woe` | PvP maps, War of Emperium, castle siege, battlegrounds |
@@ -248,6 +279,7 @@ Invoke with `/skill-name`. Located at `C:/Users/pladr/.claude/skills/`.
 | `/sabrimmo-click-interact` | Left-click interactable actors (NPCs, chests, etc.) |
 | `/sabrimmo-skills-vfx` | Skill VFX, Niagara effects, casting circles, warp portal VFX |
 | `/sabrimmo-persistent-socket` | Persistent socket, EventRouter, BP event bridge, subsystem registration |
+| `/sabrimmo-cards` | Card compounding, card bonuses, offensive/defensive card modifiers, armor element cards |
 | `/sabrimmo-generate-icons` | RO-style skill icon generation via local Stable Diffusion XL |
 
 ### Utility Skills

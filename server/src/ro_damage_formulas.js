@@ -8,6 +8,13 @@
 
 'use strict';
 
+const {
+    HP_SP_COEFFICIENTS,
+    ASPD_BASE_DELAYS,
+    TRANS_TO_BASE_CLASS,
+    TRANSCENDENT_CLASSES,
+} = require('./ro_exp_tables');
+
 // ============================================================
 // Element Effectiveness Table (Pre-Renewal)
 // ELEMENT_TABLE[attackElement][defendElement][defendLevel - 1]
@@ -167,27 +174,113 @@ const SIZE_PENALTY = {
 };
 
 // ============================================================
+// Class-Aware MaxHP (RO Pre-Renewal)
+// BaseHP = 35 + (BaseLv * HP_JOB_B) + sum(round(HP_JOB_A * i) for i=2..BaseLv)
+// MaxHP = floor(BaseHP * (1 + VIT * 0.01) * TransMod) + bonusMaxHp
+// ============================================================
+function calculateMaxHP(baseLevel, vit, jobClass, isTranscendent, bonusMaxHp) {
+    const coeff = HP_SP_COEFFICIENTS[jobClass] || HP_SP_COEFFICIENTS['novice'];
+    let baseHP = 35 + Math.floor(baseLevel * coeff.HP_JOB_B);
+    for (let i = 2; i <= baseLevel; i++) {
+        baseHP += Math.round(coeff.HP_JOB_A * i);
+    }
+    const transMod = isTranscendent ? 1.25 : 1.0;
+    const maxHP = Math.floor(baseHP * (1 + vit * 0.01) * transMod) + (bonusMaxHp || 0);
+    return Math.max(1, maxHP);
+}
+
+// ============================================================
+// Class-Aware MaxSP (RO Pre-Renewal)
+// Simple linear formula: BaseSP = 10 + BaseLv * SP_JOB
+// MaxSP = floor(BaseSP * (1 + INT * 0.01) * TransMod) + bonusMaxSp
+// ============================================================
+function calculateMaxSP(baseLevel, intStat, jobClass, isTranscendent, bonusMaxSp) {
+    const coeff = HP_SP_COEFFICIENTS[jobClass] || HP_SP_COEFFICIENTS['novice'];
+    const baseSP = 10 + Math.floor(baseLevel * coeff.SP_JOB);
+    const transMod = isTranscendent ? 1.25 : 1.0;
+    const maxSP = Math.floor(baseSP * (1 + intStat * 0.01) * transMod) + (bonusMaxSp || 0);
+    return Math.max(1, maxSP);
+}
+
+// ============================================================
+// Weapon-Type-Aware ASPD (RO Pre-Renewal)
+// ASPD = 200 - (WD - floor((WD*AGI/25 + WD*DEX/100) / 10)) * (1 - SpeedMod)
+// ============================================================
+/**
+ * Calculate ASPD for single weapon or dual wield.
+ * @param {string} jobClass — player's job class
+ * @param {string} weaponType — right-hand weapon type (or single weapon)
+ * @param {number} agi — effective AGI stat
+ * @param {number} dex — effective DEX stat
+ * @param {number} buffAspdMultiplier — buff speed modifier (1.0 = none, 1.3 = +30%)
+ * @param {string|null} weaponTypeLeft — left-hand weapon type (for dual wield, null otherwise)
+ * @returns {number} ASPD value (100-190 range, capped at 190 for dual wield, 195 for single)
+ */
+function calculateASPD(jobClass, weaponType, agi, dex, buffAspdMultiplier, weaponTypeLeft) {
+    // Resolve transcendent class to base class for ASPD table lookup
+    const baseClass = TRANS_TO_BASE_CLASS[jobClass] || jobClass;
+    const classDelays = ASPD_BASE_DELAYS[baseClass] || ASPD_BASE_DELAYS['novice'];
+    const wt = weaponType || 'bare_hand';
+    const baseDelay = classDelays[wt] || classDelays['bare_hand'] || 50;
+
+    let WD;
+    if (weaponTypeLeft) {
+        // Dual wield ASPD: combined weapon delay formula
+        // WD_dual = floor((WD_right + WD_left) * 7 / 10)
+        const leftDelay = classDelays[weaponTypeLeft] || classDelays['bare_hand'] || 50;
+        WD = Math.floor((baseDelay + leftDelay) * 7 / 10);
+    } else {
+        WD = baseDelay;
+    }
+
+    const agiReduction = Math.floor(WD * agi / 25);
+    const dexReduction = Math.floor(WD * dex / 100);
+    const totalReduction = Math.floor((agiReduction + dexReduction) / 10);
+
+    // Speed modifier from buffs (e.g., Two-Hand Quicken +0.30, Adrenaline Rush +0.30)
+    const speedMod = Math.max(0, (buffAspdMultiplier || 1) - 1); // 1.3 → 0.3
+
+    const rawASPD = 200 - Math.floor((WD - totalReduction) * (1 - speedMod));
+    // Dual wield cap is 190 (harder to reach max); single weapon cap is 195
+    const aspdCap = weaponTypeLeft ? 190 : 195;
+    return Math.min(aspdCap, Math.max(100, rawASPD));
+}
+
+// ============================================================
 // Derived Stat Calculations (Pre-Renewal)
 // ============================================================
 
 /**
  * Calculate all derived combat stats from base stats + equipment.
- * @param {Object} stats — { str, agi, vit, int, dex, luk, level, bonusHit, bonusFlee, bonusCritical, bonusMaxHp, bonusMaxSp }
+ * @param {Object} stats — all effective stats + equipment fields
  * @returns {Object} derived stats
  */
 function calculateDerivedStats(stats) {
     const {
         str = 1, agi = 1, vit = 1, int: intStat = 1, dex = 1, luk = 1, level = 1,
-        bonusHit = 0, bonusFlee = 0, bonusCritical = 0, bonusMaxHp = 0, bonusMaxSp = 0
+        bonusHit = 0, bonusFlee = 0, bonusCritical = 0, bonusPerfectDodge = 0,
+        bonusMaxHp = 0, bonusMaxSp = 0, bonusMaxHpRate = 0, bonusMaxSpRate = 0,
+        bonusHardDef = 0, bonusMATK = 0, bonusHardMDEF = 0,
+        // Class/weapon fields for HP/SP/ASPD formulas
+        jobClass = 'novice',
+        weaponType = 'bare_hand',
+        weaponMATK = 0,
+        buffAspdMultiplier = 1,
+        equipAspdRate = 0,
+        // Dual wield (Assassin/Assassin Cross)
+        weaponTypeLeft = null,
     } = stats;
 
     // ── Status ATK (Pre-Renewal) ──
     // STR + floor(STR/10)² + floor(DEX/5) + floor(LUK/3)
     const statusATK = str + Math.floor(str / 10) ** 2 + Math.floor(dex / 5) + Math.floor(luk / 3);
 
-    // ── Status MATK (Pre-Renewal) ──
-    // INT + floor(INT/7)²
+    // ── Status MATK Min/Max (Pre-Renewal) ──
+    // Min = INT + floor(INT/7)²   Max = INT + floor(INT/5)²
     const statusMATK = intStat + Math.floor(intStat / 7) ** 2;
+    const statusMATKMax = intStat + Math.floor(intStat / 5) ** 2;
+    const matkMin = statusMATK + Math.floor(weaponMATK * 0.7);
+    const matkMax = statusMATKMax + weaponMATK;
 
     // ── HIT (Pre-Renewal) ──
     // 175 + BaseLv + DEX + bonuses
@@ -202,30 +295,37 @@ function calculateDerivedStats(stats) {
     const critical = 1 + Math.floor(luk * 0.3) + bonusCritical;
 
     // ── Perfect Dodge (Pre-Renewal) ──
-    // 1 + floor(LUK / 10)
-    const perfectDodge = 1 + Math.floor(luk / 10);
+    // 1 + floor(LUK / 10) + equipment bonus (bFlee2)
+    const perfectDodge = 1 + Math.floor(luk / 10) + bonusPerfectDodge;
 
-    // ── Soft DEF from VIT (Pre-Renewal rAthena formula) ──
-    // VIT/2 + max(1, (VIT*2 - 1) / 3)
-    const softDEF = Math.floor(vit / 2) + Math.max(1, Math.floor((vit * 2 - 1) / 3));
+    // ── Soft DEF (Pre-Renewal) ──
+    // floor(VIT/2) + floor(AGI/5) + floor(BaseLv/2)
+    const softDEF = Math.floor(vit / 2) + Math.floor(agi / 5) + Math.floor(level / 2);
 
-    // ── Soft MDEF from INT (Pre-Renewal) ──
-    // INT + floor(INT/2)... simplified
-    const softMDEF = Math.floor(intStat / 2) + Math.max(0, Math.floor((intStat * 2 - 1) / 4));
+    // ── Soft MDEF (Pre-Renewal) ──
+    // INT + floor(VIT/5) + floor(DEX/5) + floor(BaseLv/4)
+    const softMDEF = intStat + Math.floor(vit / 5) + Math.floor(dex / 5) + Math.floor(level / 4);
 
-    // ── ASPD (custom formula — sqrt scaling for smooth gameplay) ──
-    const agiContribution = Math.floor(Math.sqrt(agi) * 1.2);
-    const dexContribution = Math.floor(Math.sqrt(dex) * 0.6);
-    const aspd = Math.min(195, Math.floor(170 + agiContribution + dexContribution));
+    // ── ASPD — weapon-type-aware (RO pre-renewal), dual wield aware ──
+    // Combine buff ASPD multiplier with equipment ASPD rate (e.g., Muramasa +8%)
+    const totalAspdMultiplier = (buffAspdMultiplier || 1) + (equipAspdRate / 100);
+    const aspd = calculateASPD(jobClass, weaponType, agi, dex, totalAspdMultiplier, weaponTypeLeft);
 
-    // ── Max HP (simplified, class-agnostic) ──
-    const maxHP = 100 + vit * 8 + level * 10 + bonusMaxHp;
+    // ── MaxHP — class-aware (RO pre-renewal) ──
+    const isTranscendent = TRANSCENDENT_CLASSES.has(jobClass);
+    let maxHP = calculateMaxHP(level, vit, jobClass, isTranscendent, bonusMaxHp);
+    if (bonusMaxHpRate !== 0) maxHP = Math.floor(maxHP * (100 + bonusMaxHpRate) / 100);
 
-    // ── Max SP ──
-    const maxSP = 50 + intStat * 5 + level * 5 + bonusMaxSp;
+    // ── MaxSP — class-aware (RO pre-renewal) ──
+    let maxSP = calculateMaxSP(level, intStat, jobClass, isTranscendent, bonusMaxSp);
+    if (bonusMaxSpRate !== 0) maxSP = Math.floor(maxSP * (100 + bonusMaxSpRate) / 100);
 
     return {
-        statusATK, statusMATK, hit, flee, critical, perfectDodge,
+        statusATK,
+        statusMATK,     // kept for backward compat (= matkMin base component)
+        matkMin,
+        matkMax,
+        hit, flee, critical, perfectDodge,
         softDEF, softMDEF, aspd, maxHP, maxSP
     };
 }
@@ -319,6 +419,7 @@ function calculatePhysicalDamage(attacker, target, options = {}) {
         isSkill = false,
         skillMultiplier = 100,
         skillHitBonus = 0,
+        skillName = null,
         forceHit = false,
         forceCrit = false,
         skillElement = null
@@ -374,7 +475,17 @@ function calculatePhysicalDamage(attacker, target, options = {}) {
         isCritical = true;
     } else {
         const targetLuk = (target.stats || target).luk || 1;
-        const effectiveCrit = calculateCritRate(atkDerived.critical, targetLuk);
+        // Phase 1: Card crit race bonus (bCriticalAddRace)
+        let extraCrit = 0;
+        if (attacker.cardCritRace) {
+            extraCrit += attacker.cardCritRace[targetRace] || 0;
+        }
+        // Phase 1: Card ranged crit bonus (bCriticalLong)
+        if (attacker.cardCriticalLong) {
+            const wType = attacker.weaponType || 'bare_hand';
+            if (wType === 'bow' || wType === 'gun') extraCrit += attacker.cardCriticalLong;
+        }
+        const effectiveCrit = calculateCritRate(atkDerived.critical + extraCrit, targetLuk);
         if (Math.random() * 100 < effectiveCrit) {
             isCritical = true;
         }
@@ -413,8 +524,9 @@ function calculatePhysicalDamage(attacker, target, options = {}) {
     const passiveATK = attacker.passiveATK || 0;
 
     // ── Size penalty (applies to weapon ATK portion only) ──
+    // Phase 3: Drake Card (bNoSizeFix) nullifies size penalty
     const weaponType = attacker.weaponType || 'bare_hand';
-    const sizePenaltyPct = getSizePenalty(weaponType, targetSize);
+    const sizePenaltyPct = attacker.cardNoSizeFix ? 100 : getSizePenalty(weaponType, targetSize);
     result.sizePenalty = sizePenaltyPct;
 
     // ── Weapon ATK with size penalty ──
@@ -436,6 +548,13 @@ function calculatePhysicalDamage(attacker, target, options = {}) {
     // ── Total base ATK ──
     let totalATK = statusATK + variancedWeaponATK + passiveATK;
 
+    // ── Critical damage bonus (+40% base, plus equipment bCritAtkRate) ──
+    if (isCritical) {
+        const baseCritBonus = 40; // RO pre-renewal: +40% on critical hits
+        const equipCritAtkRate = attacker.critAtkRate || 0; // Equipment bCritAtkRate bonus
+        totalATK = Math.floor(totalATK * (100 + baseCritBonus + equipCritAtkRate) / 100);
+    }
+
     // ── Buff ATK modifier (Provoke etc.) ──
     const atkMultiplier = (attacker.buffMods && attacker.buffMods.atkMultiplier) || 1.0;
     totalATK = Math.floor(totalATK * atkMultiplier);
@@ -445,6 +564,14 @@ function calculatePhysicalDamage(attacker, target, options = {}) {
     // ─────────────────────────────────────────────────────
     if (isSkill && skillMultiplier !== 100) {
         totalATK = Math.floor(totalATK * skillMultiplier / 100);
+    }
+
+    // ─────────────────────────────────────────────────────
+    // Step 5b: Card bSkillAtk bonus (per-skill damage %)
+    // ─────────────────────────────────────────────────────
+    if (isSkill && skillName && attacker.cardSkillAtk) {
+        const skillBonus = attacker.cardSkillAtk[skillName] || 0;
+        if (skillBonus !== 0) totalATK = Math.floor(totalATK * (100 + skillBonus) / 100);
     }
 
     // ─────────────────────────────────────────────────────
@@ -473,6 +600,41 @@ function calculatePhysicalDamage(attacker, target, options = {}) {
     }
 
     // ─────────────────────────────────────────────────────
+    // Step 6c: Card boss/normal class modifier (Abysmal Knight, Turtle General, etc.)
+    // ─────────────────────────────────────────────────────
+    if (attacker.cardAddClass) {
+        const targetClass = (target.modeFlags && target.modeFlags.isBoss) ? 'boss' : 'normal';
+        const classBonus = attacker.cardAddClass[targetClass] || 0;
+        if (classBonus !== 0) totalATK = Math.floor(totalATK * (100 + classBonus) / 100);
+    }
+
+    // ─────────────────────────────────────────────────────
+    // Step 6c2: Card sub-race modifier (Goblin Leader, Orc Lady, etc.)
+    // ─────────────────────────────────────────────────────
+    if (attacker.cardAddRace2 && target.subRace) {
+        const subRaceBonus = attacker.cardAddRace2[target.subRace] || 0;
+        if (subRaceBonus !== 0) totalATK = Math.floor(totalATK * (100 + subRaceBonus) / 100);
+    }
+
+    // ─────────────────────────────────────────────────────
+    // Step 6d: Card damage vs specific monster (Crab Card, Aster Card, etc.)
+    // ─────────────────────────────────────────────────────
+    if (attacker.cardAddDamageClass && target.templateId) {
+        const monsterBonus = attacker.cardAddDamageClass[target.templateId] || 0;
+        if (monsterBonus !== 0) totalATK = Math.floor(totalATK * (100 + monsterBonus) / 100);
+    }
+
+    // ─────────────────────────────────────────────────────
+    // Step 6e: Ranged ATK bonus (Archer Skeleton Card)
+    // ─────────────────────────────────────────────────────
+    if (attacker.cardLongAtkRate && attacker.cardLongAtkRate !== 0) {
+        const isRanged = weaponType === 'bow' || weaponType === 'gun' || weaponType === 'instrument' || weaponType === 'whip';
+        if (isRanged) {
+            totalATK = Math.floor(totalATK * (100 + attacker.cardLongAtkRate) / 100);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────
     // Step 7: Element modifier
     // ─────────────────────────────────────────────────────
     const eleModifier = getElementModifier(atkElement, targetElement, targetElementLevel);
@@ -489,25 +651,44 @@ function calculatePhysicalDamage(attacker, target, options = {}) {
 
     // ─────────────────────────────────────────────────────
     // Step 8: DEF reduction
-    // Hard DEF (equipment): percentage reduction — NOT affected by buff defMultiplier
-    //   (RO Classic: Provoke/Signum Crucis only reduce VIT soft DEF)
-    //   damage = damage * (100 - hardDEF) / 100
-    // Soft DEF (VIT-based): flat subtraction, affected by defMultiplier
+    // System D: bIgnoreDefClass (Samurai Spector) skips both hard+soft DEF
+    // System D: bDefRatioAtkClass (Thanatos/Ice Pick) converts DEF into bonus damage
     // ─────────────────────────────────────────────────────
-    const hardDef = Math.min(99, target.hardDef || 0); // Cap at 99% reduction
+    const rawHardDef = Math.min(99, target.hardDef || 0);
     const defMultiplier = (target.buffMods && target.buffMods.defMultiplier) || 1.0;
-
-    // Apply hard DEF (percentage reduction) — unmodified by buffs
-    if (hardDef > 0) {
-        totalATK = Math.floor(totalATK * (100 - hardDef) / 100);
-    }
-
-    // Apply soft DEF (flat reduction) — modified by Provoke/Signum Crucis defMultiplier
-    // Angelus: increases VIT-based soft DEF by defPercent%
     const defPercentBonus = (target.buffMods && target.buffMods.defPercent) || 0;
     const angelusMultiplier = defPercentBonus > 0 ? (1 + defPercentBonus / 100) : 1.0;
-    const effectiveSoftDef = Math.floor(defDerived.softDEF * defMultiplier * angelusMultiplier);
-    totalATK = totalATK - effectiveSoftDef;
+    const effectiveSoftDef = Math.floor(defDerived.softDEF * angelusMultiplier);
+
+    // Check DEF bypass cards
+    let skipDEF = false;
+    const targetMonsterClass = (target.modeFlags && target.modeFlags.isBoss) ? 'boss' : 'normal';
+
+    // bIgnoreDefClass: skip both hard DEF and soft DEF entirely
+    if (attacker.cardIgnoreDefClass) {
+        if (attacker.cardIgnoreDefClass === targetMonsterClass || attacker.cardIgnoreDefClass === 'all') {
+            skipDEF = true;
+        }
+    }
+
+    // bDefRatioAtkClass: DEF becomes bonus damage instead of reduction
+    // Formula: ATK * (hardDEF + softDEF) / 100 — replaces normal DEF step
+    if (!skipDEF && attacker.cardDefRatioAtkClass) {
+        if (attacker.cardDefRatioAtkClass === targetMonsterClass || attacker.cardDefRatioAtkClass === 'all') {
+            const combinedDEF = rawHardDef + effectiveSoftDef;
+            totalATK = Math.floor(totalATK * combinedDEF / 100);
+            skipDEF = true;
+        }
+    }
+
+    if (!skipDEF) {
+        // Normal DEF reduction path
+        const hardDef = Math.floor(rawHardDef * defMultiplier);
+        if (hardDef > 0) {
+            totalATK = Math.floor(totalATK * (100 - hardDef) / 100);
+        }
+        totalATK = totalATK - effectiveSoftDef;
+    }
 
     // Passive race DEF bonuses (Divine Protection)
     if (target.passiveRaceDEF && attacker.race) {
@@ -515,6 +696,48 @@ function calculatePhysicalDamage(attacker, target, options = {}) {
         if (raceDEFBonus > 0) {
             totalATK = Math.max(1, totalATK - raceDEFBonus);
         }
+    }
+
+    // ─────────────────────────────────────────────────────
+    // Step 8c: Defensive card modifiers (Thara Frog, Raydric, etc.)
+    // Percentage reduction from target's compounded cards
+    // Applied as: damage * (100 - reduction%) / 100
+    // ─────────────────────────────────────────────────────
+    if (target.cardDefMods) {
+        const raceRed = target.cardDefMods[`race_${attacker.race || 'formless'}`] || 0;
+        const eleRed = target.cardDefMods[`ele_${atkElement}`] || 0;
+        const sizeRed = target.cardDefMods[`size_${attacker.size || 'medium'}`] || 0;
+        if (raceRed !== 0) totalATK = Math.floor(totalATK * (100 - raceRed) / 100);
+        if (eleRed !== 0) totalATK = Math.floor(totalATK * (100 - eleRed) / 100);
+        if (sizeRed !== 0) totalATK = Math.floor(totalATK * (100 - sizeRed) / 100);
+    }
+
+    // ─────────────────────────────────────────────────────
+    // Step 8d: Defensive boss/normal class card (Alice Card)
+    // ─────────────────────────────────────────────────────
+    if (target.cardSubClass) {
+        const atkClass = (attacker.modeFlags && attacker.modeFlags.isBoss) ? 'boss' : 'normal';
+        const classRed = target.cardSubClass[atkClass] || 0;
+        if (classRed !== 0) totalATK = Math.floor(totalATK * (100 - classRed) / 100);
+    }
+
+    // ─────────────────────────────────────────────────────
+    // Step 8e: Ranged damage reduction (Horn Card, Alligator Card, etc.)
+    // ─────────────────────────────────────────────────────
+    if (target.cardLongAtkDef && target.cardLongAtkDef > 0) {
+        const atkWeaponType = attacker.weaponType || 'bare_hand';
+        const isRanged = atkWeaponType === 'bow' || atkWeaponType === 'gun' || atkWeaponType === 'instrument' || atkWeaponType === 'whip';
+        if (isRanged) {
+            totalATK = Math.floor(totalATK * (100 - target.cardLongAtkDef) / 100);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────
+    // Step 8f: Monster-specific DEF card (Bongun, Mi Gao cards)
+    // ─────────────────────────────────────────────────────
+    if (target.cardAddDefMonster && attacker.templateId) {
+        const monsterDef = target.cardAddDefMonster[attacker.templateId] || 0;
+        if (monsterDef !== 0) totalATK = totalATK - monsterDef;
     }
 
     // ─────────────────────────────────────────────────────
@@ -542,7 +765,8 @@ function calculatePhysicalDamage(attacker, target, options = {}) {
 function calculateMagicalDamage(attacker, target, options = {}) {
     const {
         skillMultiplier = 100,
-        skillElement = 'neutral'
+        skillElement = 'neutral',
+        skillName = null
     } = options;
 
     const atkDerived = calculateDerivedStats(attacker.stats || attacker);
@@ -557,22 +781,43 @@ function calculateMagicalDamage(attacker, target, options = {}) {
         elementModifier: 100
     };
 
+    // ── Phase 3: GTB Card — magic immunity (bNoMagicDamage) ──
+    if (target.cardNoMagicDamage && target.cardNoMagicDamage >= 100) {
+        result.damage = 0;
+        result.hitType = 'magicImmune';
+        result.isMiss = true;
+        return result;
+    }
+
     // ── MATK calculation ──
-    // statusMATK = INT + floor(INT/7)²
-    // MATK varies between min and max:
-    //   max = statusMATK + weaponMATK
-    //   min = statusMATK * 0.7 + weaponMATK * 0.7
-    const weaponMATK = attacker.weaponMATK || 0;
-    const matkMax = atkDerived.statusMATK + weaponMATK;
-    const matkMin = Math.floor(atkDerived.statusMATK * 0.7) + Math.floor(weaponMATK * 0.7);
+    const matkMin = atkDerived.matkMin || atkDerived.statusMATK;
+    const matkMax = atkDerived.matkMax || atkDerived.statusMATK;
     const matk = matkMin + Math.floor(Math.random() * (matkMax - matkMin + 1));
 
     // ── Apply skill multiplier ──
     let totalDamage = Math.floor(matk * skillMultiplier / 100);
 
+    // ── Phase 1: Card MATK rate bonus (bMatkRate) ──
+    if (attacker.cardMatkRate && attacker.cardMatkRate !== 0) {
+        totalDamage = Math.floor(totalDamage * (100 + attacker.cardMatkRate) / 100);
+    }
+
     // ── Buff ATK modifier ──
     const atkMultiplier = (attacker.buffMods && attacker.buffMods.atkMultiplier) || 1.0;
     totalDamage = Math.floor(totalDamage * atkMultiplier);
+
+    // ── Phase 1: Card bSkillAtk — per-skill damage bonus ──
+    if (skillName && attacker.cardSkillAtk) {
+        const skillBonus = attacker.cardSkillAtk[skillName] || 0;
+        if (skillBonus !== 0) totalDamage = Math.floor(totalDamage * (100 + skillBonus) / 100);
+    }
+
+    // ── Phase 1: Card magic race bonus (bMagicAddRace) ──
+    const targetRace = target.race || 'formless';
+    if (attacker.cardMagicRace) {
+        const magicRaceBonus = attacker.cardMagicRace[targetRace] || 0;
+        if (magicRaceBonus !== 0) totalDamage = Math.floor(totalDamage * (100 + magicRaceBonus) / 100);
+    }
 
     // ── Element modifier ──
     const targetElement = (target.element && target.element.type) ? target.element.type : 'neutral';
@@ -589,11 +834,18 @@ function calculateMagicalDamage(attacker, target, options = {}) {
     totalDamage = Math.floor(totalDamage * eleModifier / 100);
 
     // ── MDEF reduction ──
-    // Hard MDEF (equipment): percentage reduction — unmodified by buffs
-    const hardMdef = Math.min(99, target.hardMdef || target.magicDefense || 0);
+    // Phase 1: Card ignore MDEF (Vesper, High Wizard Card)
+    let effectiveHardMdef = Math.min(99, target.hardMdef || target.magicDefense || 0);
+    if (attacker.cardIgnoreMdefClass) {
+        const targetClass = (target.modeFlags && target.modeFlags.isBoss) ? 'boss' : 'normal';
+        const ignorePercent = attacker.cardIgnoreMdefClass[targetClass] || 0;
+        if (ignorePercent > 0) {
+            effectiveHardMdef = Math.floor(effectiveHardMdef * (100 - Math.min(100, ignorePercent)) / 100);
+        }
+    }
 
-    if (hardMdef > 0) {
-        totalDamage = Math.floor(totalDamage * (100 - hardMdef) / 100);
+    if (effectiveHardMdef > 0) {
+        totalDamage = Math.floor(totalDamage * (100 - effectiveHardMdef) / 100);
     }
 
     // Soft MDEF (INT-based): flat subtraction
@@ -629,6 +881,11 @@ module.exports = {
     getSizePenalty,
     calculateHitRate,
     calculateCritRate,
+
+    // Class-aware stat helpers
+    calculateMaxHP,
+    calculateMaxSP,
+    calculateASPD,
 
     // Damage calculations
     calculatePhysicalDamage,

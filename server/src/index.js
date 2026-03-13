@@ -59,6 +59,9 @@ const {
 } = require('./ro_buff_system');
 // Re-export expireBuffs from buff system (used in tick loop)
 const { expireBuffs: expireBuffsGeneric } = require('./ro_buff_system');
+// Import card effect system (parses rAthena scripts into combat/defense modifiers)
+const { CARD_EFFECTS, buildCardEffects, canCompoundCardOnEquipment } = require('./ro_card_effects');
+const { getItemGroups, pickRandomFromGroup } = require('./ro_item_groups');
 
 // Setup file logging
 const logsDir = path.join(__dirname, '..', 'logs');
@@ -130,6 +133,21 @@ const connectedPlayers = new Map();
 
 // PvP toggle — set to false to disable all player-vs-player damage
 const PVP_ENABLED = false;
+
+// System H: Gem/Catalyst requirements per skill (skill_name → { itemId, quantity, minLevel? })
+// Blue Gemstone=717, Red Gemstone=716, Yellow Gemstone=715, Holy Water=523
+const SKILL_CATALYSTS = {
+    'warp_portal':       [{ itemId: 717, quantity: 1 }],
+    'safety_wall':       [{ itemId: 717, quantity: 1 }],
+    'sanctuary':         [{ itemId: 717, quantity: 1 }],
+    'resurrection':      [{ itemId: 717, quantity: 1 }],
+    'magnus_exorcismus': [{ itemId: 717, quantity: 1 }],
+    'fire_pillar':       [{ itemId: 717, quantity: 1, minLevel: 6 }], // Lv6+ only
+    'stone_curse':       [{ itemId: 716, quantity: 1 }], // consumed always Lv1-5, on success Lv6-10
+    'dispell':           [{ itemId: 715, quantity: 1 }],
+    'land_protector':    [{ itemId: 717, quantity: 1 }, { itemId: 715, quantity: 1 }],
+    'aspersio':          [{ itemId: 523, quantity: 1 }],
+};
 
 // Combat constants (Ragnarok Online-style)
 const COMBAT = {
@@ -274,18 +292,32 @@ const activeCasts = new Map();
 const afterCastDelayEnd = new Map();
 
 // Calculate actual cast time after DEX reduction (RO pre-renewal formula)
-// ActualCastTime = BaseCastTime × (1 - DEX/150)
+// ActualCastTime = BaseCastTime × (1 - DEX/150) × (100 + equipCastRate) / 100
 // DEX >= 150 → instant cast
-function calculateActualCastTime(baseCastTime, casterDex) {
+// equipCastRate: negative = faster (e.g., -10 = 10% faster), from bCastrate
+function calculateActualCastTime(baseCastTime, casterDex, equipCastRate) {
     if (baseCastTime <= 0) return 0;
     if (casterDex >= 150) return 0;
-    return Math.max(0, Math.floor(baseCastTime * (1 - casterDex / 150)));
+    let castTime = Math.floor(baseCastTime * (1 - casterDex / 150));
+    // Apply equipment cast rate modifier (bCastrate: negative = faster)
+    if (equipCastRate) {
+        castTime = Math.floor(castTime * (100 + equipCastRate) / 100);
+    }
+    return Math.max(0, castTime);
 }
 
 // Interrupt a player's active cast (called when they take damage or move)
+// Phase 3: bNoCastCancel (Phen Card) prevents damage interruption
 function interruptCast(characterId, reason) {
     const cast = activeCasts.get(characterId);
     if (!cast) return;
+
+    // Phase 3: noCastCancel prevents interruption from damage (but not from movement)
+    if (reason === 'damage') {
+        const castPlayer = connectedPlayers.get(characterId);
+        if (castPlayer && castPlayer.cardNoCastCancel) return; // Phen Card: immune to damage interrupt
+    }
+
     activeCasts.delete(characterId);
     const sock = io.sockets.sockets.get(cast.socketId);
     if (sock) sock.emit('skill:cast_interrupted', { skillId: cast.skillId, reason });
@@ -363,6 +395,10 @@ function getPassiveSkillBonuses(player) {
         raceDEF: {},
         fatalBlowChance: 0,
         movingHPRecovery: false,
+        // Dual Wield Mastery (Assassin)
+        rightHandMasteryLv: 0,
+        leftHandMasteryLv: 0,
+        katarMasteryATK: 0,
     };
     const learned = player.learnedSkills || {};
     const wType = player.weaponType || null;
@@ -428,6 +464,21 @@ function getPassiveSkillBonuses(player) {
     const idLv = learned[501] || 0;
     if (idLv > 0) bonuses.bonusFLEE += idLv * 3;
 
+    // Katar Mastery (1100): +3 ATK/level with Katars
+    const kmLv = learned[1100] || 0;
+    if (kmLv > 0 && wType === 'katar') {
+        bonuses.bonusATK += kmLv * 3;
+        bonuses.katarMasteryATK = kmLv * 3;
+    }
+
+    // Righthand Mastery (1107): dual wield right-hand penalty recovery (passive, Assassin)
+    const rhmLv = learned[1107] || 0;
+    if (rhmLv > 0) bonuses.rightHandMasteryLv = rhmLv;
+
+    // Lefthand Mastery (1108): dual wield left-hand penalty recovery (passive, Assassin)
+    const lhmLv = learned[1108] || 0;
+    if (lhmLv > 0) bonuses.leftHandMasteryLv = lhmLv;
+
     return bonuses;
 }
 
@@ -463,9 +514,14 @@ function applySkillDelays(characterId, player, skillId, levelData, socket) {
     }
 
     // After-Cast Delay (ALL skills locked globally)
-    if (acdMs > 0) {
-        afterCastDelayEnd.set(characterId, Date.now() + acdMs);
-        if (socket) socket.emit('skill:acd_started', { afterCastDelay: acdMs });
+    // Phase 1: Card delay rate modifier (bDelayRate: negative = faster, e.g., Kiel -30%)
+    let effectiveAcd = acdMs;
+    if (acdMs > 0 && player.cardDelayRate) {
+        effectiveAcd = Math.max(0, Math.floor(acdMs * (100 + player.cardDelayRate) / 100));
+    }
+    if (effectiveAcd > 0) {
+        afterCastDelayEnd.set(characterId, Date.now() + effectiveAcd);
+        if (socket) socket.emit('skill:acd_started', { afterCastDelay: effectiveAcd });
     }
 }
 
@@ -490,9 +546,14 @@ function expireBuffs(target) {
 //   SP 60-80%: -24% damage, 2.5% of damage drained from SP
 //   SP 80-100%: -30% damage, 3.0% of damage drained from SP
 // Returns the reduced damage amount. Only applies to physical damage.
-function applyEnergyCoat(player, damage) {
+function applyEnergyCoat(player, damage, characterId, zone) {
     if (!hasBuff(player, 'energy_coat')) return damage;
-    if (player.maxMana <= 0) return damage;
+    if (player.maxMana <= 0 || player.mana <= 0) {
+        // No SP left — dispel Energy Coat
+        removeBuff(player, 'energy_coat');
+        broadcastToZone(zone || 'prontera_south', 'skill:buff_removed', { targetId: characterId, isEnemy: false, buffName: 'energy_coat', reason: 'no_sp' });
+        return damage;
+    }
 
     const spRatio = player.mana / player.maxMana;
     let reduction, spDrainPct;
@@ -506,6 +567,12 @@ function applyEnergyCoat(player, damage) {
     const reducedDamage = Math.max(1, Math.floor(damage * (1 - reduction)));
     const spDrain = Math.max(1, Math.floor(damage * spDrainPct));
     player.mana = Math.max(0, player.mana - spDrain);
+
+    // Dispel if SP drained to 0
+    if (player.mana <= 0) {
+        removeBuff(player, 'energy_coat');
+        broadcastToZone(zone || 'prontera_south', 'skill:buff_removed', { targetId: characterId, isEnemy: false, buffName: 'energy_coat', reason: 'no_sp' });
+    }
 
     return reducedDamage;
 }
@@ -642,12 +709,18 @@ function calculateMagicSkillDamage(attackerStats, targetStats, targetHardMdef, s
     );
 }
 
-// RO Classic Heal formula: floor((baseLv + INT) / 8) * (4 + skillLevel * 8)
+// RO Classic Heal formula: floor((baseLv + INT) / 8) * (4 + skillLevel * 8) * (100 + healPower) / 100
 function calculateHealAmount(caster, skillLevel) {
     const stats = getEffectiveStats(caster);
     const baseLv = stats.level || 1;
     const intStat = stats.int || 1;
-    return Math.floor((baseLv + intStat) / 8) * (4 + skillLevel * 8);
+    let heal = Math.floor((baseLv + intStat) / 8) * (4 + skillLevel * 8);
+    // Apply equipment + card healing power bonus (bHealPower, e.g., +20 = 20% more healing)
+    const healPower = (caster.equipHealPower || 0) + (caster.cardHealPower || 0);
+    if (healPower !== 0) {
+        heal = Math.floor(heal * (100 + healPower) / 100);
+    }
+    return heal;
 }
 
 // Helper: execute a physical skill on an enemy target (shared by Envenom, Sand Attack, Arrow Repel, Mammonite, etc.)
@@ -670,6 +743,19 @@ async function executePhysicalSkillOnEnemy(player, characterId, socket, skill, s
     }
 
     player.mana = Math.max(0, player.mana - spCost);
+    // System H: Consume catalysts/gems on skill execution
+    const catalysts = SKILL_CATALYSTS[skill.name];
+    if (catalysts && !player.cardNoGemStone) {
+        for (const cat of catalysts) {
+            if (cat.minLevel && learnedLevel < cat.minLevel) continue;
+            await pool.query(
+                `UPDATE character_inventory SET quantity = quantity - $3
+                 WHERE character_id = $1 AND item_id = $2 AND is_equipped = false AND quantity >= $3
+                 LIMIT 1`,
+                [characterId, cat.itemId, cat.quantity]
+            );
+        }
+    }
     applySkillDelays(characterId, player, skillId, levelData, socket);
 
     const atkBuffMods = getBuffStatModifiers(player);
@@ -734,9 +820,19 @@ async function processEnemyDeathFromSkill(enemy, attacker, attackerId, io) {
     }
     enemy.inCombatWith.clear();
 
-    // Award EXP
-    const baseExpReward = enemy.baseExp || 0;
-    const jobExpReward = enemy.jobExp || 0;
+    // Card kill hooks (Phase 2): SP/HP gain on kill, Zeny, EXP bonus
+    const cardKillResult = processCardKillHooks(attacker, enemy, attackerId, io);
+
+    // Card drop bonuses (Phase 8): extra item drops from cards
+    const cardExtraDrops = processCardDropBonuses(attacker, enemy);
+
+    // Award EXP (with card race bonus)
+    let baseExpReward = enemy.baseExp || 0;
+    let jobExpReward = enemy.jobExp || 0;
+    if (cardKillResult.expBonusPercent > 0) {
+        baseExpReward = Math.floor(baseExpReward * (100 + cardKillResult.expBonusPercent) / 100);
+        jobExpReward = Math.floor(jobExpReward * (100 + cardKillResult.expBonusPercent) / 100);
+    }
     const expResult = processExpGain(attacker, baseExpReward, jobExpReward);
 
     const killerSocket = io.sockets.sockets.get(attacker.socketId);
@@ -793,19 +889,39 @@ async function processEnemyDeathFromSkill(enemy, attacker, attackerId, io) {
         timestamp: Date.now()
     });
 
-    // Roll and award loot
+    // Roll and award loot (including Phase 8 card bonus drops)
     const droppedItems = rollEnemyDrops(enemy);
+    if (cardExtraDrops.length > 0) {
+        for (const cd of cardExtraDrops) {
+            droppedItems.push(cd);
+        }
+    }
     if (droppedItems.length > 0) {
         const lootItems = [];
         let addedToDb = false;
+        const lootPlayer = connectedPlayers.get(attackerId);
         for (const drop of droppedItems) {
             if (drop.itemId) {
+                // RO Classic: skip pickup if player would exceed max weight
+                if (lootPlayer) {
+                    const dropDef = itemDefinitions.get(drop.itemId);
+                    const dropWeight = dropDef ? (dropDef.weight || 0) * drop.quantity : 0;
+                    if ((lootPlayer.currentWeight || 0) + dropWeight > getPlayerMaxWeight(lootPlayer)) {
+                        logger.info(`[WEIGHT] ${lootPlayer.characterName} overweight — skipped ${drop.quantity}x ${drop.itemName}`);
+                        continue;
+                    }
+                }
                 const added = await addItemToInventory(attackerId, drop.itemId, drop.quantity);
                 if (added) {
                     const itemDef = itemDefinitions.get(drop.itemId);
                     lootItems.push({ itemId: drop.itemId, itemName: drop.itemName, quantity: drop.quantity,
                         icon: itemDef ? itemDef.icon : 'default_item', itemType: itemDef ? itemDef.item_type : 'etc' });
                     addedToDb = true;
+                    // Update cached weight so subsequent drops in same loop check correctly
+                    if (lootPlayer) {
+                        const dropDef = itemDefinitions.get(drop.itemId);
+                        lootPlayer.currentWeight = (lootPlayer.currentWeight || 0) + (dropDef ? (dropDef.weight || 0) * drop.quantity : 0);
+                    }
                 }
             } else {
                 lootItems.push({ itemId: null, itemName: drop.itemName, quantity: drop.quantity,
@@ -816,7 +932,9 @@ async function processEnemyDeathFromSkill(enemy, attacker, attackerId, io) {
             killerSocket.emit('loot:drop', { enemyId: enemy.enemyId, enemyName: enemy.name, items: lootItems });
             if (addedToDb) {
                 const killerInventory = await getPlayerInventory(attackerId);
-                killerSocket.emit('inventory:data', { items: killerInventory, zuzucoin: attacker.zuzucoin });
+                killerSocket.emit('inventory:data', { items: killerInventory, zuzucoin: attacker.zuzucoin, currentWeight: attacker.currentWeight || 0, maxWeight: getPlayerMaxWeight(attacker) });
+                // Update weight cache from DB (authoritative) after loot
+                if (lootPlayer) await updatePlayerWeightCache(attackerId, lootPlayer);
             }
         }
     }
@@ -884,27 +1002,1091 @@ function calculatePhysicalDamage(attackerStats, targetStats, targetHardDef = 0, 
     return roPhysicalDamage(attacker, target, options);
 }
 
-// Merge base stats with equipment bonuses + passive skill bonuses + buff modifiers
+// ============================================================
+// Card Bonus System — rebuild all card bonuses from equipped items
+// ============================================================
+async function rebuildCardBonuses(player, characterId) {
+    // Reset card-specific data
+    player.cardBonuses = { str: 0, agi: 0, vit: 0, int: 0, dex: 0, luk: 0, maxHp: 0, maxSp: 0, hit: 0, flee: 0, critical: 0, perfectDodge: 0, atk: 0, def: 0, matk: 0, mdef: 0 };
+    player.cardMods = null;
+    player.cardDefMods = null;
+    player.cardModsRight = null;  // Per-hand card mods for dual wield auto-attacks
+    player.cardModsLeft = null;
+    player.cardMaxHpRate = 0;
+    player.cardMaxSpRate = 0;
+
+    // Phase 1: Extended combat modifiers
+    player.cardCritAtkRate = 0;
+    player.cardCritRace = {};
+    player.cardHpRecovRate = 0;
+    player.cardSpRecovRate = 0;
+    player.cardCastRate = 0;
+    player.cardMatkRate = 0;
+    player.cardAspdRate = 0;
+    player.cardLongAtkRate = 0;
+    player.cardLongAtkDef = 0;
+    player.cardAddClass = {};
+    player.cardSubClass = {};
+    player.cardMagicRace = {};
+    player.cardAddRace2 = {};
+    player.cardUseSPRate = 0;
+    player.cardHealPower = 0;
+    player.cardDelayRate = 0;
+    player.cardCriticalLong = 0;
+    player.cardIgnoreMdefClass = {};
+    player.cardIgnoreDefClass = null;
+    player.cardDefRatioAtkClass = null;
+    player.cardSkillAtk = {};
+
+    // Phase 2: Kill/drain hooks
+    player.cardSpGainRace = {};
+    player.cardHpGainValue = 0;
+    player.cardSpGainValue = 0;
+    player.cardExpAddRace = {};
+    player.cardGetZenyNum = 0;
+    player.cardHpDrainRate = null;
+    player.cardSpDrainRate = null;
+    player.cardSpDrainValue = 0;
+
+    // Phase 3: Special flags
+    player.cardNoSizeFix = false;
+    player.cardNoMagicDamage = 0;
+    player.cardNoCastCancel = false;
+    player.cardNoWalkDelay = false;
+    player.cardNoGemStone = false;
+    player.cardNoKnockback = false;
+    player.cardSplashRange = 0;
+    player.cardIntravision = false;
+    player.cardRestartFullRecover = false;
+    player.cardSpeedRate = 0;
+    player.cardUnbreakableArmor = false;
+    player.cardUnbreakableWeapon = false;
+
+    // Phase 4: Reflection & periodic
+    player.cardMagicDamageReturn = 0;
+    player.cardShortWeaponDamageReturn = 0;
+    player.cardHpLossRate = null;
+    player.cardHpRegenRate = null;
+    player.cardSpRegenRate = null;
+    player.cardSpVanishRate = null;
+    player.cardBreakWeaponRate = 0;
+    player.cardBreakArmorRate = 0;
+
+    // Phase 5: Status effect procs
+    player.cardAddEff = [];
+    player.cardAddEff2 = [];
+    player.cardAddEffWhenHit = [];
+    player.cardResEff = {};
+
+    // Phase 6: Auto-cast & skill systems
+    player.cardAutoSpell = [];
+    player.cardAutoSpellWhenHit = [];
+    player.cardSkillGrant = [];
+    player.cardAddSkillBlow = [];
+    player.cardAutobonus = [];
+
+    // Phase 8: Drop modification
+    player.cardAddMonsterDropItem = [];
+    player.cardAddMonsterDropItemGroup = [];
+    player.cardAddItemHealRate = {};
+    player.cardAddItemGroupHealRate = {};
+    player.cardAddDamageClass = {};
+    player.cardAddDefMonster = {};
+
+    // Phase 6: Unique effects
+    player.cardComaClass = null;
+
+    try {
+        const result = await pool.query(
+            `SELECT ci.compounded_cards, i.equip_slot, ci.equipped_position
+             FROM character_inventory ci
+             JOIN items i ON ci.item_id = i.item_id
+             WHERE ci.character_id = $1 AND ci.is_equipped = true
+             AND ci.compounded_cards IS NOT NULL AND ci.compounded_cards != '[]'::jsonb`,
+            [characterId]
+        );
+
+        const combatMods = {};       // Merged (for skills)
+        const combatModsRight = {};  // Right-hand weapon cards only (for auto-attacks)
+        const combatModsLeft = {};   // Left-hand weapon cards only (for auto-attacks)
+        const defenseMods = {};
+        let armorElement = null;
+        let totalMaxHpRate = 0;
+        let totalMaxSpRate = 0;
+
+        for (const row of result.rows) {
+            const cards = row.compounded_cards;
+            if (!Array.isArray(cards)) continue;
+
+            // Determine which per-hand bucket this equipment's cards go to
+            const isRightWeapon = row.equipped_position === 'weapon';
+            const isLeftWeapon = row.equipped_position === 'weapon_left';
+
+            for (const cardId of cards) {
+                if (!cardId) continue;
+
+                // Flat stat bonuses from card item's DB columns
+                const cardDef = itemDefinitions.get(cardId);
+                if (cardDef) {
+                    player.cardBonuses.str += cardDef.str_bonus || 0;
+                    player.cardBonuses.agi += cardDef.agi_bonus || 0;
+                    player.cardBonuses.vit += cardDef.vit_bonus || 0;
+                    player.cardBonuses.int += cardDef.int_bonus || 0;
+                    player.cardBonuses.dex += cardDef.dex_bonus || 0;
+                    player.cardBonuses.luk += cardDef.luk_bonus || 0;
+                    player.cardBonuses.maxHp += cardDef.max_hp_bonus || 0;
+                    player.cardBonuses.maxSp += cardDef.max_sp_bonus || 0;
+                    player.cardBonuses.hit += cardDef.hit_bonus || 0;
+                    player.cardBonuses.flee += cardDef.flee_bonus || 0;
+                    player.cardBonuses.critical += cardDef.critical_bonus || 0;
+                    player.cardBonuses.perfectDodge += cardDef.perfect_dodge_bonus || 0;
+                    player.cardBonuses.atk += cardDef.atk || 0;
+                    player.cardBonuses.def += cardDef.def || 0;
+                    player.cardBonuses.matk += cardDef.matk || 0;
+                    player.cardBonuses.mdef += cardDef.mdef || 0;
+                }
+
+                // Complex effects from parsed scripts
+                const effect = CARD_EFFECTS.get(cardId);
+                if (effect) {
+                    // Always add to merged combatMods (used by skills)
+                    for (const [key, val] of Object.entries(effect.combat)) {
+                        combatMods[key] = (combatMods[key] || 0) + val;
+                    }
+
+                    // Per-hand card mods: weapon cards go to their respective hand
+                    if (isRightWeapon) {
+                        for (const [key, val] of Object.entries(effect.combat)) {
+                            combatModsRight[key] = (combatModsRight[key] || 0) + val;
+                        }
+                    } else if (isLeftWeapon) {
+                        for (const [key, val] of Object.entries(effect.combat)) {
+                            combatModsLeft[key] = (combatModsLeft[key] || 0) + val;
+                        }
+                    } else {
+                        // Non-weapon equipment cards apply to BOTH hands
+                        for (const [key, val] of Object.entries(effect.combat)) {
+                            combatModsRight[key] = (combatModsRight[key] || 0) + val;
+                            combatModsLeft[key] = (combatModsLeft[key] || 0) + val;
+                        }
+                    }
+
+                    for (const [key, val] of Object.entries(effect.defense)) {
+                        defenseMods[key] = (defenseMods[key] || 0) + val;
+                    }
+                    // Armor element — only from armor slot cards
+                    if (effect.armorElement && row.equip_slot === 'armor') {
+                        armorElement = effect.armorElement;
+                    }
+                    totalMaxHpRate += effect.maxHpRate || 0;
+                    totalMaxSpRate += effect.maxSpRate || 0;
+
+                    // Phase 1: Extended combat modifiers (additive aggregation)
+                    player.cardCritAtkRate += effect.critAtkRate || 0;
+                    for (const [r, v] of Object.entries(effect.critRace)) player.cardCritRace[r] = (player.cardCritRace[r] || 0) + v;
+                    player.cardHpRecovRate += effect.hpRecovRate || 0;
+                    player.cardSpRecovRate += effect.spRecovRate || 0;
+                    player.cardCastRate += effect.castRate || 0;
+                    player.cardMatkRate += effect.matkRate || 0;
+                    player.cardAspdRate += effect.aspdRate || 0;
+                    player.cardLongAtkRate += effect.longAtkRate || 0;
+                    player.cardLongAtkDef += effect.longAtkDef || 0;
+                    for (const [c, v] of Object.entries(effect.addClass)) player.cardAddClass[c] = (player.cardAddClass[c] || 0) + v;
+                    for (const [c, v] of Object.entries(effect.subClass)) player.cardSubClass[c] = (player.cardSubClass[c] || 0) + v;
+                    for (const [r, v] of Object.entries(effect.magicRace)) player.cardMagicRace[r] = (player.cardMagicRace[r] || 0) + v;
+                    for (const [r, v] of Object.entries(effect.addRace2)) player.cardAddRace2[r] = (player.cardAddRace2[r] || 0) + v;
+                    player.cardUseSPRate += effect.useSPRate || 0;
+                    player.cardHealPower += effect.healPower || 0;
+                    player.cardDelayRate += effect.delayRate || 0;
+                    player.cardCriticalLong += effect.criticalLong || 0;
+                    for (const [c, v] of Object.entries(effect.ignoreMdefClass)) player.cardIgnoreMdefClass[c] = (player.cardIgnoreMdefClass[c] || 0) + v;
+                    if (effect.ignoreDefClass) player.cardIgnoreDefClass = effect.ignoreDefClass;
+                    if (effect.defRatioAtkClass) player.cardDefRatioAtkClass = effect.defRatioAtkClass;
+                    for (const [s, v] of Object.entries(effect.skillAtk)) player.cardSkillAtk[s] = (player.cardSkillAtk[s] || 0) + v;
+                    if (effect.allStats) {
+                        player.cardBonuses.str += effect.allStats;
+                        player.cardBonuses.agi += effect.allStats;
+                        player.cardBonuses.vit += effect.allStats;
+                        player.cardBonuses.int += effect.allStats;
+                        player.cardBonuses.dex += effect.allStats;
+                        player.cardBonuses.luk += effect.allStats;
+                    }
+
+                    // Phase 2: Kill/drain hooks
+                    for (const [r, v] of Object.entries(effect.spGainRace)) player.cardSpGainRace[r] = (player.cardSpGainRace[r] || 0) + v;
+                    player.cardHpGainValue += effect.hpGainValue || 0;
+                    player.cardSpGainValue += effect.spGainValue || 0;
+                    for (const [r, v] of Object.entries(effect.expAddRace)) player.cardExpAddRace[r] = (player.cardExpAddRace[r] || 0) + v;
+                    player.cardGetZenyNum += effect.getZenyNum || 0;
+                    if (effect.hpDrainRate) {
+                        if (!player.cardHpDrainRate) player.cardHpDrainRate = { chance: 0, percent: 0 };
+                        player.cardHpDrainRate.chance = Math.max(player.cardHpDrainRate.chance, effect.hpDrainRate.chance);
+                        player.cardHpDrainRate.percent += effect.hpDrainRate.percent;
+                    }
+                    if (effect.spDrainRate) {
+                        if (!player.cardSpDrainRate) player.cardSpDrainRate = { chance: 0, percent: 0 };
+                        player.cardSpDrainRate.chance = Math.max(player.cardSpDrainRate.chance, effect.spDrainRate.chance);
+                        player.cardSpDrainRate.percent += effect.spDrainRate.percent;
+                    }
+                    player.cardSpDrainValue += effect.spDrainValue || 0;
+
+                    // Phase 3: Special flags (OR for booleans, additive for values)
+                    if (effect.noSizeFix) player.cardNoSizeFix = true;
+                    player.cardNoMagicDamage += effect.noMagicDamage || 0;
+                    if (effect.noCastCancel) player.cardNoCastCancel = true;
+                    if (effect.noWalkDelay) player.cardNoWalkDelay = true;
+                    if (effect.noGemStone) player.cardNoGemStone = true;
+                    if (effect.noKnockback) player.cardNoKnockback = true;
+                    player.cardSplashRange = Math.max(player.cardSplashRange, effect.splashRange || 0);
+                    if (effect.intravision) player.cardIntravision = true;
+                    if (effect.restartFullRecover) player.cardRestartFullRecover = true;
+                    player.cardSpeedRate += effect.speedRate || 0;
+                    if (effect.unbreakableArmor) player.cardUnbreakableArmor = true;
+                    if (effect.unbreakableWeapon) player.cardUnbreakableWeapon = true;
+
+                    // Phase 4: Reflection & periodic
+                    player.cardMagicDamageReturn += effect.magicDamageReturn || 0;
+                    player.cardShortWeaponDamageReturn += effect.shortWeaponDamageReturn || 0;
+                    if (effect.hpLossRate) player.cardHpLossRate = effect.hpLossRate;
+                    if (effect.hpRegenRate) player.cardHpRegenRate = effect.hpRegenRate;
+                    if (effect.spRegenRate) player.cardSpRegenRate = effect.spRegenRate;
+                    if (effect.spVanishRate) player.cardSpVanishRate = effect.spVanishRate;
+                    player.cardBreakWeaponRate += effect.breakWeaponRate || 0;
+                    player.cardBreakArmorRate += effect.breakArmorRate || 0;
+
+                    // Phase 5: Status effect procs (concat arrays)
+                    if (effect.addEff.length > 0) player.cardAddEff.push(...effect.addEff);
+                    if (effect.addEff2.length > 0) player.cardAddEff2.push(...effect.addEff2);
+                    if (effect.addEffWhenHit.length > 0) player.cardAddEffWhenHit.push(...effect.addEffWhenHit);
+                    for (const [e, v] of Object.entries(effect.resEff)) player.cardResEff[e] = (player.cardResEff[e] || 0) + v;
+
+                    // Phase 6: Auto-cast & skill systems
+                    if (effect.autoSpell.length > 0) player.cardAutoSpell.push(...effect.autoSpell);
+                    if (effect.autoSpellWhenHit.length > 0) player.cardAutoSpellWhenHit.push(...effect.autoSpellWhenHit);
+                    if (effect.skillGrant.length > 0) player.cardSkillGrant.push(...effect.skillGrant);
+                    if (effect.addSkillBlow.length > 0) player.cardAddSkillBlow.push(...effect.addSkillBlow);
+                    if (effect.autobonus.length > 0) player.cardAutobonus.push(...effect.autobonus);
+
+                    // Phase 8: Drop modification
+                    if (effect.addMonsterDropItem.length > 0) player.cardAddMonsterDropItem.push(...effect.addMonsterDropItem);
+                    if (effect.addMonsterDropItemGroup.length > 0) player.cardAddMonsterDropItemGroup.push(...effect.addMonsterDropItemGroup);
+                    for (const [id, v] of Object.entries(effect.addItemHealRate)) player.cardAddItemHealRate[id] = (player.cardAddItemHealRate[id] || 0) + v;
+                    for (const [g, v] of Object.entries(effect.addItemGroupHealRate)) player.cardAddItemGroupHealRate[g] = (player.cardAddItemGroupHealRate[g] || 0) + v;
+                    for (const [id, v] of Object.entries(effect.addDamageClass)) player.cardAddDamageClass[id] = (player.cardAddDamageClass[id] || 0) + v;
+                    for (const [id, v] of Object.entries(effect.addDefMonster)) player.cardAddDefMonster[id] = (player.cardAddDefMonster[id] || 0) + v;
+
+                    // Unique
+                    if (effect.comaClass) player.cardComaClass = effect.comaClass;
+
+                    // System F: Card skill grants — resolve skill names to IDs
+                    if (effect.skillGrant.length > 0) {
+                        if (!player.cardGrantedSkills) player.cardGrantedSkills = {};
+                        for (const grant of effect.skillGrant) {
+                            const skillDef = ALL_SKILLS.find(s => s.name === grant.skill.toLowerCase() ||
+                                s.name === grant.skill.replace(/^[A-Z]{2}_/, '').toLowerCase());
+                            if (skillDef) {
+                                const existing = player.cardGrantedSkills[skillDef.id] || 0;
+                                player.cardGrantedSkills[skillDef.id] = Math.max(existing, grant.level);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        player.cardMods = Object.keys(combatMods).length > 0 ? combatMods : null;
+        player.cardDefMods = Object.keys(defenseMods).length > 0 ? defenseMods : null;
+        player.cardModsRight = Object.keys(combatModsRight).length > 0 ? combatModsRight : null;
+        player.cardModsLeft = Object.keys(combatModsLeft).length > 0 ? combatModsLeft : null;
+
+        // Armor element from card (only armor-slot cards can change armor element)
+        if (armorElement) {
+            player.armorElement = { type: armorElement, level: 1 };
+        } else {
+            player.armorElement = { type: 'neutral', level: 1 };
+        }
+
+        player.cardMaxHpRate = totalMaxHpRate;
+        player.cardMaxSpRate = totalMaxSpRate;
+
+        // ── Phase 7: Evaluate conditional card effects ──
+        // Cards with readparam()/getrefine() as bonus values need player context
+        await evaluateConditionalCardBonuses(player, characterId, result.rows, combatMods, defenseMods, combatModsRight, combatModsLeft);
+
+        // Re-apply combat/defense mods after conditional evaluation may have changed them
+        player.cardMods = Object.keys(combatMods).length > 0 ? combatMods : null;
+        player.cardDefMods = Object.keys(defenseMods).length > 0 ? defenseMods : null;
+        player.cardModsRight = Object.keys(combatModsRight).length > 0 ? combatModsRight : null;
+        player.cardModsLeft = Object.keys(combatModsLeft).length > 0 ? combatModsLeft : null;
+
+        const hasAny = player.cardMods || player.cardDefMods || armorElement ||
+            Object.values(player.cardBonuses).some(v => v !== 0);
+        if (hasAny) {
+            logger.info(`[CARDS] Rebuilt card bonuses for char ${characterId}: stats=${JSON.stringify(player.cardBonuses)}, combat=${JSON.stringify(combatMods)}, defense=${JSON.stringify(defenseMods)}${armorElement ? `, armorEle=${armorElement}` : ''}`);
+        }
+    } catch (err) {
+        logger.warn(`[CARDS] Failed to rebuild card bonuses for char ${characterId}: ${err.message}`);
+    }
+}
+
+// ============================================================
+// Phase 7: Conditional Card Effect Evaluation
+// Handles cards with getrefine()/readparam() in bonus values
+// and if() conditions gating bonus application
+// ============================================================
+async function evaluateConditionalCardBonuses(player, characterId, equippedRows, combatMods, defenseMods, combatModsRight, combatModsLeft) {
+    // Get refine levels of equipped items
+    const refineResult = await pool.query(
+        `SELECT ci.item_id, ci.equipped_position, ci.compounded_cards, ci.refine_level, i.equip_slot
+         FROM character_inventory ci
+         JOIN items i ON ci.item_id = i.item_id
+         WHERE ci.character_id = $1 AND ci.is_equipped = true`,
+        [characterId]
+    );
+    const refineBySlot = {};
+    for (const row of refineResult.rows) {
+        refineBySlot[row.equipped_position || row.equip_slot] = row.refine_level || 0;
+    }
+
+    // Player base stats for readparam()
+    const pStr = player.stats.str || 1;
+    const pAgi = player.stats.agi || 1;
+    const pVit = player.stats.vit || 1;
+    const pInt = player.stats.int || player.stats.int_stat || 1;
+    const pDex = player.stats.dex || 1;
+    const pLuk = player.stats.luk || 1;
+    const pLevel = player.stats.level || 1;
+    const jobClass = player.jobClass || 'novice';
+
+    // Process each equipped item's compounded cards for conditional effects
+    for (const row of equippedRows) {
+        const cards = row.compounded_cards;
+        if (!Array.isArray(cards)) continue;
+        const refine = refineBySlot[row.equipped_position || row.equip_slot] || 0;
+
+        for (const cardId of cards) {
+            if (!cardId) continue;
+            const cardDef = itemDefinitions.get(cardId);
+            if (!cardDef || !cardDef.script) continue;
+            const script = cardDef.script;
+
+            // Skip cards that don't need conditional evaluation
+            if (!script.includes('getrefine') && !script.includes('readparam') && !script.includes('BaseClass') && !script.includes('BaseJob') && !script.includes('getskilllv')) continue;
+
+            // ── readparam-as-value cards (stat scales with another stat) ──
+            // Pattern: bonus bStat,readparam(bOtherStat)/N;
+            const paramValueMatch = script.match(/bonus\s+b(\w+)\s*,\s*readparam\(b(\w+)\)\s*\/\s*(\d+)/);
+            if (paramValueMatch) {
+                const targetStat = paramValueMatch[1].toLowerCase();
+                const sourceStat = paramValueMatch[2].toLowerCase();
+                const divisor = parseInt(paramValueMatch[3]);
+                const statMap = { str: pStr, agi: pAgi, vit: pVit, int: pInt, dex: pDex, luk: pLuk };
+                const sourceVal = statMap[sourceStat] || 0;
+                const bonus = Math.floor(sourceVal / divisor);
+                if (bonus > 0 && player.cardBonuses[targetStat] !== undefined) {
+                    player.cardBonuses[targetStat] += bonus;
+                }
+            }
+
+            // ── getrefine()-as-value cards (stat scales with refine level) ──
+            // Pattern: bonus bStat,getrefine()-N;
+            for (const rm of script.matchAll(/bonus\s+b(\w+)\s*,\s*getrefine\(\)\s*(?:-\s*(\d+))?/g)) {
+                const targetStat = rm[1].toLowerCase();
+                const offset = rm[2] ? parseInt(rm[2]) : 0;
+                const bonus = refine - offset;
+                if (bonus > 0 && player.cardBonuses[targetStat] !== undefined) {
+                    player.cardBonuses[targetStat] += bonus;
+                }
+                // Handle bCritical with getrefine() (Green Maiden Card)
+                if (targetStat === 'critical' && bonus > 0) {
+                    player.cardBonuses.critical += bonus;
+                }
+            }
+
+            // ── if(getrefine()>=N) conditional bonuses ──
+            const refineCondMatches = [...script.matchAll(/if\s*\(\s*getrefine\(\)\s*([><=!]+)\s*(\d+)\s*\)/g)];
+            for (const rcm of refineCondMatches) {
+                const op = rcm[1];
+                const threshold = parseInt(rcm[2]);
+                let conditionMet = false;
+                if (op === '>=' || op === '>') conditionMet = op === '>=' ? refine >= threshold : refine > threshold;
+                else if (op === '<=' || op === '<') conditionMet = op === '<=' ? refine <= threshold : refine < threshold;
+                else if (op === '==' || op === '===') conditionMet = refine === threshold;
+
+                if (conditionMet) {
+                    // Extract the bonus block after this condition
+                    const condIdx = script.indexOf(rcm[0]);
+                    const afterCond = script.substring(condIdx + rcm[0].length);
+                    // Parse bonuses in the conditional block (up to next if/else/})
+                    const blockEnd = afterCond.search(/\bif\b|^\s*else\b|^\s*\}/m);
+                    const block = blockEnd > 0 ? afterCond.substring(0, blockEnd) : afterCond;
+                    applyConditionalBonusBlock(block, player, combatMods, defenseMods, row, combatModsRight, combatModsLeft);
+                }
+            }
+
+            // ── if(readparam(bX)>=N) conditional bonuses ──
+            const paramCondMatches = [...script.matchAll(/if\s*\(\s*readparam\(b(\w+)\)\s*>=\s*(\d+)\s*\)/g)];
+            for (const pcm of paramCondMatches) {
+                const stat = pcm[1].toLowerCase();
+                const threshold = parseInt(pcm[2]);
+                const statMap = { str: pStr, agi: pAgi, vit: pVit, int: pInt, dex: pDex, luk: pLuk };
+                const val = statMap[stat] || 0;
+                if (val >= threshold) {
+                    const condIdx = script.indexOf(pcm[0]);
+                    const afterCond = script.substring(condIdx + pcm[0].length);
+                    const blockEnd = afterCond.search(/\bif\b|^\s*else\b|^\s*\}/m);
+                    const block = blockEnd > 0 ? afterCond.substring(0, blockEnd) : afterCond;
+                    applyConditionalBonusBlock(block, player, combatMods, defenseMods, row, combatModsRight, combatModsLeft);
+                }
+            }
+
+            // ── if(BaseClass == Job_X) conditional bonuses ──
+            const classCondMatches = [...script.matchAll(/if\s*\(\s*(?:BaseClass|BaseJob)\s*==\s*Job_(\w+)\s*\)/g)];
+            const BASE_CLASS_MAP = {
+                'Swordman': ['swordsman', 'knight', 'crusader', 'lord_knight', 'paladin'],
+                'Mage': ['mage', 'wizard', 'sage', 'high_wizard', 'scholar'],
+                'Archer': ['archer', 'hunter', 'bard', 'dancer', 'sniper', 'minstrel', 'gypsy'],
+                'Merchant': ['merchant', 'blacksmith', 'alchemist', 'whitesmith', 'biochemist'],
+                'Thief': ['thief', 'assassin', 'rogue', 'assassin_cross', 'stalker'],
+                'Acolyte': ['acolyte', 'priest', 'monk', 'high_priest', 'champion'],
+                'Novice': ['novice', 'high_novice', 'super_novice'],
+                'Knight': ['knight', 'lord_knight'],
+                'Assassin': ['assassin', 'assassin_cross'],
+                'Priest': ['priest', 'high_priest'],
+                'Sage': ['sage', 'scholar'],
+                'Rogue': ['rogue', 'stalker'],
+                'Dancer': ['dancer', 'gypsy'],
+                'SuperNovice': ['super_novice'],
+            };
+            for (const ccm of classCondMatches) {
+                const reqClass = ccm[1];
+                const allowedClasses = BASE_CLASS_MAP[reqClass] || [reqClass.toLowerCase()];
+                if (allowedClasses.includes(jobClass)) {
+                    const condIdx = script.indexOf(ccm[0]);
+                    const afterCond = script.substring(condIdx + ccm[0].length);
+                    const blockEnd = afterCond.search(/\bif\b|^\s*else\b|^\s*\}/m);
+                    const block = blockEnd > 0 ? afterCond.substring(0, blockEnd) : afterCond;
+                    applyConditionalBonusBlock(block, player, combatMods, defenseMods, row, combatModsRight, combatModsLeft);
+                }
+            }
+        }
+    }
+}
+
+// Apply bonuses from a conditional block (reuses same regex patterns as parseCardScript)
+function applyConditionalBonusBlock(block, player, combatMods, defenseMods, row, combatModsRight, combatModsLeft) {
+    const { RC_MAP, ELE_MAP, SIZE_MAP, EFF_MAP } = require('./ro_card_effects');
+    const ALL_RACES = ['formless', 'undead', 'brute', 'plant', 'insect', 'fish', 'demon', 'demihuman', 'angel', 'dragon'];
+
+    const isRightWeapon = row.equipped_position === 'weapon';
+    const isLeftWeapon = row.equipped_position === 'weapon_left';
+
+    // Flat stat bonuses
+    for (const m of block.matchAll(/bonus\s+b(Str|Agi|Vit|Int|Dex|Luk)\s*,\s*(-?\d+)/g)) {
+        const stat = m[1].toLowerCase();
+        const val = parseInt(m[2]);
+        if (player.cardBonuses[stat] !== undefined) player.cardBonuses[stat] += val;
+    }
+    for (const m of block.matchAll(/bonus\s+bBaseAtk\s*,\s*(-?\d+)/g)) player.cardBonuses.atk += parseInt(m[1]);
+    for (const m of block.matchAll(/bonus\s+bDef\s*,\s*(-?\d+)/g)) player.cardBonuses.def += parseInt(m[1]);
+    for (const m of block.matchAll(/bonus\s+bMdef\s*,\s*(-?\d+)/g)) player.cardBonuses.mdef += parseInt(m[1]);
+    for (const m of block.matchAll(/bonus\s+bHit\s*,\s*(-?\d+)/g)) player.cardBonuses.hit += parseInt(m[1]);
+    for (const m of block.matchAll(/bonus\s+bFlee\s*,\s*(-?\d+)/g)) player.cardBonuses.flee += parseInt(m[1]);
+    for (const m of block.matchAll(/bonus\s+bFlee2\s*,\s*(-?\d+)/g)) player.cardBonuses.perfectDodge += parseInt(m[1]);
+    for (const m of block.matchAll(/bonus\s+bCritical\s*,\s*(-?\d+)/g)) player.cardBonuses.critical += parseInt(m[1]);
+    for (const m of block.matchAll(/bonus\s+bMaxHP\s*,\s*(-?\d+)/g)) player.cardBonuses.maxHp += parseInt(m[1]);
+    for (const m of block.matchAll(/bonus\s+bMaxSP\s*,\s*(-?\d+)/g)) player.cardBonuses.maxSp += parseInt(m[1]);
+    for (const m of block.matchAll(/bonus\s+bMaxHPrate\s*,\s*(-?\d+)/g)) player.cardMaxHpRate += parseInt(m[1]);
+    for (const m of block.matchAll(/bonus\s+bMaxSPrate\s*,\s*(-?\d+)/g)) player.cardMaxSpRate += parseInt(m[1]);
+
+    // Combat mods
+    for (const m of block.matchAll(/bonus2\s+bSubEle\s*,\s*(\w+)\s*,\s*(-?\d+)/g)) {
+        const ele = ELE_MAP[m[1]]; const val = parseInt(m[2]);
+        if (ele) defenseMods[`ele_${ele}`] = (defenseMods[`ele_${ele}`] || 0) + val;
+    }
+    for (const m of block.matchAll(/bonus2\s+bCriticalAddRace\s*,\s*(\w+)\s*,\s*(-?\d+)/g)) {
+        const race = RC_MAP[m[1]]; const val = parseInt(m[2]);
+        if (race) player.cardCritRace[race] = (player.cardCritRace[race] || 0) + val;
+    }
+    for (const m of block.matchAll(/bonus2\s+bSkillAtk\s*,\s*"?(\w+)"?\s*,\s*(-?\d+)/g)) {
+        player.cardSkillAtk[m[1]] = (player.cardSkillAtk[m[1]] || 0) + parseInt(m[2]);
+    }
+
+    // Flags
+    if (/bonus\s+bUnbreakableArmor/.test(block)) player.cardUnbreakableArmor = true;
+    if (/bonus\s+bUnbreakableWeapon/.test(block)) player.cardUnbreakableWeapon = true;
+
+    // HP/SP regen rates
+    for (const m of block.matchAll(/bonus\s+bHPrecovRate\s*,\s*(-?\d+)/g)) player.cardHpRecovRate += parseInt(m[1]);
+    for (const m of block.matchAll(/bonus\s+bSPrecovRate\s*,\s*(-?\d+)/g)) player.cardSpRecovRate += parseInt(m[1]);
+
+    // MATK rate
+    for (const m of block.matchAll(/bonus\s+bMatkRate\s*,\s*(-?\d+)/g)) player.cardMatkRate += parseInt(m[1]);
+
+    // AddClass
+    for (const m of block.matchAll(/bonus2\s+bAddClass\s*,\s*(\w+)\s*,\s*(-?\d+)/g)) {
+        const { CLASS_MAP } = require('./ro_card_effects');
+        const cls = CLASS_MAP[m[1]]; const val = parseInt(m[2]);
+        if (cls) {
+            if (cls === 'all') { player.cardAddClass.boss = (player.cardAddClass.boss || 0) + val; player.cardAddClass.normal = (player.cardAddClass.normal || 0) + val; }
+            else player.cardAddClass[cls] = (player.cardAddClass[cls] || 0) + val;
+        }
+    }
+
+    // Ignore MDEF
+    for (const m of block.matchAll(/bonus2\s+bIgnoreMdefClassRate\s*,\s*(\w+)\s*,\s*(-?\d+)/g)) {
+        const { CLASS_MAP } = require('./ro_card_effects');
+        const cls = CLASS_MAP[m[1]]; const val = parseInt(m[2]);
+        if (cls) player.cardIgnoreMdefClass[cls] = (player.cardIgnoreMdefClass[cls] || 0) + val;
+    }
+}
+
+// ============================================================
+// Card Effect Hooks — Called from combat, kill, regen, etc.
+// Phases 2-8: Process card effects at the right moments
+// ============================================================
+
+/**
+ * Phase 2: Process card kill hooks (SP/HP gain, Zeny, EXP bonus)
+ * Called after a monster is killed, BEFORE processExpGain for EXP bonuses
+ * @returns {object} { bonusBaseExp, bonusJobExp } - EXP multiplier adjustments
+ */
+function processCardKillHooks(attacker, enemy, attackerId, io) {
+    const monsterRace = enemy.race || 'formless';
+    const killerSocket = io.sockets.sockets.get(attacker.socketId);
+    let hpGained = 0, spGained = 0;
+
+    // bSPGainRace: gain SP on kill by race (Zombie Master Card, etc.)
+    const spGainRace = attacker.cardSpGainRace || {};
+    const spFromRace = spGainRace[monsterRace] || 0;
+    if (spFromRace > 0) spGained += spFromRace;
+
+    // bHPGainValue: flat HP on kill
+    if (attacker.cardHpGainValue > 0) hpGained += attacker.cardHpGainValue;
+
+    // bSPGainValue: flat SP on kill
+    if (attacker.cardSpGainValue > 0) spGained += attacker.cardSpGainValue;
+
+    // Apply HP/SP gains
+    if (hpGained > 0 && !attacker.isDead) {
+        attacker.health = Math.min(attacker.maxHealth, attacker.health + hpGained);
+    }
+    if (spGained > 0 && !attacker.isDead) {
+        attacker.mana = Math.min(attacker.maxMana, attacker.mana + spGained);
+    }
+
+    // bGetZenyNum: random Zeny on kill (Cramp Card)
+    if (attacker.cardGetZenyNum > 0) {
+        const zeny = Math.floor(Math.random() * attacker.cardGetZenyNum) + 1;
+        attacker.zeny = (attacker.zeny || 0) + zeny;
+        // Could emit zeny:gain event here if we add one later
+    }
+
+    // bExpAddRace: EXP bonus % by race
+    const expBonus = (attacker.cardExpAddRace || {})[monsterRace] || 0;
+
+    return { expBonusPercent: expBonus };
+}
+
+/**
+ * Phase 2: Process card drain effects on each auto-attack hit
+ * Called after damage is dealt in auto-attack tick
+ */
+function processCardDrainEffects(attacker, damage, attackerId) {
+    // bHPDrainRate: chance% to drain percent% of damage as HP
+    if (attacker.cardHpDrainRate && damage > 0) {
+        if (Math.random() * 100 < attacker.cardHpDrainRate.chance) {
+            const hpDrain = Math.max(1, Math.floor(damage * attacker.cardHpDrainRate.percent / 100));
+            attacker.health = Math.min(attacker.maxHealth, attacker.health + hpDrain);
+        }
+    }
+
+    // bSPDrainRate: chance% to drain percent% of damage as SP
+    if (attacker.cardSpDrainRate && damage > 0) {
+        if (Math.random() * 100 < attacker.cardSpDrainRate.chance) {
+            const spDrain = Math.max(1, Math.floor(damage * attacker.cardSpDrainRate.percent / 100));
+            attacker.mana = Math.min(attacker.maxMana, attacker.mana + spDrain);
+        }
+    }
+
+    // bSPDrainValue: flat SP per hit (positive = gain, negative = lose)
+    if (attacker.cardSpDrainValue !== 0 && damage > 0) {
+        attacker.mana = Math.max(0, Math.min(attacker.maxMana, attacker.mana + attacker.cardSpDrainValue));
+    }
+}
+
+/**
+ * Phase 5: Process card status effect procs on auto-attack
+ * Called after damage is dealt in auto-attack tick
+ */
+function processCardStatusProcsOnAttack(attacker, target, targetIsEnemy) {
+    if (!attacker.cardAddEff || attacker.cardAddEff.length === 0) return;
+    // Boss immunity check
+    if (targetIsEnemy && target.modeFlags && target.modeFlags.statusImmune) return;
+
+    for (const proc of attacker.cardAddEff) {
+        // Chance is in 1/10000 (rAthena convention)
+        if (Math.random() * 10000 < proc.chance) {
+            // Use the status effect system if available
+            if (typeof applyStatusEffect === 'function') {
+                applyStatusEffect(attacker, target, proc.effect, 10000); // 100% base chance (already passed RNG)
+            } else if (target.activeStatusEffects && !target.activeStatusEffects.has(proc.effect)) {
+                // Fallback: simple application
+                target.activeStatusEffects.set(proc.effect, {
+                    type: proc.effect, appliedAt: Date.now(), duration: 5000,
+                    expiresAt: Date.now() + 5000, sourceId: attacker.characterId || 0
+                });
+            }
+        }
+    }
+
+    // bAddEff2: inflict status on SELF
+    if (attacker.cardAddEff2 && attacker.cardAddEff2.length > 0) {
+        for (const proc of attacker.cardAddEff2) {
+            if (Math.random() * 10000 < proc.chance) {
+                if (typeof applyStatusEffect === 'function') {
+                    applyStatusEffect(attacker, attacker, proc.effect, 10000);
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Phase 5: Process card status procs when being hit
+ */
+function processCardStatusProcsWhenHit(target, attacker, attackerIsEnemy) {
+    if (!target.cardAddEffWhenHit || target.cardAddEffWhenHit.length === 0) return;
+    // Can't proc on boss attackers
+    if (attackerIsEnemy && attacker.modeFlags && attacker.modeFlags.statusImmune) return;
+
+    for (const proc of target.cardAddEffWhenHit) {
+        if (Math.random() * 10000 < proc.chance) {
+            if (typeof applyStatusEffect === 'function') {
+                applyStatusEffect(target, attacker, proc.effect, 10000);
+            } else if (attacker.activeStatusEffects && !attacker.activeStatusEffects.has(proc.effect)) {
+                attacker.activeStatusEffects.set(proc.effect, {
+                    type: proc.effect, appliedAt: Date.now(), duration: 5000,
+                    expiresAt: Date.now() + 5000, sourceId: target.characterId || 0
+                });
+            }
+        }
+    }
+}
+
+/**
+ * Phase 4: Process melee damage reflection (Orc Lord, High Orc cards)
+ * Returns reflected damage amount
+ */
+function processCardMeleeReflection(target, damage) {
+    if (!target.cardShortWeaponDamageReturn || target.cardShortWeaponDamageReturn <= 0) return 0;
+    return Math.max(1, Math.floor(damage * target.cardShortWeaponDamageReturn / 100));
+}
+
+/**
+ * Phase 4: Process magic damage reflection (Maya Card)
+ * Returns reflected damage amount
+ */
+function processCardMagicReflection(target, damage) {
+    if (!target.cardMagicDamageReturn || target.cardMagicDamageReturn <= 0) return 0;
+    return Math.max(1, Math.floor(damage * target.cardMagicDamageReturn / 100));
+}
+
+/**
+ * System K: Check if observer can see a hidden target (cardIntravision)
+ * Returns true if the target is visible to the observer
+ */
+function canSeeHiddenTarget(observer, target) {
+    const targetMods = getCombinedModifiers(target);
+    if (!targetMods.isHidden) return true; // Not hidden, always visible
+    if (observer.cardIntravision) return true; // Maya Purple Card
+    return false;
+}
+
+/**
+ * System B: Knockback target N cells away from source position
+ * Returns new position or null if target is immune
+ */
+function knockbackTarget(target, sourceX, sourceY, cells, zone, io) {
+    if (!target || !cells || cells <= 0) return null;
+    // Boss immunity
+    if (target.modeFlags && target.modeFlags.isBoss) return null;
+    // bNoKnockback card (RSX-0806)
+    if (target.cardNoKnockback) return null;
+
+    const targetX = target.x || 0;
+    const targetY = target.y || 0;
+    const targetZ = target.z || 0;
+
+    // Calculate direction vector from source to target (push away from source)
+    let dx = targetX - sourceX;
+    let dy = targetY - sourceY;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+    if (dist < 1) { dx = -100; dy = 0; } // Same position → push west (default)
+    else { dx = dx / dist; dy = dy / dist; }
+
+    // Move target by `cells` * cell size (100 UE units per cell)
+    const cellSize = 100;
+    const newX = targetX + Math.floor(dx * cells * cellSize);
+    const newY = targetY + Math.floor(dy * cells * cellSize);
+
+    // Update target position
+    target.x = newX;
+    target.y = newY;
+
+    // Broadcast knockback event
+    const targetId = target.enemyId || target.characterId || 0;
+    const isEnemy = !!target.enemyId;
+    broadcastToZone(zone, 'combat:knockback', {
+        targetId, isEnemy, newX, newY, newZ: targetZ, cells,
+        sourceX, sourceY
+    });
+
+    return { x: newX, y: newY, z: targetZ };
+}
+
+/**
+ * System G: Process autobonus procs on attack (Vanberk, Isilla, Atroce)
+ * Applies temporary stat bonuses as buffs when proc triggers
+ */
+function processAutobonusOnAttack(player, characterId) {
+    if (!player.cardAutobonus || player.cardAutobonus.length === 0) return;
+    for (let i = 0; i < player.cardAutobonus.length; i++) {
+        const ab = player.cardAutobonus[i];
+        if (Math.random() * 10000 >= ab.chance) continue;
+        // Parse the bonus script for stat bonuses
+        const bonuses = parseAutobonusScript(ab.bonusScript);
+        if (!bonuses) continue;
+        // Apply as a temporary buff
+        const buffName = `autobonus_${i}`;
+        const buffDef = {
+            name: buffName, duration: ab.duration,
+            modifiers: bonuses, stackRule: 'refresh',
+            category: 'buff', displayName: 'Auto Bonus'
+        };
+        applyBuff(player, buffDef);
+        logger.info(`[AUTOBONUS] ${player.characterName} triggered autobonus ${i} for ${ab.duration}ms`);
+    }
+}
+
+/**
+ * System G: Process autobonus2 procs when hit (Hodremlin, Ice Titan)
+ */
+function processAutobonusWhenHit(player, characterId) {
+    if (!player.cardAutobonus || player.cardAutobonus.length === 0) return;
+    // autobonus2 entries are stored in the same array with trigger info from the parser
+    // For now, process all as potential when-hit triggers
+    for (let i = 0; i < player.cardAutobonus.length; i++) {
+        const ab = player.cardAutobonus[i];
+        if (Math.random() * 10000 >= ab.chance) continue;
+        const bonuses = parseAutobonusScript(ab.bonusScript);
+        if (!bonuses) continue;
+        const buffName = `autobonus_${i}`;
+        const buffDef = {
+            name: buffName, duration: ab.duration,
+            modifiers: bonuses, stackRule: 'refresh',
+            category: 'buff', displayName: 'Auto Bonus'
+        };
+        applyBuff(player, buffDef);
+    }
+}
+
+/**
+ * Parse an autobonus script string like "{ bonus bCritical,100; }" into modifier object
+ */
+function parseAutobonusScript(script) {
+    if (!script) return null;
+    const mods = {};
+    // bonus bCritical,N
+    const critMatch = script.match(/bonus\s+bCritical\s*,\s*(-?\d+)/);
+    if (critMatch) mods.bonusCritical = parseInt(critMatch[1]);
+    // bonus bCastrate,N
+    const castMatch = script.match(/bonus\s+bCastrate\s*,\s*(-?\d+)/);
+    if (castMatch) mods.castRateBonus = parseInt(castMatch[1]);
+    // bonus bFlee,N
+    const fleeMatch = script.match(/bonus\s+bFlee\s*,\s*(-?\d+)/);
+    if (fleeMatch) mods.bonusFlee = parseInt(fleeMatch[1]);
+    // bonus bFlee2,N (Perfect Dodge)
+    const flee2Match = script.match(/bonus\s+bFlee2\s*,\s*(-?\d+)/);
+    if (flee2Match) mods.bonusPerfectDodge = parseInt(flee2Match[1]);
+    // bonus bDef,N
+    const defMatch = script.match(/bonus\s+bDef\s*,\s*(-?\d+)/);
+    if (defMatch) mods.bonusDef = parseInt(defMatch[1]);
+    // bonus bAspdRate,N
+    const aspdMatch = script.match(/bonus\s+bAspdRate\s*,\s*(-?\d+)/);
+    if (aspdMatch) mods.aspdMultiplier = 1 + parseInt(aspdMatch[1]) / 100;
+    // bonus bAllStats,N
+    const allMatch = script.match(/bonus\s+bAllStats\s*,\s*(-?\d+)/);
+    if (allMatch) {
+        const v = parseInt(allMatch[1]);
+        mods.strBonus = v; mods.agiBonus = v; mods.vitBonus = v;
+        mods.intBonus = v; mods.dexBonus = v; mods.lukBonus = v;
+    }
+    return Object.keys(mods).length > 0 ? mods : null;
+}
+
+/**
+ * System E: Process card auto-spell on attack (bAutoSpell)
+ * Called after a successful auto-attack hit. No SP, no cast time, no gems.
+ */
+function processCardAutoSpellOnAttack(attacker, target, targetIsEnemy, zone, io) {
+    if (!attacker.cardAutoSpell || attacker.cardAutoSpell.length === 0) return;
+    for (const proc of attacker.cardAutoSpell) {
+        if (Math.random() * 1000 >= proc.chance) continue;
+        const level = resolveAutoSpellLevel(proc.level, attacker);
+        executeAutoSpellEffect(attacker, target, targetIsEnemy, proc.skill, level, zone, io);
+    }
+}
+
+/**
+ * System E: Process card auto-spell when hit (bAutoSpellWhenHit)
+ * Called when player takes physical damage. No SP, no cast time, no gems.
+ */
+function processCardAutoSpellWhenHit(target, attacker, attackerIsEnemy, zone, io) {
+    if (!target.cardAutoSpellWhenHit || target.cardAutoSpellWhenHit.length === 0) return;
+    for (const proc of target.cardAutoSpellWhenHit) {
+        if (Math.random() * 1000 >= proc.chance) continue;
+        const level = resolveAutoSpellLevel(proc.level, target);
+        // Offensive skills target the attacker, self/support skills target self
+        const isOffensive = isAutoSpellOffensive(proc.skill);
+        if (isOffensive) {
+            executeAutoSpellEffect(target, attacker, attackerIsEnemy, proc.skill, level, zone, io);
+        } else {
+            // Self-targeted (Gloria, Kyrie, Auto Guard, Heal on self, etc.)
+            executeAutoSpellEffect(target, target, false, proc.skill, level, zone, io);
+        }
+    }
+}
+
+/**
+ * Resolve auto-spell level — handles expressions like "3+7*(getskilllv("WZ_JUPITEL") == 10)"
+ */
+function resolveAutoSpellLevel(levelExpr, caster) {
+    if (typeof levelExpr === 'number') return levelExpr;
+    const str = String(levelExpr).trim();
+    // Simple integer
+    const simple = parseInt(str);
+    if (!isNaN(simple) && String(simple) === str) return simple;
+    // Expression with getskilllv — resolve skill level
+    try {
+        let resolved = str;
+        resolved = resolved.replace(/getskilllv\("(\w+)"\)/g, (_, skillName) => {
+            // Look up skill ID from name, then check caster's learned skills
+            const skillDef = ALL_SKILLS.find(s => s.name === skillName.toLowerCase());
+            if (!skillDef || !caster.learnedSkills) return '0';
+            return String(caster.learnedSkills[skillDef.id] || 0);
+        });
+        // Evaluate safe math expression (only +, -, *, ==, numbers)
+        const safeExpr = resolved.replace(/[^0-9+\-*/%()= ]/g, '');
+        if (safeExpr.length > 0) {
+            const result = Function('"use strict"; return (' + safeExpr + ')')();
+            return Math.max(1, Math.floor(result));
+        }
+    } catch (e) { /* fallback */ }
+    return parseInt(str) || 1;
+}
+
+/**
+ * Check if a skill is offensive (targets enemy) vs self/support
+ */
+function isAutoSpellOffensive(skillName) {
+    const SELF_SKILLS = new Set([
+        'PR_GLORIA', 'PR_KYRIE', 'SM_ENDURE', 'AL_HEAL', 'AL_BLESSING',
+        'AL_INCAGI', 'CR_AUTOGUARD', 'AC_CONCENTRATION', 'MG_SIGHT',
+        'PR_MAGNIFICAT', 'PR_SUFFRAGIUM', 'HP_ASSUMPTIO', 'PR_LEXDIVINA'
+    ]);
+    return !SELF_SKILLS.has(skillName);
+}
+
+/**
+ * Execute an auto-spell effect (damage, heal, or buff) without SP/cast/gems
+ */
+function executeAutoSpellEffect(caster, target, targetIsEnemy, skillName, level, zone, io) {
+    if (!caster || !target || !zone || !io) return;
+
+    // Look up skill data
+    const skillDef = ALL_SKILLS.find(s =>
+        s.name === skillName.toLowerCase() ||
+        s.name === skillName.replace(/^[A-Z]{2}_/, '').toLowerCase()
+    );
+
+    if (!skillDef) {
+        // Skill not in our data — log and skip
+        logger.debug(`[AUTOCAST] Skill ${skillName} not found in ro_skill_data, skipping`);
+        return;
+    }
+
+    const levelData = skillDef.levels ? skillDef.levels[Math.min(level - 1, skillDef.levels.length - 1)] : null;
+    const multiplier = levelData ? (levelData.effectValue || levelData.damagePercent || 100) : 100;
+    const casterId = caster.characterId || caster.enemyId || 0;
+    const targetId = target.characterId || target.enemyId || 0;
+
+    // Determine if this is a physical or magical skill
+    const isMagical = skillDef.type === 'offensive_magic' || skillDef.element === 'fire' ||
+        skillDef.element === 'water' || skillDef.element === 'wind' || skillDef.element === 'earth' ||
+        skillDef.element === 'ghost' || skillDef.element === 'holy';
+
+    if (skillDef.type === 'heal' || skillName === 'AL_HEAL') {
+        // Heal auto-cast (Loli Ruri, Enchanted Peach Tree, Vitata granted skill)
+        const healAmt = Math.floor(((caster.stats?.level || 1) + (caster.stats?.int || 1)) / 8) * (4 + level * 8);
+        if (target.health !== undefined) {
+            target.health = Math.min(target.maxHealth || target.health, target.health + healAmt);
+        }
+        broadcastToZone(zone, 'skill:effect_damage', {
+            attackerId: casterId, targetId, skillId: skillDef.id, skillName: skillDef.displayName || skillName,
+            damage: 0, hitType: 'heal', healAmount: healAmt, element: 'holy',
+            isEnemy: targetIsEnemy, targetHealth: target.health || 0, targetMaxHealth: target.maxHealth || 0,
+            hitNumber: 1, totalHits: 1
+        });
+    } else if (skillDef.type === 'buff' || skillDef.type === 'support' || !isMagical && !targetIsEnemy) {
+        // Buff auto-cast (Gloria, Kyrie, Auto Guard, Blessing, etc.)
+        // Apply as a buff if we have a handler for it
+        const buffName = skillName.toLowerCase().replace(/^[a-z]{2}_/, '');
+        logger.info(`[AUTOCAST] Buff ${skillName} Lv${level} triggered on ${target.characterName || target.name || targetId}`);
+        // For now, broadcast the visual — full buff application would need per-skill handlers
+        broadcastToZone(zone, 'skill:cast_complete', { casterId, skillId: skillDef.id });
+    } else if (isMagical && targetIsEnemy) {
+        // Magical damage auto-cast (bolts, Meteor Storm, etc.)
+        const effectiveStats = caster.stats ? getEffectiveStats(caster) : caster;
+        const attackerInfo = caster.characterId ? getAttackerInfo(caster) : { weaponType: 'bare_hand', weaponElement: 'neutral', weaponLevel: 1, buffMods: {}, cardMods: null, race: 'demihuman' };
+        const targetInfo = target.enemyId ? getEnemyTargetInfo(target) : { element: target.element || { type: 'neutral', level: 1 }, size: 'medium', race: target.race || 'formless', numAttackers: 1, buffMods: {} };
+        const skillElement = skillDef.element && skillDef.element !== 'neutral' ? skillDef.element : null;
+
+        // Bolt skills: multi-hit (1 hit per level)
+        const isBolt = /bolt/i.test(skillName) || skillName === 'MG_SOULSTRIKE' || skillName === 'HW_NAPALMVULCAN';
+        const totalHits = isBolt ? level : 1;
+        const perHitMult = isBolt ? 100 : multiplier;
+
+        for (let hit = 0; hit < totalHits; hit++) {
+            const result = calculateMagicalDamage(
+                { ...effectiveStats, ...attackerInfo, stats: effectiveStats },
+                { ...targetInfo, stats: target.stats || target, hardMdef: target.hardMdef || 0 },
+                { skillMultiplier: perHitMult, skillElement: skillElement || 'neutral', skillName }
+            );
+
+            if (!result.isMiss && result.damage > 0 && target.health !== undefined) {
+                target.health = Math.max(0, target.health - result.damage);
+            }
+
+            // Stagger broadcast for multi-hit
+            const delay = hit * 200;
+            setTimeout(() => {
+                broadcastToZone(zone, 'skill:effect_damage', {
+                    attackerId: casterId, targetId: target.enemyId || targetId,
+                    skillId: skillDef.id, skillName: skillDef.displayName || skillName,
+                    damage: result.damage, hitType: result.hitType, element: result.element,
+                    isEnemy: targetIsEnemy,
+                    targetHealth: target.health || 0, targetMaxHealth: target.maxHealth || 0,
+                    hitNumber: hit + 1, totalHits,
+                    isAutocast: true
+                });
+            }, delay);
+        }
+
+        logger.info(`[AUTOCAST] ${caster.characterName || 'Player'} proc'd ${skillName} Lv${level} (${totalHits} hits) on ${target.name || targetId}`);
+    } else if (!isMagical && targetIsEnemy) {
+        // Physical damage auto-cast (Bash, Bowling Bash, etc.)
+        const effectiveStats = caster.stats ? getEffectiveStats(caster) : caster;
+        const attackerInfo = caster.characterId ? getAttackerInfo(caster) : { weaponType: 'bare_hand', weaponElement: 'neutral', weaponLevel: 1, buffMods: {}, cardMods: null, race: 'demihuman' };
+        const targetInfo = target.enemyId ? getEnemyTargetInfo(target) : { element: { type: 'neutral', level: 1 }, size: 'medium', race: 'formless', numAttackers: 1, buffMods: {} };
+
+        const result = calculatePhysicalDamage(
+            { ...effectiveStats, ...attackerInfo, stats: effectiveStats },
+            { ...targetInfo, stats: target.stats || target, hardDef: target.hardDef || 0 },
+            { isSkill: true, skillMultiplier: multiplier, forceHit: true, skillElement: skillDef.element === 'neutral' ? null : skillDef.element, skillName }
+        );
+
+        if (!result.isMiss && result.damage > 0 && target.health !== undefined) {
+            target.health = Math.max(0, target.health - result.damage);
+        }
+
+        broadcastToZone(zone, 'skill:effect_damage', {
+            attackerId: casterId, targetId: target.enemyId || targetId,
+            skillId: skillDef.id, skillName: skillDef.displayName || skillName,
+            damage: result.damage, hitType: result.hitType, element: result.element,
+            isEnemy: targetIsEnemy,
+            targetHealth: target.health || 0, targetMaxHealth: target.maxHealth || 0,
+            hitNumber: 1, totalHits: 1, isAutocast: true
+        });
+
+        logger.info(`[AUTOCAST] ${caster.characterName || 'Player'} proc'd ${skillName} Lv${level} for ${result.damage} on ${target.name || targetId}`);
+    }
+}
+
+/**
+ * Phase 8: Process card drop bonuses on monster kill
+ * Returns array of extra items to add to inventory
+ */
+function processCardDropBonuses(attacker, enemy) {
+    const extraDrops = [];
+    const monsterRace = enemy.race || 'formless';
+
+    // bAddMonsterDropItem: extra item drops
+    if (attacker.cardAddMonsterDropItem && attacker.cardAddMonsterDropItem.length > 0) {
+        for (const drop of attacker.cardAddMonsterDropItem) {
+            if (drop.race !== 'all' && drop.race !== monsterRace) continue;
+            if (Math.random() * 10000 < drop.chance) {
+                const itemDef = itemDefinitions.get(drop.itemId);
+                if (itemDef) {
+                    extraDrops.push({
+                        itemId: drop.itemId, itemName: itemDef.name, quantity: 1,
+                        icon: itemDef.icon || 'default_item', itemType: itemDef.item_type || 'etc'
+                    });
+                }
+            }
+        }
+    }
+
+    // System N: bAddMonsterDropItemGroup — pick random item from group
+    if (attacker.cardAddMonsterDropItemGroup && attacker.cardAddMonsterDropItemGroup.length > 0) {
+        for (const drop of attacker.cardAddMonsterDropItemGroup) {
+            if (Math.random() * 10000 < drop.chance) {
+                const itemId = pickRandomFromGroup(drop.group);
+                if (itemId) {
+                    const itemDef = itemDefinitions.get(itemId);
+                    if (itemDef) {
+                        extraDrops.push({
+                            itemId, itemName: itemDef.name, quantity: 1,
+                            icon: itemDef.icon || 'default_item', itemType: itemDef.item_type || 'etc'
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    return extraDrops;
+}
+
+// Merge base stats with equipment bonuses + card bonuses + passive skill bonuses + buff modifiers
 function getEffectiveStats(player) {
     const bonuses = player.equipmentBonuses || {};
+    const cardB = player.cardBonuses || {};
     const passive = getPassiveSkillBonuses(player);
     const buffMods = getBuffStatModifiers(player);
     return {
-        str: (player.stats.str || 1) + (bonuses.str || 0) + (buffMods.strBonus || 0),
-        agi: (player.stats.agi || 1) + (bonuses.agi || 0) + (buffMods.agiBonus || 0),
-        vit: (player.stats.vit || 1) + (bonuses.vit || 0) + (buffMods.vitBonus || 0),
-        int: (player.stats.int || 1) + (bonuses.int || 0) + (buffMods.intBonus || 0),
-        dex: (player.stats.dex || 1) + (bonuses.dex || 0) + (buffMods.dexBonus || 0) + (passive.bonusDEX || 0),
-        luk: (player.stats.luk || 1) + (bonuses.luk || 0) + (buffMods.lukBonus || 0),
+        str: (player.stats.str || 1) + (bonuses.str || 0) + (cardB.str || 0) + (buffMods.strBonus || 0),
+        agi: (player.stats.agi || 1) + (bonuses.agi || 0) + (cardB.agi || 0) + (buffMods.agiBonus || 0),
+        vit: (player.stats.vit || 1) + (bonuses.vit || 0) + (cardB.vit || 0) + (buffMods.vitBonus || 0),
+        int: (player.stats.int || 1) + (bonuses.int || 0) + (cardB.int || 0) + (buffMods.intBonus || 0),
+        dex: (player.stats.dex || 1) + (bonuses.dex || 0) + (cardB.dex || 0) + (buffMods.dexBonus || 0) + (passive.bonusDEX || 0),
+        luk: (player.stats.luk || 1) + (bonuses.luk || 0) + (cardB.luk || 0) + (buffMods.lukBonus || 0),
         level: player.stats.level || 1,
-        weaponATK: player.stats.weaponATK || 0,
+        weaponATK: (player.stats.weaponATK || 0) + (cardB.atk || 0),
         passiveATK: passive.bonusATK,
         statPoints: player.stats.statPoints || 0,
-        bonusHit: (bonuses.hit || 0) + (passive.bonusHIT || 0) + (buffMods.bonusHit || 0),
-        bonusFlee: (bonuses.flee || 0) + (passive.bonusFLEE || 0) + (buffMods.bonusFlee || 0),
-        bonusCritical: (bonuses.critical || 0) + (buffMods.bonusCritical || 0),
-        bonusMaxHp: (bonuses.maxHp || 0) + (buffMods.bonusMaxHp || 0),
-        bonusMaxSp: (bonuses.maxSp || 0) + (buffMods.bonusMaxSp || 0),
+        bonusHit: (bonuses.hit || 0) + (cardB.hit || 0) + (passive.bonusHIT || 0) + (buffMods.bonusHit || 0),
+        bonusFlee: (bonuses.flee || 0) + (cardB.flee || 0) + (passive.bonusFLEE || 0) + (buffMods.bonusFlee || 0),
+        bonusCritical: (bonuses.critical || 0) + (cardB.critical || 0) + (buffMods.bonusCritical || 0),
+        bonusPerfectDodge: (bonuses.perfectDodge || 0) + (cardB.perfectDodge || 0),
+        bonusMaxHp: (bonuses.maxHp || 0) + (cardB.maxHp || 0) + (buffMods.bonusMaxHp || 0),
+        bonusMaxSp: (bonuses.maxSp || 0) + (cardB.maxSp || 0) + (buffMods.bonusMaxSp || 0),
+        bonusMaxHpRate: (player.cardMaxHpRate || 0) + (player.equipMaxHpRate || 0),
+        bonusMaxSpRate: (player.cardMaxSpRate || 0) + (player.equipMaxSpRate || 0),
+        equipAspdRate: (player.equipAspdRate || 0) + (player.cardAspdRate || 0),
+        bonusHardDef: cardB.def || 0,
+        bonusMATK: cardB.matk || 0,
+        bonusHardMDEF: cardB.mdef || 0,
         buffAtkMultiplier: buffMods.atkMultiplier,
         buffDefMultiplier: buffMods.defMultiplier,
         buffBonusMDEF: buffMods.bonusMDEF,
@@ -913,6 +2095,14 @@ function getEffectiveStats(player) {
         doubleAttackChance: passive.doubleAttackChance || 0,
         bonusRange: passive.bonusRange || 0,
         fatalBlowChance: passive.fatalBlowChance || 0,
+        // Equipment properties for derived stat formulas
+        jobClass: player.jobClass || 'novice',
+        weaponType: player.weaponType || 'bare_hand',
+        weaponMATK: player.weaponMATK || 0,
+        hardMdef: player.hardMdef || 0,
+        buffAspdMultiplier: buffMods.aspdMultiplier || 1,
+        // Dual wield: pass left-hand weapon type for ASPD calculation
+        weaponTypeLeft: (player.equippedWeaponLeft && player.equippedWeaponLeft.weaponType) || null,
     };
 }
 
@@ -923,10 +2113,26 @@ function getAttackerInfo(player, cachedPassive) {
         weaponType: player.weaponType || 'bare_hand',
         weaponElement: player.weaponElement || 'neutral',
         weaponLevel: player.weaponLevel || 1,
+        weaponMATK: player.weaponMATK || 0,
         buffMods: getBuffStatModifiers(player),
         cardMods: player.cardMods || null,
         passiveRaceATK: passive.raceATK || null,
-        race: 'demihuman'
+        critAtkRate: (player.equipCritAtkRate || 0) + (player.cardCritAtkRate || 0),
+        race: 'demihuman',
+        // Phase 1: Extended card modifiers for damage pipeline
+        cardCritRace: player.cardCritRace || {},
+        cardAddClass: player.cardAddClass || {},
+        cardMagicRace: player.cardMagicRace || {},
+        cardAddRace2: player.cardAddRace2 || {},
+        cardLongAtkRate: player.cardLongAtkRate || 0,
+        cardSkillAtk: player.cardSkillAtk || {},
+        cardIgnoreMdefClass: player.cardIgnoreMdefClass || {},
+        cardIgnoreDefClass: player.cardIgnoreDefClass,
+        cardNoSizeFix: player.cardNoSizeFix || false,
+        cardMatkRate: player.cardMatkRate || 0,
+        cardDefRatioAtkClass: player.cardDefRatioAtkClass,
+        cardAddDamageClass: player.cardAddDamageClass || {},
+        cardCriticalLong: player.cardCriticalLong || 0,
     };
 }
 
@@ -963,9 +2169,15 @@ function getPlayerTargetInfo(player, targetCharId, cachedPassive) {
         element: player.armorElement || { type: 'neutral', level: 1 },
         size: 'medium', // Players are always medium
         race: 'demihuman',
+        hardMdef: player.hardMdef || 0,
         numAttackers: Math.max(1, numAttackers),
         buffMods: getBuffStatModifiers(player),
-        passiveRaceDEF: passive.raceDEF || null
+        passiveRaceDEF: passive.raceDEF || null,
+        cardDefMods: player.cardDefMods || null,
+        cardSubClass: player.cardSubClass || {},
+        cardLongAtkDef: player.cardLongAtkDef || 0,
+        cardNoMagicDamage: player.cardNoMagicDamage || 0,
+        cardAddDefMonster: player.cardAddDefMonster || {},
     };
 }
 
@@ -1141,6 +2353,25 @@ function buildFullStatsPayload(characterId, player, effectiveStats, derived, fin
         dex: getStatPointCost(player.stats.dex || 1),
         luk: getStatPointCost(player.stats.luk || 1)
     };
+    // Dual wield info for client display
+    const dualWieldInfo = {};
+    if (isDualWielding(player)) {
+        const passive = getPassiveSkillBonuses(player);
+        dualWieldInfo.isDualWielding = true;
+        dualWieldInfo.weaponATK_right = (player.equippedWeaponRight && player.equippedWeaponRight.atk) || 0;
+        dualWieldInfo.weaponATK_left = (player.equippedWeaponLeft && player.equippedWeaponLeft.atk) || 0;
+        dualWieldInfo.rightHandMasteryLv = passive.rightHandMasteryLv;
+        dualWieldInfo.leftHandMasteryLv = passive.leftHandMasteryLv;
+        dualWieldInfo.rightHandDamagePercent = 50 + (passive.rightHandMasteryLv * 10);
+        dualWieldInfo.leftHandDamagePercent = 30 + (passive.leftHandMasteryLv * 10);
+        dualWieldInfo.weaponTypeRight = (player.equippedWeaponRight && player.equippedWeaponRight.weaponType) || null;
+        dualWieldInfo.weaponTypeLeft = (player.equippedWeaponLeft && player.equippedWeaponLeft.weaponType) || null;
+        dualWieldInfo.elementRight = (player.equippedWeaponRight && player.equippedWeaponRight.element) || 'neutral';
+        dualWieldInfo.elementLeft = (player.equippedWeaponLeft && player.equippedWeaponLeft.element) || 'neutral';
+    } else {
+        dualWieldInfo.isDualWielding = false;
+    }
+
     return {
         characterId,
         stats: {
@@ -1148,6 +2379,8 @@ function buildFullStatsPayload(characterId, player, effectiveStats, derived, fin
             str: effectiveStats.str, agi: effectiveStats.agi, vit: effectiveStats.vit,
             int: effectiveStats.int, dex: effectiveStats.dex, luk: effectiveStats.luk,
             hardDef: player.hardDef || 0,
+            hardMdef: player.hardMdef || 0,
+            weaponMATK: player.weaponMATK || 0,
             passiveATK: effectiveStats.passiveATK || 0
         },
         baseStats: {
@@ -1159,9 +2392,13 @@ function buildFullStatsPayload(characterId, player, effectiveStats, derived, fin
             ...derived,
             statusATK: Math.floor(derived.statusATK * (effectiveStats.buffAtkMultiplier || 1)),
             softDEF: Math.floor(derived.softDEF * (effectiveStats.buffDefMultiplier || 1)),
-            aspd: finalAspd
+            softMDEF: derived.softMDEF + (effectiveStats.buffBonusMDEF || 0),
+            aspd: finalAspd,
+            // System J: Movement speed (base 150ms/cell, lower = faster)
+            moveSpeed: Math.max(20, Math.floor(150 * (100 - (player.cardSpeedRate || 0)) / 100)),
         },
-        exp: buildExpPayload(player)
+        exp: buildExpPayload(player),
+        dualWield: dualWieldInfo
     };
 }
 
@@ -1418,7 +2655,9 @@ async function savePlayerHealthToDB(characterId, health, mana) {
 // ============================================================
 const INVENTORY = {
     MAX_SLOTS: 100,           // Max inventory slots per character
-    MAX_WEIGHT: 2000          // Max carry weight (future use)
+    MAX_WEIGHT: 2000,         // Base max carry weight (before STR bonus)
+    OVERWEIGHT_50: 0.5,       // Regen stops at 50% weight
+    OVERWEIGHT_90: 0.9,       // Attack/skills blocked at 90% weight
 };
 
 // Item definitions cache (loaded from DB on startup)
@@ -1458,6 +2697,97 @@ const NPC_SHOPS = {
         itemIds: [501, 502, 503, 505, 506, 2301, 2312, 2314]
     }
 };
+
+// ---- Equipment Restriction Helpers (RO Classic job/gender/two-hand validation) ----
+
+// Maps our lowercase jobClass → all rAthena job names that should grant equip access.
+// In RO Classic, a first-class character can equip items tagged for their base class AND
+// second-class characters can equip items tagged for their pre-trans second classes.
+const JOB_EQUIP_NAMES = {
+    'novice':     ['Novice', 'SuperNovice'],
+    'swordsman':  ['Swordman', 'Novice', 'SuperNovice'],
+    'mage':       ['Mage', 'Novice', 'SuperNovice'],
+    'archer':     ['Archer', 'Novice', 'SuperNovice'],
+    'acolyte':    ['Acolyte', 'Novice', 'SuperNovice'],
+    'thief':      ['Thief', 'Novice', 'SuperNovice'],
+    'merchant':   ['Merchant', 'Novice', 'SuperNovice'],
+    // Second classes inherit their first-class equip access
+    'knight':     ['Knight', 'Swordman', 'Novice', 'SuperNovice'],
+    'crusader':   ['Crusader', 'Swordman', 'Novice', 'SuperNovice'],
+    'wizard':     ['Wizard', 'Mage', 'Novice', 'SuperNovice'],
+    'sage':       ['Sage', 'Mage', 'Novice', 'SuperNovice'],
+    'hunter':     ['Hunter', 'Archer', 'Novice', 'SuperNovice'],
+    'bard':       ['BardDancer', 'Archer', 'Novice', 'SuperNovice'],
+    'dancer':     ['BardDancer', 'Archer', 'Novice', 'SuperNovice'],
+    'priest':     ['Priest', 'Acolyte', 'Novice', 'SuperNovice'],
+    'monk':       ['Monk', 'Acolyte', 'Novice', 'SuperNovice'],
+    'assassin':   ['Assassin', 'Thief', 'Novice', 'SuperNovice'],
+    'rogue':      ['Rogue', 'Thief', 'Novice', 'SuperNovice'],
+    'blacksmith': ['Blacksmith', 'Merchant', 'Novice', 'SuperNovice'],
+    'alchemist':  ['Alchemist', 'Merchant', 'Novice', 'SuperNovice'],
+};
+
+/**
+ * Check if a player's job class can equip an item based on its jobs_allowed column.
+ * @param {string} jobClass - Our lowercase job class (e.g. 'swordsman')
+ * @param {string} jobsAllowed - Comma-separated rAthena job names or 'All'
+ * @returns {boolean}
+ */
+function canJobEquip(jobClass, jobsAllowed) {
+    if (!jobsAllowed || jobsAllowed === 'All') return true;
+    const allowedSet = jobsAllowed.split(',').map(s => s.trim());
+    if (allowedSet.includes('All')) return true;
+    const playerJobNames = JOB_EQUIP_NAMES[jobClass] || ['Novice'];
+    return playerJobNames.some(name => allowedSet.includes(name));
+}
+
+/**
+ * Check if a player's gender can equip an item based on its gender_allowed column.
+ * @param {string} playerGender - 'male' or 'female'
+ * @param {string} genderAllowed - 'Both', 'Male', or 'Female'
+ * @returns {boolean}
+ */
+function canGenderEquip(playerGender, genderAllowed) {
+    if (!genderAllowed || genderAllowed === 'Both') return true;
+    return genderAllowed.toLowerCase() === playerGender;
+}
+
+/**
+ * Determine if a weapon is two-handed based on its sub_type (rAthena SubType).
+ * @param {string} subType - e.g. '2hSword', 'Bow', 'Katar', etc.
+ * @returns {boolean}
+ */
+function isTwoHandedWeapon(subType) {
+    if (!subType) return false;
+    const twoHandedTypes = ['2hSword', '2hSpear', '2hAxe', '2hMace', '2hStaff',
+                            'Bow', 'Katar', 'Musical', 'Whip',
+                            'Huuma', 'Rifle', 'Shotgun', 'Gatling', 'Grenade'];
+    return twoHandedTypes.includes(subType);
+}
+
+// ============================================================
+// Dual Wield System — Assassin/Assassin Cross only
+// ============================================================
+
+// Classes that can dual wield weapons (RO Classic: only Assassin and Assassin Cross)
+function canDualWield(jobClass) {
+    return jobClass === 'assassin' || jobClass === 'assassin_cross';
+}
+
+// Weapon types allowed in the left hand for dual wielding
+function isValidLeftHandWeapon(weaponType) {
+    return weaponType === 'dagger' || weaponType === 'one_hand_sword' || weaponType === 'axe';
+}
+
+// Check if a player is currently dual wielding (both weapon slots occupied)
+function isDualWielding(player) {
+    return !!(player.equippedWeaponRight && player.equippedWeaponLeft);
+}
+
+// Check if item sub_type is a Katar (occupies both hand slots, mutually exclusive with dual wield)
+function isKatar(subType) {
+    return subType === 'Katar';
+}
 
 // ---- Discount / Overcharge skill helpers (RO Classic Merchant passives) ----
 // Discount (601): reduces NPC buy prices. Overcharge (602): increases NPC sell prices.
@@ -1506,6 +2836,90 @@ function getPlayerMaxWeight(player) {
         }
     }
     return maxW;
+}
+
+// ---- Weight Threshold Helpers (RO Classic overweight system) ----
+
+/**
+ * Get the weight ratio (0.0 to 1.0+) for a player using cached currentWeight.
+ */
+function getWeightRatio(player) {
+    const maxW = getPlayerMaxWeight(player);
+    if (maxW <= 0) return 0;
+    return (player.currentWeight || 0) / maxW;
+}
+
+/**
+ * Get full weight status object for a player.
+ */
+function getWeightStatus(player) {
+    const currentWeight = player.currentWeight || 0;
+    const maxWeight = getPlayerMaxWeight(player);
+    const ratio = maxWeight > 0 ? currentWeight / maxWeight : 0;
+    return {
+        ratio,
+        currentWeight,
+        maxWeight,
+        isOverweight50: ratio >= INVENTORY.OVERWEIGHT_50,
+        isOverweight90: ratio >= INVENTORY.OVERWEIGHT_90,
+        isOverweight100: currentWeight > maxWeight
+    };
+}
+
+/**
+ * Calculate a player's current weight from the DB (SUM of inventory item weights).
+ */
+async function calculatePlayerCurrentWeight(characterId) {
+    try {
+        const result = await pool.query(
+            `SELECT COALESCE(SUM(ci.quantity * i.weight), 0) as total_weight
+             FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
+             WHERE ci.character_id = $1`, [characterId]
+        );
+        return parseInt(result.rows[0].total_weight) || 0;
+    } catch (err) {
+        logger.warn(`[WEIGHT] Failed to calculate weight for char ${characterId}: ${err.message}`);
+        return 0;
+    }
+}
+
+/**
+ * Recalculate weight from DB, update cache, and emit weight:status if a threshold boundary was crossed.
+ */
+async function updatePlayerWeightCache(characterId, player) {
+    const oldWeight = player.currentWeight || 0;
+    const maxWeight = getPlayerMaxWeight(player);
+    const oldRatio = maxWeight > 0 ? oldWeight / maxWeight : 0;
+
+    player.currentWeight = await calculatePlayerCurrentWeight(characterId);
+
+    const newRatio = maxWeight > 0 ? player.currentWeight / maxWeight : 0;
+
+    // Check if any threshold boundary was crossed
+    const thresholds = [INVENTORY.OVERWEIGHT_50, INVENTORY.OVERWEIGHT_90, 1.0];
+    const crossed = thresholds.some(t => (oldRatio < t) !== (newRatio < t));
+
+    if (crossed || Math.abs(oldWeight - player.currentWeight) > 0) {
+        emitWeightStatus(characterId, player);
+    }
+}
+
+/**
+ * Emit weight:status event to the player's socket.
+ */
+function emitWeightStatus(characterId, player) {
+    const sock = io.sockets.sockets.get(player.socketId);
+    if (!sock) return;
+    const status = getWeightStatus(player);
+    sock.emit('weight:status', {
+        characterId,
+        currentWeight: status.currentWeight,
+        maxWeight: status.maxWeight,
+        ratio: Math.round(status.ratio * 1000) / 1000, // 3 decimal places
+        isOverweight50: status.isOverweight50,
+        isOverweight90: status.isOverweight90,
+        isOverweight100: status.isOverweight100
+    });
 }
 
 async function loadItemDefinitions() {
@@ -1622,20 +3036,52 @@ async function getPlayerInventory(characterId) {
     try {
         const result = await pool.query(
             `SELECT ci.inventory_id, ci.item_id, ci.quantity, ci.is_equipped, ci.slot_index,
-                    ci.equipped_position,
-                    i.name, i.description, i.item_type, i.equip_slot, i.weight, i.price,
+                    ci.equipped_position, ci.refine_level, ci.compounded_cards,
+                    i.name, i.description, i.full_description, i.item_type, i.equip_slot,
+                    i.weight, i.price, i.buy_price, i.sell_price,
                     i.atk, i.def, i.matk, i.mdef,
                     i.str_bonus, i.agi_bonus, i.vit_bonus, i.int_bonus, i.dex_bonus, i.luk_bonus,
-                    i.max_hp_bonus, i.max_sp_bonus, i.required_level, i.stackable, i.icon,
+                    i.max_hp_bonus, i.max_sp_bonus, i.hit_bonus, i.flee_bonus, i.critical_bonus, i.perfect_dodge_bonus,
+                    i.max_hp_rate, i.max_sp_rate, i.aspd_rate,
+                    i.hp_regen_rate, i.sp_regen_rate, i.crit_atk_rate, i.cast_rate, i.use_sp_rate, i.heal_power,
+                    i.required_level, i.stackable, i.icon,
                     i.weapon_type, i.aspd_modifier, i.weapon_range,
-                    i.buy_price, i.sell_price
+                    i.slots, i.weapon_level, i.refineable, i.jobs_allowed,
+                    i.card_type, i.card_prefix, i.card_suffix,
+                    i.two_handed, i.element
              FROM character_inventory ci
              JOIN items i ON ci.item_id = i.item_id
              WHERE ci.character_id = $1
              ORDER BY ci.slot_index ASC, ci.created_at ASC`,
             [characterId]
         );
-        return result.rows;
+
+        // Resolve compounded card details inline
+        const rows = result.rows;
+        for (const item of rows) {
+            const cards = item.compounded_cards;
+            if (cards && Array.isArray(cards) && cards.length > 0) {
+                item.compounded_card_details = cards.map(cardId => {
+                    if (!cardId) return null;
+                    const cardDef = itemDefinitions.get(cardId);
+                    if (!cardDef) return null;
+                    return {
+                        item_id: cardId,
+                        name: cardDef.name,
+                        description: cardDef.description,
+                        full_description: cardDef.full_description,
+                        icon: cardDef.icon,
+                        card_type: cardDef.card_type || null,
+                        card_prefix: cardDef.card_prefix || null,
+                        card_suffix: cardDef.card_suffix || null,
+                        weight: cardDef.weight || 0
+                    };
+                });
+            } else {
+                item.compounded_card_details = [];
+            }
+        }
+        return rows;
     } catch (err) {
         logger.error(`[ITEMS] Failed to load inventory for char ${characterId}: ${err.message}`);
         return [];
@@ -1827,9 +3273,10 @@ io.on('connection', (socket) => {
         let health = 100, maxHealth = 100, mana = 100, maxMana = 100, zuzucoin = 0;
         let initialX, initialY, initialZ;
         let playerZone = 'prontera_south';
+        let playerGender = 'male';
         try {
             const charResult = await pool.query(
-                'SELECT x, y, z, health, max_health, mana, max_mana, zuzucoin, zone_name FROM characters WHERE character_id = $1',
+                'SELECT x, y, z, health, max_health, mana, max_mana, zuzucoin, zone_name, gender FROM characters WHERE character_id = $1',
                 [characterId]
             );
             if (charResult.rows.length > 0) {
@@ -1843,6 +3290,7 @@ io.on('connection', (socket) => {
                 initialY = row.y;
                 initialZ = row.z;
                 playerZone = row.zone_name || 'prontera_south';
+                playerGender = row.gender || 'male';
 
                 // Cache correct position in Redis
                 await setPlayerPosition(characterId, row.x, row.y, row.z);
@@ -1897,35 +3345,75 @@ io.on('connection', (socket) => {
             logger.warn(`Could not load stats for character ${characterId}: ${err.message}`);
         }
         
-        // Load equipped weapon ATK, range, and ASPD modifier
+        // Load equipped weapon ATK, range, and ASPD modifier (both right and left hand)
         let weaponRange = COMBAT.MELEE_RANGE;
         let weaponAspdMod = 0;
         let weaponResult = null;
+        // Dual wield: left-hand weapon tracking
+        let equippedWeaponRight = null;  // { atk, weaponType, element, weaponLevel, matk, refineLevel, itemId }
+        let equippedWeaponLeft = null;
         try {
             weaponResult = await pool.query(
-                `SELECT i.atk, i.weapon_type, i.aspd_modifier, i.weapon_range, i.weapon_level FROM character_inventory ci
+                `SELECT i.atk, i.weapon_type, i.aspd_modifier, i.weapon_range, i.weapon_level,
+                        i.element, i.matk, i.item_id, i.sub_type, ci.equipped_position,
+                        ci.refine_level
+                 FROM character_inventory ci
                  JOIN items i ON ci.item_id = i.item_id
-                 WHERE ci.character_id = $1 AND ci.is_equipped = true AND i.equip_slot = 'weapon'
-                 LIMIT 1`,
+                 WHERE ci.character_id = $1 AND ci.is_equipped = true
+                   AND ci.equipped_position IN ('weapon', 'weapon_left')`,
                 [characterId]
             );
-            if (weaponResult.rows.length > 0) {
-                const w = weaponResult.rows[0];
-                baseStats.weaponATK = w.atk || 0;
-                weaponRange = w.weapon_range ? w.weapon_range * COMBAT.MELEE_RANGE : COMBAT.MELEE_RANGE; // Convert RO cells to UE units (1 cell = 150 UE units)
-                weaponAspdMod = w.aspd_modifier || 0;
-                logger.info(`[ITEMS] Loaded equipped weapon: ATK=${baseStats.weaponATK}, range=${weaponRange}, aspdMod=${weaponAspdMod}, type=${w.weapon_type} for char ${characterId}`);
+            for (const w of weaponResult.rows) {
+                if (w.equipped_position === 'weapon') {
+                    baseStats.weaponATK = w.atk || 0;
+                    weaponRange = w.weapon_range ? w.weapon_range * COMBAT.MELEE_RANGE : COMBAT.MELEE_RANGE;
+                    weaponAspdMod = w.aspd_modifier || 0;
+                    equippedWeaponRight = {
+                        atk: w.atk || 0, weaponType: w.weapon_type, element: w.element || 'neutral',
+                        weaponLevel: w.weapon_level || 1, matk: w.matk || 0, refineLevel: w.refine_level || 0,
+                        itemId: w.item_id, subType: w.sub_type
+                    };
+                    logger.info(`[ITEMS] Loaded right-hand weapon: ATK=${w.atk}, type=${w.weapon_type} for char ${characterId}`);
+                } else if (w.equipped_position === 'weapon_left') {
+                    equippedWeaponLeft = {
+                        atk: w.atk || 0, weaponType: w.weapon_type, element: w.element || 'neutral',
+                        weaponLevel: w.weapon_level || 1, matk: w.matk || 0, refineLevel: w.refine_level || 0,
+                        itemId: w.item_id, subType: w.sub_type
+                    };
+                    logger.info(`[ITEMS] Loaded left-hand weapon: ATK=${w.atk}, type=${w.weapon_type} for char ${characterId}`);
+                }
             }
         } catch (err) {
             logger.debug(`[ITEMS] No equipped weapon found for char ${characterId}`);
         }
 
-        // Track weapon type + level for passive mastery skills and damage variance
+        // Track weapon type + level + element for passive mastery skills and damage variance
         let weaponType = null;
         let weaponLevel = 1;
-        if (weaponResult && weaponResult.rows.length > 0) {
-            weaponType = weaponResult.rows[0].weapon_type;
-            weaponLevel = weaponResult.rows[0].weapon_level || 1;
+        let weaponElement = 'neutral';
+        let weaponMATK = 0;
+        if (equippedWeaponRight) {
+            weaponType = equippedWeaponRight.weaponType;
+            weaponLevel = equippedWeaponRight.weaponLevel;
+            weaponElement = equippedWeaponRight.element;
+            weaponMATK = equippedWeaponRight.matk;
+        }
+
+        // Load equipped armor element (determines player's defensive element)
+        let armorElement = { type: 'neutral', level: 1 };
+        try {
+            const armorResult = await pool.query(
+                `SELECT i.element FROM character_inventory ci
+                 JOIN items i ON ci.item_id = i.item_id
+                 WHERE ci.character_id = $1 AND ci.is_equipped = true AND i.equip_slot = 'armor'
+                 LIMIT 1`,
+                [characterId]
+            );
+            if (armorResult.rows.length > 0 && armorResult.rows[0].element && armorResult.rows[0].element !== 'neutral') {
+                armorElement = { type: armorResult.rows[0].element, level: 1 };
+            }
+        } catch (err) {
+            logger.debug(`[ITEMS] No equipped armor element for char ${characterId}`);
         }
 
         // Load learned skills for passive bonuses and skill usage
@@ -1946,12 +3434,24 @@ io.on('connection', (socket) => {
         }
 
         // Load stat bonuses and hardDEF from ALL equipped items (armor, accessories, etc.)
-        const equipmentBonuses = { str: 0, agi: 0, vit: 0, int: 0, dex: 0, luk: 0, maxHp: 0, maxSp: 0, hit: 0, flee: 0, critical: 0 };
+        const equipmentBonuses = { str: 0, agi: 0, vit: 0, int: 0, dex: 0, luk: 0, maxHp: 0, maxSp: 0, hit: 0, flee: 0, critical: 0, perfectDodge: 0 };
         let hardDef = 0;
+        let hardMdef = 0;
+        let equipMaxHpRate = 0;
+        let equipMaxSpRate = 0;
+        let equipAspdRate = 0;
+        let equipHpRegenRate = 0;
+        let equipSpRegenRate = 0;
+        let equipCritAtkRate = 0;
+        let equipCastRate = 0;
+        let equipUseSpRate = 0;
+        let equipHealPower = 0;
         try {
             const equipResult = await pool.query(
-                `SELECT i.def, i.str_bonus, i.agi_bonus, i.vit_bonus, i.int_bonus, i.dex_bonus, i.luk_bonus,
-                        i.max_hp_bonus, i.max_sp_bonus, i.hit_bonus, i.flee_bonus, i.critical_bonus
+                `SELECT i.def, i.mdef, i.str_bonus, i.agi_bonus, i.vit_bonus, i.int_bonus, i.dex_bonus, i.luk_bonus,
+                        i.max_hp_bonus, i.max_sp_bonus, i.hit_bonus, i.flee_bonus, i.critical_bonus,
+                        i.perfect_dodge_bonus, i.max_hp_rate, i.max_sp_rate, i.aspd_rate,
+                        i.hp_regen_rate, i.sp_regen_rate, i.crit_atk_rate, i.cast_rate, i.use_sp_rate, i.heal_power
                  FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
                  WHERE ci.character_id = $1 AND ci.is_equipped = true`,
                 [characterId]
@@ -1968,7 +3468,18 @@ io.on('connection', (socket) => {
                 equipmentBonuses.hit += row.hit_bonus || 0;
                 equipmentBonuses.flee += row.flee_bonus || 0;
                 equipmentBonuses.critical += row.critical_bonus || 0;
+                equipmentBonuses.perfectDodge += row.perfect_dodge_bonus || 0;
                 hardDef += row.def || 0;
+                hardMdef += row.mdef || 0;
+                equipMaxHpRate += row.max_hp_rate || 0;
+                equipMaxSpRate += row.max_sp_rate || 0;
+                equipAspdRate += row.aspd_rate || 0;
+                equipHpRegenRate += row.hp_regen_rate || 0;
+                equipSpRegenRate += row.sp_regen_rate || 0;
+                equipCritAtkRate += row.crit_atk_rate || 0;
+                equipCastRate += row.cast_rate || 0;
+                equipUseSpRate += row.use_sp_rate || 0;
+                equipHealPower += row.heal_power || 0;
             }
             if (hardDef > 0 || Object.values(equipmentBonuses).some(v => v > 0)) {
                 logger.info(`[ITEMS] Loaded equipment bonuses for char ${characterId}: bonuses=${JSON.stringify(equipmentBonuses)} hardDef=${hardDef}`);
@@ -1990,6 +3501,7 @@ io.on('connection', (socket) => {
             socketId: socket.id,
             characterId: characterId,
             characterName: characterName || 'Unknown',
+            gender: playerGender,
             zone: playerZone,
             health: Math.min(health, maxHealth),
             maxHealth,
@@ -2002,6 +3514,8 @@ io.on('connection', (socket) => {
             weaponAspdMod,
             equipmentBonuses,
             hardDef,
+            hardMdef,
+            weaponMATK,
             stats: baseStats,
             zuzucoin,
             // EXP & Leveling (RO-style dual progression)
@@ -2016,16 +3530,60 @@ io.on('connection', (socket) => {
             activeBuffs: [],
             skillCooldowns: {},
             // RO damage system: weapon/armor properties
-            weaponElement: 'neutral',  // Default; updated when weapon has element
+            weaponElement,             // From equipped weapon element column (default 'neutral')
             weaponLevel,               // From equipped weapon (default 1)
-            armorElement: { type: 'neutral', level: 1 }, // Default; updated from armor
-            cardMods: null,            // Card % bonuses (race/element/size)
+            armorElement,              // From equipped armor element column (default { type: 'neutral', level: 1 })
+            // Dual Wield System (Assassin/Assassin Cross)
+            equippedWeaponRight,       // { atk, weaponType, element, weaponLevel, matk, refineLevel, itemId, subType } or null
+            equippedWeaponLeft,        // Same struct or null (only for Assassin dual wielding)
+            cardMods: null,            // Card % bonuses (race/element/size) — rebuilt by rebuildCardBonuses()
+            cardDefMods: null,         // Defensive card % bonuses (race/element/size reduction)
+            cardBonuses: { str: 0, agi: 0, vit: 0, int: 0, dex: 0, luk: 0, maxHp: 0, maxSp: 0, hit: 0, flee: 0, critical: 0, perfectDodge: 0, atk: 0, def: 0, matk: 0, mdef: 0 },
+            cardMaxHpRate: 0,
+            cardMaxSpRate: 0,
+            // Equipment rate bonuses (bMaxHPrate, bMaxSPrate, bAspdRate from item scripts)
+            equipMaxHpRate,
+            equipMaxSpRate,
+            equipAspdRate,
+            equipHpRegenRate,
+            equipSpRegenRate,
+            equipCritAtkRate,
+            equipCastRate,
+            equipUseSpRate,
+            equipHealPower,
+            // Weight system (RO Classic overweight thresholds)
+            currentWeight: 0,
             // Position tracking for enemy AI aggro detection (updated by player:position)
             lastX: initialX,
             lastY: initialY,
             lastZ: initialZ
         });
         
+        // Rebuild card bonuses from compounded cards on equipped items
+        const player = connectedPlayers.get(characterId);
+        await rebuildCardBonuses(player, characterId);
+        // Recalculate derived stats with card bonuses included
+        {
+            const effWithCards = getEffectiveStats(player);
+            const derivedWithCards = calculateDerivedStats(effWithCards);
+            player.maxHealth = derivedWithCards.maxHP;
+            player.maxMana = derivedWithCards.maxSP;
+            player.health = Math.min(health, player.maxHealth);
+            player.mana = Math.min(mana, player.maxMana);
+            player.aspd = Math.min(COMBAT.ASPD_CAP, derivedWithCards.aspd + (player.weaponAspdMod || 0));
+            // Update hardDef/hardMdef with card DEF/MDEF bonus
+            player.hardDef = hardDef + (player.cardBonuses.def || 0);
+            player.hardMdef = hardMdef + (player.cardBonuses.mdef || 0);
+            maxHealth = player.maxHealth;
+            maxMana = player.maxMana;
+            health = player.health;
+            mana = player.mana;
+        }
+
+        // Initialize weight cache from DB
+        player.currentWeight = await calculatePlayerCurrentWeight(characterId);
+        logger.info(`[WEIGHT] ${characterName} weight: ${player.currentWeight}/${getPlayerMaxWeight(player)}`);
+
         logger.info(`Player joined: ${characterName || 'Unknown'} (Character ${characterId}) HP: ${health}/${maxHealth} MP: ${mana}/${maxMana} zone=${playerZone}`);
         const zoneInfo = getZone(playerZone);
         const joinedPayload = {
@@ -2070,6 +3628,9 @@ io.on('connection', (socket) => {
         const statsPayload = buildFullStatsPayload(characterId, playerObj, effectiveStatsJoin, derived, finalAspd);
         socket.emit('player:stats', statsPayload);
         logger.info(`[SEND] player:stats to ${socket.id} on join`);
+
+        // Send initial weight status
+        emitWeightStatus(characterId, playerObj);
 
         // Send current buff/status list (may have persisted buffs from combat)
         socket.emit('buff:list', {
@@ -2144,6 +3705,10 @@ io.on('connection', (socket) => {
                     reason: 'cc_locked'
                 });
                 return;
+            }
+            // System A: Walk delay (hit stun) — brief movement lock after taking damage
+            if (player.walkDelayUntil && Date.now() < player.walkDelayUntil) {
+                return; // Silently reject — very brief (46ms), no need for client feedback
             }
         }
 
@@ -2704,6 +4269,12 @@ io.on('connection', (socket) => {
             return;
         }
 
+        // RO Classic: cannot attack at >= 90% weight
+        if (getWeightRatio(attacker) >= INVENTORY.OVERWEIGHT_90) {
+            socket.emit('combat:error', { message: 'Too heavy to attack! Reduce weight below 90%.' });
+            return;
+        }
+
         // --- Clean up previous auto-attack if switching targets ---
         if (autoAttackState.has(attackerId)) {
             const oldAtk = autoAttackState.get(attackerId);
@@ -2873,9 +4444,14 @@ io.on('connection', (socket) => {
             }
         }
         
-        // Restore health to full
-        player.health = player.maxHealth;
-        player.mana = player.maxMana;
+        // Restore health (Phase 3: Osiris Card = full HP+SP, otherwise 50% HP)
+        if (player.cardRestartFullRecover) {
+            player.health = player.maxHealth;
+            player.mana = player.maxMana;
+        } else {
+            player.health = player.maxHealth; // Default is full HP on respawn in our game
+            player.mana = player.maxMana;
+        }
         player.isDead = false;
 
         // Save health to database
@@ -3064,6 +4640,11 @@ io.on('connection', (socket) => {
         const statsPayload = buildFullStatsPayload(characterId, player, effectiveStats, derived, finalAspd);
         socket.emit('player:stats', statsPayload);
         logger.info(`[SEND] player:stats to ${socket.id} after stat allocation`);
+
+        // STR affects max weight — update weight status if STR changed
+        if (statKey === 'str') {
+            emitWeightStatus(characterId, player);
+        }
     });
     
     // ============================================================
@@ -3336,6 +4917,11 @@ io.on('connection', (socket) => {
             const derived = calculateDerivedStats(effectiveStats);
             const finalAspd = Math.min(COMBAT.ASPD_CAP, derived.aspd + (player.weaponAspdMod || 0));
             socket.emit('player:stats', buildFullStatsPayload(characterId, player, effectiveStats, derived, finalAspd));
+
+            // Enlarge Weight Limit (skill 600) affects max weight — update weight status
+            if (skillId === 600) {
+                emitWeightStatus(characterId, player);
+            }
         } catch (err) {
             logger.error(`[SKILLS] Failed to save skill ${skillId} for char ${characterId}: ${err.message}`);
             socket.emit('skill:error', { message: 'Failed to learn skill' });
@@ -3451,7 +5037,7 @@ io.on('connection', (socket) => {
         if (!playerInfo) return;
         
         const inventory = await getPlayerInventory(playerInfo.characterId);
-        socket.emit('inventory:data', { items: inventory, zuzucoin: playerInfo.player.zuzucoin });
+        socket.emit('inventory:data', { items: inventory, zuzucoin: playerInfo.player.zuzucoin, currentWeight: playerInfo.player.currentWeight || 0, maxWeight: getPlayerMaxWeight(playerInfo.player) });
         logger.info(`[SEND] inventory:data to ${socket.id}: ${inventory.length} items, zuzucoin=${playerInfo.player.zuzucoin}`);
 
         // Also send hotbar state so client can restore hotbar after reconnect
@@ -3660,6 +5246,12 @@ io.on('connection', (socket) => {
             return;
         }
 
+        // RO Classic: cannot use skills at >= 90% weight
+        if (getWeightRatio(player) >= INVENTORY.OVERWEIGHT_90) {
+            socket.emit('skill:error', { message: 'Too heavy to use skills! Reduce weight below 90%.' });
+            return;
+        }
+
         // Check if already casting
         if (activeCasts.has(characterId)) {
             socket.emit('skill:error', { message: 'Already casting a skill' });
@@ -3678,6 +5270,12 @@ io.on('connection', (socket) => {
         const skill = SKILL_MAP.get(skillId);
         if (!skill) {
             socket.emit('skill:error', { message: 'Unknown skill' });
+            return;
+        }
+
+        // Katar-only skill check: Sonic Blow (1101) and Grimtooth (1102) require Katar
+        if ((skillId === 1101 || skillId === 1102) && player.weaponType !== 'katar') {
+            socket.emit('skill:error', { message: `${skill.displayName} requires a Katar` });
             return;
         }
 
@@ -3705,6 +5303,11 @@ io.on('connection', (socket) => {
                 return;
             }
         }
+        // System F: Card skill grants — use highest of learned vs card-granted
+        if (player.cardGrantedSkills) {
+            const grantedLevel = player.cardGrantedSkills[skillId] || 0;
+            if (grantedLevel > learnedLevel) learnedLevel = grantedLevel;
+        }
 
         if (learnedLevel <= 0) {
             socket.emit('skill:error', { message: 'Skill not learned' });
@@ -3713,7 +5316,12 @@ io.on('connection', (socket) => {
 
         // Get SP cost and effect at current level
         const levelData = skill.levels[Math.min(learnedLevel - 1, skill.levels.length - 1)];
-        const spCost = levelData ? levelData.spCost : 0;
+        const baseSpCost = levelData ? levelData.spCost : 0;
+        // Apply equipment + card SP consumption rate (bUseSPrate: negative = less SP, e.g., -20 = 20% less)
+        const totalUseSpRate = (player.equipUseSpRate || 0) + (player.cardUseSPRate || 0);
+        const spCost = (baseSpCost > 0 && totalUseSpRate)
+            ? Math.max(1, Math.floor(baseSpCost * (100 + totalUseSpRate) / 100))
+            : baseSpCost;
         const cooldownMs = levelData ? levelData.cooldown : 0;
         const effectVal = levelData ? levelData.effectValue : 0;
         const duration = levelData ? levelData.duration : 0;
@@ -3729,6 +5337,23 @@ io.on('connection', (socket) => {
         if (spCost > 0 && player.mana < spCost) {
             socket.emit('skill:error', { message: `Not enough SP (need ${spCost}, have ${player.mana})` });
             return;
+        }
+
+        // System H: Gem/Catalyst check (Mistress Card bypasses via cardNoGemStone)
+        const catalysts = SKILL_CATALYSTS[skill.name];
+        if (catalysts && !player.cardNoGemStone && !data._castComplete) {
+            for (const cat of catalysts) {
+                if (cat.minLevel && learnedLevel < cat.minLevel) continue; // e.g., Fire Pillar Lv6+
+                const hasItem = await pool.query(
+                    'SELECT inventory_id, quantity FROM character_inventory WHERE character_id = $1 AND item_id = $2 AND quantity >= $3 AND is_equipped = false LIMIT 1',
+                    [characterId, cat.itemId, cat.quantity]
+                );
+                if (hasItem.rows.length === 0) {
+                    const itemDef = itemDefinitions.get(cat.itemId);
+                    socket.emit('skill:error', { message: `Requires ${cat.quantity}x ${itemDef ? itemDef.name : 'item ' + cat.itemId}` });
+                    return;
+                }
+            }
         }
 
         // Resolve target for single-target skills
@@ -3804,7 +5429,8 @@ io.on('connection', (socket) => {
         const baseCastTime = levelData ? (levelData.castTime || 0) : 0;
         if (baseCastTime > 0 && !data._castComplete) {
             const effectiveStats = getEffectiveStats(player);
-            const actualCastTime = calculateActualCastTime(baseCastTime, effectiveStats.dex);
+            const totalCastRate = (player.equipCastRate || 0) + (player.cardCastRate || 0);
+            const actualCastTime = calculateActualCastTime(baseCastTime, effectiveStats.dex, totalCastRate);
 
             if (actualCastTime > 0) {
                 const now = Date.now();
@@ -4177,6 +5803,8 @@ io.on('connection', (socket) => {
                     timestamp: Date.now()
                 });
                 broadcastToZone(mbZone, 'enemy:health_update', { enemyId: eid, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: true });
+                // System B: Magnum Break knockback (2 cells away from caster)
+                if (enemy.health > 0) knockbackTarget(enemy, attackerPos.x, attackerPos.y, 2, mbZone, io);
 
                 // Check death
                 if (enemy.health <= 0) {
@@ -6323,7 +7951,8 @@ io.on('connection', (socket) => {
                     mana: player.mana, maxMana: player.maxMana
                 });
                 const invFW = await getPlayerInventory(characterId);
-                socket.emit('inventory:data', { items: invFW, zuzucoin: player.zuzucoin });
+                socket.emit('inventory:data', { items: invFW, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+                await updatePlayerWeightCache(characterId, player);
                 logger.info(`[ITEMS] ${player.characterName} used Fly Wing → (${Math.round(newX)}, ${Math.round(newY)}, ${newZ})`);
                 return;
             }
@@ -6398,7 +8027,8 @@ io.on('connection', (socket) => {
                     mana: player.mana, maxMana: player.maxMana
                 });
                 const invBW = await getPlayerInventory(characterId);
-                socket.emit('inventory:data', { items: invBW, zuzucoin: player.zuzucoin });
+                socket.emit('inventory:data', { items: invBW, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+                await updatePlayerWeightCache(characterId, player);
                 logger.info(`[ITEMS] ${player.characterName} used Butterfly Wing → ${saveMap} (${Math.round(saveX)}, ${Math.round(saveY)})`);
                 return;
             }
@@ -6420,8 +8050,21 @@ io.on('connection', (socket) => {
             const processEffect = (eff) => {
                 switch (eff.type) {
                     case 'heal': {
-                        const hpHeal = eff.hpMin ? randBetween(eff.hpMin, eff.hpMax) : 0;
-                        const spHeal = eff.spMin ? randBetween(eff.spMin, eff.spMax) : 0;
+                        let hpHeal = eff.hpMin ? randBetween(eff.hpMin, eff.hpMax) : 0;
+                        let spHeal = eff.spMin ? randBetween(eff.spMin, eff.spMax) : 0;
+                        // Phase 8: Card item heal rate bonus (bAddItemHealRate by item ID)
+                        if (hpHeal > 0 && player.cardAddItemHealRate && player.cardAddItemHealRate[item.item_id]) {
+                            hpHeal = Math.floor(hpHeal * (100 + player.cardAddItemHealRate[item.item_id]) / 100);
+                        }
+                        // System N: Card item GROUP heal rate bonus (bAddItemGroupHealRate)
+                        if (hpHeal > 0 && player.cardAddItemGroupHealRate && Object.keys(player.cardAddItemGroupHealRate).length > 0) {
+                            const groups = getItemGroups(item.item_id);
+                            for (const grp of groups) {
+                                if (player.cardAddItemGroupHealRate[grp]) {
+                                    hpHeal = Math.floor(hpHeal * (100 + player.cardAddItemGroupHealRate[grp]) / 100);
+                                }
+                            }
+                        }
                         if (hpHeal) {
                             healed += hpHeal;
                             player.health = Math.min(player.maxHealth, player.health + hpHeal);
@@ -6497,9 +8140,10 @@ io.on('connection', (socket) => {
             });
             logger.info(`[ITEMS] ${player.characterName} used ${item.name}: +${healed}HP +${spRestored}SP`);
 
-            // Refresh inventory
+            // Refresh inventory + weight
             const inventory = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin });
+            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await updatePlayerWeightCache(characterId, player);
             
         } catch (err) {
             logger.error(`[ITEMS] Use item error: ${err.message}`);
@@ -6520,36 +8164,71 @@ io.on('connection', (socket) => {
         
         try {
             const result = await pool.query(
-                `SELECT ci.inventory_id, ci.item_id, ci.is_equipped, i.item_type, i.equip_slot, i.name,
+                `SELECT ci.inventory_id, ci.item_id, ci.is_equipped, ci.refine_level,
+                        i.item_type, i.equip_slot, i.name,
                         i.atk, i.def, i.matk, i.mdef,
                         i.str_bonus, i.agi_bonus, i.vit_bonus, i.int_bonus, i.dex_bonus, i.luk_bonus,
                         i.max_hp_bonus, i.max_sp_bonus, i.hit_bonus, i.flee_bonus, i.critical_bonus,
-                        i.required_level, i.weapon_type, i.aspd_modifier, i.weapon_range, i.weapon_level
+                        i.perfect_dodge_bonus, i.max_hp_rate, i.max_sp_rate, i.aspd_rate,
+                        i.hp_regen_rate, i.sp_regen_rate, i.crit_atk_rate, i.cast_rate, i.use_sp_rate, i.heal_power,
+                        i.element,
+                        i.required_level, i.weapon_type, i.aspd_modifier, i.weapon_range, i.weapon_level,
+                        i.jobs_allowed, i.gender_allowed, i.equip_level_min, i.equip_level_max, i.sub_type,
+                        i.two_handed
                  FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
                  WHERE ci.inventory_id = $1 AND ci.character_id = $2`,
                 [inventoryId, characterId]
             );
-            
+
             if (result.rows.length === 0) {
                 socket.emit('inventory:error', { message: 'Item not found' });
                 return;
             }
-            
+
             const item = result.rows[0];
-            
+
             if (!item.equip_slot) {
                 socket.emit('inventory:error', { message: 'This item cannot be equipped' });
                 return;
             }
-            
+
             if (equip && item.required_level > (player.stats.level || 1)) {
                 socket.emit('inventory:error', { message: `Requires level ${item.required_level}` });
                 return;
             }
+
+            // Job/class restriction check (RO Classic)
+            if (equip && !canJobEquip(player.jobClass || 'novice', item.jobs_allowed)) {
+                socket.emit('inventory:error', { message: `Your class cannot equip ${item.name}` });
+                return;
+            }
+
+            // Gender restriction check
+            if (equip && !canGenderEquip(player.gender || 'male', item.gender_allowed)) {
+                socket.emit('inventory:error', { message: `${item.name} cannot be equipped by your gender` });
+                return;
+            }
+
+            // Level max cap check (rare, mostly PvP/event gear)
+            if (equip && item.equip_level_max > 0 && (player.stats.level || 1) > item.equip_level_max) {
+                socket.emit('inventory:error', { message: `${item.name} cannot be equipped above level ${item.equip_level_max}` });
+                return;
+            }
             
             // Ensure equipment tracking objects exist
-            if (!player.equipmentBonuses) player.equipmentBonuses = { str: 0, agi: 0, vit: 0, int: 0, dex: 0, luk: 0, maxHp: 0, maxSp: 0, hit: 0, flee: 0, critical: 0 };
+            if (!player.equipmentBonuses) player.equipmentBonuses = { str: 0, agi: 0, vit: 0, int: 0, dex: 0, luk: 0, maxHp: 0, maxSp: 0, hit: 0, flee: 0, critical: 0, perfectDodge: 0 };
             if (player.hardDef === undefined) player.hardDef = 0;
+            if (player.hardMdef === undefined) player.hardMdef = 0;
+            if (player.weaponMATK === undefined) player.weaponMATK = 0;
+            if (player.equipMaxHpRate === undefined) player.equipMaxHpRate = 0;
+            if (player.equipMaxSpRate === undefined) player.equipMaxSpRate = 0;
+            if (player.equipAspdRate === undefined) player.equipAspdRate = 0;
+            if (player.equipHpRegenRate === undefined) player.equipHpRegenRate = 0;
+            if (player.equipSpRegenRate === undefined) player.equipSpRegenRate = 0;
+            if (player.equipCritAtkRate === undefined) player.equipCritAtkRate = 0;
+            if (player.equipCastRate === undefined) player.equipCastRate = 0;
+            if (player.equipUseSpRate === undefined) player.equipUseSpRate = 0;
+            if (player.equipHealPower === undefined) player.equipHealPower = 0;
             let equippedPosition = null; // Hoisted for use in response
             
             // Helper: remove stat bonuses from an old equipped item row
@@ -6565,12 +8244,112 @@ io.on('connection', (socket) => {
                 player.equipmentBonuses.hit -= old.hit_bonus || 0;
                 player.equipmentBonuses.flee -= old.flee_bonus || 0;
                 player.equipmentBonuses.critical -= old.critical_bonus || 0;
+                player.equipmentBonuses.perfectDodge -= old.perfect_dodge_bonus || 0;
                 player.hardDef -= old.def || 0;
+                player.hardMdef -= old.mdef || 0;
+                player.equipMaxHpRate -= old.max_hp_rate || 0;
+                player.equipMaxSpRate -= old.max_sp_rate || 0;
+                player.equipAspdRate -= old.aspd_rate || 0;
+                player.equipHpRegenRate -= old.hp_regen_rate || 0;
+                player.equipSpRegenRate -= old.sp_regen_rate || 0;
+                player.equipCritAtkRate -= old.crit_atk_rate || 0;
+                player.equipCastRate -= old.cast_rate || 0;
+                player.equipUseSpRate -= old.use_sp_rate || 0;
+                player.equipHealPower -= old.heal_power || 0;
             };
 
             if (equip) {
                 // Determine the equipped_position for this item
                 equippedPosition = item.equip_slot; // default: same as equip_slot
+
+                // Helper: unequip left-hand weapon (dual wield cleanup)
+                const unequipLeftHandWeapon = async () => {
+                    const leftCheck = await pool.query(
+                        `SELECT ci.inventory_id, i.def, i.mdef, i.str_bonus, i.agi_bonus, i.vit_bonus, i.int_bonus, i.dex_bonus, i.luk_bonus,
+                                i.max_hp_bonus, i.max_sp_bonus, i.hit_bonus, i.flee_bonus, i.critical_bonus,
+                                i.perfect_dodge_bonus, i.max_hp_rate, i.max_sp_rate, i.aspd_rate,
+                                i.hp_regen_rate, i.sp_regen_rate, i.crit_atk_rate, i.cast_rate, i.use_sp_rate, i.heal_power,
+                                i.atk, i.weapon_type, i.element, i.weapon_level, i.matk
+                         FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
+                         WHERE ci.character_id = $1 AND ci.is_equipped = true AND ci.equipped_position = 'weapon_left'`,
+                        [characterId]
+                    );
+                    for (const old of leftCheck.rows) {
+                        removeOldBonuses(old);
+                        await pool.query(
+                            'UPDATE character_inventory SET is_equipped = false, equipped_position = NULL WHERE inventory_id = $1',
+                            [old.inventory_id]
+                        );
+                        logger.info(`[DUAL_WIELD] Auto-unequipped left-hand weapon (inv ${old.inventory_id})`);
+                    }
+                    player.equippedWeaponLeft = null;
+                };
+
+                // Helper: unequip shield
+                const unequipShield = async () => {
+                    const shieldCheck = await pool.query(
+                        `SELECT ci.inventory_id, i.def, i.mdef, i.str_bonus, i.agi_bonus, i.vit_bonus, i.int_bonus, i.dex_bonus, i.luk_bonus,
+                                i.max_hp_bonus, i.max_sp_bonus, i.hit_bonus, i.flee_bonus, i.critical_bonus,
+                                i.perfect_dodge_bonus, i.max_hp_rate, i.max_sp_rate, i.aspd_rate,
+                                i.hp_regen_rate, i.sp_regen_rate, i.crit_atk_rate, i.cast_rate, i.use_sp_rate, i.heal_power
+                         FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
+                         WHERE ci.character_id = $1 AND ci.is_equipped = true AND ci.equipped_position = 'shield'`,
+                        [characterId]
+                    );
+                    for (const oldShield of shieldCheck.rows) {
+                        removeOldBonuses(oldShield);
+                        await pool.query(
+                            'UPDATE character_inventory SET is_equipped = false, equipped_position = NULL WHERE inventory_id = $1',
+                            [oldShield.inventory_id]
+                        );
+                        logger.info(`[ITEMS] Auto-unequipped shield (inv ${oldShield.inventory_id})`);
+                    }
+                };
+
+                // ── Dual Wield Equip Logic (Assassin/Assassin Cross) ──
+                if (item.equip_slot === 'weapon' && canDualWield(player.jobClass) && isValidLeftHandWeapon(item.weapon_type) && !isKatar(item.sub_type)) {
+                    // Assassin equipping a valid dual-wield weapon (dagger/1H sword/axe)
+                    if (!player.equippedWeaponRight) {
+                        // Right hand empty → equip to right hand
+                        equippedPosition = 'weapon';
+                    } else if (!player.equippedWeaponLeft && !isKatar(player.equippedWeaponRight.subType)) {
+                        // Right hand has weapon (not Katar), left hand empty → equip to left hand
+                        equippedPosition = 'weapon_left';
+                        // If shield is equipped, unequip it first
+                        await unequipShield();
+                    } else {
+                        // Both hands occupied → replace right hand weapon
+                        equippedPosition = 'weapon';
+                    }
+                }
+
+                // Katar equip: unequip left-hand weapon (Katar uses both hands)
+                if (item.equip_slot === 'weapon' && isKatar(item.sub_type)) {
+                    await unequipLeftHandWeapon();
+                    await unequipShield();
+                }
+
+                // Two-handed weapon enforcement (RO Classic)
+                if (item.equip_slot === 'weapon' && isTwoHandedWeapon(item.sub_type) && !isKatar(item.sub_type)) {
+                    // Auto-unequip shield and left-hand weapon when equipping a two-handed weapon
+                    await unequipShield();
+                    await unequipLeftHandWeapon();
+                } else if (item.equip_slot === 'shield') {
+                    // Block equipping a shield if a two-handed weapon is equipped
+                    const weaponCheck = await pool.query(
+                        `SELECT i.sub_type, i.name FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
+                         WHERE ci.character_id = $1 AND ci.is_equipped = true AND ci.equipped_position = 'weapon'`,
+                        [characterId]
+                    );
+                    if (weaponCheck.rows.length > 0 && isTwoHandedWeapon(weaponCheck.rows[0].sub_type)) {
+                        socket.emit('inventory:error', { message: `Cannot equip shield while using two-handed ${weaponCheck.rows[0].name}` });
+                        return;
+                    }
+                    // Assassin: unequip left-hand weapon when equipping shield
+                    if (canDualWield(player.jobClass) && player.equippedWeaponLeft) {
+                        await unequipLeftHandWeapon();
+                    }
+                }
 
                 if (item.equip_slot === 'accessory') {
                     // Dual-accessory support: find which accessory slots are occupied
@@ -6592,8 +8371,10 @@ io.on('connection', (socket) => {
                         if (oldAcc) {
                             // Fetch bonuses of old accessory to remove
                             const oldAccData = await pool.query(
-                                `SELECT i.def, i.str_bonus, i.agi_bonus, i.vit_bonus, i.int_bonus, i.dex_bonus, i.luk_bonus,
-                                        i.max_hp_bonus, i.max_sp_bonus, i.hit_bonus, i.flee_bonus, i.critical_bonus
+                                `SELECT i.def, i.mdef, i.str_bonus, i.agi_bonus, i.vit_bonus, i.int_bonus, i.dex_bonus, i.luk_bonus,
+                                        i.max_hp_bonus, i.max_sp_bonus, i.hit_bonus, i.flee_bonus, i.critical_bonus,
+                                        i.perfect_dodge_bonus, i.max_hp_rate, i.max_sp_rate, i.aspd_rate,
+                                        i.hp_regen_rate, i.sp_regen_rate, i.crit_atk_rate, i.cast_rate, i.use_sp_rate, i.heal_power
                                  FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
                                  WHERE ci.inventory_id = $1`,
                                 [oldAcc.inventory_id]
@@ -6606,14 +8387,18 @@ io.on('connection', (socket) => {
                         }
                     }
                 } else {
-                    // Non-accessory: unequip any item currently in this slot (including its bonuses)
+                    // Non-accessory: unequip any item currently in the TARGET position
+                    // For dual wield, we unequip by equipped_position (weapon vs weapon_left), not equip_slot
+                    const targetPosition = equippedPosition || item.equip_slot;
                     const oldEquipped = await pool.query(
-                        `SELECT ci.inventory_id, i.def, i.str_bonus, i.agi_bonus, i.vit_bonus, i.int_bonus, i.dex_bonus, i.luk_bonus,
+                        `SELECT ci.inventory_id, i.def, i.mdef, i.str_bonus, i.agi_bonus, i.vit_bonus, i.int_bonus, i.dex_bonus, i.luk_bonus,
                                 i.max_hp_bonus, i.max_sp_bonus, i.hit_bonus, i.flee_bonus, i.critical_bonus,
+                                i.perfect_dodge_bonus, i.max_hp_rate, i.max_sp_rate, i.aspd_rate,
+                                i.hp_regen_rate, i.sp_regen_rate, i.crit_atk_rate, i.cast_rate, i.use_sp_rate, i.heal_power,
                                 i.equip_slot, i.atk, i.aspd_modifier, i.weapon_range
                          FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
-                         WHERE ci.character_id = $1 AND ci.is_equipped = true AND i.equip_slot = $2`,
-                        [characterId, item.equip_slot]
+                         WHERE ci.character_id = $1 AND ci.is_equipped = true AND ci.equipped_position = $2`,
+                        [characterId, targetPosition]
                     );
                     for (const old of oldEquipped.rows) {
                         removeOldBonuses(old);
@@ -6621,9 +8406,8 @@ io.on('connection', (socket) => {
 
                     await pool.query(
                         `UPDATE character_inventory SET is_equipped = false, equipped_position = NULL
-                         WHERE character_id = $1 AND is_equipped = true
-                         AND item_id IN (SELECT item_id FROM items WHERE equip_slot = $2)`,
-                        [characterId, item.equip_slot]
+                         WHERE character_id = $1 AND is_equipped = true AND equipped_position = $2`,
+                        [characterId, targetPosition]
                     );
                 }
 
@@ -6645,18 +8429,54 @@ io.on('connection', (socket) => {
                 player.equipmentBonuses.hit += item.hit_bonus || 0;
                 player.equipmentBonuses.flee += item.flee_bonus || 0;
                 player.equipmentBonuses.critical += item.critical_bonus || 0;
+                player.equipmentBonuses.perfectDodge += item.perfect_dodge_bonus || 0;
                 player.hardDef += item.def || 0;
+                player.hardMdef += item.mdef || 0;
+                player.equipMaxHpRate += item.max_hp_rate || 0;
+                player.equipMaxSpRate += item.max_sp_rate || 0;
+                player.equipAspdRate += item.aspd_rate || 0;
+                player.equipHpRegenRate += item.hp_regen_rate || 0;
+                player.equipSpRegenRate += item.sp_regen_rate || 0;
+                player.equipCritAtkRate += item.crit_atk_rate || 0;
+                player.equipCastRate += item.cast_rate || 0;
+                player.equipUseSpRate += item.use_sp_rate || 0;
+                player.equipHealPower += item.heal_power || 0;
 
-                if (item.equip_slot === 'weapon') {
+                if (equippedPosition === 'weapon') {
                     player.stats.weaponATK = item.atk || 0;
-                    player.attackRange = item.weapon_range ? item.weapon_range * COMBAT.MELEE_RANGE : COMBAT.MELEE_RANGE; // Convert RO cells to UE units (1 cell = 150 UE units)
+                    player.attackRange = item.weapon_range ? item.weapon_range * COMBAT.MELEE_RANGE : COMBAT.MELEE_RANGE;
                     player.weaponAspdMod = item.aspd_modifier || 0;
                     player.weaponType = item.weapon_type || null;
                     player.weaponLevel = item.weapon_level || 1;
+                    player.weaponElement = item.element || 'neutral';
+                    player.weaponMATK = item.matk || 0;
+                    player.equippedWeaponRight = {
+                        atk: item.atk || 0, weaponType: item.weapon_type, element: item.element || 'neutral',
+                        weaponLevel: item.weapon_level || 1, matk: item.matk || 0,
+                        refineLevel: item.refine_level || 0, itemId: item.item_id, subType: item.sub_type
+                    };
+                } else if (equippedPosition === 'weapon_left') {
+                    player.equippedWeaponLeft = {
+                        atk: item.atk || 0, weaponType: item.weapon_type, element: item.element || 'neutral',
+                        weaponLevel: item.weapon_level || 1, matk: item.matk || 0,
+                        refineLevel: item.refine_level || 0, itemId: item.item_id, subType: item.sub_type
+                    };
+                    logger.info(`[DUAL_WIELD] ${player.characterName} equipped left-hand ${item.name} (ATK=${item.atk}, type=${item.weapon_type})`);
+                }
+
+                if (item.equip_slot === 'armor') {
+                    player.armorElement = { type: item.element || 'neutral', level: 1 };
                 }
 
                 logger.info(`[ITEMS] ${player.characterName} equipped ${item.name} (position: ${equippedPosition}, weaponType: ${player.weaponType}, bonuses: ${JSON.stringify(player.equipmentBonuses)}, hardDef: ${player.hardDef})`);
             } else {
+                // Determine which position this item was in before unequipping
+                const posResult = await pool.query(
+                    'SELECT equipped_position FROM character_inventory WHERE inventory_id = $1',
+                    [inventoryId]
+                );
+                const unequipPosition = (posResult.rows.length > 0 && posResult.rows[0].equipped_position) || item.equip_slot;
+
                 // Remove this item's stat bonuses before unequipping
                 removeOldBonuses(item);
 
@@ -6665,18 +8485,31 @@ io.on('connection', (socket) => {
                     [inventoryId]
                 );
 
-                if (item.equip_slot === 'weapon') {
+                if (unequipPosition === 'weapon') {
                     player.stats.weaponATK = 0;
                     player.attackRange = COMBAT.MELEE_RANGE;
                     player.weaponAspdMod = 0;
                     player.weaponType = null;
                     player.weaponLevel = 1;
+                    player.weaponElement = 'neutral';
+                    player.weaponMATK = 0;
+                    player.equippedWeaponRight = null;
+                } else if (unequipPosition === 'weapon_left') {
+                    player.equippedWeaponLeft = null;
+                    logger.info(`[DUAL_WIELD] ${player.characterName} unequipped left-hand ${item.name}`);
                 }
 
-                logger.info(`[ITEMS] ${player.characterName} unequipped ${item.name}`);
+                if (item.equip_slot === 'armor') {
+                    player.armorElement = { type: 'neutral', level: 1 };
+                }
+
+                logger.info(`[ITEMS] ${player.characterName} unequipped ${item.name} (position: ${unequipPosition})`);
             }
             
-            // Recalculate derived stats using EFFECTIVE stats (base + equipment bonuses)
+            // Rebuild card bonuses (compounded cards may change with equip/unequip)
+            await rebuildCardBonuses(player, characterId);
+
+            // Recalculate derived stats using EFFECTIVE stats (base + equipment + card bonuses)
             const effectiveStats = getEffectiveStats(player);
             const derived = calculateDerivedStats(effectiveStats);
             player.aspd = Math.min(COMBAT.ASPD_CAP, derived.aspd + (player.weaponAspdMod || 0));
@@ -6708,7 +8541,7 @@ io.on('connection', (socket) => {
 
             // Send updated inventory
             const inventory = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin });
+            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
             
             socket.emit('inventory:equipped', {
                 inventoryId, itemId: item.item_id, itemName: item.name,
@@ -6726,6 +8559,189 @@ io.on('connection', (socket) => {
         }
     });
     
+    // ============================================================
+    // System I: Equipment Repair — NPC service to fix broken equipment
+    // ============================================================
+    socket.on('equipment:repair', async (data) => {
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { characterId, player } = playerInfo;
+        const inventoryId = parseInt(data.inventoryId);
+        if (!inventoryId) { socket.emit('inventory:error', { message: 'Invalid item' }); return; }
+
+        const REPAIR_COST = 5000; // 5,000 Zeny per repair
+
+        try {
+            // Check item is broken and belongs to player
+            const item = await pool.query(
+                'SELECT inventory_id, is_broken FROM character_inventory WHERE inventory_id = $1 AND character_id = $2 AND is_broken = true',
+                [inventoryId, characterId]
+            );
+            if (item.rows.length === 0) { socket.emit('inventory:error', { message: 'Item is not broken' }); return; }
+
+            // Check Zeny
+            if ((player.zeny || 0) < REPAIR_COST) { socket.emit('inventory:error', { message: 'Not enough Zeny (need 5,000)' }); return; }
+
+            // Repair
+            await pool.query('UPDATE character_inventory SET is_broken = false WHERE inventory_id = $1', [inventoryId]);
+            player.zeny = (player.zeny || 0) - REPAIR_COST;
+            await pool.query('UPDATE characters SET zeny = $1 WHERE id = $2', [player.zeny, characterId]);
+
+            socket.emit('equipment:repaired', { inventoryId, zenyRemaining: player.zeny });
+            logger.info(`[REPAIR] ${player.characterName} repaired item ${inventoryId} for ${REPAIR_COST} Zeny`);
+        } catch (err) {
+            logger.error(`[REPAIR] Error: ${err.message}`);
+            socket.emit('inventory:error', { message: 'Repair failed' });
+        }
+    });
+
+    // ============================================================
+    // Card Compound System — insert a card into slotted equipment
+    // ============================================================
+    socket.on('card:compound', async (data) => {
+        logger.info(`[RECV] card:compound from ${socket.id}: ${JSON.stringify(data)}`);
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+
+        const { characterId, player } = playerInfo;
+        const cardInventoryId = parseInt(data.cardInventoryId);
+        const equipInventoryId = parseInt(data.equipInventoryId);
+        const slotIndex = parseInt(data.slotIndex);
+
+        if (isNaN(cardInventoryId) || isNaN(equipInventoryId) || isNaN(slotIndex)) {
+            socket.emit('card:result', { success: false, message: 'Invalid compound request' });
+            return;
+        }
+
+        try {
+            // Fetch card item
+            const cardResult = await pool.query(
+                `SELECT ci.inventory_id, ci.item_id, ci.quantity, ci.is_equipped,
+                        i.name, i.item_type, i.equip_locations, i.card_prefix, i.card_suffix
+                 FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
+                 WHERE ci.inventory_id = $1 AND ci.character_id = $2`,
+                [cardInventoryId, characterId]
+            );
+            if (cardResult.rows.length === 0) {
+                socket.emit('card:result', { success: false, message: 'Card not found in inventory' });
+                return;
+            }
+            const card = cardResult.rows[0];
+
+            if (card.item_type !== 'card') {
+                socket.emit('card:result', { success: false, message: `${card.name} is not a card` });
+                return;
+            }
+            if (card.is_equipped) {
+                socket.emit('card:result', { success: false, message: 'Cannot use an equipped card' });
+                return;
+            }
+
+            // Fetch equipment item
+            const equipResult = await pool.query(
+                `SELECT ci.inventory_id, ci.item_id, ci.is_equipped, ci.compounded_cards,
+                        i.name, i.item_type, i.equip_slot, i.slots
+                 FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
+                 WHERE ci.inventory_id = $1 AND ci.character_id = $2`,
+                [equipInventoryId, characterId]
+            );
+            if (equipResult.rows.length === 0) {
+                socket.emit('card:result', { success: false, message: 'Equipment not found in inventory' });
+                return;
+            }
+            const equip = equipResult.rows[0];
+
+            if (!equip.equip_slot) {
+                socket.emit('card:result', { success: false, message: `${equip.name} is not equippable` });
+                return;
+            }
+
+            // Validate card can go in this equipment type
+            if (!canCompoundCardOnEquipment(card.equip_locations, equip.equip_slot)) {
+                socket.emit('card:result', { success: false, message: `${card.name} cannot be compounded on ${equip.name}` });
+                return;
+            }
+
+            // Validate slot count
+            const maxSlots = equip.slots || 0;
+            if (maxSlots <= 0) {
+                socket.emit('card:result', { success: false, message: `${equip.name} has no card slots` });
+                return;
+            }
+            if (slotIndex < 0 || slotIndex >= maxSlots) {
+                socket.emit('card:result', { success: false, message: `Invalid slot index (${slotIndex}), ${equip.name} has ${maxSlots} slots` });
+                return;
+            }
+
+            // Check the slot is empty
+            let cards = equip.compounded_cards || [];
+            if (!Array.isArray(cards)) cards = [];
+            // Pad array to maxSlots if needed
+            while (cards.length < maxSlots) cards.push(null);
+
+            if (cards[slotIndex] !== null) {
+                socket.emit('card:result', { success: false, message: `Slot ${slotIndex + 1} is already occupied` });
+                return;
+            }
+
+            // Insert card into slot
+            cards[slotIndex] = card.item_id;
+
+            // Update compounded_cards in DB
+            await pool.query(
+                'UPDATE character_inventory SET compounded_cards = $1 WHERE inventory_id = $2',
+                [JSON.stringify(cards), equipInventoryId]
+            );
+
+            // Remove card from inventory (consume it — cards are permanent once compounded)
+            if (card.quantity > 1) {
+                await pool.query(
+                    'UPDATE character_inventory SET quantity = quantity - 1 WHERE inventory_id = $1',
+                    [cardInventoryId]
+                );
+            } else {
+                await pool.query(
+                    'DELETE FROM character_inventory WHERE inventory_id = $1',
+                    [cardInventoryId]
+                );
+            }
+
+            logger.info(`[CARDS] ${player.characterName} compounded ${card.name} into ${equip.name} slot ${slotIndex}`);
+
+            // If equipment is currently equipped, rebuild card bonuses and recalculate stats
+            if (equip.is_equipped) {
+                await rebuildCardBonuses(player, characterId);
+                const effectiveStats = getEffectiveStats(player);
+                const derived = calculateDerivedStats(effectiveStats);
+                player.aspd = Math.min(COMBAT.ASPD_CAP, derived.aspd + (player.weaponAspdMod || 0));
+                player.maxHealth = derived.maxHP;
+                player.maxMana = derived.maxSP;
+                player.health = Math.min(player.health, player.maxHealth);
+                player.mana = Math.min(player.mana, player.maxMana);
+                const finalAspd = Math.min(COMBAT.ASPD_CAP, derived.aspd + (player.weaponAspdMod || 0));
+                socket.emit('player:stats', buildFullStatsPayload(characterId, player, effectiveStats, derived, finalAspd));
+            }
+
+            // Emit success
+            socket.emit('card:result', {
+                success: true,
+                cardName: card.name,
+                equipmentName: equip.name,
+                slotIndex,
+                message: `${card.name} compounded into ${equip.name} [slot ${slotIndex + 1}]`
+            });
+
+            // Refresh inventory + weight (card was consumed)
+            const inventory = await getPlayerInventory(characterId);
+            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await updatePlayerWeightCache(characterId, player);
+
+        } catch (err) {
+            logger.error(`[CARDS] Compound error: ${err.message}`);
+            socket.emit('card:result', { success: false, message: 'Failed to compound card' });
+        }
+    });
+
     // Drop/discard an item
     socket.on('inventory:drop', async (data) => {
         logger.info(`[RECV] inventory:drop from ${socket.id}: ${JSON.stringify(data)}`);
@@ -6759,10 +8775,11 @@ io.on('connection', (socket) => {
             socket.emit('inventory:dropped', {
                 inventoryId, itemId: item.item_id, itemName: item.name, quantity: dropQty
             });
-            
-            // Refresh inventory
+
+            // Refresh inventory + weight
             const inventory = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin });
+            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await updatePlayerWeightCache(characterId, player);
             
         } catch (err) {
             logger.error(`[ITEMS] Drop error: ${err.message}`);
@@ -6818,7 +8835,7 @@ io.on('connection', (socket) => {
 
             // Refresh inventory for client
             const inventory = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: inventory, zuzucoin: playerInfo.player.zuzucoin });
+            socket.emit('inventory:data', { items: inventory, zuzucoin: playerInfo.player.zuzucoin, currentWeight: playerInfo.player.currentWeight || 0, maxWeight: getPlayerMaxWeight(playerInfo.player) });
         } catch (err) {
             logger.error(`[ITEMS] Move error: ${err.message}`);
             socket.emit('inventory:error', { message: 'Failed to move item' });
@@ -6854,6 +8871,7 @@ io.on('connection', (socket) => {
                 itemId: item.item_id,
                 name: item.name,
                 description: item.description,
+                fullDescription: item.full_description || '',
                 itemType: item.item_type,
                 equipSlot: item.equip_slot || '',
                 buyPrice: applyDiscount(item.buy_price || item.price * 2, discountPct),
@@ -6872,25 +8890,28 @@ io.on('connection', (socket) => {
                 lukBonus: item.luk_bonus || 0,
                 maxHpBonus: item.max_hp_bonus || 0,
                 maxSpBonus: item.max_sp_bonus || 0,
+                hitBonus: item.hit_bonus || 0,
+                fleeBonus: item.flee_bonus || 0,
+                criticalBonus: item.critical_bonus || 0,
+                perfectDodgeBonus: item.perfect_dodge_bonus || 0,
                 weaponType: item.weapon_type || '',
                 weaponRange: item.weapon_range || 0,
                 aspdModifier: item.aspd_modifier || 0,
                 requiredLevel: item.required_level || 1,
-                stackable: item.stackable || false
+                stackable: item.stackable || false,
+                slots: item.slots || 0,
+                weaponLevel: item.weapon_level || 0,
+                refineable: item.refineable || false,
+                jobsAllowed: item.jobs_allowed || 'All',
+                cardType: item.card_type || null,
+                cardPrefix: item.card_prefix || null,
+                cardSuffix: item.card_suffix || null,
+                twoHanded: item.two_handed || false,
+                element: item.element || 'neutral'
             }));
 
-        // Calculate current inventory weight
-        let currentWeight = 0;
-        try {
-            const invW = await pool.query(
-                `SELECT COALESCE(SUM(ci.quantity * i.weight), 0) as total_weight
-                 FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
-                 WHERE ci.character_id = $1`, [characterId]
-            );
-            currentWeight = parseInt(invW.rows[0].total_weight);
-        } catch (err) {
-            logger.warn(`[SHOP] Weight query failed: ${err.message}`);
-        }
+        // Use cached weight (updated on every inventory mutation)
+        const currentWeight = player.currentWeight || 0;
 
         // Count used inventory slots
         let usedSlots = 0;
@@ -6974,7 +8995,8 @@ io.on('connection', (socket) => {
 
             const inventory = await getPlayerInventory(characterId);
             socket.emit('shop:bought', { itemId, itemName: itemDef.name, quantity, totalCost, newZuzucoin: newZeny });
-            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin });
+            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await updatePlayerWeightCache(characterId, player);
             logger.info(`[SEND] shop:bought + inventory:data to ${socket.id}`);
         } catch (err) {
             await client.query('ROLLBACK').catch(() => {});
@@ -7047,7 +9069,8 @@ io.on('connection', (socket) => {
 
             const inventory = await getPlayerInventory(characterId);
             socket.emit('shop:sold', { inventoryId, itemName: item.name, quantity: sellQty, sellPrice, newZuzucoin: newZeny });
-            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin });
+            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await updatePlayerWeightCache(characterId, player);
             logger.info(`[SEND] shop:sold + inventory:data to ${socket.id}`);
         } catch (err) {
             logger.error(`[SHOP] Sell error for char ${characterId}: ${err.message}`);
@@ -7125,17 +9148,8 @@ io.on('connection', (socket) => {
             return;
         }
 
-        // 2. Check weight
-        let currentWeight = 0;
-        try {
-            const invW = await pool.query(
-                `SELECT COALESCE(SUM(ci.quantity * i.weight), 0) as w
-                 FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
-                 WHERE ci.character_id = $1`, [characterId]
-            );
-            currentWeight = parseInt(invW.rows[0].w);
-        } catch (err) { /* weight query failed, skip check */ }
-
+        // 2. Check weight (use cached value — updated on every inventory mutation)
+        const currentWeight = player.currentWeight || 0;
         const maxWeight = getPlayerMaxWeight(player);
         if (currentWeight + totalWeight > maxWeight) {
             socket.emit('shop:error', {
@@ -7206,7 +9220,8 @@ io.on('connection', (socket) => {
 
             const inventory = await getPlayerInventory(characterId);
             socket.emit('shop:bought', { items: boughtItems, totalCost, newZuzucoin: newZeny });
-            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin });
+            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await updatePlayerWeightCache(characterId, player);
             logger.info(`[SEND] shop:bought + inventory:data to ${socket.id}`);
         } catch (err) {
             await client.query('ROLLBACK').catch(() => {});
@@ -7320,7 +9335,8 @@ io.on('connection', (socket) => {
 
             const inventory = await getPlayerInventory(characterId);
             socket.emit('shop:sold', { items: soldItems, totalRevenue, newZuzucoin: newZeny });
-            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin });
+            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await updatePlayerWeightCache(characterId, player);
             logger.info(`[SEND] shop:sold + inventory:data to ${socket.id}`);
         } catch (err) {
             await client.query('ROLLBACK').catch(() => {});
@@ -7446,6 +9462,13 @@ async function executeCastComplete(characterId, cast) {
         return;
     }
 
+    // Re-check weight (player may have picked up loot during cast)
+    if (getWeightRatio(player) >= INVENTORY.OVERWEIGHT_90) {
+        const sock = io.sockets.sockets.get(cast.socketId);
+        if (sock) sock.emit('skill:cast_failed', { skillId: cast.skillId, reason: 'Overweight' });
+        return;
+    }
+
     // Re-check SP (not consumed during cast, only at execution)
     if (cast.spCost > 0 && player.mana < cast.spCost) {
         const sock = io.sockets.sockets.get(cast.socketId);
@@ -7566,7 +9589,17 @@ setInterval(async () => {
         // Skip if attacker is CC'd (stun/freeze/stone/sleep prevent attacks)
         const attackerCCMods = getCombinedModifiers(attacker);
         if (attackerCCMods.preventsAttack) continue;
-        
+
+        // RO Classic: stop auto-attack if >= 90% weight
+        if (getWeightRatio(attacker) >= INVENTORY.OVERWEIGHT_90) {
+            autoAttackState.delete(attackerId);
+            const attackerSocket = io.sockets.sockets.get(attacker.socketId);
+            if (attackerSocket) {
+                attackerSocket.emit('combat:auto_attack_stopped', { reason: 'Overweight' });
+            }
+            continue;
+        }
+
         // ========== ENEMY TARGET ==========
         if (atkState.isEnemy) {
             const enemy = enemies.get(atkState.targetCharId);
@@ -7638,7 +9671,16 @@ setInterval(async () => {
                 // Includes: HIT/FLEE check, Critical, Perfect Dodge, Size Penalty, Element, DEF
                 // Cache effective stats and attacker info to avoid redundant passive/buff recalculations
                 const cachedEffStats = getEffectiveStats(attacker);
+                const cachedPassive = getPassiveSkillBonuses(attacker);
                 const cachedAtkInfo = getAttackerInfo(attacker, { raceATK: cachedEffStats.passiveRaceATK, bonusATK: cachedEffStats.passiveATK });
+                // For dual wield auto-attacks, use per-hand card mods
+                if (dualWield && attacker.cardModsRight) {
+                    cachedAtkInfo.cardMods = attacker.cardModsRight;
+                }
+                const atkEnemyZone = enemy.zone || attacker.zone || 'prontera_south';
+                const dualWield = isDualWielding(attacker);
+
+                // === RIGHT HAND damage calculation ===
                 const combatResult = calculatePhysicalDamage(
                     cachedEffStats,
                     enemy.stats,
@@ -7648,7 +9690,14 @@ setInterval(async () => {
                 );
 
                 attacker.lastAttackTime = now;
-                const { damage, isCritical, isMiss, hitType, element: atkElement } = combatResult;
+                let { damage, isCritical, isMiss, hitType, element: atkElement } = combatResult;
+
+                // Apply dual wield mastery penalty to right hand (only during dual wield auto-attacks)
+                if (dualWield && !isMiss) {
+                    const rhMasteryLv = cachedPassive.rightHandMasteryLv || 0;
+                    const rightHandPercent = 50 + (rhMasteryLv * 10); // 50% base, 100% at Lv5
+                    damage = Math.max(1, Math.floor(damage * rightHandPercent / 100));
+                }
 
                 // Build damage payload (sent for all hit types including miss/dodge)
                 const damagePayload = {
@@ -7662,6 +9711,11 @@ setInterval(async () => {
                     isMiss,
                     hitType,  // 'normal', 'critical', 'miss', 'dodge', 'perfectDodge'
                     element: atkElement,
+                    // Dual wield fields (added below if applicable)
+                    damage2: 0,
+                    isDualWield: dualWield,
+                    isCritical2: false,
+                    element2: 'neutral',
                     targetHealth: enemy.health,
                     targetMaxHealth: enemy.maxHealth,
                     attackerX: attackerPos.x, attackerY: attackerPos.y, attackerZ: attackerPos.z,
@@ -7669,17 +9723,93 @@ setInterval(async () => {
                     timestamp: now
                 };
 
-                const atkEnemyZone = enemy.zone || attacker.zone || 'prontera_south';
-                if (isMiss) {
-                    // Miss/Dodge: don't deal damage, still broadcast event
+                if (isMiss && !dualWield) {
+                    // Miss/Dodge (single weapon): don't deal damage, still broadcast event
                     broadcastToZone(atkEnemyZone, 'combat:damage', damagePayload);
                     logger.info(`[COMBAT] ${attacker.characterName} ${hitType} against ${enemy.name}(${enemy.enemyId})`);
                     continue;
                 }
 
-                // Apply damage
-                enemy.health = Math.max(0, enemy.health - damage);
+                // Apply right hand damage (even if missed in dual wield, left hand still hits)
+                if (!isMiss) {
+                    enemy.health = Math.max(0, enemy.health - damage);
+                }
                 damagePayload.targetHealth = enemy.health;
+
+                // === LEFT HAND damage calculation (dual wield only) ===
+                if (dualWield && enemy.health > 0) {
+                    // Left hand uses its own weapon stats
+                    const leftWeapon = attacker.equippedWeaponLeft;
+                    const leftAtkInfo = {
+                        weaponType: leftWeapon.weaponType || 'bare_hand',
+                        weaponElement: leftWeapon.element || 'neutral',
+                        weaponLevel: leftWeapon.weaponLevel || 1,
+                        buffMods: cachedAtkInfo.buffMods,
+                        cardMods: attacker.cardModsLeft || attacker.cardMods || null,
+                        passiveRaceATK: cachedAtkInfo.passiveRaceATK,
+                        race: 'demihuman'
+                    };
+                    // Left hand effective stats use its own weapon ATK
+                    const leftEffStats = { ...cachedEffStats, weaponATK: (leftWeapon.atk || 0) + (attacker.cardBonuses ? attacker.cardBonuses.atk || 0 : 0) };
+
+                    // Left hand: forceHit=true (always hits), noCrit=true (never crits)
+                    const leftResult = calculatePhysicalDamage(
+                        leftEffStats,
+                        enemy.stats,
+                        enemy.hardDef || 0,
+                        getEnemyTargetInfo(enemy),
+                        leftAtkInfo,
+                        { forceHit: true, forceCrit: false }
+                    );
+
+                    let leftDamage = leftResult.damage;
+                    // Apply left hand mastery penalty
+                    const lhMasteryLv = cachedPassive.leftHandMasteryLv || 0;
+                    const leftHandPercent = 30 + (lhMasteryLv * 10); // 30% base, 80% at Lv5
+                    leftDamage = Math.max(1, Math.floor(leftDamage * leftHandPercent / 100));
+
+                    // Left hand never crits independently, but mirrors right crit visually
+                    damagePayload.damage2 = leftDamage;
+                    damagePayload.isCritical2 = isCritical; // Cosmetic mirror of right hand
+                    damagePayload.element2 = leftWeapon.element || 'neutral';
+
+                    // Apply left hand damage
+                    enemy.health = Math.max(0, enemy.health - leftDamage);
+                    damagePayload.targetHealth = enemy.health;
+
+                    logger.info(`[DUAL_WIELD] ${attacker.characterName} L-hand hit ${enemy.name} for ${leftDamage} [${leftWeapon.element}] (HP: ${enemy.health}/${enemy.maxHealth})`);
+                } else if (dualWield && isMiss) {
+                    // Right hand missed but left hand still hits (forceHit)
+                    const leftWeapon = attacker.equippedWeaponLeft;
+                    const leftAtkInfo = {
+                        weaponType: leftWeapon.weaponType || 'bare_hand',
+                        weaponElement: leftWeapon.element || 'neutral',
+                        weaponLevel: leftWeapon.weaponLevel || 1,
+                        buffMods: cachedAtkInfo.buffMods,
+                        cardMods: attacker.cardMods || null,
+                        passiveRaceATK: cachedAtkInfo.passiveRaceATK,
+                        race: 'demihuman'
+                    };
+                    const leftEffStats = { ...cachedEffStats, weaponATK: (leftWeapon.atk || 0) + (attacker.cardBonuses ? attacker.cardBonuses.atk || 0 : 0) };
+
+                    const leftResult = calculatePhysicalDamage(
+                        leftEffStats, enemy.stats, enemy.hardDef || 0,
+                        getEnemyTargetInfo(enemy), leftAtkInfo,
+                        { forceHit: true, forceCrit: false }
+                    );
+
+                    let leftDamage = leftResult.damage;
+                    const lhMasteryLv = cachedPassive.leftHandMasteryLv || 0;
+                    const leftHandPercent = 30 + (lhMasteryLv * 10);
+                    leftDamage = Math.max(1, Math.floor(leftDamage * leftHandPercent / 100));
+
+                    damagePayload.damage2 = leftDamage;
+                    damagePayload.isCritical2 = false;
+                    damagePayload.element2 = leftWeapon.element || 'neutral';
+
+                    enemy.health = Math.max(0, enemy.health - leftDamage);
+                    damagePayload.targetHealth = enemy.health;
+                }
 
                 // RO AI: Record hit stun time and trigger aggro/assist
                 enemy.lastDamageTime = now;
@@ -7687,16 +9817,88 @@ setInterval(async () => {
                     setEnemyAggro(enemy, attackerId, 'melee');
                 }
 
-                logger.info(`[COMBAT] ${attacker.characterName} hit enemy ${enemy.name}(${enemy.enemyId}) for ${damage}${isCritical ? ' CRIT' : ''} [${atkElement}→${(enemy.element||{}).type||'neutral'}] (HP: ${enemy.health}/${enemy.maxHealth})`);
+                // System C: Splash auto-attack (Baphomet Card — 3x3 AoE around target)
+                if (!isMiss && attacker.cardSplashRange > 0) {
+                    const splashRadius = attacker.cardSplashRange * 100; // 1 cell = 100 UE units
+                    for (const [splashEid, splashEnemy] of enemies.entries()) {
+                        if (splashEid === enemy.enemyId || splashEnemy.isDead) continue;
+                        if (splashEnemy.zone !== enemy.zone) continue;
+                        const sdx = enemy.x - splashEnemy.x;
+                        const sdy = enemy.y - splashEnemy.y;
+                        if (Math.sqrt(sdx*sdx + sdy*sdy) > splashRadius) continue;
+                        // Independent damage calc for splash target (no procs)
+                        const splashResult = calculatePhysicalDamage(
+                            { ...cachedEffStats, ...cachedAtkInfo, stats: cachedEffStats },
+                            { ...(splashEnemy.stats || {}), hardDef: splashEnemy.hardDef || 0, ...getEnemyTargetInfo(splashEnemy) },
+                            { isSkill: false, forceHit: false }
+                        );
+                        if (!splashResult.isMiss && splashResult.damage > 0) {
+                            splashEnemy.health = Math.max(0, splashEnemy.health - splashResult.damage);
+                            broadcastToZone(atkEnemyZone, 'combat:damage', {
+                                attackerId, targetId: splashEid, attackerName: attacker.characterName,
+                                targetName: splashEnemy.name, damage: splashResult.damage,
+                                isCritical: splashResult.isCritical, isMiss: false,
+                                hitType: 'splash', element: splashResult.element,
+                                isEnemy: true, isEnemyAttacker: false,
+                                damage2: 0, isDualWield: false,
+                                targetHealth: splashEnemy.health, targetMaxHealth: splashEnemy.maxHealth,
+                                targetX: splashEnemy.x, targetY: splashEnemy.y, targetZ: splashEnemy.z,
+                                timestamp: now
+                            });
+                            broadcastToZone(atkEnemyZone, 'enemy:health_update', {
+                                enemyId: splashEid, health: splashEnemy.health, maxHealth: splashEnemy.maxHealth, inCombat: true
+                            });
+                            if (splashEnemy.health <= 0) {
+                                processEnemyDeathFromSkill(splashEnemy, attacker, attackerId, io);
+                            }
+                        }
+                    }
+                }
+
+                const totalDamage = damage + (damagePayload.damage2 || 0);
+                logger.info(`[COMBAT] ${attacker.characterName} hit enemy ${enemy.name}(${enemy.enemyId}) for ${damage}${dualWield ? '+' + damagePayload.damage2 + '(LH)' : ''}${isCritical ? ' CRIT' : ''}${isMiss ? ' MISS(RH)' : ''} [${atkElement}→${(enemy.element||{}).type||'neutral'}] (HP: ${enemy.health}/${enemy.maxHealth})`);
 
                 broadcastToZone(atkEnemyZone, 'combat:damage', damagePayload);
 
+                // ── Card hooks on auto-attack hit (Phase 2/4/5) ──
+                const totalAutoAtkDmg = damage + (damagePayload.damage2 || 0);
+                if (!isMiss && totalAutoAtkDmg > 0) {
+                    // Phase 2: HP/SP drain on hit
+                    processCardDrainEffects(attacker, totalAutoAtkDmg, attackerId);
+                    // Phase 5: Status effect procs on attack (bAddEff)
+                    processCardStatusProcsOnAttack(attacker, enemy, true);
+                    // Phase 6: Coma proc (Lord of the Dead Card — 1HP on normal class enemies)
+                    if (attacker.cardComaClass && enemy.health > 0) {
+                        const enemyClass = (enemy.modeFlags && enemy.modeFlags.isBoss) ? 'boss' : 'normal';
+                        if (attacker.cardComaClass.class === enemyClass || attacker.cardComaClass.class === 'all') {
+                            if (Math.random() * 10000 < attacker.cardComaClass.chance) {
+                                enemy.health = 1;
+                                damagePayload.targetHealth = 1;
+                                logger.info(`[CARDS] COMA proc! ${attacker.characterName}'s card reduced ${enemy.name} to 1 HP`);
+                            }
+                        }
+                    }
+                    // System E: Auto-cast on attack (bAutoSpell)
+                    processCardAutoSpellOnAttack(attacker, enemy, true, atkEnemyZone, io);
+                    // System G: Autobonus procs on attack
+                    processAutobonusOnAttack(attacker, attackerId);
+                    // System M: SP vanish (bSPVanishRate — works on targets with mana/SP)
+                    if (attacker.cardSpVanishRate && enemy.mana > 0) {
+                        if (Math.random() * 100 < attacker.cardSpVanishRate.chance / 10) {
+                            const spLost = Math.floor(enemy.mana * attacker.cardSpVanishRate.percent / 100);
+                            if (spLost > 0) enemy.mana = Math.max(0, enemy.mana - spLost);
+                        }
+                    }
+                }
+
                 // Any damage breaks freeze/stone/sleep/confusion
-                const aaEnemyBroken = checkDamageBreakStatuses(enemy);
-                for (const brokenType of aaEnemyBroken) {
-                    broadcastToZone(atkEnemyZone, 'status:removed', { targetId: enemy.enemyId, isEnemy: true, statusType: brokenType, reason: 'damage_break' });
-                    broadcastToZone(atkEnemyZone, 'skill:buff_removed', { targetId: enemy.enemyId, isEnemy: true, buffName: brokenType, reason: 'damage_break' });
-                    logger.info(`[COMBAT] Auto-attack broke ${brokenType} on ${enemy.name}`);
+                if (!isMiss || dualWield) {
+                    const aaEnemyBroken = checkDamageBreakStatuses(enemy);
+                    for (const brokenType of aaEnemyBroken) {
+                        broadcastToZone(atkEnemyZone, 'status:removed', { targetId: enemy.enemyId, isEnemy: true, statusType: brokenType, reason: 'damage_break' });
+                        broadcastToZone(atkEnemyZone, 'skill:buff_removed', { targetId: enemy.enemyId, isEnemy: true, buffName: brokenType, reason: 'damage_break' });
+                        logger.info(`[COMBAT] Auto-attack broke ${brokenType} on ${enemy.name}`);
+                    }
                 }
 
                 // Broadcast enemy health update to zone (for health bar visibility)
@@ -7708,22 +9910,34 @@ setInterval(async () => {
                 });
 
                 // Double Attack passive check (Thief, daggers only)
+                // During dual wield: DA only procs on RIGHT hand weapon (dagger), adds 2nd right hit + left hit = 3 total
                 const doubleAttackChance = cachedEffStats.doubleAttackChance || 0;
-                if (doubleAttackChance > 0 && !isMiss && enemy.health > 0 && Math.random() * 100 < doubleAttackChance) {
+                const canDA = doubleAttackChance > 0 && !isMiss && enemy.health > 0;
+                // DA only works with right-hand dagger
+                const rightIsDagger = (attacker.weaponType === 'dagger');
+                if (canDA && rightIsDagger && Math.random() * 100 < doubleAttackChance) {
                     const daResult2 = calculatePhysicalDamage(
                         cachedEffStats, enemy.stats, enemy.hardDef || 0,
                         getEnemyTargetInfo(enemy), cachedAtkInfo
                     );
                     if (!daResult2.isMiss) {
-                        enemy.health = Math.max(0, enemy.health - daResult2.damage);
+                        let daDamage = daResult2.damage;
+                        // Apply right hand mastery penalty to DA hit too
+                        if (dualWield) {
+                            const rhMasteryLv = cachedPassive.rightHandMasteryLv || 0;
+                            const rightHandPercent = 50 + (rhMasteryLv * 10);
+                            daDamage = Math.max(1, Math.floor(daDamage * rightHandPercent / 100));
+                        }
+                        enemy.health = Math.max(0, enemy.health - daDamage);
                         enemy.lastDamageTime = now;
                         const daZone = atkEnemyZone;
                         setTimeout(() => {
                             broadcastToZone(daZone, 'combat:damage', {
                                 attackerId, attackerName: attacker.characterName,
                                 targetId: enemy.enemyId, targetName: enemy.name, isEnemy: true,
-                                damage: daResult2.damage, isCritical: daResult2.isCritical, isMiss: false,
+                                damage: daDamage, isCritical: daResult2.isCritical, isMiss: false,
                                 hitType: 'doubleAttack', element: daResult2.element,
+                                damage2: 0, isDualWield: false, // DA hit is a single extra right-hand hit
                                 targetHealth: enemy.health, targetMaxHealth: enemy.maxHealth,
                                 attackerX: attackerPos.x, attackerY: attackerPos.y, attackerZ: attackerPos.z,
                                 targetX: enemy.x, targetY: enemy.y, targetZ: enemy.z,
@@ -7759,9 +9973,19 @@ setInterval(async () => {
                     // Clear combat set
                     enemy.inCombatWith.clear();
                     
+                    // Card kill hooks (Phase 2): SP/HP gain, Zeny, EXP bonus
+                    const cardKillResult2 = processCardKillHooks(attacker, enemy, attackerId, io);
+
+                    // Card drop bonuses (Phase 8)
+                    const cardExtraDrops2 = processCardDropBonuses(attacker, enemy);
+
                     // ── Award EXP to killer (RO-style dual progression) ──
-                    const baseExpReward = enemy.baseExp || 0;
-                    const jobExpReward = enemy.jobExp || 0;
+                    let baseExpReward = enemy.baseExp || 0;
+                    let jobExpReward = enemy.jobExp || 0;
+                    if (cardKillResult2.expBonusPercent > 0) {
+                        baseExpReward = Math.floor(baseExpReward * (100 + cardKillResult2.expBonusPercent) / 100);
+                        jobExpReward = Math.floor(jobExpReward * (100 + cardKillResult2.expBonusPercent) / 100);
+                    }
                     const expResult = processExpGain(attacker, baseExpReward, jobExpReward);
                     
                     // Send exp:gain event to killer
@@ -7850,13 +10074,23 @@ setInterval(async () => {
                     broadcastToZone(enemyDeathZone, 'enemy:death', deathPayload);
                     logger.info(`[BROADCAST] enemy:death: ${JSON.stringify(deathPayload)}`);
 
-                    // Roll item drops for the killer
+                    // Roll item drops for the killer (including Phase 8 card bonus drops)
                     const droppedItems = rollEnemyDrops(enemy);
+                    if (cardExtraDrops2.length > 0) {
+                        for (const cd of cardExtraDrops2) droppedItems.push(cd);
+                    }
                     if (droppedItems.length > 0) {
                         const lootItems = [];
                         let addedToDb = false;
                         for (const drop of droppedItems) {
                             if (drop.itemId) {
+                                // RO Classic: skip pickup if player would exceed max weight
+                                const dropDef = itemDefinitions.get(drop.itemId);
+                                const dropWeight = dropDef ? (dropDef.weight || 0) * drop.quantity : 0;
+                                if ((attacker.currentWeight || 0) + dropWeight > getPlayerMaxWeight(attacker)) {
+                                    logger.info(`[WEIGHT] ${attacker.characterName} overweight — skipped ${drop.quantity}x ${drop.itemName}`);
+                                    continue;
+                                }
                                 // Item exists in DB — add to inventory
                                 const added = await addItemToInventory(attackerId, drop.itemId, drop.quantity);
                                 if (added) {
@@ -7870,6 +10104,8 @@ setInterval(async () => {
                                         isMvpDrop: drop.isMvpDrop || false
                                     });
                                     addedToDb = true;
+                                    // Update cached weight for subsequent drops in same loop
+                                    attacker.currentWeight = (attacker.currentWeight || 0) + dropWeight;
                                 }
                             } else {
                                 // RO drop not yet in items DB — still notify client for display
@@ -7896,7 +10132,9 @@ setInterval(async () => {
                                 // Refresh inventory if any items were actually added to DB
                                 if (addedToDb) {
                                     const killerInventory = await getPlayerInventory(attackerId);
-                                    killerSocket.emit('inventory:data', { items: killerInventory, zuzucoin: attacker.zuzucoin });
+                                    killerSocket.emit('inventory:data', { items: killerInventory, zuzucoin: attacker.zuzucoin, currentWeight: attacker.currentWeight || 0, maxWeight: getPlayerMaxWeight(attacker) });
+                                    // Update weight cache from DB (authoritative) after loot
+                                    await updatePlayerWeightCache(attackerId, attacker);
                                 }
                             }
                         }
@@ -8145,6 +10383,9 @@ setInterval(() => {
         const regenMods = getCombinedModifiers(player);
         if (regenMods.blocksHPRegen) continue;
 
+        // RO Classic: HP regen blocked at >= 50% weight
+        if (getWeightRatio(player) >= INVENTORY.OVERWEIGHT_50) continue;
+
         // RO Classic: HP regen blocked while moving (unless Moving HP Recovery passive)
         const passive = getPassiveSkillBonuses(player);
         if (player.lastMoveTime && (now - player.lastMoveTime < 4000) && !passive.movingHPRecovery) continue;
@@ -8152,6 +10393,12 @@ setInterval(() => {
         const stats = getEffectiveStats(player);
         let hpRegen = Math.max(1, Math.floor(player.maxHealth / 200));
         hpRegen += Math.floor((stats.vit || 0) / 5);
+
+        // Equipment + Card HP regen rate bonus (bHPrecovRate, e.g., +30% = 30)
+        const totalHpRecovRate = (player.equipHpRegenRate || 0) + (player.cardHpRecovRate || 0);
+        if (totalHpRecovRate) {
+            hpRegen = Math.floor(hpRegen * (100 + totalHpRecovRate) / 100);
+        }
 
         const oldHP = player.health;
         player.health = Math.min(player.maxHealth, player.health + hpRegen);
@@ -8176,6 +10423,9 @@ setInterval(() => {
         const spRegenMods = getCombinedModifiers(player);
         if (spRegenMods.blocksSPRegen) continue;
 
+        // RO Classic: SP regen blocked at >= 50% weight
+        if (getWeightRatio(player) >= INVENTORY.OVERWEIGHT_50) continue;
+
         const stats = getEffectiveStats(player);
         const intStat = stats.int || stats.int_stat || 0;
         let spRegen = 1 + Math.floor(player.maxMana / 100) + Math.floor(intStat / 6);
@@ -8183,6 +10433,12 @@ setInterval(() => {
         // High INT bonus (120+)
         if (intStat >= 120) {
             spRegen += 4 + Math.floor(intStat / 2 - 60);
+        }
+
+        // Equipment + Card SP regen rate bonus (bSPrecovRate, e.g., +30% = 30)
+        const totalSpRecovRate = (player.equipSpRegenRate || 0) + (player.cardSpRecovRate || 0);
+        if (totalSpRecovRate) {
+            spRegen = Math.floor(spRegen * (100 + totalSpRecovRate) / 100);
         }
 
         const oldSP = player.mana;
@@ -8201,6 +10457,10 @@ setInterval(() => {
 setInterval(() => {
     for (const [charId, player] of connectedPlayers.entries()) {
         if (player.isDead) continue;
+
+        // RO Classic: skill regen blocked at >= 50% weight
+        if (getWeightRatio(player) >= INVENTORY.OVERWEIGHT_50) continue;
+
         const learned = player.learnedSkills || {};
         let hpBonus = 0, spBonus = 0;
 
@@ -8229,6 +10489,43 @@ setInterval(() => {
         }
     }
 }, 10000);
+
+// --- Phase 4: Card-Based Periodic Effects (every 5 seconds) ---
+// bHPRegenRate (Egnigem Cenia), bSPRegenRate (Egnigem Cenia), bHPLossRate (Samurai Spector)
+setInterval(() => {
+    for (const [charId, player] of connectedPlayers.entries()) {
+        if (player.isDead) continue;
+
+        // Card HP regen (bHPRegenRate): e.g., +50 HP every 10000ms
+        if (player.cardHpRegenRate && player.health < player.maxHealth) {
+            const hpGain = player.cardHpRegenRate.amount || 0;
+            if (hpGain > 0) {
+                player.health = Math.min(player.maxHealth, player.health + hpGain);
+                emitRegenUpdate(charId, player);
+                checkAutoBerserk(player, charId, player.zone);
+            }
+        }
+
+        // Card SP regen (bSPRegenRate): e.g., +10 SP every 10000ms
+        if (player.cardSpRegenRate && player.mana < player.maxMana) {
+            const spGain = player.cardSpRegenRate.amount || 0;
+            if (spGain > 0) {
+                player.mana = Math.min(player.maxMana, player.mana + spGain);
+                emitRegenUpdate(charId, player);
+            }
+        }
+
+        // Card HP loss (bHPLossRate, Samurai Spector): periodic HP drain
+        if (player.cardHpLossRate) {
+            const hpLoss = player.cardHpLossRate.amount || 0;
+            if (hpLoss > 0) {
+                player.health = Math.max(1, player.health - hpLoss);
+                emitRegenUpdate(charId, player);
+                checkAutoBerserk(player, charId, player.zone);
+            }
+        }
+    }
+}, 5000);
 
 // ============================================================
 // Status Effect & Buff Expiry Tick (every 1 second)
@@ -8711,7 +11008,8 @@ function calculateEnemyDamage(enemy, targetCharId) {
         weaponLevel: 1,
         buffMods: getBuffStatModifiers(enemy),
         cardMods: null,
-        race: enemy.race || 'formless'
+        race: enemy.race || 'formless',
+        size: enemy.size || 'medium'
     };
 
     return calculatePhysicalDamage(
@@ -9043,13 +11341,40 @@ setInterval(async () => {
             // Attack timing check
             if (now - enemy.lastAttackTime < (enemy.attackDelay || 1500)) break;
 
+            // ── GROUND EFFECT CHECKS (Safety Wall / Pneuma) ──
+            const targetGroundEffects = getGroundEffectsAtPosition(targetPos.x, targetPos.y, targetPos.z || 0, 100);
+
+            // Safety Wall: block melee attacks on player standing inside
+            const swEffect = targetGroundEffects.find(e => e.type === 'safety_wall' && e.hitsRemaining > 0);
+            if (swEffect && (enemy.attackRange || COMBAT.MELEE_RANGE) <= COMBAT.MELEE_RANGE + COMBAT.RANGE_TOLERANCE) {
+                swEffect.hitsRemaining--;
+                enemy.lastAttackTime = now;
+                const swZone = enemy.zone || 'prontera_south';
+                logger.info(`[COMBAT] Safety Wall blocked ${enemy.name}(${enemyId}) melee attack on player ${atkTarget.characterName} (${swEffect.hitsRemaining} hits remaining)`);
+                broadcastToZone(swZone, 'skill:ground_effect_blocked', { effectId: swEffect.id, type: 'safety_wall', hitsRemaining: swEffect.hitsRemaining, targetId: enemy.targetPlayerId, targetName: atkTarget.characterName, isEnemy: false });
+                broadcastToZone(swZone, 'enemy:attack', { enemyId: enemy.enemyId, targetId: enemy.targetPlayerId, attackMotion: enemy.attackMotion });
+                if (swEffect.hitsRemaining <= 0) {
+                    removeGroundEffect(swEffect.id);
+                    broadcastToZone(swZone, 'skill:ground_effect_removed', { effectId: swEffect.id, type: 'safety_wall', reason: 'hits_exhausted' });
+                }
+                break;
+            }
+
+            // Pneuma: block ranged attacks on player standing inside
+            const pneumaEffect = targetGroundEffects.find(e => e.type === 'pneuma');
+            if (pneumaEffect && (enemy.attackRange || COMBAT.MELEE_RANGE) > COMBAT.MELEE_RANGE + COMBAT.RANGE_TOLERANCE) {
+                enemy.lastAttackTime = now;
+                broadcastToZone(enemy.zone || 'prontera_south', 'enemy:attack', { enemyId: enemy.enemyId, targetId: enemy.targetPlayerId, attackMotion: enemy.attackMotion });
+                break;
+            }
+
             // ── EXECUTE ATTACK ──
             enemy.lastAttackTime = now;
 
             const combatResult = calculateEnemyDamage(enemy, enemy.targetPlayerId);
             if (!combatResult) break;
 
-            const { damage, isCritical, isMiss, hitType, element: atkElement } = combatResult;
+            let { damage, isCritical, isMiss, hitType, element: atkElement } = combatResult;
 
             // Build damage payload
             const damagePayload = {
@@ -9072,8 +11397,8 @@ setInterval(async () => {
             };
 
             if (!isMiss) {
-                // Energy Coat: reduce physical damage and drain SP
-                damage = applyEnergyCoat(atkTarget, damage);
+                // Energy Coat: reduce physical damage and drain SP (dispels at 0 SP)
+                damage = applyEnergyCoat(atkTarget, damage, enemy.targetPlayerId, enemy.zone);
                 damagePayload.damage = damage;
                 atkTarget.health = Math.max(0, atkTarget.health - damage);
                 damagePayload.targetHealth = atkTarget.health;
@@ -9087,6 +11412,33 @@ setInterval(async () => {
                 logger.info(`[ENEMY COMBAT] ${enemy.name}(${enemyId}) hit ${atkTarget.characterName} for ${damage}${isCritical ? ' CRIT' : ''} (HP: ${atkTarget.health}/${atkTarget.maxHealth})`);
             } else {
                 logger.info(`[ENEMY COMBAT] ${enemy.name}(${enemyId}) ${hitType} against ${atkTarget.characterName}`);
+            }
+
+            // ── Card hooks when player is hit by enemy (Phase 4/5) ──
+            if (!isMiss && damage > 0) {
+                // Phase 5: Status procs when being hit (bAddEffWhenHit)
+                processCardStatusProcsWhenHit(atkTarget, enemy, true);
+                // System E: Auto-cast when hit (bAutoSpellWhenHit)
+                processCardAutoSpellWhenHit(atkTarget, enemy, true, enemy.zone || 'prontera_south', io);
+                // System G: Autobonus2 procs when hit
+                processAutobonusWhenHit(atkTarget, enemy.targetPlayerId);
+                // Phase 4: Melee damage reflection (Orc Lord Card, High Orc Card)
+                const reflectedDmg = processCardMeleeReflection(atkTarget, damage);
+                if (reflectedDmg > 0 && !enemy.isDead) {
+                    enemy.health = Math.max(0, enemy.health - reflectedDmg);
+                    broadcastToZone(enemy.zone || 'prontera_south', 'enemy:health_update', {
+                        enemyId: enemy.enemyId, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: true
+                    });
+                }
+                // Phase 3: Cast interrupt from damage (checked inside interruptCast via cardNoCastCancel)
+                interruptCast(enemy.targetPlayerId, 'damage');
+                // System A: Walk delay (hit stun) — 46ms movement block on damage taken
+                if (!atkTarget.cardNoWalkDelay && !hasBuff(atkTarget, 'endure')) {
+                    atkTarget.walkDelayUntil = Date.now() + 46;
+                }
+                // System I: Equipment break from enemy cards (MasterSmith Card on monster)
+                // Note: enemy auto-attacks don't break equipment in RO Classic (equip_natural_break_rate=0)
+                // This only triggers from enemy skills or special enemy cards (future)
             }
 
             // Broadcast damage
@@ -10072,6 +12424,8 @@ server.listen(PORT, async () => {
   // Load item definitions into memory cache, then resolve monster drop itemIds
   await loadItemDefinitions();
   resolveDropItemIds();
+  // Parse card scripts into combat/defense modifiers
+  buildCardEffects(itemDefinitions);
 
   // Zone-based lazy enemy spawning: enemies spawn when first player enters a zone
   // No enemies spawned at startup — they spawn on demand in player:join handler
