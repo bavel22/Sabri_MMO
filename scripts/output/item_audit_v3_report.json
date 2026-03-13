@@ -1,0 +1,2618 @@
+{
+  "summary": {
+    "total_equipment": 1923,
+    "with_description": 1921,
+    "no_description": 2,
+    "perfect_match": 1772,
+    "items_with_issues": 149,
+    "total_issues": 150,
+    "by_category": {
+      "TRUE_MISMATCH": 29,
+      "COSMETIC": 0,
+      "KNOWN_LIMITATION": 118,
+      "CONDITIONAL": 3
+    }
+  },
+  "property_breakdown": {
+    "Element": 16,
+    "ASPD flat (no DB column)": 1,
+    "Critical ATK rate % (in DB, not in desc)": 4,
+    "MATK rate % (no DB column)": 117,
+    "Required Level (missing in desc)": 4,
+    "Element (missing in desc)": 2,
+    "Weight": 1,
+    "Cast rate (in desc, not in DB)": 1,
+    "DEX bonus (in DB, not in desc)": 2,
+    "MATK flat (in desc, not in DB)": 2
+  },
+  "category_property_breakdown": {
+    "TRUE_MISMATCH": {
+      "Element": 16,
+      "Critical ATK rate % (in DB, not in desc)": 4,
+      "Required Level (missing in desc)": 4,
+      "Element (missing in desc)": 2,
+      "Weight": 1,
+      "DEX bonus (in DB, not in desc)": 2
+    },
+    "COSMETIC": {},
+    "KNOWN_LIMITATION": {
+      "ASPD flat (no DB column)": 1,
+      "MATK rate % (no DB column)": 117
+    },
+    "CONDITIONAL": {
+      "Cast rate (in desc, not in DB)": 1,
+      "MATK flat (in desc, not in DB)": 2
+    }
+  },
+  "issues_TRUE_MISMATCH": [
+    {
+      "item_id": 1138,
+      "name": "Mysteltainn",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "one_hand_sword",
+      "issues": [
+        {
+          "property": "Element",
+          "db_column": "element",
+          "desc_value": "dark",
+          "db_value": "dark",
+          "category": "TRUE_MISMATCH",
+          "detail": "Desc says \"dark\", DB has \"dark\" (normalized: \"shadow\")"
+        }
+      ]
+    },
+    {
+      "item_id": 1139,
+      "name": "Tirfing",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "one_hand_sword",
+      "issues": [
+        {
+          "property": "Element",
+          "db_column": "element",
+          "desc_value": "dark",
+          "db_value": "dark",
+          "category": "TRUE_MISMATCH",
+          "detail": "Desc says \"dark\", DB has \"dark\" (normalized: \"shadow\")"
+        }
+      ]
+    },
+    {
+      "item_id": 1169,
+      "name": "Executioner",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "two_hand_sword",
+      "issues": [
+        {
+          "property": "Element",
+          "db_column": "element",
+          "desc_value": "dark",
+          "db_value": "dark",
+          "category": "TRUE_MISMATCH",
+          "detail": "Desc says \"dark\", DB has \"dark\" (normalized: \"shadow\")"
+        }
+      ]
+    },
+    {
+      "item_id": 1174,
+      "name": "Executioner",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "two_hand_sword",
+      "issues": [
+        {
+          "property": "Element",
+          "db_column": "element",
+          "desc_value": "dark",
+          "db_value": "dark",
+          "category": "TRUE_MISMATCH",
+          "detail": "Desc says \"dark\", DB has \"dark\" (normalized: \"shadow\")"
+        }
+      ]
+    },
+    {
+      "item_id": 1179,
+      "name": "Executioner",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "two_hand_sword",
+      "issues": [
+        {
+          "property": "Element",
+          "db_column": "element",
+          "desc_value": "dark",
+          "db_value": "dark",
+          "category": "TRUE_MISMATCH",
+          "detail": "Desc says \"dark\", DB has \"dark\" (normalized: \"shadow\")"
+        }
+      ]
+    },
+    {
+      "item_id": 1184,
+      "name": "Valorous Assaulter's Katzbalger",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "two_hand_sword",
+      "issues": [
+        {
+          "property": "Critical ATK rate % (in DB, not in desc)",
+          "db_column": "crit_atk_rate",
+          "desc_value": null,
+          "db_value": 20,
+          "category": "TRUE_MISMATCH",
+          "detail": "DB has crit_atk_rate=20 but description does not mention it."
+        }
+      ]
+    },
+    {
+      "item_id": 1232,
+      "name": "Assassin Dagger",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "dagger",
+      "issues": [
+        {
+          "property": "Element",
+          "db_column": "element",
+          "desc_value": "dark",
+          "db_value": "dark",
+          "category": "TRUE_MISMATCH",
+          "detail": "Desc says \"dark\", DB has \"dark\" (normalized: \"shadow\")"
+        }
+      ]
+    },
+    {
+      "item_id": 1263,
+      "name": "Unholy Touch",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "katar",
+      "issues": [
+        {
+          "property": "Element",
+          "db_column": "element",
+          "desc_value": "dark",
+          "db_value": "dark",
+          "category": "TRUE_MISMATCH",
+          "detail": "Desc says \"dark\", DB has \"dark\" (normalized: \"shadow\")"
+        }
+      ]
+    },
+    {
+      "item_id": 1274,
+      "name": "Refined Unholy Touch",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "katar",
+      "issues": [
+        {
+          "property": "Element",
+          "db_column": "element",
+          "desc_value": "dark",
+          "db_value": "dark",
+          "category": "TRUE_MISMATCH",
+          "detail": "Desc says \"dark\", DB has \"dark\" (normalized: \"shadow\")"
+        }
+      ]
+    },
+    {
+      "item_id": 1280,
+      "name": "Valorous Carnage Katar",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "katar",
+      "issues": [
+        {
+          "property": "Critical ATK rate % (in DB, not in desc)",
+          "db_column": "crit_atk_rate",
+          "desc_value": null,
+          "db_value": 20,
+          "category": "TRUE_MISMATCH",
+          "detail": "DB has crit_atk_rate=20 but description does not mention it."
+        }
+      ]
+    },
+    {
+      "item_id": 1308,
+      "name": "Golden Axe",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "axe",
+      "issues": [
+        {
+          "property": "Required Level (missing in desc)",
+          "db_column": "required_level/equip_level_min",
+          "desc_value": null,
+          "db_value": 45,
+          "category": "TRUE_MISMATCH",
+          "detail": "DB has required level 45 but description does not mention \"Base level N\""
+        }
+      ]
+    },
+    {
+      "item_id": 1365,
+      "name": "Sabbath",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "axe",
+      "issues": [
+        {
+          "property": "Element",
+          "db_column": "element",
+          "desc_value": "dark",
+          "db_value": "dark",
+          "category": "TRUE_MISMATCH",
+          "detail": "Desc says \"dark\", DB has \"dark\" (normalized: \"shadow\")"
+        }
+      ]
+    },
+    {
+      "item_id": 1390,
+      "name": "Light Epsilon",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "axe",
+      "issues": [
+        {
+          "property": "Element (missing in desc)",
+          "db_column": "element",
+          "desc_value": null,
+          "db_value": "holy",
+          "category": "TRUE_MISMATCH",
+          "detail": "DB has element=\"holy\" but description does not show Element: line"
+        }
+      ]
+    },
+    {
+      "item_id": 1469,
+      "name": "Longinus's Spear",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "spear",
+      "issues": [
+        {
+          "property": "Element",
+          "db_column": "element",
+          "desc_value": "dark",
+          "db_value": "dark",
+          "category": "TRUE_MISMATCH",
+          "detail": "Desc says \"dark\", DB has \"dark\" (normalized: \"shadow\")"
+        }
+      ]
+    },
+    {
+      "item_id": 1475,
+      "name": "Equestrian's Spear",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "spear",
+      "issues": [
+        {
+          "property": "Required Level (missing in desc)",
+          "db_column": "required_level/equip_level_min",
+          "desc_value": null,
+          "db_value": 75,
+          "category": "TRUE_MISMATCH",
+          "detail": "DB has required level 75 but description does not mention \"Base level N\""
+        }
+      ]
+    },
+    {
+      "item_id": 1557,
+      "name": "Book of the Apocalypse",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "book",
+      "issues": [
+        {
+          "property": "Element",
+          "db_column": "element",
+          "desc_value": "dark",
+          "db_value": "dark",
+          "category": "TRUE_MISMATCH",
+          "detail": "Desc says \"dark\", DB has \"dark\" (normalized: \"shadow\")"
+        }
+      ]
+    },
+    {
+      "item_id": 1815,
+      "name": "Hatii Claw",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "knuckle",
+      "issues": [
+        {
+          "property": "Element",
+          "db_column": "element",
+          "desc_value": "dark",
+          "db_value": "dark",
+          "category": "TRUE_MISMATCH",
+          "detail": "Desc says \"dark\", DB has \"dark\" (normalized: \"shadow\")"
+        }
+      ]
+    },
+    {
+      "item_id": 2653,
+      "name": "Sacrifice Ring",
+      "item_type": "armor",
+      "equip_slot": "accessory",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "Required Level (missing in desc)",
+          "db_column": "required_level/equip_level_min",
+          "desc_value": null,
+          "db_value": 90,
+          "category": "TRUE_MISMATCH",
+          "detail": "DB has required level 90 but description does not mention \"Base level N\""
+        }
+      ]
+    },
+    {
+      "item_id": 2706,
+      "name": "Arrest Handcuffs",
+      "item_type": "armor",
+      "equip_slot": "accessory",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "Weight",
+          "db_column": "weight",
+          "desc_value": 1,
+          "db_value": 0,
+          "category": "TRUE_MISMATCH",
+          "detail": null
+        }
+      ]
+    },
+    {
+      "item_id": 5260,
+      "name": "Cookie Hat",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "Critical ATK rate % (in DB, not in desc)",
+          "db_column": "crit_atk_rate",
+          "desc_value": null,
+          "db_value": 5,
+          "category": "TRUE_MISMATCH",
+          "detail": "DB has crit_atk_rate=5 but description does not mention it."
+        }
+      ]
+    },
+    {
+      "item_id": 5324,
+      "name": "Little Angel Doll",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "DEX bonus (in DB, not in desc)",
+          "db_column": "dex_bonus",
+          "desc_value": null,
+          "db_value": 3,
+          "category": "TRUE_MISMATCH",
+          "detail": "DB has dex_bonus=3 but description does not mention it."
+        }
+      ]
+    },
+    {
+      "item_id": 5360,
+      "name": "Hyuke's Black Cat Ears",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "Critical ATK rate % (in DB, not in desc)",
+          "db_column": "crit_atk_rate",
+          "desc_value": null,
+          "db_value": 10,
+          "category": "TRUE_MISMATCH",
+          "detail": "DB has crit_atk_rate=10 but description does not mention it."
+        }
+      ]
+    },
+    {
+      "item_id": 5411,
+      "name": "White Snake Hat",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "DEX bonus (in DB, not in desc)",
+          "db_column": "dex_bonus",
+          "desc_value": null,
+          "db_value": 2,
+          "category": "TRUE_MISMATCH",
+          "detail": "DB has dex_bonus=2 but description does not mention it."
+        }
+      ]
+    },
+    {
+      "item_id": 13002,
+      "name": "Ginnungagap",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "dagger",
+      "issues": [
+        {
+          "property": "Element",
+          "db_column": "element",
+          "desc_value": "dark",
+          "db_value": "dark",
+          "category": "TRUE_MISMATCH",
+          "detail": "Desc says \"dark\", DB has \"dark\" (normalized: \"shadow\")"
+        }
+      ]
+    },
+    {
+      "item_id": 13005,
+      "name": "Angelic Wing Dagger",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "dagger",
+      "issues": [
+        {
+          "property": "Required Level (missing in desc)",
+          "db_column": "required_level/equip_level_min",
+          "desc_value": null,
+          "db_value": 50,
+          "category": "TRUE_MISMATCH",
+          "detail": "DB has required level 50 but description does not mention \"Base level N\""
+        }
+      ]
+    },
+    {
+      "item_id": 13006,
+      "name": "Khukri",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "dagger",
+      "issues": [
+        {
+          "property": "Element",
+          "db_column": "element",
+          "desc_value": "dark",
+          "db_value": "dark",
+          "category": "TRUE_MISMATCH",
+          "detail": "Desc says \"dark\", DB has \"dark\" (normalized: \"shadow\")"
+        }
+      ]
+    },
+    {
+      "item_id": 13019,
+      "name": "Ginnungagap",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "dagger",
+      "issues": [
+        {
+          "property": "Element",
+          "db_column": "element",
+          "desc_value": "dark",
+          "db_value": "dark",
+          "category": "TRUE_MISMATCH",
+          "detail": "Desc says \"dark\", DB has \"dark\" (normalized: \"shadow\")"
+        }
+      ]
+    },
+    {
+      "item_id": 13033,
+      "name": "Assassin Dagger",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "dagger",
+      "issues": [
+        {
+          "property": "Element",
+          "db_column": "element",
+          "desc_value": "dark",
+          "db_value": "dark",
+          "category": "TRUE_MISMATCH",
+          "detail": "Desc says \"dark\", DB has \"dark\" (normalized: \"shadow\")"
+        }
+      ]
+    },
+    {
+      "item_id": 18102,
+      "name": "Rudra Bow",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "bow",
+      "issues": [
+        {
+          "property": "Element (missing in desc)",
+          "db_column": "element",
+          "desc_value": null,
+          "db_value": "holy",
+          "category": "TRUE_MISMATCH",
+          "detail": "DB has element=\"holy\" but description does not show Element: line"
+        }
+      ]
+    }
+  ],
+  "issues_CONDITIONAL": [
+    {
+      "item_id": 2709,
+      "name": "5th Anniversary Coin",
+      "item_type": "armor",
+      "equip_slot": "accessory",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "Cast rate (in desc, not in DB)",
+          "db_column": "cast_rate",
+          "desc_value": 50,
+          "db_value": 0,
+          "category": "CONDITIONAL",
+          "detail": "Desc says \"Reduces cast time by 50%\" but DB cast_rate=0."
+        }
+      ]
+    },
+    {
+      "item_id": 5570,
+      "name": "Gemini Crown",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK flat (in desc, not in DB)",
+          "db_column": "matk",
+          "desc_value": 15,
+          "db_value": 0,
+          "category": "CONDITIONAL",
+          "detail": "Desc has flat MATK +N but DB matk=0. May be in script only."
+        }
+      ]
+    },
+    {
+      "item_id": 5682,
+      "name": "Triangle Rune Cap",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK flat (in desc, not in DB)",
+          "db_column": "matk",
+          "desc_value": 10,
+          "db_value": 0,
+          "category": "CONDITIONAL",
+          "detail": "Desc has flat MATK +N but DB matk=0. May be in script only."
+        }
+      ]
+    }
+  ],
+  "issues_KNOWN_LIMITATION": [
+    {
+      "item_id": 1165,
+      "name": "Masamune",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "two_hand_sword",
+      "issues": [
+        {
+          "property": "ASPD flat (no DB column)",
+          "db_column": "none",
+          "desc_value": 2,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has ASPD +N flat. DB only stores aspd_rate (%). These are different stats."
+        }
+      ]
+    },
+    {
+      "item_id": 1231,
+      "name": "Bazerald",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "dagger",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 10,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1472,
+      "name": "Soul Staff",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1473,
+      "name": "Wizardry Staff",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1560,
+      "name": "Sage's Diary",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "book",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 20,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1563,
+      "name": "Sage's Diary",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "book",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 20,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1564,
+      "name": "Encyclopedia",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "book",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1565,
+      "name": "Ledger of Death",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "book",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1567,
+      "name": "Refined Hardcover Book",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "book",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 20,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1572,
+      "name": "Principles of Magic",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "book",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 20,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1573,
+      "name": "Ancient Magic",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "book",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1574,
+      "name": "Brave Battle Strategy Book",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "book",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1575,
+      "name": "Valorous Battle Strategy Book",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "book",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1576,
+      "name": "Glorious Tablet",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "book",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1577,
+      "name": "Glorious Apocalypse",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "book",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 20,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1579,
+      "name": "Book of the Dead",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "book",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1580,
+      "name": "Giant Encyclopedia",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "book",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1599,
+      "name": "Angra Manyu",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "mace",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 200,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1601,
+      "name": "Rod",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1602,
+      "name": "Rod",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1603,
+      "name": "Rod",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1604,
+      "name": "Wand",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1605,
+      "name": "Wand",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1606,
+      "name": "Wand",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1607,
+      "name": "Staff",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1608,
+      "name": "Staff",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1609,
+      "name": "Staff",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1610,
+      "name": "Arc Wand",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1611,
+      "name": "Arc Wand",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1612,
+      "name": "Arc Wand",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1613,
+      "name": "Mighty Staff",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1614,
+      "name": "Wand of Occult",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1615,
+      "name": "Evil Bone Wand",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1616,
+      "name": "Wing Staff",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1617,
+      "name": "Survivor's Rod",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1618,
+      "name": "Survivor's Rod",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1619,
+      "name": "Survivor's Rod",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1620,
+      "name": "Survivor's Rod",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1621,
+      "name": "Hypnotist's Staff",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 25,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1622,
+      "name": "Hypnotist's Staff",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 25,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1623,
+      "name": "Mighty Staff",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 20,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1624,
+      "name": "Lich's Bone Wand",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 23,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1625,
+      "name": "Healing Staff",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1626,
+      "name": "Piercing Staff",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1627,
+      "name": "Staffy",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1628,
+      "name": "Refined Survivor's Rod",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 20,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1629,
+      "name": "Gentleman's Staff",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1630,
+      "name": "Release of Wish",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1631,
+      "name": "Holy Stick",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1632,
+      "name": "Warlock's Magic Wand",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1633,
+      "name": "Warlock's Battle Wand",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1634,
+      "name": "Strong Recovery Wand",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1635,
+      "name": "Speedy Recovery Wand",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1636,
+      "name": "Thorn Staff of Darkness",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 20,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1637,
+      "name": "Eraser",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 20,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1638,
+      "name": "Staff Of Healing",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1639,
+      "name": "Novice Rod",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 16,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1640,
+      "name": "Glorious Arc Wand",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 20,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1641,
+      "name": "Glorious Cure Wand",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1642,
+      "name": "Staff Of Darkness",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1643,
+      "name": "Dead Tree Cane",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1644,
+      "name": "Staff of Piercing",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1645,
+      "name": "Lich's Bone Wand",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 23,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1646,
+      "name": "La'cryma Stick",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1647,
+      "name": "Croce Staff",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 1648,
+      "name": "Staff Of Bordeaux",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 2001,
+      "name": "Divine Cross",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 2004,
+      "name": "Kronos",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "staff",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 32,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 2383,
+      "name": "Brynhild",
+      "item_type": "armor",
+      "equip_slot": "armor",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 10,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 2542,
+      "name": "Flame Manteau of Naght Sieger",
+      "item_type": "armor",
+      "equip_slot": "garment",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 1,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 2644,
+      "name": "The Sign",
+      "item_type": "armor",
+      "equip_slot": "accessory",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 5,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 2701,
+      "name": "Orleans's Glove",
+      "item_type": "armor",
+      "equip_slot": "accessory",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 3,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 2709,
+      "name": "5th Anniversary Coin",
+      "item_type": "armor",
+      "equip_slot": "accessory",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 5,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 2720,
+      "name": "Medal of Honor",
+      "item_type": "armor",
+      "equip_slot": "accessory",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 5,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 2721,
+      "name": "Medal of Honor",
+      "item_type": "armor",
+      "equip_slot": "accessory",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 5,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 2722,
+      "name": "Medal of Honor",
+      "item_type": "armor",
+      "equip_slot": "accessory",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 5,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 2723,
+      "name": "Medal of Honor",
+      "item_type": "armor",
+      "equip_slot": "accessory",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 5,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 2724,
+      "name": "Medal of Honor",
+      "item_type": "armor",
+      "equip_slot": "accessory",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 5,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 2725,
+      "name": "Medal of Honor",
+      "item_type": "armor",
+      "equip_slot": "accessory",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 5,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 2733,
+      "name": "Sheriff Badge",
+      "item_type": "armor",
+      "equip_slot": "accessory",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 5,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 2738,
+      "name": "Shiny Coin",
+      "item_type": "armor",
+      "equip_slot": "accessory",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 6,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 2739,
+      "name": "Ordinary Coin",
+      "item_type": "armor",
+      "equip_slot": "accessory",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 5,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 2740,
+      "name": "Rusty Coin",
+      "item_type": "armor",
+      "equip_slot": "accessory",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 3,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 2752,
+      "name": "Praccsinos",
+      "item_type": "armor",
+      "equip_slot": "accessory",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 5,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 2763,
+      "name": "Neo Skull Ring",
+      "item_type": "armor",
+      "equip_slot": "accessory",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 5,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 2785,
+      "name": "Orlean's Gloves",
+      "item_type": "armor",
+      "equip_slot": "accessory",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 3,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 2788,
+      "name": "Bradium Earring",
+      "item_type": "armor",
+      "equip_slot": "accessory",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 2,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 5156,
+      "name": "Father's Mask",
+      "item_type": "armor",
+      "equip_slot": "head_low",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 1,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 5313,
+      "name": "Diadem",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 3,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 5325,
+      "name": "Robo Eye",
+      "item_type": "armor",
+      "equip_slot": "head_mid",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 2,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 5362,
+      "name": "Ninja Scroll",
+      "item_type": "armor",
+      "equip_slot": "head_low",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 1,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 5372,
+      "name": "Koneko Hat",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 3,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 5457,
+      "name": "Moon Rabbit Hat",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 5,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 5463,
+      "name": "Rainbow Scarf",
+      "item_type": "armor",
+      "equip_slot": "head_low",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 1,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 5481,
+      "name": "Hermode Cap",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": -10,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 5506,
+      "name": "Blue Night Cap",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 5,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 5507,
+      "name": "Pink Night Cap",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 5,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 5514,
+      "name": "Pisces Diadem",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 2,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 5515,
+      "name": "Pisces Crown",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 2,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 5520,
+      "name": "Rabbit Earplugs",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 4,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 5549,
+      "name": "Taurus Diadem",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 1,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 5550,
+      "name": "Taurus Crown",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 1,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 5569,
+      "name": "Gemini Diadem",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 2,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 5581,
+      "name": "Cancer Diadem",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 2,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 5690,
+      "name": "Red Wing Hat",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 4,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 13010,
+      "name": "Asura",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "dagger",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 10,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 13011,
+      "name": "Asura",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "dagger",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 10,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 13023,
+      "name": "Ashura",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "dagger",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 13036,
+      "name": "Brave Assassin's Damascus",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "dagger",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 13037,
+      "name": "Valorous Assassin's Damascus",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "dagger",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 13109,
+      "name": "Wasteland Outlaw",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "gun",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 10,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 13307,
+      "name": "Glorious Shuriken",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "huuma",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 15,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 13411,
+      "name": "Brave Gladiator Blade",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "one_hand_sword",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 10,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 13414,
+      "name": "Elemental Sword",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "one_hand_sword",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 5,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 13417,
+      "name": "Glorious Rapier",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "one_hand_sword",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 10,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 13418,
+      "name": "Glorious Holy Avenger",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "one_hand_sword",
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 10,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 18503,
+      "name": "Small Devil Horns",
+      "item_type": "armor",
+      "equip_slot": "head_mid",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 5,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    },
+    {
+      "item_id": 18539,
+      "name": "Skull Cap",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "property": "MATK rate % (no DB column)",
+          "db_column": "none",
+          "desc_value": 8,
+          "db_value": null,
+          "category": "KNOWN_LIMITATION",
+          "detail": "Desc has MATK +N%. No matk_rate column in DB — stored in script."
+        }
+      ]
+    }
+  ],
+  "issues_COSMETIC": [],
+  "no_description": [
+    {
+      "item_id": 1389,
+      "name": "Tomahawk",
+      "item_type": "weapon",
+      "equip_slot": "weapon"
+    },
+    {
+      "item_id": 1582,
+      "name": "Diary Of Great Sage",
+      "item_type": "weapon",
+      "equip_slot": "weapon"
+    }
+  ]
+}

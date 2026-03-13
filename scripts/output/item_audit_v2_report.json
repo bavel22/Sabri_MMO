@@ -1,0 +1,849 @@
+{
+  "summary": {
+    "total_equipment": 1923,
+    "with_description": 1921,
+    "no_description": 2,
+    "perfect_match": 1870,
+    "has_mismatch": 4,
+    "has_missing_in_desc": 45,
+    "has_extra_in_desc": 3
+  },
+  "stats": {
+    "mismatch_by_stat": {
+      "Cast time reduction %": 4
+    },
+    "missing_by_stat": {
+      "Base DEF (Defense: N)": 16,
+      "Critical ATK rate %": 4,
+      "Base ATK (Attack: N)": 25,
+      "DEX bonus": 2
+    },
+    "extra_by_stat": {
+      "ASPD flat bonus (no DB column)": 1,
+      "MATK flat bonus": 2
+    }
+  },
+  "mismatches": [
+    {
+      "item_id": 2365,
+      "name": "Orleans's Gown",
+      "item_type": "armor",
+      "equip_slot": "armor",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Cast time reduction %",
+          "db_column": "cast_rate",
+          "desc_value": -15,
+          "db_value": 15,
+          "diff": -30
+        }
+      ],
+      "desc_snippet": "A uniform that was once worn by a chef that was obsessed with cleanliness.\nNobody could stop him once he started talking about cuisine.\n________________________\nReduces cast time by 15%.\nEnables skill cast cannot be interrupted (except during WoE).\n________________________\nType: Armor\nDefense: 2\nWeight: 30\nRefinable: Yes\nCan be enchanted by:\n\n________________________\nRequirement:\nBase level 55\nAll"
+    },
+    {
+      "item_id": 2741,
+      "name": "All In One Ring",
+      "item_type": "armor",
+      "equip_slot": "accessory",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Cast time reduction %",
+          "db_column": "cast_rate",
+          "desc_value": -10,
+          "db_value": 10,
+          "diff": -20
+        }
+      ],
+      "desc_snippet": "Rental Item\nA Jewelry Ring that contains a 3 Seal Magic Spell.\n________________________\nAll Stats +1\nReduces cast time by 10%.\nEnables the use of Level 1 Heal.\nEnables the use of Level 1 Teleport.\nEnables uninterruptable skill cast.\n________________________\nType: Accessory\nWeight: 0\n________________________\nRequirement: None"
+    },
+    {
+      "item_id": 5286,
+      "name": "Pecopeco Hairband",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Cast time reduction %",
+          "db_column": "cast_rate",
+          "desc_value": -25,
+          "db_value": 25,
+          "diff": -50
+        }
+      ],
+      "desc_snippet": "Rental Item\nA hairband with PecoPeco wings that lends you a PecoPeco's speed.\n________________________\nReduces after attack delay by -10%.\nReduces cast time by 25%.\nMovement speed +25%\n________________________\nType: Headgear\nDefense: 3\nPosition: Upper\nWeight: 0\nRefinable: No\n________________________\nRequirement: None"
+    },
+    {
+      "item_id": 5408,
+      "name": "Old Bandana",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Cast time reduction %",
+          "db_column": "cast_rate",
+          "desc_value": -10,
+          "db_value": 10,
+          "diff": -20
+        }
+      ],
+      "desc_snippet": "Rental Item\nA bandana of legendary pioneer.\n________________________\nINT +2\nMaxSP +50\nReduces cast time by 10%.\n________________________\nType: Headgear\nDefense: 5\nPosition: Upper\nWeight: 0\n________________________\nRequirement: None"
+    }
+  ],
+  "missing_in_desc": [
+    {
+      "item_id": 1135,
+      "name": "Cutlus",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "one_hand_sword",
+      "issues": [
+        {
+          "stat": "Base DEF (Defense: N)",
+          "db_column": "def",
+          "db_value": 1,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 1160,
+      "name": "Broad Sword",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "two_hand_sword",
+      "issues": [
+        {
+          "stat": "Base DEF (Defense: N)",
+          "db_column": "def",
+          "db_value": 5,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 1162,
+      "name": "Broad Sword",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "two_hand_sword",
+      "issues": [
+        {
+          "stat": "Base DEF (Defense: N)",
+          "db_column": "def",
+          "db_value": 5,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 1167,
+      "name": "Schweizersabel",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "two_hand_sword",
+      "issues": [
+        {
+          "stat": "Base DEF (Defense: N)",
+          "db_column": "def",
+          "db_value": 1,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 1170,
+      "name": "Katzbalger",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "two_hand_sword",
+      "issues": [
+        {
+          "stat": "Base DEF (Defense: N)",
+          "db_column": "def",
+          "db_value": 10,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 1178,
+      "name": "Schweizersabel",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "two_hand_sword",
+      "issues": [
+        {
+          "stat": "Base DEF (Defense: N)",
+          "db_column": "def",
+          "db_value": 1,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 1184,
+      "name": "Valorous Assaulter's Katzbalger",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "two_hand_sword",
+      "issues": [
+        {
+          "stat": "Critical ATK rate %",
+          "db_column": "crit_atk_rate",
+          "db_value": 20,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 1261,
+      "name": "Infiltrator",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "katar",
+      "issues": [
+        {
+          "stat": "Base DEF (Defense: N)",
+          "db_column": "def",
+          "db_value": 3,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 1266,
+      "name": "Infiltrator",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "katar",
+      "issues": [
+        {
+          "stat": "Base DEF (Defense: N)",
+          "db_column": "def",
+          "db_value": 3,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 1267,
+      "name": "Infiltrator",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "katar",
+      "issues": [
+        {
+          "stat": "Base DEF (Defense: N)",
+          "db_column": "def",
+          "db_value": 3,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 1280,
+      "name": "Valorous Carnage Katar",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "katar",
+      "issues": [
+        {
+          "stat": "Critical ATK rate %",
+          "db_column": "crit_atk_rate",
+          "db_value": 20,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 2370,
+      "name": "Used Mage Coat",
+      "item_type": "armor",
+      "equip_slot": "armor",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Base ATK (Attack: N)",
+          "db_column": "atk",
+          "db_value": 10,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 2389,
+      "name": "Armor of Naga",
+      "item_type": "armor",
+      "equip_slot": "armor",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Base ATK (Attack: N)",
+          "db_column": "atk",
+          "db_value": 20,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 2620,
+      "name": "Rogue's Treasure",
+      "item_type": "armor",
+      "equip_slot": "accessory",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Base ATK (Attack: N)",
+          "db_column": "atk",
+          "db_value": 10,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 2650,
+      "name": "Morrigane's Belt",
+      "item_type": "armor",
+      "equip_slot": "accessory",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Base ATK (Attack: N)",
+          "db_column": "atk",
+          "db_value": 5,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 2660,
+      "name": "Vesper Core 02",
+      "item_type": "armor",
+      "equip_slot": "accessory",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Base ATK (Attack: N)",
+          "db_column": "atk",
+          "db_value": 10,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 2673,
+      "name": "Warrior's Shining Ring",
+      "item_type": "armor",
+      "equip_slot": "accessory",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Base ATK (Attack: N)",
+          "db_column": "atk",
+          "db_value": 10,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 2678,
+      "name": "Ring Of Flame Lord",
+      "item_type": "armor",
+      "equip_slot": "accessory",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Base ATK (Attack: N)",
+          "db_column": "atk",
+          "db_value": 15,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 2697,
+      "name": "Vesper Core 02",
+      "item_type": "armor",
+      "equip_slot": "accessory",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Base ATK (Attack: N)",
+          "db_column": "atk",
+          "db_value": 10,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 2710,
+      "name": "Bloody Iron Ball",
+      "item_type": "armor",
+      "equip_slot": "accessory",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Base ATK (Attack: N)",
+          "db_column": "atk",
+          "db_value": 30,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 2766,
+      "name": "Swordman Figure",
+      "item_type": "armor",
+      "equip_slot": "accessory",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Base DEF (Defense: N)",
+          "db_column": "def",
+          "db_value": 2,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 2769,
+      "name": "Archer Figure",
+      "item_type": "armor",
+      "equip_slot": "accessory",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Base ATK (Attack: N)",
+          "db_column": "atk",
+          "db_value": 10,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 5127,
+      "name": "Morrigane's Helm",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Base ATK (Attack: N)",
+          "db_column": "atk",
+          "db_value": 3,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 5155,
+      "name": "Father's White Moustache",
+      "item_type": "armor",
+      "equip_slot": "head_low",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Base ATK (Attack: N)",
+          "db_column": "atk",
+          "db_value": 20,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 5260,
+      "name": "Cookie Hat",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Critical ATK rate %",
+          "db_column": "crit_atk_rate",
+          "db_value": 5,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 5305,
+      "name": "Pirate Dagger",
+      "item_type": "armor",
+      "equip_slot": "head_low",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Base ATK (Attack: N)",
+          "db_column": "atk",
+          "db_value": 5,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 5324,
+      "name": "Little Angel Doll",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Base DEF (Defense: N)",
+          "db_column": "def",
+          "db_value": 2,
+          "desc_value": null
+        },
+        {
+          "stat": "DEX bonus",
+          "db_column": "dex_bonus",
+          "db_value": 3,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 5342,
+      "name": "Sorin Doll Hat",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Base ATK (Attack: N)",
+          "db_column": "atk",
+          "db_value": 50,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 5360,
+      "name": "Hyuke's Black Cat Ears",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Critical ATK rate %",
+          "db_column": "crit_atk_rate",
+          "db_value": 10,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 5361,
+      "name": "Gangster Scarf",
+      "item_type": "armor",
+      "equip_slot": "head_low",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Base ATK (Attack: N)",
+          "db_column": "atk",
+          "db_value": 5,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 5411,
+      "name": "White Snake Hat",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Base DEF (Defense: N)",
+          "db_column": "def",
+          "db_value": 2,
+          "desc_value": null
+        },
+        {
+          "stat": "DEX bonus",
+          "db_column": "dex_bonus",
+          "db_value": 2,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 5457,
+      "name": "Moon Rabbit Hat",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Base ATK (Attack: N)",
+          "db_column": "atk",
+          "db_value": 5,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 5481,
+      "name": "Hermode Cap",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Base ATK (Attack: N)",
+          "db_column": "atk",
+          "db_value": -20,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 5506,
+      "name": "Blue Night Cap",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Base ATK (Attack: N)",
+          "db_column": "atk",
+          "db_value": 5,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 5507,
+      "name": "Pink Night Cap",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Base ATK (Attack: N)",
+          "db_column": "atk",
+          "db_value": 5,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 5512,
+      "name": "Aquarius Diadem",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Base ATK (Attack: N)",
+          "db_column": "atk",
+          "db_value": 15,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 5513,
+      "name": "Aquarius Crown",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Base ATK (Attack: N)",
+          "db_column": "atk",
+          "db_value": 15,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 5570,
+      "name": "Gemini Crown",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Base ATK (Attack: N)",
+          "db_column": "atk",
+          "db_value": 2,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 5582,
+      "name": "Cancer Crown",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Base ATK (Attack: N)",
+          "db_column": "atk",
+          "db_value": 15,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 5816,
+      "name": "Purple Cowboy Hat",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Base ATK (Attack: N)",
+          "db_column": "atk",
+          "db_value": 15,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 13003,
+      "name": "Cowardice Blade",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "dagger",
+      "issues": [
+        {
+          "stat": "Base DEF (Defense: N)",
+          "db_column": "def",
+          "db_value": 5,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 13004,
+      "name": "Cowardice Blade",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "dagger",
+      "issues": [
+        {
+          "stat": "Base DEF (Defense: N)",
+          "db_column": "def",
+          "db_value": 5,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 13400,
+      "name": "Cutlus",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "one_hand_sword",
+      "issues": [
+        {
+          "stat": "Base DEF (Defense: N)",
+          "db_column": "def",
+          "db_value": 1,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 13402,
+      "name": "Cutlus",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "one_hand_sword",
+      "issues": [
+        {
+          "stat": "Base DEF (Defense: N)",
+          "db_column": "def",
+          "db_value": 1,
+          "desc_value": null
+        }
+      ]
+    },
+    {
+      "item_id": 18595,
+      "name": "Horn of Ancient",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "Base ATK (Attack: N)",
+          "db_column": "atk",
+          "db_value": 100,
+          "desc_value": null
+        }
+      ]
+    }
+  ],
+  "extra_in_desc": [
+    {
+      "item_id": 1165,
+      "name": "Masamune",
+      "item_type": "weapon",
+      "equip_slot": "weapon",
+      "weapon_type": "two_hand_sword",
+      "issues": [
+        {
+          "stat": "ASPD flat bonus (no DB column)",
+          "db_column": "aspd_rate (closest)",
+          "desc_value": 2,
+          "db_value": 0,
+          "note": "Description has flat ASPD +N. DB only has aspd_rate (%). These are different stats."
+        }
+      ]
+    },
+    {
+      "item_id": 5570,
+      "name": "Gemini Crown",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "MATK flat bonus",
+          "db_column": "matk",
+          "desc_value": 15,
+          "db_value": 0,
+          "note": "Description has flat MATK +N but DB matk=0. May be in script only."
+        }
+      ]
+    },
+    {
+      "item_id": 5682,
+      "name": "Triangle Rune Cap",
+      "item_type": "armor",
+      "equip_slot": "head_top",
+      "weapon_type": null,
+      "issues": [
+        {
+          "stat": "MATK flat bonus",
+          "db_column": "matk",
+          "desc_value": 10,
+          "db_value": 0,
+          "note": "Description has flat MATK +N but DB matk=0. May be in script only."
+        }
+      ]
+    }
+  ],
+  "no_description": [
+    {
+      "item_id": 1389,
+      "name": "Tomahawk",
+      "item_type": "weapon",
+      "equip_slot": "weapon"
+    },
+    {
+      "item_id": 1582,
+      "name": "Diary Of Great Sage",
+      "item_type": "weapon",
+      "equip_slot": "weapon"
+    }
+  ]
+}
