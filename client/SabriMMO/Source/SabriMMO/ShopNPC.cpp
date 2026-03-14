@@ -3,6 +3,7 @@
 // Name text rendered in screen-space by WorldHealthBarSubsystem overlay.
 
 #include "ShopNPC.h"
+#include "UI/NameTagSubsystem.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "UObject/ConstructorHelpers.h"
@@ -48,6 +49,10 @@ AShopNPC::AShopNPC()
 void AShopNPC::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// Register name tag (RO Classic: NPC names are hover-only, light blue)
+	if (UNameTagSubsystem* NTS = GetWorld()->GetSubsystem<UNameTagSubsystem>())
+		NTS->RegisterEntity(this, NPCDisplayName, ENameTagEntityType::NPC);
 }
 
 void AShopNPC::Interact()

@@ -28,6 +28,11 @@ public:
 	int32 GetAttackTargetId() const { return AttackTargetId; }
 	bool IsAttackTargetEnemy() const { return bAttackTargetIsEnemy; }
 
+	// Clear client-side attack state WITHOUT emitting combat:stop_attack.
+	// Called by CombatActionSubsystem when the server sends target_lost/stopped
+	// to avoid redundantly re-emitting the stop command.
+	void ClearAttackStateNoEmit();
+
 private:
 	// --- Auto-attack state ---
 	bool bIsAutoAttacking = false;

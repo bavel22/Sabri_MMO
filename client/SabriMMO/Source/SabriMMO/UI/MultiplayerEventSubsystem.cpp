@@ -1,4 +1,5 @@
-// MultiplayerEventSubsystem.cpp — Bridges persistent socket events to BP_SocketManager functions.
+// MultiplayerEventSubsystem.cpp — Bridges 14 persistent socket events to BP_SocketManager functions.
+// Player/enemy/combat events migrated to C++ subsystems in Phases 2-3.
 
 #include "MultiplayerEventSubsystem.h"
 #include "MMOGameInstance.h"
@@ -44,43 +45,15 @@ void UMultiplayerEventSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	// Register handlers for ALL BP-exclusive events.
 	// Each handler forwards the event data to the corresponding BP function via ProcessEvent.
 
-	// ---- Player Events ----
-	Router->RegisterHandler(TEXT("player:moved"), this,
-		[this](const TSharedPtr<FJsonValue>& D) { ForwardToBPHandler(TEXT("OnPlayerMoved"), D); });
-	Router->RegisterHandler(TEXT("player:left"), this,
-		[this](const TSharedPtr<FJsonValue>& D) { ForwardToBPHandler(TEXT("OnPlayerLeft"), D); });
+	// ---- Player Events: REMOVED (Phase 3) ----
+	// player:moved + player:left now handled by UOtherPlayerSubsystem.
 
-	// ---- Combat Events (BP handles animation, targeting state, etc.) ----
-	Router->RegisterHandler(TEXT("combat:damage"), this,
-		[this](const TSharedPtr<FJsonValue>& D) { ForwardToBPHandler(TEXT("OnCombatDamage"), D); });
-	Router->RegisterHandler(TEXT("combat:health_update"), this,
-		[this](const TSharedPtr<FJsonValue>& D) { ForwardToBPHandler(TEXT("OnHealthUpdate"), D); });
-	Router->RegisterHandler(TEXT("combat:death"), this,
-		[this](const TSharedPtr<FJsonValue>& D) { ForwardToBPHandler(TEXT("OnCombatDeath"), D); });
-	Router->RegisterHandler(TEXT("combat:respawn"), this,
-		[this](const TSharedPtr<FJsonValue>& D) { ForwardToBPHandler(TEXT("OnCombatRespawn"), D); });
-	Router->RegisterHandler(TEXT("combat:auto_attack_started"), this,
-		[this](const TSharedPtr<FJsonValue>& D) { ForwardToBPHandler(TEXT("OnAutoAttackStarted"), D); });
-	Router->RegisterHandler(TEXT("combat:auto_attack_stopped"), this,
-		[this](const TSharedPtr<FJsonValue>& D) { ForwardToBPHandler(TEXT("OnAutoAttackStopped"), D); });
-	Router->RegisterHandler(TEXT("combat:target_lost"), this,
-		[this](const TSharedPtr<FJsonValue>& D) { ForwardToBPHandler(TEXT("OnTargetLost"), D); });
-	Router->RegisterHandler(TEXT("combat:out_of_range"), this,
-		[this](const TSharedPtr<FJsonValue>& D) { ForwardToBPHandler(TEXT("OnCombatOutOfRange"), D); });
-	Router->RegisterHandler(TEXT("combat:error"), this,
-		[this](const TSharedPtr<FJsonValue>& D) { ForwardToBPHandler(TEXT("OnCombatError"), D); });
+	// ---- Combat Events: REMOVED (Phase 2) ----
+	// All 9 combat events now handled by UCombatActionSubsystem.
 
-	// ---- Enemy Events ----
-	Router->RegisterHandler(TEXT("enemy:spawn"), this,
-		[this](const TSharedPtr<FJsonValue>& D) { ForwardToBPHandler(TEXT("OnEnemySpawn"), D); });
-	Router->RegisterHandler(TEXT("enemy:move"), this,
-		[this](const TSharedPtr<FJsonValue>& D) { ForwardToBPHandler(TEXT("OnEnemyMove"), D); });
-	Router->RegisterHandler(TEXT("enemy:death"), this,
-		[this](const TSharedPtr<FJsonValue>& D) { ForwardToBPHandler(TEXT("OnEnemyDeath"), D); });
-	Router->RegisterHandler(TEXT("enemy:health_update"), this,
-		[this](const TSharedPtr<FJsonValue>& D) { ForwardToBPHandler(TEXT("OnEnemyHealthUpdate"), D); });
-	Router->RegisterHandler(TEXT("enemy:attack"), this,
-		[this](const TSharedPtr<FJsonValue>& D) { HandleEnemyAttack(D); });
+	// ---- Enemy Events: REMOVED (Phase 3) ----
+	// enemy:spawn, enemy:move, enemy:death, enemy:health_update, enemy:attack
+	// now handled by UEnemySubsystem.
 
 	// ---- Inventory Events (BP handles UI updates, equip visuals) ----
 	Router->RegisterHandler(TEXT("inventory:data"), this,
@@ -122,9 +95,6 @@ void UMultiplayerEventSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	Router->RegisterHandler(TEXT("shop:error"), this,
 		[this](const TSharedPtr<FJsonValue>& D) { ForwardToBPHandler(TEXT("OnShopError"), D); });
 
-	// Cache BP_EnemyManager for enemy:attack handling
-	EnemyManagerActor = FindEnemyManagerActor();
-
 	// Defer event forwarding by one frame — prevents ProcessEvent during PostLoad
 	// (UE5 assertion: "Cannot call UnrealScript while PostLoading objects")
 	// Events arriving during this gap are safely dropped; zone:ready resends all data.
@@ -134,8 +104,8 @@ void UMultiplayerEventSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		bReadyToForward = true;
 	});
 
-	UE_LOG(LogMultiplayerBridge, Log, TEXT("MultiplayerEventSubsystem — %d events registered (bridge to %s)."),
-		31, *SocketManagerActor->GetName());
+	UE_LOG(LogMultiplayerBridge, Log, TEXT("MultiplayerEventSubsystem — 14 events registered (bridge to %s). Player/enemy/combat events migrated to C++ subsystems."),
+		*SocketManagerActor->GetName());
 }
 
 void UMultiplayerEventSubsystem::Deinitialize()
@@ -153,7 +123,6 @@ void UMultiplayerEventSubsystem::Deinitialize()
 
 	bReadyToForward = false;
 	SocketManagerActor = nullptr;
-	EnemyManagerActor = nullptr;
 	Super::Deinitialize();
 }
 
@@ -174,78 +143,6 @@ AActor* UMultiplayerEventSubsystem::FindSocketManagerActor() const
 		}
 	}
 	return nullptr;
-}
-
-// ============================================================
-// Find BP_EnemyManager actor
-// ============================================================
-
-AActor* UMultiplayerEventSubsystem::FindEnemyManagerActor() const
-{
-	UWorld* World = GetWorld();
-	if (!World) return nullptr;
-
-	for (TActorIterator<AActor> It(World); It; ++It)
-	{
-		if (It->GetName().Contains(TEXT("EnemyManager")))
-		{
-			return *It;
-		}
-	}
-	return nullptr;
-}
-
-// ============================================================
-// Handle enemy:attack — find enemy actor, play attack animation
-// ============================================================
-
-void UMultiplayerEventSubsystem::HandleEnemyAttack(const TSharedPtr<FJsonValue>& Data)
-{
-	if (!bReadyToForward) return;
-	if (!Data.IsValid()) return;
-
-	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
-	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
-	const TSharedPtr<FJsonObject>& Obj = *ObjPtr;
-
-	// Parse enemyId from event data
-	double EnemyIdD = 0;
-	if (!Obj->TryGetNumberField(TEXT("enemyId"), EnemyIdD)) return;
-	int32 EnemyId = (int32)EnemyIdD;
-
-	// Find BP_EnemyManager (lazy re-find if stale)
-	if (!EnemyManagerActor.IsValid())
-	{
-		EnemyManagerActor = FindEnemyManagerActor();
-		if (!EnemyManagerActor.IsValid()) return;
-	}
-
-	// Call GetEnemyActor(EnemyId) on BP_EnemyManager via ProcessEvent
-	UFunction* GetEnemyFunc = EnemyManagerActor->FindFunction(TEXT("GetEnemyActor"));
-	if (!GetEnemyFunc) return;
-
-	// Struct must match BP function layout: input EnemyId, output EnemyRef + WasFound
-	struct FGetEnemyParams
-	{
-		int32 EnemyId;
-		AActor* EnemyRef;
-		bool WasFound;
-	};
-	FGetEnemyParams GetParams;
-	GetParams.EnemyId = EnemyId;
-	GetParams.EnemyRef = nullptr;
-	GetParams.WasFound = false;
-
-	EnemyManagerActor->ProcessEvent(GetEnemyFunc, &GetParams);
-
-	if (!GetParams.WasFound || !GetParams.EnemyRef) return;
-
-	// Call PlayAttackAnimation() on the enemy actor
-	UFunction* PlayAttackFunc = GetParams.EnemyRef->FindFunction(TEXT("PlayAttackAnimation"));
-	if (PlayAttackFunc)
-	{
-		GetParams.EnemyRef->ProcessEvent(PlayAttackFunc, nullptr);
-	}
 }
 
 // ============================================================

@@ -441,6 +441,118 @@ const SECOND_CLASS_UPGRADES = {
     'merchant': ['blacksmith', 'alchemist']
 };
 
+// ============================================================
+// HP/SP class coefficients (RO pre-renewal)
+// HP uses iterative formula:
+//   BaseHP = 35 + (BaseLv * HP_JOB_B) + sum(round(HP_JOB_A * i) for i=2..BaseLv)
+//   MaxHP  = floor(BaseHP * (1 + VIT * 0.01) * TransMod) + bonusMaxHp
+// SP uses simple linear formula:
+//   BaseSP = 10 + BaseLv * SP_JOB
+//   MaxSP  = floor(BaseSP * (1 + INT * 0.01) * TransMod) + bonusMaxSp
+// ============================================================
+const HP_SP_COEFFICIENTS = {
+    novice:      { HP_JOB_A: 0.0,  HP_JOB_B: 5,   SP_JOB: 1 },
+    super_novice:{ HP_JOB_A: 0.0,  HP_JOB_B: 5,   SP_JOB: 1 },
+    swordsman:   { HP_JOB_A: 0.7,  HP_JOB_B: 5,   SP_JOB: 2 },
+    mage:        { HP_JOB_A: 0.3,  HP_JOB_B: 5,   SP_JOB: 6 },
+    archer:      { HP_JOB_A: 0.5,  HP_JOB_B: 5,   SP_JOB: 2 },
+    thief:       { HP_JOB_A: 0.5,  HP_JOB_B: 5,   SP_JOB: 2 },
+    merchant:    { HP_JOB_A: 0.4,  HP_JOB_B: 5,   SP_JOB: 3 },
+    acolyte:     { HP_JOB_A: 0.4,  HP_JOB_B: 5,   SP_JOB: 5 },
+    knight:      { HP_JOB_A: 1.5,  HP_JOB_B: 5,   SP_JOB: 3 },
+    crusader:    { HP_JOB_A: 1.1,  HP_JOB_B: 7,   SP_JOB: 4.7 },
+    wizard:      { HP_JOB_A: 0.55, HP_JOB_B: 5,   SP_JOB: 9 },
+    sage:        { HP_JOB_A: 0.75, HP_JOB_B: 5,   SP_JOB: 7 },
+    hunter:      { HP_JOB_A: 0.85, HP_JOB_B: 5,   SP_JOB: 4 },
+    bard:        { HP_JOB_A: 0.75, HP_JOB_B: 3,   SP_JOB: 6 },
+    dancer:      { HP_JOB_A: 0.75, HP_JOB_B: 3,   SP_JOB: 6 },
+    blacksmith:  { HP_JOB_A: 0.9,  HP_JOB_B: 5,   SP_JOB: 4 },
+    alchemist:   { HP_JOB_A: 0.9,  HP_JOB_B: 5,   SP_JOB: 4 },
+    assassin:    { HP_JOB_A: 1.1,  HP_JOB_B: 5,   SP_JOB: 4 },
+    rogue:       { HP_JOB_A: 0.85, HP_JOB_B: 5,   SP_JOB: 5 },
+    priest:      { HP_JOB_A: 0.75, HP_JOB_B: 5,   SP_JOB: 8 },
+    monk:        { HP_JOB_A: 0.9,  HP_JOB_B: 6.5, SP_JOB: 4.7 },
+    // Transcendent classes use same coefficients as base class (TransMod=1.25 applied separately)
+    lord_knight:    { HP_JOB_A: 1.5,  HP_JOB_B: 5,   SP_JOB: 3 },
+    paladin:        { HP_JOB_A: 1.1,  HP_JOB_B: 7,   SP_JOB: 4.7 },
+    high_wizard:    { HP_JOB_A: 0.55, HP_JOB_B: 5,   SP_JOB: 9 },
+    scholar:        { HP_JOB_A: 0.75, HP_JOB_B: 5,   SP_JOB: 7 },
+    sniper:         { HP_JOB_A: 0.85, HP_JOB_B: 5,   SP_JOB: 4 },
+    minstrel:       { HP_JOB_A: 0.75, HP_JOB_B: 3,   SP_JOB: 6 },
+    gypsy:          { HP_JOB_A: 0.75, HP_JOB_B: 3,   SP_JOB: 6 },
+    whitesmith:     { HP_JOB_A: 0.9,  HP_JOB_B: 5,   SP_JOB: 4 },
+    biochemist:     { HP_JOB_A: 0.9,  HP_JOB_B: 5,   SP_JOB: 4 },
+    assassin_cross: { HP_JOB_A: 1.1,  HP_JOB_B: 5,   SP_JOB: 4 },
+    stalker:        { HP_JOB_A: 0.85, HP_JOB_B: 5,   SP_JOB: 5 },
+    high_priest:    { HP_JOB_A: 0.75, HP_JOB_B: 5,   SP_JOB: 8 },
+    champion:       { HP_JOB_A: 0.9,  HP_JOB_B: 6.5, SP_JOB: 4.7 },
+    // High Novice and High First classes use same coefficients as base
+    high_novice:    { HP_JOB_A: 0.0,  HP_JOB_B: 5,   SP_JOB: 1 },
+    high_swordsman: { HP_JOB_A: 0.7,  HP_JOB_B: 5,   SP_JOB: 2 },
+    high_mage:      { HP_JOB_A: 0.3,  HP_JOB_B: 5,   SP_JOB: 6 },
+    high_archer:    { HP_JOB_A: 0.5,  HP_JOB_B: 5,   SP_JOB: 2 },
+    high_thief:     { HP_JOB_A: 0.5,  HP_JOB_B: 5,   SP_JOB: 2 },
+    high_merchant:  { HP_JOB_A: 0.4,  HP_JOB_B: 5,   SP_JOB: 3 },
+    high_acolyte:   { HP_JOB_A: 0.4,  HP_JOB_B: 5,   SP_JOB: 5 },
+};
+
+// ============================================================
+// ASPD base weapon delays (BTBA values per class per weapon)
+// ASPD = 200 - (WD - floor((WD*AGI/25 + WD*DEX/100) / 10)) * (1 - SpeedMod)
+// ============================================================
+const ASPD_BASE_DELAYS = {
+    novice:     { bare_hand: 50, dagger: 55 },
+    swordsman:  { bare_hand: 40, dagger: 65, one_hand_sword: 70, two_hand_sword: 60, spear: 65, mace: 70, axe: 80 },
+    mage:       { bare_hand: 35, dagger: 60, staff: 65 },
+    archer:     { bare_hand: 50, dagger: 55, bow: 70 },
+    thief:      { bare_hand: 40, dagger: 50, one_hand_sword: 70, bow: 85 },
+    merchant:   { bare_hand: 40, dagger: 65, one_hand_sword: 55, mace: 65, axe: 70 },
+    acolyte:    { bare_hand: 40, dagger: 60, mace: 70, staff: 65 },
+    knight:     { bare_hand: 38, dagger: 60, one_hand_sword: 55, two_hand_sword: 50, spear: 55, mace: 60, axe: 70 },
+    wizard:     { bare_hand: 35, dagger: 58, staff: 60 },
+    hunter:     { bare_hand: 48, dagger: 55, bow: 60 },
+    assassin:   { bare_hand: 38, dagger: 45, one_hand_sword: 65, katar: 42, axe: 75 },
+    blacksmith: { bare_hand: 38, dagger: 60, one_hand_sword: 52, mace: 60, axe: 62 },
+    priest:     { bare_hand: 40, mace: 62, staff: 60, knuckle: 55 },
+    crusader:   { bare_hand: 38, dagger: 62, one_hand_sword: 58, two_hand_sword: 55, spear: 58, mace: 62 },
+    sage:       { bare_hand: 35, dagger: 58, staff: 60, book: 58 },
+    bard:       { bare_hand: 45, dagger: 55, bow: 62, instrument: 58 },
+    dancer:     { bare_hand: 45, dagger: 55, bow: 62, whip: 58 },
+    rogue:      { bare_hand: 38, dagger: 48, one_hand_sword: 62, bow: 75 },
+    monk:       { bare_hand: 36, mace: 60, staff: 62, knuckle: 42 },
+    alchemist:  { bare_hand: 38, dagger: 60, one_hand_sword: 52, mace: 60, axe: 62 },
+};
+
+// Transcendent class -> base class mapping (for ASPD table lookup)
+const TRANS_TO_BASE_CLASS = {
+    lord_knight:    'knight',
+    paladin:        'crusader',
+    high_wizard:    'wizard',
+    scholar:        'sage',
+    sniper:         'hunter',
+    minstrel:       'bard',
+    gypsy:          'dancer',
+    whitesmith:     'blacksmith',
+    biochemist:     'alchemist',
+    assassin_cross: 'assassin',
+    stalker:        'rogue',
+    high_priest:    'priest',
+    champion:       'monk',
+    high_novice:    'novice',
+    high_swordsman: 'swordsman',
+    high_mage:      'mage',
+    high_archer:    'archer',
+    high_thief:     'thief',
+    high_merchant:  'merchant',
+    high_acolyte:   'acolyte',
+};
+
+const TRANSCENDENT_CLASSES = new Set([
+    'lord_knight', 'paladin', 'high_wizard', 'scholar', 'sniper',
+    'minstrel', 'gypsy', 'whitesmith', 'biochemist',
+    'assassin_cross', 'stalker', 'high_priest', 'champion'
+]);
+
 module.exports = {
     BASE_EXP_TABLE,
     NOVICE_JOB_EXP_TABLE,
@@ -450,6 +562,10 @@ module.exports = {
     MAX_BASE_LEVEL,
     FIRST_CLASSES,
     SECOND_CLASS_UPGRADES,
+    HP_SP_COEFFICIENTS,
+    ASPD_BASE_DELAYS,
+    TRANS_TO_BASE_CLASS,
+    TRANSCENDENT_CLASSES,
     getStatPointsForLevelUp,
     getSkillPointsForJobLevelUp,
     getBaseExpForNextLevel,

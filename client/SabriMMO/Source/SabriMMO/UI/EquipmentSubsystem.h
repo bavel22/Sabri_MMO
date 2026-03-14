@@ -22,28 +22,49 @@ namespace EquipSlots
 	static const FString HeadLow    = TEXT("head_low");
 	static const FString Armor      = TEXT("armor");
 	static const FString Weapon     = TEXT("weapon");
+	static const FString WeaponLeft = TEXT("weapon_left");  // Dual wield: Assassin/Assassin Cross only
 	static const FString Shield     = TEXT("shield");
 	static const FString Garment    = TEXT("garment");
 	static const FString Footgear   = TEXT("footgear");
 	static const FString Accessory1 = TEXT("accessory_1");
 	static const FString Accessory2 = TEXT("accessory_2");
 
+	// Check if a job class can dual wield (Assassin/Assassin Cross)
+	inline bool CanDualWield(const FString& JobClass)
+	{
+		return JobClass == TEXT("assassin") || JobClass == TEXT("assassin_cross");
+	}
+
+	// Check if a weapon type is valid for left hand
+	inline bool IsValidLeftHandWeapon(const FString& WeaponType)
+	{
+		return WeaponType == TEXT("dagger") || WeaponType == TEXT("one_hand_sword") || WeaponType == TEXT("axe");
+	}
+
 	// Map equip_slot (item definition) → valid equipped_positions
-	inline TArray<FString> GetValidPositions(const FString& EquipSlot)
+	inline TArray<FString> GetValidPositions(const FString& EquipSlot, const FString& JobClass = TEXT(""))
 	{
 		if (EquipSlot == TEXT("accessory")) return { Accessory1, Accessory2 };
+		// Assassin: weapon items can go to weapon or weapon_left
+		if (EquipSlot == TEXT("weapon") && CanDualWield(JobClass)) return { Weapon, WeaponLeft };
 		return { EquipSlot };
 	}
 
-	// Display name for UI
-	inline FString GetDisplayName(const FString& Position)
+	// Display name for UI — Assassin shows "Left Hand" instead of "Shield" for weapon_left
+	inline FString GetDisplayName(const FString& Position, const FString& JobClass = TEXT(""))
 	{
 		if (Position == HeadTop)    return TEXT("Head Top");
 		if (Position == HeadMid)    return TEXT("Head Mid");
 		if (Position == HeadLow)    return TEXT("Head Low");
 		if (Position == Armor)      return TEXT("Armor");
 		if (Position == Weapon)     return TEXT("Weapon");
-		if (Position == Shield)     return TEXT("Shield");
+		if (Position == WeaponLeft) return TEXT("Left Hand");
+		if (Position == Shield)
+		{
+			// Assassin: show "Left Hand" for the shield slot position
+			if (CanDualWield(JobClass)) return TEXT("Left Hand");
+			return TEXT("Shield");
+		}
 		if (Position == Garment)    return TEXT("Garment");
 		if (Position == Footgear)   return TEXT("Footgear");
 		if (Position == Accessory1) return TEXT("Accessory");
@@ -73,6 +94,11 @@ public:
 
 	// Check if a dragged item can go in a specific slot
 	bool CanEquipToSlot(const FString& ItemEquipSlot, const FString& SlotPosition) const;
+	// Overload that also checks weapon type for dual wield
+	bool CanEquipToSlot(const FString& ItemEquipSlot, const FString& SlotPosition, const FString& WeaponType) const;
+
+	// Get the local player's job class for dual wield detection
+	FString GetLocalJobClass() const;
 
 	// ---- lifecycle ----
 	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;

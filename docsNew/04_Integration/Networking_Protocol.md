@@ -108,9 +108,42 @@ All data between client and server is JSON. The UE5 client sends/receives JSON s
             "aspd_modifier": 5,
             "weapon_range": 150
         }
-    ]
+    ],
+    "zuzucoin": 1500,
+    "currentWeight": 1200,
+    "maxWeight": 3500
 }
 ```
+
+### Card Compound (Client → Server)
+```json
+{
+    "cardInventoryId": 456,
+    "equipInventoryId": 123,
+    "slotIndex": 0
+}
+```
+- **cardInventoryId**: `inventory_id` of the card to compound
+- **equipInventoryId**: `inventory_id` of the target equipment
+- **slotIndex**: which card slot to insert into (0-based, max = equipment's `slots - 1`)
+
+### Card Compound Result (Server → Client)
+```json
+{
+    "success": true,
+    "cardName": "Hydra Card",
+    "equipmentName": "Blade [4]",
+    "slotIndex": 0,
+    "message": "Hydra Card compounded into Blade [4] [slot 1]"
+}
+```
+- **success**: whether the compound succeeded
+- **cardName**: display name of the card that was compounded
+- **equipmentName**: display name of the target equipment
+- **slotIndex**: the slot index the card was inserted into
+- **message**: human-readable result message
+
+On success, the server also emits `inventory:data` to refresh the client inventory. If the target equipment is currently equipped, a `player:stats` update is also sent to reflect any stat changes from the newly compounded card.
 
 ### Player Stats (Server → Client)
 ```json
@@ -161,6 +194,20 @@ All data between client and server is JSON. The UE5 client sends/receives JSON s
 
 **Critical**: All IDs from client are parsed with `parseInt()` on the server to prevent type mismatch bugs.
 
+### Weight Status (Server → Client)
+```json
+{
+    "characterId": 1,
+    "currentWeight": 1500,
+    "maxWeight": 3500,
+    "ratio": 0.429,
+    "isOverweight50": false,
+    "isOverweight90": false,
+    "isOverweight100": false
+}
+```
+Sent on join, inventory mutations, STR allocation, Enlarge Weight Limit learned. Thresholds: 50% stops regen, 90% blocks attack/skills, >100% blocks loot pickup.
+
 ## Error Event Format
 
 Combat and inventory errors use dedicated error events:
@@ -173,6 +220,12 @@ Combat and inventory errors use dedicated error events:
 { "message": "Item not found in your inventory" }
 ```
 
+## Client-Side Event Routing
+
+Combat events (`combat:damage`, `combat:auto_attack_started/stopped`, `combat:target_lost`, `combat:out_of_range`, `combat:death`, `combat:respawn`, `combat:error`, `combat:health_update`, `enemy:health_update`) are handled directly by `UCombatActionSubsystem` (C++) via `USocketEventRouter`. They are NOT bridged through `MultiplayerEventSubsystem` to Blueprints.
+
+All other game events (enemy:spawn/move/death/attack, player:moved/left, inventory/shop/skill/chat/loot/zone events) are bridged from `MultiplayerEventSubsystem` to `BP_SocketManager` via `ProcessEvent` (22 bridges remaining).
+
 ---
 
-**Last Updated**: 2026-02-17
+**Last Updated**: 2026-03-13 (Added Client-Side Event Routing section documenting CombatActionSubsystem direct handling)

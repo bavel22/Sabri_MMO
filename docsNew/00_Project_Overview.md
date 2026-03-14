@@ -84,12 +84,18 @@
   - **58 etc items** (8 original + 50 RO): Materials, gems, dolls, ammo
   - **20 weapons** (6 original + 14 RO): Daggers, swords, maces, staves, bows, spears, axes, instruments
   - **14 armor** (3 original + 11 RO): Body armor, shields, headgear, accessories
-  - **23 monster cards**: Stat bonuses and special effects
+  - **538 monster cards** (IDs 4001-4499): rAthena canonical data, flat stat bonuses, offensive combat mods (race/ele/size %), defensive mods, armor element changes
 - PostgreSQL `items` (definitions) + `character_inventory` (per-character)
 - Socket.io events: load, use consumable, equip/unequip, drop/discard
 - Equipped weapon modifies ATK, range, and ASPD
 - Stackable items with max stack limits
 - **RO item name → ID mapping** for efficient drop processing
+- **Card compound system** (`card:compound` event, server-validated): permanent card insertion into slotted equipment
+- **Card compound UI** (`SCardCompoundPopup`, Z=23): double-click card in Etc tab opens centered popup with eligible unequipped equipment, slot diamonds, click-to-compound
+- **Card bonus aggregation**: `rebuildCardBonuses()` recalculates on equip/join/compound — flat stats, offensive mods, defensive mods, armor element
+- **Card combat modifiers**: offensive card bonuses applied at damage pipeline Step 6, defensive card bonuses at Step 8c
+- **Armor element cards**: Ghostring, Pasana, Swordfish, Sandman, etc. change equipped armor's element for defense calculations
+- **Weight threshold system** (RO Classic): <50% normal, 50-89% regen stops, >=90% attack/skills blocked, >100% no loot pickup. Cached `player.currentWeight`, `weight:status` event
 
 ### Chat System
 - Global chat channel via Socket.io
@@ -104,7 +110,7 @@
 - Mouse scroll zoom (200–1500 units)
 - Character faces movement direction
 
-### UI System — 18 Blueprint Widgets + 14 Slate Widgets
+### UI System — 18 Blueprint Widgets + 15 Slate Widgets
 
 #### Login Flow (Pure C++ Slate — replaces BP_GameFlow)
 - `ULoginFlowSubsystem` — UWorldSubsystem state machine: Login → ServerSelect → CharacterSelect → CharacterCreate → EnteringWorld
@@ -127,7 +133,9 @@
 - `WBP_DeathOverlay` — Death screen with respawn button
 - `WBP_LootPopup` — Loot notification popup with auto-fade
 
-#### Game HUD (Pure C++ Slate — 15 UWorldSubsystems)
+#### Game HUD (Pure C++ Slate — 18 UWorldSubsystems)
+- `SWorldHealthBarOverlay` — Floating HP/SP bars above characters (Z=8)
+- `STargetFrameWidget` — Auto-attack target name + HP bar, RO brown/gold theme (Z=9, via CombatActionSubsystem)
 - `SBasicInfoWidget` — Draggable HUD panel: player name, job, HP/SP bars, base/job EXP bars, weight, zuzucoin (Z=10)
 - `SBuffBarWidget` — Buff/status icons with 3-letter abbreviations and countdown timers (Z=11)
 - `SCombatStatsWidget` — ATK/DEF/HIT/FLEE/ASPD stat panel, F8 toggle (Z=12)
@@ -138,8 +146,18 @@
 - `SKafraWidget` — Kafra service dialog (Z=19)
 - `SSkillTreeWidget` — Skill tree with point allocation (Z=20)
 - `SDamageNumberOverlay` — Floating damage/heal numbers (Z=20)
+- `SCardCompoundPopup` — Double-click card compound: equipment list with slot diamonds (Z=23)
 - `SCastBarOverlay` — World-projected cast time bars (Z=25)
-- `SWorldHealthBarOverlay` — Floating HP/SP bars above characters (Z=8)
+- `SDeathOverlayWidget` — "You have been defeated" + Respawn button (Z=40, via CombatActionSubsystem)
+
+#### Game Subsystems (Non-Widget, Pure C++)
+- `CombatActionSubsystem` — 10 combat event handlers, bOrientRotationToMovement toggling, PlayAttackAnimation via reflection, target frame + death overlay
+- `TargetingSubsystem` — 30Hz hover trace, cursor switching (Enemy=Crosshairs, NPC=TextEditBeam), hover indicators, pauses during skill targeting
+- `PlayerInputSubsystem` — Click-to-move, click-to-attack (emit only), click-to-interact, walk-to-NPC/enemy
+- `CameraSubsystem` — Right-click yaw rotation, scroll zoom (200-1500 units), fixed -55 degree pitch
+- `MultiplayerEventSubsystem` — Bridge: forwards 22 events to BP_SocketManager (9 combat events migrated to CombatActionSubsystem)
+- `PositionBroadcastSubsystem` — 30Hz position broadcasting via persistent socket
+- `SkillVFXSubsystem` — Skill visual effects via Niagara
 
 ### Zone / Map / Warp System
 - Multi-zone architecture: zone registry (`ro_zone_data.js`), zone-scoped broadcasting, lazy enemy spawning
@@ -264,13 +282,14 @@ UMG, Slate, HTTP, Json, JsonUtilities
 
 **Last Updated**: 2026-03-10
 
-- **Completed**: Foundation, Multiplayer, Combat, Stats, Inventory, Equipment, Hotbar, NPC Shops, Zone System, Skill VFX, Status Effect & Buff System (Phase 2), Element Table & Formula Audit (Phase 3), Persistent Socket Connection (Phase 4), Passive Skills & First Class Completion (Phase 5)
+- **Completed**: Foundation, Multiplayer, Combat, Stats, Inventory, Equipment, Hotbar, NPC Shops, Zone System, Skill VFX, Status Effect & Buff System (Phase 2), Element Table & Formula Audit (Phase 3), Persistent Socket Connection (Phase 4), Passive Skills & First Class Completion (Phase 5), Dual Wield System (Assassin), Blueprint-to-C++ Migration Phase 1 (Camera+Input) + Phase 2 (Targeting+Combat)
 - **Monsters**: 509 RO templates loaded, 46 spawns active (zones 1-3), full AI state machine with CC lock + hidden player detection
-- **Items**: 148 items in database (22 original + 126 RO drops)
+- **Items**: 148 items + 538 cards in database (22 original + 126 RO drops + 538 rAthena cards with compound system)
 - **Skills**: 151 total skill definitions (68 first-class + 83 second-class), 43 active skill handlers implemented, 12 passive skills with stat bonuses, 24 buff types, 10 status effects, 31 VFX configs
 - **Classes**: All 6 first classes fully playable — Swordsman (10 skills), Mage (14 skills), Archer (7 skills), Acolyte (14 skills), Thief (10 skills), Merchant (10 skills)
-- **Combat Data**: Element table (10×10×4 = 400 values) verified against rAthena pre-renewal `attr_fix.yml`, size penalty table (18 weapons × 3 sizes) verified, card modifier stacking fixed (per-category multiplicative), race ATK/DEF passive bonuses (Demon Bane, Divine Protection)
-- **UI**: 17 C++ Slate subsystems + 18 Blueprint widgets, BuffBar with timer icons
+- **Combat Data**: Element table (10×10×4 = 400 values) verified against rAthena pre-renewal `attr_fix.yml`, size penalty table (18 weapons × 3 sizes) verified, card modifier stacking fixed (per-category multiplicative), card compound system with `rebuildCardBonuses()` integration, race ATK/DEF passive bonuses (Demon Bane, Divine Protection), dual wield per-hand card/element for auto-attacks
+- **Dual Wield**: Assassin/Assassin Cross dual wield (8 phases complete). Both hands hit per cycle, per-hand mastery penalties, per-hand cards/elements, ASPD combined formula, Katar/DW mutual exclusivity, combat stats display
+- **UI**: 22 C++ Slate subsystems (18 original + 2 Phase 1 + 2 Phase 2 migration) + 18 Blueprint widgets, BuffBar with timer icons
 - **Zones**: 4 zones (prontera, prt_south, prt_north, prt_dungeon_01)
 - **Next**: Phase 6 (Party System) per Strategic Plan v3
 - **Roadmap**: See `docsNew/05_Development/Strategic_Implementation_Plan_v3.md`

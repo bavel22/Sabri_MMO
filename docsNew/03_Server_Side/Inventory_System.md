@@ -4,7 +4,7 @@
 
 The inventory system manages items, equipment, and consumables for all characters. **6,169 items** from the rAthena pre-renewal database are stored in PostgreSQL with canonical IDs. Item definitions are loaded into memory on server startup via `loadItemDefinitions()`. Per-character inventory uses the `character_inventory` table with support for stacking, equipping, and dropping items. All consumable effects are data-driven via `ro_item_effects.js`.
 
-**Last Updated**: 2026-03-11 — Migrated to rAthena canonical IDs (6,169 items), data-driven consumable system, separate buy/sell prices.
+**Last Updated**: 2026-03-12 — Added RO Classic weight threshold system (50%/90%/100% penalties, cached weight, `weight:status` event).
 
 ---
 
@@ -12,10 +12,55 @@ The inventory system manages items, equipment, and consumables for all character
 
 ```javascript
 const INVENTORY = {
-    MAX_SLOTS: 100,    // Max inventory slots per character
-    MAX_WEIGHT: 2000   // Base max carry weight (+ STR*30 + skills)
+    MAX_SLOTS: 100,           // Max inventory slots per character
+    MAX_WEIGHT: 2000,         // Base max carry weight (before STR bonus)
+    OVERWEIGHT_50: 0.5,       // Regen stops at 50% weight
+    OVERWEIGHT_90: 0.9,       // Attack/skills blocked at 90% weight
 };
 ```
+
+---
+
+## Weight System (RO Classic Overweight Thresholds)
+
+### Max Weight Formula
+
+`maxWeight = 2000 + STR * 30 + (Enlarge Weight Limit level * 200)`
+
+### Thresholds
+
+| Threshold | Effect |
+|-----------|--------|
+| < 50% | Normal — full regen, all actions |
+| 50-89% | HP/SP/skill regen **stops** |
+| >= 90% | Cannot **attack** or use **skills** |
+| > 100% | Cannot **pick up loot** |
+
+Item use (potions, wings) is never gated by weight.
+
+### Cached Weight
+
+`player.currentWeight` is cached in memory (set from DB on join, updated after every inventory mutation via `updatePlayerWeightCache()`). The cached value feeds all threshold checks — zero DB queries per regen/combat tick.
+
+### Socket Event: `weight:status`
+
+```json
+{
+    "characterId": 1,
+    "currentWeight": 1500,
+    "maxWeight": 3500,
+    "ratio": 0.429,
+    "isOverweight50": false,
+    "isOverweight90": false,
+    "isOverweight100": false
+}
+```
+
+Sent on: join, any inventory mutation, STR allocation, Enlarge Weight Limit learned.
+
+All `inventory:data` emissions also include `currentWeight` and `maxWeight` fields.
+
+See skill `/sabrimmo-weight` for full enforcement details.
 
 ---
 
@@ -268,12 +313,26 @@ Server:
     1. Verify ownership
     2. Check item has equip_slot
     3. Check required_level
-    4. Two-hand weapon check (auto-unequip shield)
-    5. Auto-unequip existing item in same slot
-    6. Update is_equipped, equipped_position
-    7. Recalculate stat bonuses + derived stats
-    8. Emit player:stats, inventory:data, player:equipment_changed
+    4. Dual wield check (Assassin: route to weapon_left if right occupied)
+    5. Katar check (auto-unequip left-hand weapon + shield)
+    6. Two-hand weapon check (auto-unequip shield + left-hand weapon)
+    7. Shield check (block if 2H; Assassin: unequip left-hand weapon)
+    8. Auto-unequip existing item in TARGET position (by equipped_position, not equip_slot)
+    9. Update is_equipped, equipped_position
+    10. Track equippedWeaponRight/Left on player object
+    11. Recalculate stat bonuses + derived stats (ASPD uses dual wield formula)
+    12. Emit player:stats (with dualWield{}), inventory:data, inventory:equipped
 ```
+
+**Dual Wield Equip Logic (Assassin/Assassin Cross only):**
+- `canDualWield(jobClass)`: only assassin/assassin_cross
+- `isValidLeftHandWeapon(weaponType)`: dagger, one_hand_sword, axe
+- Right hand empty → equip to `weapon`
+- Right hand occupied + left hand empty (not Katar) → equip to `weapon_left`
+- Both hands occupied → replace right hand
+- Katar equip → auto-unequip left-hand weapon + shield
+- Shield equip → auto-unequip left-hand weapon for Assassin
+- DB: `equipped_position = 'weapon_left'` (no schema changes needed)
 
 ### inventory:drop / inventory:move
 
@@ -327,6 +386,7 @@ Hotbar slot assignments with cascading deletes: `character_id`, `slot_index`, `i
 |------|---------|
 | `server/src/index.js` | itemDefinitions/itemNameToId (~line 1375), loadItemDefinitions (~line 1458), resolveDropItemIds (~line 1177), NPC_SHOPS (~line 1379), inventory:use handler (~line 6195), shop events (~line 6738), weight system (~line 1442) |
 | `server/src/ro_item_effects.js` | Auto-generated consumable use-effect data (490 effects) |
+| `server/src/ro_card_prefix_suffix.js` | Card naming data: 441 prefix/suffix texts + postfix flag set |
 | `server/src/ro_monster_templates.js` | 509 RO monsters with drop tables (item names) |
 | `database/init.sql` | Items table schema (40+ columns) |
 | `scripts/output/canonical_items.sql` | 6,169 rAthena items (full data) |
@@ -349,3 +409,102 @@ Hotbar slot assignments with cascading deletes: `character_id`, `slot_index`, `i
 | "Return is blocked in this area" | Zone has `noreturn` flag (Butterfly Wing) |
 | "Shop not found" | shopId not in NPC_SHOPS |
 | "Not enough Zuzucoin" | Insufficient funds |
+| "Too heavy to attack!" | combat:error — weight ratio >= 90% |
+| "Too heavy to use skills!" | skill:error — weight ratio >= 90% |
+| "Overweight" | skill:cast_failed reason — weight >= 90% during cast |
+
+---
+
+## Card Compound System
+
+### Overview
+
+**538 cards** from the rAthena pre-renewal database (item IDs 4001+) can be permanently compounded into slotted equipment. Cards provide passive bonuses — flat stat increases, combat modifiers, or armor element changes — that activate while the equipment is worn. Once compounded, a card cannot be removed (card removal is a future feature). The number of available slots is defined per-item in the `slots` column of the `items` table.
+
+### `card:compound` Event Handler
+
+```
+Client: emit('card:compound', {cardInventoryId, equipInventoryId})
+Server:
+    1. Verify ownership of both card and equipment (character_id match)
+    2. Validate card item_type === 'card'
+    3. Validate equipment has equip_slot and slots > 0
+    4. Check card_type compatibility (weapon cards → weapons, armor cards → armor/shield/garment/footgear/accessory)
+    5. Check equipment has an empty slot (compounded_cards array length < slots)
+    6. Insert card into equipment's compounded_cards JSONB array
+    7. Remove card from inventory (quantity - 1 or delete)
+    8. Call rebuildCardBonuses() if equipment is currently worn
+    9. Emit inventory:data to refresh client
+```
+
+### Validation Pipeline
+
+| Step | Check | Error |
+|------|-------|-------|
+| 1 | Card exists in player inventory | "Card not found in your inventory" |
+| 2 | Equipment exists in player inventory | "Equipment not found in your inventory" |
+| 3 | Card `item_type === 'card'` | "This item is not a card" |
+| 4 | Equipment has `slots > 0` | "This equipment has no card slots" |
+| 5 | Card type matches slot type (weapon/armor) | "This card cannot be placed in this equipment type" |
+| 6 | `compounded_cards.length < slots` | "All card slots are already filled" |
+
+### `rebuildCardBonuses(player)`
+
+Called on `player:join`, `inventory:equip`, `inventory:unequip`, and `card:compound`. Queries all equipped items with their `compounded_cards` JSONB column and aggregates bonuses:
+
+```javascript
+async function rebuildCardBonuses(player) {
+    // 1. Query all equipped items for this character
+    // 2. For each equipped item, iterate compounded_cards JSONB array
+    // 3. Look up each card_id in itemDefinitions
+    // 4. Aggregate bonuses by type (flat stats, combat modifiers, element)
+    // 5. Store aggregated result on player.cardBonuses
+    // 6. Recalculate derived stats via getEffectiveStats()
+}
+```
+
+The aggregated `player.cardBonuses` object is consumed by `getEffectiveStats()` alongside buff and passive bonuses.
+
+### Card Bonus Types
+
+| Bonus Type | Source | Example |
+|------------|--------|---------|
+| Flat stat bonuses | DB columns (`str_bonus`, `agi_bonus`, etc.) | Poring Card (+2 LUK, +1 FLEE) |
+| Combat modifiers | Parsed from `script` column | Hydra Card (+20% damage vs Demi-Human) |
+| Armor element change | `element` field in card definition | Pasana Card (armor becomes Fire 1) |
+| Max HP/SP bonuses | DB columns (`max_hp_bonus`, `max_sp_bonus`) | Peco Peco Card (+10% Max HP) |
+| Race/element/size ATK | Parsed race/ele/size modifiers from script | Vadon Card (+20% ATK vs Fire) |
+
+### Stacking Rules
+
+Card bonuses follow RO Classic stacking behavior:
+
+- **Additive within category**: Two Hydra Cards (each +20% vs Demi-Human) = +40% vs Demi-Human
+- **Multiplicative between categories**: Hydra (+20% race) × Skeleton Worker (+15% size) = `1.20 × 1.15 = 1.38` (38% total)
+
+Categories for multiplicative stacking: `race`, `element`, `size`, `boss/normal`.
+
+### Database Schema
+
+The `compounded_cards` column on `character_inventory` stores an array of card IDs:
+
+```sql
+-- character_inventory
+compounded_cards  JSONB  DEFAULT '[]'::jsonb
+```
+
+Example value for a weapon with 2 cards compounded:
+
+```json
+[4001, 4013]
+```
+
+Card definitions come from the `items` table where `item_type = 'card'`. Relevant columns: `card_type`, `card_prefix`, `card_suffix`, `script`.
+
+### Card Naming Display
+
+Compounded cards change equipment display names. 441 cards have prefix or suffix text populated in `card_prefix`/`card_suffix` DB columns. The client's `GetDisplayName()` assembles names with multiplier support (Double/Triple/Quadruple for duplicate cards). This is purely visual — the item's `name` column is never modified. See [Card System — Card Naming](./Card_System.md#card-naming-system-display-names) for full details.
+
+### Cross-Reference
+
+See [Card System](./Card_System.md) for full documentation including card drop sources, card type classification, card naming system, and the complete list of 538 card effects.

@@ -100,17 +100,31 @@ FShopItem UShopSubsystem::ParseShopItemFromJson(const TSharedPtr<FJsonObject>& O
 	if (Obj->TryGetNumberField(TEXT("lukBonus"), Val)) Item.LukBonus = (int32)Val;
 	if (Obj->TryGetNumberField(TEXT("maxHpBonus"), Val)) Item.MaxHPBonus = (int32)Val;
 	if (Obj->TryGetNumberField(TEXT("maxSpBonus"), Val)) Item.MaxSPBonus = (int32)Val;
+	if (Obj->TryGetNumberField(TEXT("hitBonus"), Val)) Item.HitBonus = (int32)Val;
+	if (Obj->TryGetNumberField(TEXT("fleeBonus"), Val)) Item.FleeBonus = (int32)Val;
+	if (Obj->TryGetNumberField(TEXT("criticalBonus"), Val)) Item.CriticalBonus = (int32)Val;
+	if (Obj->TryGetNumberField(TEXT("perfectDodgeBonus"), Val)) Item.PerfectDodgeBonus = (int32)Val;
+	if (Obj->TryGetNumberField(TEXT("slots"), Val)) Item.Slots = (int32)Val;
+	if (Obj->TryGetNumberField(TEXT("weaponLevel"), Val)) Item.WeaponLevel = (int32)Val;
 
 	FString Str;
 	if (Obj->TryGetStringField(TEXT("name"), Str)) Item.Name = Str;
 	if (Obj->TryGetStringField(TEXT("description"), Str)) Item.Description = Str;
+	if (Obj->TryGetStringField(TEXT("fullDescription"), Str)) Item.FullDescription = Str;
 	if (Obj->TryGetStringField(TEXT("itemType"), Str)) Item.ItemType = Str;
 	if (Obj->TryGetStringField(TEXT("equipSlot"), Str)) Item.EquipSlot = Str;
 	if (Obj->TryGetStringField(TEXT("icon"), Str)) Item.Icon = Str;
 	if (Obj->TryGetStringField(TEXT("weaponType"), Str)) Item.WeaponType = Str;
+	if (Obj->TryGetStringField(TEXT("jobsAllowed"), Str)) Item.JobsAllowed = Str;
+	if (Obj->TryGetStringField(TEXT("cardType"), Str)) Item.CardType = Str;
+	if (Obj->TryGetStringField(TEXT("cardPrefix"), Str)) Item.CardPrefix = Str;
+	if (Obj->TryGetStringField(TEXT("cardSuffix"), Str)) Item.CardSuffix = Str;
+	if (Obj->TryGetStringField(TEXT("element"), Str)) Item.Element = Str;
 
 	bool bBool = false;
 	if (Obj->TryGetBoolField(TEXT("stackable"), bBool)) Item.bStackable = bBool;
+	if (Obj->TryGetBoolField(TEXT("refineable"), bBool)) Item.bRefineable = bBool;
+	if (Obj->TryGetBoolField(TEXT("twoHanded"), bBool)) Item.bTwoHanded = bBool;
 
 	return Item;
 }
@@ -410,7 +424,7 @@ void UShopSubsystem::AddToSellCart(const FInventoryItem& Item, int32 Quantity, i
 	FCartItem CI;
 	CI.InventoryId = Item.InventoryId;
 	CI.ItemId = Item.ItemId;
-	CI.Name = Item.Name;
+	CI.Name = Item.GetDisplayName();
 	CI.Icon = Item.Icon;
 	CI.Quantity = FMath::Min(Quantity, Item.Quantity);
 	CI.UnitPrice = SellPrice;

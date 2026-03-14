@@ -4,6 +4,7 @@
 #include "HotbarSubsystem.h"
 #include "InventorySubsystem.h"
 #include "SkillTreeSubsystem.h"
+#include "ItemTooltipBuilder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/SOverlay.h"
@@ -149,6 +150,16 @@ TSharedRef<SWidget> SHotbarRowWidget::BuildSlot(int32 SlotIndex)
 		.WidthOverride(SlotSize)
 		.HeightOverride(SlotSize)
 		.Padding(FMargin(1.f))
+		.ToolTipText_Lambda([this, SlotIndex, Sub]() -> FText
+		{
+			if (!Sub) return FText::GetEmpty();
+			const FHotbarSlot& Slot = Sub->GetSlot(RowIndex, SlotIndex);
+			if (Slot.IsItem() && !Slot.ItemName.IsEmpty())
+				return FText::FromString(Slot.ItemName);
+			if (Slot.IsSkill() && !Slot.SkillName.IsEmpty())
+				return FText::FromString(Slot.SkillName);
+			return FText::GetEmpty();
+		})
 		[
 			// Slot border
 			SNew(SBorder)

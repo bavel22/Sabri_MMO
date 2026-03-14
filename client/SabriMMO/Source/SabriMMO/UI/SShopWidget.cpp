@@ -4,6 +4,9 @@
 #include "SShopWidget.h"
 #include "ShopSubsystem.h"
 #include "InventorySubsystem.h"
+#include "ItemInspectSubsystem.h"
+#include "ItemTooltipBuilder.h"
+#include "Engine/Engine.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SScrollBox.h"
@@ -786,6 +789,23 @@ TSharedRef<SWidget> SShopWidget::BuildShopItemRow(int32 ItemIndex)
 				ShowQuantityPopup(CapturedName, 99, CapturedPrice, CapturedWeight, true, CapturedIndex);
 				return FReply::Handled();
 			}
+			if (Event.GetEffectingButton() == EKeys::RightMouseButton)
+			{
+				// Right-click: open item inspect
+				UShopSubsystem* ShopSub = OwningSubsystem.Get();
+				if (ShopSub && ShopSub->ShopItems.IsValidIndex(CapturedIndex))
+				{
+					FInventoryItem InspectItem = ShopSub->ShopItems[CapturedIndex].ToInspectableItem();
+					if (UWorld* World = GEngine ? GEngine->GetCurrentPlayWorld() : nullptr)
+					{
+						if (UItemInspectSubsystem* InspectSub = World->GetSubsystem<UItemInspectSubsystem>())
+						{
+							InspectSub->ShowInspect(InspectItem);
+						}
+					}
+				}
+				return FReply::Handled();
+			}
 			return FReply::Unhandled();
 		})
 		[ Row ];
@@ -877,7 +897,7 @@ TSharedRef<SWidget> SShopWidget::BuildSellItemRow(const FInventoryItem& Item, in
 			+ SVerticalBox::Slot().AutoHeight()
 			[
 				SNew(STextBlock)
-				.Text(FText::FromString(FString::Printf(TEXT("%s x%d"), *Item.Name, Item.Quantity)))
+				.Text(FText::FromString(FString::Printf(TEXT("%s x%d"), *Item.GetDisplayName(), Item.Quantity)))
 				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
 				.ColorAndOpacity(FSlateColor(ShopColors::TextPrimary))
 				.ShadowOffset(FVector2D(1, 1))
@@ -898,7 +918,7 @@ TSharedRef<SWidget> SShopWidget::BuildSellItemRow(const FInventoryItem& Item, in
 		];
 
 	// Capture for lambda
-	FString CapturedName = Item.Name;
+	FString CapturedName = Item.GetDisplayName();
 	int32 CapturedInvId = Item.InventoryId;
 	int32 CapturedMaxQty = Item.Quantity;
 	int32 CapturedSellPrice = SellPrice;
@@ -916,7 +936,7 @@ TSharedRef<SWidget> SShopWidget::BuildSellItemRow(const FInventoryItem& Item, in
 		.BorderBackgroundColor(ShopColors::RowBg)
 		.Padding(FMargin(2.f, 1.f))
 		.Cursor(EMouseCursor::Hand)
-		.OnMouseButtonDown_Lambda([this, CapturedName, CapturedSellPrice, RemainingQty, CapturedInvId](
+		.OnMouseButtonDown_Lambda([this, CapturedName, CapturedSellPrice, RemainingQty, CapturedInvId, Item](
 			const FGeometry&, const FPointerEvent& Event) -> FReply
 		{
 			if (Event.GetEffectingButton() == EKeys::LeftMouseButton && RemainingQty > 0)
@@ -937,6 +957,18 @@ TSharedRef<SWidget> SShopWidget::BuildSellItemRow(const FInventoryItem& Item, in
 				else
 				{
 					ShowQuantityPopup(CapturedName, RemainingQty, CapturedSellPrice, 0, false, 0, CapturedInvId);
+				}
+				return FReply::Handled();
+			}
+			if (Event.GetEffectingButton() == EKeys::RightMouseButton)
+			{
+				// Right-click: open item inspect for sell item
+				if (UWorld* World = GEngine ? GEngine->GetCurrentPlayWorld() : nullptr)
+				{
+					if (UItemInspectSubsystem* InspectSub = World->GetSubsystem<UItemInspectSubsystem>())
+					{
+						InspectSub->ShowInspect(Item);
+					}
 				}
 				return FReply::Handled();
 			}

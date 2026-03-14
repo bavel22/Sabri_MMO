@@ -3,6 +3,7 @@
 
 #include "InventorySubsystem.h"
 #include "SInventoryWidget.h"
+#include "SCardCompoundPopup.h"
 #include "HotbarSubsystem.h"
 #include "MMOGameInstance.h"
 #include "SocketEventRouter.h"
@@ -52,6 +53,8 @@ void UInventorySubsystem::OnWorldBeginPlay(UWorld& InWorld)
 			[this](const TSharedPtr<FJsonValue>& D) { HandleInventoryDropped(D); });
 		Router->RegisterHandler(TEXT("inventory:error"), this,
 			[this](const TSharedPtr<FJsonValue>& D) { HandleInventoryError(D); });
+		Router->RegisterHandler(TEXT("card:result"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleCardResult(D); });
 	}
 
 	// Request fresh inventory data
@@ -62,6 +65,8 @@ void UInventorySubsystem::OnWorldBeginPlay(UWorld& InWorld)
 
 void UInventorySubsystem::Deinitialize()
 {
+	HideCardCompoundPopup();
+
 	if (bWidgetVisible)
 	{
 		ToggleWidget();
@@ -115,23 +120,84 @@ FInventoryItem UInventorySubsystem::ParseItemFromJson(const TSharedPtr<FJsonObje
 	if (Obj->TryGetNumberField(TEXT("luk_bonus"), Val)) Item.LukBonus = (int32)Val;
 	if (Obj->TryGetNumberField(TEXT("max_hp_bonus"), Val)) Item.MaxHPBonus = (int32)Val;
 	if (Obj->TryGetNumberField(TEXT("max_sp_bonus"), Val)) Item.MaxSPBonus = (int32)Val;
+	if (Obj->TryGetNumberField(TEXT("hit_bonus"), Val)) Item.HitBonus = (int32)Val;
+	if (Obj->TryGetNumberField(TEXT("flee_bonus"), Val)) Item.FleeBonus = (int32)Val;
+	if (Obj->TryGetNumberField(TEXT("critical_bonus"), Val)) Item.CriticalBonus = (int32)Val;
+	if (Obj->TryGetNumberField(TEXT("perfect_dodge_bonus"), Val)) Item.PerfectDodgeBonus = (int32)Val;
 	if (Obj->TryGetNumberField(TEXT("required_level"), Val)) Item.RequiredLevel = (int32)Val;
 	if (Obj->TryGetNumberField(TEXT("aspd_modifier"), Val)) Item.ASPDModifier = (int32)Val;
 	if (Obj->TryGetNumberField(TEXT("weapon_range"), Val)) Item.WeaponRange = (int32)Val;
 	if (Obj->TryGetNumberField(TEXT("max_stack"), Val)) Item.MaxStack = (int32)Val;
+	if (Obj->TryGetNumberField(TEXT("buy_price"), Val)) Item.BuyPrice = (int32)Val;
+	if (Obj->TryGetNumberField(TEXT("sell_price"), Val)) Item.SellPrice = (int32)Val;
+	if (Obj->TryGetNumberField(TEXT("slots"), Val)) Item.Slots = (int32)Val;
+	if (Obj->TryGetNumberField(TEXT("weapon_level"), Val)) Item.WeaponLevel = (int32)Val;
+	if (Obj->TryGetNumberField(TEXT("refine_level"), Val)) Item.RefineLevel = (int32)Val;
 
 	bool bBool = false;
 	if (Obj->TryGetBoolField(TEXT("is_equipped"), bBool)) Item.bIsEquipped = bBool;
 	if (Obj->TryGetBoolField(TEXT("stackable"), bBool)) Item.bStackable = bBool;
+	if (Obj->TryGetBoolField(TEXT("refineable"), bBool)) Item.bRefineable = bBool;
+	if (Obj->TryGetBoolField(TEXT("two_handed"), bBool)) Item.bTwoHanded = bBool;
 
 	FString Str;
 	if (Obj->TryGetStringField(TEXT("name"), Str)) Item.Name = Str;
 	if (Obj->TryGetStringField(TEXT("description"), Str)) Item.Description = Str;
+	if (Obj->TryGetStringField(TEXT("full_description"), Str)) Item.FullDescription = Str;
 	if (Obj->TryGetStringField(TEXT("item_type"), Str)) Item.ItemType = Str;
 	if (Obj->TryGetStringField(TEXT("equip_slot"), Str)) Item.EquipSlot = Str;
 	if (Obj->TryGetStringField(TEXT("equipped_position"), Str)) Item.EquippedPosition = Str;
 	if (Obj->TryGetStringField(TEXT("icon"), Str)) Item.Icon = Str;
 	if (Obj->TryGetStringField(TEXT("weapon_type"), Str)) Item.WeaponType = Str;
+	if (Obj->TryGetStringField(TEXT("jobs_allowed"), Str)) Item.JobsAllowed = Str;
+	if (Obj->TryGetStringField(TEXT("card_type"), Str)) Item.CardType = Str;
+	if (Obj->TryGetStringField(TEXT("card_prefix"), Str)) Item.CardPrefix = Str;
+	if (Obj->TryGetStringField(TEXT("card_suffix"), Str)) Item.CardSuffix = Str;
+	if (Obj->TryGetStringField(TEXT("element"), Str)) Item.Element = Str;
+
+	// Parse compounded cards array: [null, 4036, null, null]
+	const TArray<TSharedPtr<FJsonValue>>* CardsArray = nullptr;
+	if (Obj->TryGetArrayField(TEXT("compounded_cards"), CardsArray) && CardsArray)
+	{
+		for (const TSharedPtr<FJsonValue>& CardVal : *CardsArray)
+		{
+			if (!CardVal.IsValid() || CardVal->IsNull())
+				Item.CompoundedCards.Add(-1);
+			else
+				Item.CompoundedCards.Add((int32)CardVal->AsNumber());
+		}
+	}
+
+	// Parse compounded card details array
+	const TArray<TSharedPtr<FJsonValue>>* CardDetailsArray = nullptr;
+	if (Obj->TryGetArrayField(TEXT("compounded_card_details"), CardDetailsArray) && CardDetailsArray)
+	{
+		for (const TSharedPtr<FJsonValue>& DetailVal : *CardDetailsArray)
+		{
+			FCompoundedCardInfo CardInfo;
+			if (!DetailVal.IsValid() || DetailVal->IsNull())
+			{
+				Item.CompoundedCardDetails.Add(CardInfo);
+				continue;
+			}
+			const TSharedPtr<FJsonObject>* DetailObj = nullptr;
+			if (DetailVal->TryGetObject(DetailObj) && DetailObj)
+			{
+				double DVal = 0;
+				FString SVal;
+				if ((*DetailObj)->TryGetNumberField(TEXT("item_id"), DVal)) CardInfo.ItemId = (int32)DVal;
+				if ((*DetailObj)->TryGetStringField(TEXT("name"), SVal)) CardInfo.Name = SVal;
+				if ((*DetailObj)->TryGetStringField(TEXT("description"), SVal)) CardInfo.Description = SVal;
+				if ((*DetailObj)->TryGetStringField(TEXT("full_description"), SVal)) CardInfo.FullDescription = SVal;
+				if ((*DetailObj)->TryGetStringField(TEXT("icon"), SVal)) CardInfo.Icon = SVal;
+				if ((*DetailObj)->TryGetStringField(TEXT("card_type"), SVal)) CardInfo.CardType = SVal;
+				if ((*DetailObj)->TryGetStringField(TEXT("card_prefix"), SVal)) CardInfo.CardPrefix = SVal;
+				if ((*DetailObj)->TryGetStringField(TEXT("card_suffix"), SVal)) CardInfo.CardSuffix = SVal;
+				if ((*DetailObj)->TryGetNumberField(TEXT("weight"), DVal)) CardInfo.Weight = (int32)DVal;
+			}
+			Item.CompoundedCardDetails.Add(CardInfo);
+		}
+	}
 
 	return Item;
 }
@@ -271,6 +337,32 @@ FSlateBrush* UInventorySubsystem::GetOrCreateItemIconBrush(const FString& IconNa
 		{TEXT("chain_mail"),     TEXT("RingweaveHauberk")},
 	};
 
+	// All card items share a single generic card icon (icon names end with "_card")
+	if (IconName.EndsWith(TEXT("_card")))
+	{
+		FString ContentPath = TEXT("/Game/SabriMMO/Assets/Item_Icons/cards/Icon_Card");
+		UTexture2D* Tex = LoadObject<UTexture2D>(nullptr, *ContentPath);
+		if (Tex)
+		{
+			Tex->LODGroup = TEXTUREGROUP_UI;
+			Tex->Filter = TF_Bilinear;
+			Tex->NeverStream = true;
+			Tex->UpdateResource();
+			ItemIconTextureCache.Add(IconName, Tex);
+			TSharedPtr<FSlateBrush> Brush = MakeShared<FSlateBrush>();
+			Brush->SetResourceObject(Tex);
+			Brush->ImageSize = FVector2D(28.f, 28.f);
+			Brush->DrawAs = ESlateBrushDrawType::Image;
+			FSlateBrush* RawPtr = Brush.Get();
+			ItemIconBrushCache.Add(IconName, Brush);
+			UE_LOG(LogInventory, Log, TEXT("Loaded card icon: %s → %s"), *IconName, *ContentPath);
+			return RawPtr;
+		}
+		UE_LOG(LogInventory, Warning, TEXT("Failed to load card icon: %s"), *ContentPath);
+		ItemIconBrushCache.Add(IconName, nullptr);
+		return nullptr;
+	}
+
 	const FString* AssetName = IconAssetMap.Find(IconName);
 	FString ContentPath = FString::Printf(TEXT("/Game/SabriMMO/Assets/Item_Icons/Icon_%s"),
 		AssetName ? **AssetName : *IconName);
@@ -288,7 +380,7 @@ FSlateBrush* UInventorySubsystem::GetOrCreateItemIconBrush(const FString& IconNa
 	// Without this, UE5 defaults (DXT compression + mipmap chain + streaming) make
 	// 1024px icons look blurry/blocky when rendered at 28px in Slate.
 	Tex->LODGroup = TEXTUREGROUP_UI;
-	Tex->MipGenSettings = TMGS_NoMipmaps;
+	Tex->Filter = TF_Bilinear;
 	Tex->NeverStream = true;
 	Tex->UpdateResource();
 
@@ -636,4 +728,168 @@ void UInventorySubsystem::ToggleWidget()
 bool UInventorySubsystem::IsWidgetVisible() const
 {
 	return bWidgetVisible;
+}
+
+// ============================================================
+// Card compound
+// ============================================================
+
+TArray<FInventoryItem> UInventorySubsystem::FindEligibleEquipment(const FInventoryItem& Card) const
+{
+	TArray<FInventoryItem> Result;
+	if (Card.CardType.IsEmpty()) return Result;
+
+	for (const FInventoryItem& Item : Items)
+	{
+		// Must have an equip slot (i.e. is equipment)
+		if (Item.EquipSlot.IsEmpty()) continue;
+		// Must have card slots
+		if (Item.Slots <= 0) continue;
+		// RO Classic: equipment must be unequipped
+		if (Item.bIsEquipped) continue;
+
+		// Match card type to equipment slot
+		bool bMatches = false;
+		if (Card.CardType == TEXT("weapon") && Item.EquipSlot == TEXT("weapon"))
+			bMatches = true;
+		else if (Card.CardType == TEXT("shield") && Item.EquipSlot == TEXT("shield"))
+			bMatches = true;
+		else if (Card.CardType == TEXT("armor") && Item.EquipSlot == TEXT("armor"))
+			bMatches = true;
+		else if (Card.CardType == TEXT("garment") && Item.EquipSlot == TEXT("garment"))
+			bMatches = true;
+		else if (Card.CardType == TEXT("footgear") && Item.EquipSlot == TEXT("footgear"))
+			bMatches = true;
+		else if (Card.CardType == TEXT("headgear") &&
+				(Item.EquipSlot == TEXT("head_top") || Item.EquipSlot == TEXT("head_mid") || Item.EquipSlot == TEXT("head_low")))
+			bMatches = true;
+		else if (Card.CardType == TEXT("accessory") &&
+				(Item.EquipSlot == TEXT("accessory") || Item.EquipSlot.StartsWith(TEXT("accessory"))))
+			bMatches = true;
+
+		if (!bMatches) continue;
+
+		// Check has at least one empty card slot
+		int32 FilledSlots = 0;
+		for (int32 CardId : Item.CompoundedCards)
+		{
+			if (CardId > 0) FilledSlots++;
+		}
+		if (FilledSlots >= Item.Slots) continue;
+
+		Result.Add(Item);
+	}
+	return Result;
+}
+
+void UInventorySubsystem::BeginCardCompound(const FInventoryItem& Card)
+{
+	HideCardCompoundPopup();
+
+	TArray<FInventoryItem> Eligible = FindEligibleEquipment(Card);
+	if (Eligible.Num() == 0)
+	{
+		// RO Classic: silently does nothing when no valid equipment exists
+		UE_LOG(LogInventory, Log, TEXT("No eligible equipment for card %s (CardType=%s)"), *Card.Name, *Card.CardType);
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World) return;
+	UGameViewportClient* VC = World->GetGameViewport();
+	if (!VC) return;
+
+	CardCompoundPopup = SNew(SCardCompoundPopup)
+		.Subsystem(this)
+		.Card(Card)
+		.EligibleEquipment(Eligible);
+
+	CardCompoundAlignWrapper =
+		SNew(SBox)
+		.HAlign(HAlign_Fill)
+		.VAlign(VAlign_Fill)
+		.Visibility(EVisibility::Visible)
+		[
+			CardCompoundPopup.ToSharedRef()
+		];
+
+	CardCompoundOverlay = SNew(SWeakWidget).PossiblyNullContent(CardCompoundAlignWrapper);
+	VC->AddViewportWidgetContent(CardCompoundOverlay.ToSharedRef(), 23);
+	bCardCompoundVisible = true;
+
+	// Focus the popup so Escape key works
+	FSlateApplication::Get().SetKeyboardFocus(CardCompoundPopup);
+
+	UE_LOG(LogInventory, Log, TEXT("Card compound popup shown for %s — %d eligible items (Z=23)"), *Card.Name, Eligible.Num());
+}
+
+void UInventorySubsystem::HideCardCompoundPopup()
+{
+	if (!bCardCompoundVisible) return;
+
+	if (CardCompoundOverlay.IsValid())
+	{
+		if (UWorld* World = GetWorld())
+		{
+			if (UGameViewportClient* VC = World->GetGameViewport())
+			{
+				VC->RemoveViewportWidgetContent(CardCompoundOverlay.ToSharedRef());
+			}
+		}
+	}
+	CardCompoundPopup.Reset();
+	CardCompoundAlignWrapper.Reset();
+	CardCompoundOverlay.Reset();
+	bCardCompoundVisible = false;
+
+	UE_LOG(LogInventory, Log, TEXT("Card compound popup hidden."));
+}
+
+bool UInventorySubsystem::IsCardCompoundVisible() const
+{
+	return bCardCompoundVisible;
+}
+
+void UInventorySubsystem::EmitCardCompound(int32 CardInventoryId, int32 EquipInventoryId, int32 SlotIndex)
+{
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
+	if (!GI) return;
+
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+	Payload->SetNumberField(TEXT("cardInventoryId"), CardInventoryId);
+	Payload->SetNumberField(TEXT("equipInventoryId"), EquipInventoryId);
+	Payload->SetNumberField(TEXT("slotIndex"), SlotIndex);
+	GI->EmitSocketEvent(TEXT("card:compound"), Payload);
+
+	UE_LOG(LogInventory, Log, TEXT("Sent card:compound cardInvId=%d equipInvId=%d slot=%d"),
+		CardInventoryId, EquipInventoryId, SlotIndex);
+}
+
+void UInventorySubsystem::HandleCardResult(const TSharedPtr<FJsonValue>& Data)
+{
+	if (!Data.IsValid()) return;
+	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
+	const TSharedPtr<FJsonObject>& Obj = *ObjPtr;
+
+	bool bSuccess = false;
+	Obj->TryGetBoolField(TEXT("success"), bSuccess);
+	FString Message;
+	Obj->TryGetStringField(TEXT("message"), Message);
+
+	if (bSuccess)
+	{
+		UE_LOG(LogInventory, Log, TEXT("Card compound success: %s"), *Message);
+		HideCardCompoundPopup();
+		// inventory:data refresh arrives separately from server and triggers grid rebuild via DataVersion++
+	}
+	else
+	{
+		UE_LOG(LogInventory, Warning, TEXT("Card compound failed: %s"), *Message);
+		// Show error in popup if still visible
+		if (CardCompoundPopup.IsValid() && bCardCompoundVisible)
+		{
+			CardCompoundPopup->SetStatusMessage(Message, true);
+		}
+	}
 }

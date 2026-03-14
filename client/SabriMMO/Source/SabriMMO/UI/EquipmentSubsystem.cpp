@@ -156,7 +156,40 @@ bool UEquipmentSubsystem::CanEquipToSlot(const FString& ItemEquipSlot, const FSt
 	{
 		return SlotPosition == EquipSlots::Accessory1 || SlotPosition == EquipSlots::Accessory2;
 	}
+	// Assassin: weapons can go to weapon_left slot (displayed as Shield slot)
+	if (ItemEquipSlot == TEXT("weapon") && SlotPosition == EquipSlots::WeaponLeft)
+	{
+		FString JobClass = GetLocalJobClass();
+		if (EquipSlots::CanDualWield(JobClass)) return true;
+	}
+	// Assassin: weapons can also go to the shield slot position (which becomes weapon_left)
+	if (ItemEquipSlot == TEXT("weapon") && SlotPosition == EquipSlots::Shield)
+	{
+		FString JobClass = GetLocalJobClass();
+		if (EquipSlots::CanDualWield(JobClass)) return true;
+	}
 	return ItemEquipSlot == SlotPosition;
+}
+
+bool UEquipmentSubsystem::CanEquipToSlot(const FString& ItemEquipSlot, const FString& SlotPosition, const FString& WeaponType) const
+{
+	if (ItemEquipSlot == TEXT("weapon") && (SlotPosition == EquipSlots::WeaponLeft || SlotPosition == EquipSlots::Shield))
+	{
+		FString JobClass = GetLocalJobClass();
+		return EquipSlots::CanDualWield(JobClass) && EquipSlots::IsValidLeftHandWeapon(WeaponType);
+	}
+	return CanEquipToSlot(ItemEquipSlot, SlotPosition);
+}
+
+FString UEquipmentSubsystem::GetLocalJobClass() const
+{
+	UWorld* World = GetWorld();
+	if (!World) return TEXT("");
+
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance());
+	if (!GI) return TEXT("");
+
+	return GI->GetSelectedCharacter().JobClass;
 }
 
 // ============================================================

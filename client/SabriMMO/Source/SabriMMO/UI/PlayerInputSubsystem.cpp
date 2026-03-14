@@ -8,6 +8,7 @@
 #include "ShopNPC.h"
 #include "KafraNPC.h"
 #include "UI/MultiplayerEventSubsystem.h"
+#include "UI/CombatActionSubsystem.h"
 #include "UI/SkillTreeSubsystem.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
@@ -56,34 +57,54 @@ void UPlayerInputSubsystem::Deinitialize()
 
 void UPlayerInputSubsystem::OnWalkPollTick()
 {
+	// Block walk-to processing while dead
+	if (UCombatActionSubsystem* CAS = GetWorld()->GetSubsystem<UCombatActionSubsystem>())
+	{
+		if (CAS->IsDead()) return;
+	}
+
 	// --- Walk-to-attack ---
 	if (bWalkingToAttack)
 	{
-		APawn* Pawn = GetLocalPawn();
-		AActor* Target = AttackTargetActor.Get();
-
-		if (!Pawn || !Target)
+		// Stop walking if server has confirmed auto-attack is active
+		// (CombatActionSubsystem::HandleAutoAttackStarted already stopped movement)
+		if (UCombatActionSubsystem* CAS = GetWorld()->GetSubsystem<UCombatActionSubsystem>())
 		{
-			StopAutoAttack();
-		}
-		else
-		{
-			float Dist = FVector::Dist2D(Pawn->GetActorLocation(), Target->GetActorLocation());
-			if (Dist <= AttackRange + 30.f)
+			if (CAS->IsAutoAttacking())
 			{
-				CancelMovement();
 				bWalkingToAttack = false;
+			}
+		}
 
-				if (UMultiplayerEventSubsystem* MES = GetWorld()->GetSubsystem<UMultiplayerEventSubsystem>())
-				{
-					MES->EmitCombatAttack(AttackTargetId, bAttackTargetIsEnemy);
-				}
-				UE_LOG(LogMMOInput, Log, TEXT("Walk-to-attack: in range (dist=%.0f) — emitted combat:attack"), Dist);
+		if (bWalkingToAttack)
+		{
+			APawn* Pawn = GetLocalPawn();
+			AActor* Target = AttackTargetActor.Get();
+
+			if (!Pawn || !Target)
+			{
+				StopAutoAttack();
 			}
 			else
 			{
-				// Re-issue move toward target (target may have moved)
-				MoveToLocation(Target->GetActorLocation());
+				// Use server-known attack range
+				float EffectiveRange = 150.f;
+				if (UCombatActionSubsystem* CAS2 = GetWorld()->GetSubsystem<UCombatActionSubsystem>())
+					EffectiveRange = CAS2->GetAttackRange();
+
+				float Dist = FVector::Dist2D(Pawn->GetActorLocation(), Target->GetActorLocation());
+				if (Dist <= EffectiveRange + 30.f)
+				{
+					// In range — stop walking. Attack was already emitted on click.
+					CancelMovement();
+					bWalkingToAttack = false;
+					UE_LOG(LogMMOInput, Log, TEXT("Walk-to-attack: in range (dist=%.0f, range=%.0f)"), Dist, EffectiveRange);
+				}
+				else
+				{
+					// Re-issue move toward target (target may have moved)
+					MoveToLocation(Target->GetActorLocation());
+				}
 			}
 		}
 	}
@@ -123,6 +144,12 @@ void UPlayerInputSubsystem::OnWalkPollTick()
 void UPlayerInputSubsystem::OnLeftClickFromCharacter(ASabriMMOCharacter* Character)
 {
 	if (!Character) return;
+
+	// Guard: dead — block all input until respawn
+	if (UCombatActionSubsystem* CAS = GetWorld()->GetSubsystem<UCombatActionSubsystem>())
+	{
+		if (CAS->IsDead()) return;
+	}
 
 	APlayerController* PC = Cast<APlayerController>(Character->GetController());
 	if (!PC) return;
@@ -212,18 +239,27 @@ void UPlayerInputSubsystem::ProcessClickOnEnemy(AActor* EnemyActor)
 	AttackTargetActor = EnemyActor;
 	bIsAutoAttacking = true;
 
+	// Always emit attack immediately — server handles range validation.
+	// Server responds with auto_attack_started (sets correct attackRange) or
+	// out_of_range (CombatActionSubsystem walks player toward target).
+	if (UMultiplayerEventSubsystem* MES = GetWorld()->GetSubsystem<UMultiplayerEventSubsystem>())
+		MES->EmitCombatAttack(EnemyId, true);
+
 	APawn* Pawn = GetLocalPawn();
 	if (!Pawn) return;
 
-	float Dist = FVector::Dist2D(Pawn->GetActorLocation(), EnemyActor->GetActorLocation());
-	UE_LOG(LogMMOInput, Log, TEXT("Clicked enemy %d — dist=%.0f range=%.0f"), EnemyId, Dist, AttackRange);
+	// Use server-known attack range (updated by auto_attack_started events)
+	float EffectiveRange = 150.f;
+	if (UCombatActionSubsystem* CAS = GetWorld()->GetSubsystem<UCombatActionSubsystem>())
+		EffectiveRange = CAS->GetAttackRange();
 
-	if (Dist <= AttackRange + 30.f)
+	float Dist = FVector::Dist2D(Pawn->GetActorLocation(), EnemyActor->GetActorLocation());
+	UE_LOG(LogMMOInput, Log, TEXT("Clicked enemy %d — dist=%.0f range=%.0f"), EnemyId, Dist, EffectiveRange);
+
+	if (Dist <= EffectiveRange + 30.f)
 	{
 		CancelMovement();
 		bWalkingToAttack = false;
-		if (UMultiplayerEventSubsystem* MES = GetWorld()->GetSubsystem<UMultiplayerEventSubsystem>())
-			MES->EmitCombatAttack(EnemyId, true);
 		UE_LOG(LogMMOInput, Log, TEXT("In range — emitted combat:attack"));
 	}
 	else
@@ -285,10 +321,26 @@ void UPlayerInputSubsystem::StopAutoAttack()
 	AttackTargetId = 0;
 	AttackTargetActor.Reset();
 
+	// Re-enable orient-to-movement immediately so click-to-move faces the walk direction.
+	// CombatActionSubsystem disables it during auto-attack; we must restore it here
+	// because the server's auto_attack_stopped response arrives after a network round-trip.
+	if (UCombatActionSubsystem* CAS = GetWorld()->GetSubsystem<UCombatActionSubsystem>())
+	{
+		CAS->RestoreOrientToMovement();
+	}
+
 	if (UMultiplayerEventSubsystem* MES = GetWorld()->GetSubsystem<UMultiplayerEventSubsystem>())
 		MES->EmitStopAttack();
 
 	UE_LOG(LogMMOInput, Log, TEXT("Auto-attack stopped"));
+}
+
+void UPlayerInputSubsystem::ClearAttackStateNoEmit()
+{
+	bIsAutoAttacking = false;
+	bWalkingToAttack = false;
+	AttackTargetId = 0;
+	AttackTargetActor.Reset();
 }
 
 // ============================================================

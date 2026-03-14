@@ -25,6 +25,8 @@
 #include "UI/ZoneTransitionSubsystem.h"
 #include "UI/PlayerInputSubsystem.h"
 #include "UI/CameraSubsystem.h"
+#include "UI/CombatActionSubsystem.h"
+#include "UI/NameTagSubsystem.h"
 #include "InputModifiers.h"
 #include "Framework/Application/SlateApplication.h"
 
@@ -93,6 +95,16 @@ void ASabriMMOCharacter::BeginPlay()
 				GetWorld(), GI->PendingSpawnLocation,
 				GetCapsuleComponent()->GetScaledCapsuleHalfHeight());
 			SetActorLocation(Snapped);
+		}
+
+		// Register local player name tag (RO Classic: always visible, white)
+		if (UNameTagSubsystem* NTS = GetWorld()->GetSubsystem<UNameTagSubsystem>())
+		{
+			FCharacterData SelChar = GI->GetSelectedCharacter();
+			if (!SelChar.Name.IsEmpty())
+			{
+				NTS->RegisterEntity(this, SelChar.Name, ENameTagEntityType::LocalPlayer);
+			}
 		}
 	}
 }
@@ -470,6 +482,15 @@ void ASabriMMOCharacter::DoMove(float Right, float Forward)
 {
 	if (GetController() != nullptr)
 	{
+		// Block WASD movement while dead
+		if (UWorld* W = GetWorld())
+		{
+			if (UCombatActionSubsystem* CAS = W->GetSubsystem<UCombatActionSubsystem>())
+			{
+				if (CAS->IsDead()) return;
+			}
+		}
+
 		// find out which way is forward
 		const FRotator Rotation = GetController()->GetControlRotation();
 		const FRotator YawRotation(0, Rotation.Yaw, 0);

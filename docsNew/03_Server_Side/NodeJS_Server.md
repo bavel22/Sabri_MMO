@@ -314,16 +314,19 @@ server/
 ### Derived Stats (`calculateDerivedStats` from `ro_damage_formulas.js`)
 ```
 statusATK  = STR + floor(STR/10)² + floor(DEX/5) + floor(LUK/3)
-statusMATK = INT + floor(INT/7)²
-HIT        = Level + DEX
-FLEE       = Level + AGI
-softDEF    = floor(VIT*0.5 + VIT²/150)
-softMDEF   = floor(INT*0.5)
-Critical   = floor(LUK*0.3)
-ASPD       = min(195, floor(170 + AGI*0.4 + DEX*0.1))
-MaxHP      = 100 + VIT*8 + Level*10
-MaxSP      = 50 + INT*5 + Level*5
+matkMin    = INT + floor(INT/7)² + floor(weaponMATK * 0.7)
+matkMax    = INT + floor(INT/5)² + weaponMATK
+HIT        = 175 + Level + DEX + bonusHit
+FLEE       = 100 + Level + AGI + bonusFlee
+softDEF    = floor(VIT/2) + floor(AGI/5) + floor(Level/2)
+softMDEF   = INT + floor(VIT/5) + floor(DEX/5) + floor(Level/4)
+Critical   = 1 + floor(LUK*0.3) + bonusCrit
+PerfDodge  = 1 + floor(LUK/10) + bonusPD
+ASPD       = 200 - (WD - floor((WD*AGI/25 + WD*DEX/100) / 10)) * (1 - SpeedMod)
+MaxHP      = floor(BaseHP * (1 + VIT*0.01) * TransMod) + bonusMaxHp  [class-aware iterative]
+MaxSP      = floor((10 + Level * SP_JOB) * (1 + INT*0.01) * TransMod) + bonusMaxSp
 ```
+Data tables: `HP_SP_COEFFICIENTS`, `ASPD_BASE_DELAYS`, `TRANS_TO_BASE_CLASS`, `TRANSCENDENT_CLASSES` in `ro_exp_tables.js`.
 
 ### Attack Interval
 ```

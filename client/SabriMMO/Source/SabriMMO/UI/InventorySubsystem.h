@@ -13,6 +13,7 @@
 #include "InventorySubsystem.generated.h"
 
 class SInventoryWidget;
+class SCardCompoundPopup;
 
 UCLASS()
 class SABRIMMO_API UInventorySubsystem : public UWorldSubsystem
@@ -48,6 +49,12 @@ public:
 	void MoveItem(int32 InventoryId, int32 NewSlotIndex);
 	void RequestInventoryRefresh();
 
+	// ---- card compound (double-click card in inventory) ----
+	void BeginCardCompound(const FInventoryItem& Card);
+	void HideCardCompoundPopup();
+	bool IsCardCompoundVisible() const;
+	void EmitCardCompound(int32 CardInventoryId, int32 EquipInventoryId, int32 SlotIndex);
+
 	// ---- widget lifecycle ----
 	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
@@ -69,10 +76,12 @@ private:
 	void HandleInventoryEquipped(const TSharedPtr<FJsonValue>& Data);
 	void HandleInventoryDropped(const TSharedPtr<FJsonValue>& Data);
 	void HandleInventoryError(const TSharedPtr<FJsonValue>& Data);
+	void HandleCardResult(const TSharedPtr<FJsonValue>& Data);
 
 	// ---- helpers ----
 	FInventoryItem ParseItemFromJson(const TSharedPtr<FJsonObject>& Obj);
 	void RecalculateWeight();
+	TArray<FInventoryItem> FindEligibleEquipment(const FInventoryItem& Card) const;
 
 	// ---- state ----
 	bool bWidgetVisible = false;
@@ -81,6 +90,12 @@ private:
 	TSharedPtr<SInventoryWidget> InventoryWidget;
 	TSharedPtr<SWidget> AlignmentWrapper;
 	TSharedPtr<SWidget> ViewportOverlay;
+
+	// ---- card compound popup ----
+	TSharedPtr<SCardCompoundPopup> CardCompoundPopup;
+	TSharedPtr<SWidget> CardCompoundAlignWrapper;
+	TSharedPtr<SWidget> CardCompoundOverlay;
+	bool bCardCompoundVisible = false;
 
 	// ---- drag cursor overlay ----
 	void ShowDragCursor(const FInventoryItem& Item);

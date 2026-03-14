@@ -81,8 +81,15 @@ Single monolithic file (~2400 lines). Key sections:
 | `KafraNPC.*` | Clickable Kafra NPC actor |
 | `SabriMMOGameMode.*` | Base GameMode — sets DefaultPawnClass=nullptr (Level Blueprint spawns pawn) |
 | `SocketEventRouter.*` | Multi-handler Socket.io event dispatch — allows multiple subsystems per event |
-| `UI/MultiplayerEventSubsystem.*` | Bridge: forwards persistent socket events to BP_SocketManager handler functions via ProcessEvent |
+| `UI/EnemySubsystem.*` | Enemy entity registry (TMap), 5 event handlers (spawn/move/death/health/attack), spawns BP_EnemyCharacter via ProcessEvent reflection |
+| `UI/OtherPlayerSubsystem.*` | Other player entity registry (TMap), 2 event handlers (moved/left), spawns BP_OtherPlayerCharacter, filters local player |
+| `UI/NameTagSubsystem.*` | Single OnPaint overlay renders ALL entity name tags (Z=7). RO Classic: players always visible, monsters/NPCs hover-only, 4-pass black outline, level-based colors |
+| `UI/MultiplayerEventSubsystem.*` | Bridge: forwards 14 events to BP_SocketManager via ProcessEvent (player/enemy/combat events migrated to C++ subsystems) |
 | `UI/PositionBroadcastSubsystem.*` | 30Hz position broadcasting via persistent socket |
+| `UI/TargetingSubsystem.*` | 30Hz hover trace, actor classification via property reflection, cursor switching (Enemy=Crosshairs, NPC=TextEditBeam), hover indicator WidgetComponents, pauses during SkillTreeSubsystem targeting mode |
+| `UI/CombatActionSubsystem.*` | 10 combat event handlers, bOrientRotationToMovement toggling, PlayAttackAnimation via reflection, STargetFrameWidget (Z=9), SDeathOverlayWidget (Z=40), RestoreOrientToMovement() public API |
+| `UI/PlayerInputSubsystem.*` | Click-to-move, click-to-attack (emit only), click-to-interact, walk-to-NPC/enemy, ClearAttackStateNoEmit(), StopAutoAttack() calls RestoreOrientToMovement() |
+| `UI/CameraSubsystem.*` | Right-click yaw rotation, scroll zoom (200-1500 units), fixed -55 degree pitch |
 | `UI/ItemInspectSubsystem.*` | Right-click item inspect window (Z=22), ShowInspect/HideInspect |
 | `UI/SItemInspectWidget.*` | Inspect popup: title bar, icon, formatted description, card slot footer |
 | `UI/ItemTooltipBuilder.*` | Shared hover tooltip builder for all item-showing widgets |
@@ -114,7 +121,7 @@ Widget prefix: `WBP_`. Blueprint prefix: `BP_`. Interface prefix: `BPI_`.
 
 **GameInstance for persistence** — `UMMOGameInstance` holds auth state, character data, and stats. Never store cross-level state in PlayerController or GameMode.
 
-**Manager pattern** — One manager per domain (`BP_OtherPlayerManager`, `BP_EnemyManager`). Managers hold Maps/Arrays of managed objects with `Register`/`Unregister`/`Get` functions.
+**Manager pattern** — One manager per domain. `UEnemySubsystem` and `UOtherPlayerSubsystem` (C++) replaced `BP_EnemyManager` and `BP_OtherPlayerManager` (BP) in Phase 3. Managers hold TMap registries with `GetEnemy()`/`GetPlayer()` lookups.
 
 **Interfaces over cast chains** — Use `BPI_Damageable`, `BPI_Interactable`, `BPI_Targetable` instead of `Cast To BP_Enemy` / `Cast To BP_Player` chains.
 
@@ -126,7 +133,7 @@ Widget prefix: `WBP_`. Blueprint prefix: `BP_`. Interface prefix: `BPI_`.
 
 ## Persistent Socket Architecture (Phase 4)
 
-**Persistent socket on GameInstance** — `UMMOGameInstance` owns a `TSharedPtr<FSocketIONative>` that survives `OpenLevel()`. No disconnect/reconnect on zone transitions. `USocketEventRouter` provides multi-handler dispatch (multiple subsystems can register for the same event). All C++ subsystems use `Router->RegisterHandler()` in `OnWorldBeginPlay` and `Router->UnregisterAllForOwner(this)` in `Deinitialize`. Blueprint emit calls use `GI->K2_EmitSocketEvent()` (BlueprintCallable). `MultiplayerEventSubsystem` bridges 30 inbound events to BP_SocketManager's existing handler functions via `ProcessEvent`. `PositionBroadcastSubsystem` handles 30Hz position updates. BP_SocketManager still exists in levels as a handler shell — its SocketIO component is no longer connected, but its handler functions (OnCombatDamage, OnEnemySpawn, etc.) are still called by the bridge. All subsystem widgets are gated behind `GI->IsSocketConnected()` so they only show in game levels, not the login screen.
+**Persistent socket on GameInstance** — `UMMOGameInstance` owns a `TSharedPtr<FSocketIONative>` that survives `OpenLevel()`. No disconnect/reconnect on zone transitions. `USocketEventRouter` provides multi-handler dispatch (multiple subsystems can register for the same event). All C++ subsystems use `Router->RegisterHandler()` in `OnWorldBeginPlay` and `Router->UnregisterAllForOwner(this)` in `Deinitialize`. Blueprint emit calls use `GI->K2_EmitSocketEvent()` (BlueprintCallable). `MultiplayerEventSubsystem` bridges 14 inbound events to BP_SocketManager (inventory 5, loot 1, chat 1, stats 1, hotbar 2, shop 4). `CombatActionSubsystem` registers for 10 combat events. `EnemySubsystem` registers for 5 enemy events (spawn/move/death/health_update/attack) and owns the enemy actor registry. `OtherPlayerSubsystem` registers for 2 player events (moved/left) and owns the other-player actor registry. `PositionBroadcastSubsystem` handles 30Hz position updates. BP_SocketManager still exists in levels as a handler shell — its SocketIO component is no longer connected. BP_EnemyManager and BP_OtherPlayerManager are now dead code (replaced by C++ subsystems in Phase 3). All subsystem widgets are gated behind `GI->IsSocketConnected()` so they only show in game levels, not the login screen.
 
 ---
 
@@ -281,6 +288,7 @@ Invoke with `/skill-name`. Located at `C:/Users/pladr/.claude/skills/`.
 | `/sabrimmo-persistent-socket` | Persistent socket, EventRouter, BP event bridge, subsystem registration |
 | `/sabrimmo-cards` | Card compounding, card bonuses, offensive/defensive card modifiers, armor element cards |
 | `/sabrimmo-generate-icons` | RO-style skill icon generation via local Stable Diffusion XL |
+| `/sabrimmo-build-compile` | Build/compile UE5 project — editor vs game targets, Live Coding, rebuild procedures |
 
 ### Utility Skills
 | Skill | Use when |

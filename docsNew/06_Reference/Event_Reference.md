@@ -87,6 +87,8 @@ _(Empty payload)_
 
 ## Combat Events
 
+> **Note**: All combat events below are handled directly by `UCombatActionSubsystem` (C++) via `USocketEventRouter`. They are NOT bridged through `MultiplayerEventSubsystem` to Blueprints. BP_SocketManager's combat handler functions (OnCombatDamage, etc.) are dead code as of Phase 2 migration (2026-03-13).
+
 ### combat:attack (Client → Server)
 ```json
 // Attack a player:
@@ -128,14 +130,23 @@ _(Empty payload)_
     "targetName": "Blobby",
     "isEnemy": true,
     "damage": 5,
-    "targetHealth": 45,
+    "isCritical": false,
+    "isMiss": false,
+    "hitType": "normal",
+    "element": "neutral",
+    "damage2": 3,
+    "isDualWield": true,
+    "isCritical2": false,
+    "element2": "fire",
+    "targetHealth": 42,
     "targetMaxHealth": 50,
     "attackerX": 100.0, "attackerY": 200.0, "attackerZ": 300.0,
     "targetX": 150.0, "targetY": 250.0, "targetZ": 300.0,
     "timestamp": 1739793600000
 }
 ```
-**Note**: `attackerX/Y/Z` and `targetX/Y/Z` included so remote clients can rotate attacker/target to face each other.
+**Note**: `attackerX/Y/Z` and `targetX/Y/Z` included so remote clients can rotate attacker/target to face each other. **Dual wield fields**: `damage2` = left-hand damage (0 if not dual wielding), `isDualWield` = true when dual wielding, `isCritical2` = cosmetic mirror of right crit, `element2` = left weapon element.
+**Client Handler**: `UCombatActionSubsystem::HandleCombatDamage` — disables bOrientRotationToMovement, rotates attacker to face target (yaw only), calls PlayAttackAnimation via property reflection.
 
 ### combat:health_update (Server → All)
 ```json
@@ -160,6 +171,7 @@ _(Empty payload)_
 }
 ```
 **Note**: `requiredRange` = `attackRange - RANGE_TOLERANCE` (so client moves INSIDE range, not to boundary).
+**Client Handler**: `UCombatActionSubsystem::HandleOutOfRange` — re-enables bOrientRotationToMovement, calls SimpleMoveToLocation toward target with NavMesh projection.
 
 ### combat:target_lost (Server → Client)
 ```json
@@ -185,6 +197,7 @@ _(Empty payload)_
 }
 ```
 **Side Effects**: Kill message broadcast in COMBAT chat channel, health saved to DB.
+**Client Handler**: `UCombatActionSubsystem::HandleCombatDeath` — shows SDeathOverlayWidget (Z=40) for local player death.
 
 ### combat:respawn (Client → Server, then Server → All)
 
@@ -206,6 +219,7 @@ Server broadcasts:
 }
 ```
 **Server Action**: Restore full HP/MP, update Redis position to spawn point, save to DB, stop all attackers targeting this player.
+**Client Handler**: `UCombatActionSubsystem::HandleCombatRespawn` — teleports pawn, ground snap via ZoneTransitionSubsystem::SnapLocationToGround, hides death overlay.
 
 ### combat:error (Server → Client)
 ```json
@@ -525,6 +539,38 @@ _(Empty payload)_
 
 ---
 
+## Card Events
+
+### card:compound (Client → Server)
+```json
+{
+    "cardInventoryId": 42,
+    "equipInventoryId": 15,
+    "slotIndex": 0
+}
+```
+- `cardInventoryId` (int): Inventory ID of the card to compound.
+- `equipInventoryId` (int): Inventory ID of the equipment receiving the card.
+- `slotIndex` (int): Which card slot on the equipment to insert into (0-based).
+
+### card:result (Server → Client)
+```json
+{
+    "success": true,
+    "cardName": "Poring Card",
+    "equipmentName": "Sword [3]",
+    "slotIndex": 0,
+    "message": "Poring Card has been compounded into Sword [3] (slot 0)."
+}
+```
+- `success` (bool): Whether the compounding succeeded.
+- `cardName` (string): Display name of the card.
+- `equipmentName` (string): Display name of the target equipment.
+- `slotIndex` (int): Which slot the card was inserted into.
+- `message` (string): Human-readable result message for UI display.
+
+---
+
 ## Loot Events
 
 ### loot:drop (Server → Killer Only)
@@ -647,6 +693,38 @@ _(Empty payload)_
 
 ---
 
-**Last Updated**: 2026-03-04 (Added enemy:attack event, updated enemy:move description for chase/knockback)
+## Weight Events
 
-**Previous**: 2026-02-23
+### weight:status (Server → Client)
+```json
+{
+    "characterId": 1,
+    "currentWeight": 1500,
+    "maxWeight": 3500,
+    "ratio": 0.429,
+    "isOverweight50": false,
+    "isOverweight90": false,
+    "isOverweight100": false
+}
+```
+**Sent**: On player join (after `player:stats`), after any inventory mutation that changes weight, after STR stat allocation, after learning Enlarge Weight Limit (skill 600).
+
+**Weight Thresholds**:
+- `< 50%`: Normal (full regen, all actions)
+- `50-89%`: Natural HP/SP/skill regen stops
+- `>= 90%`: Cannot attack or use skills (items still usable)
+- `> 100%`: Cannot pick up loot from enemy kills
+
+**Note**: `inventory:data` also includes `currentWeight` and `maxWeight` fields in every emission.
+
+**Error Messages (from weight blocks)**:
+- `combat:error`: `"Too heavy to attack! Reduce weight below 90%."`
+- `skill:error`: `"Too heavy to use skills! Reduce weight below 90%."`
+- `skill:cast_failed`: `{ skillId, reason: "Overweight" }` (mid-cast weight check)
+- `combat:auto_attack_stopped`: `{ reason: "Overweight" }` (auto-attack interrupted)
+
+---
+
+**Last Updated**: 2026-03-13 (Added CombatActionSubsystem client handler notes for all combat events, marked BP combat handlers as dead code)
+
+**Previous**: 2026-03-12 (Added Weight Events section: weight:status, overweight error messages)

@@ -51,6 +51,9 @@ public:
 	int32 WeaponATK = 0;
 	int32 PassiveATK = 0;
 	int32 StatusMATK = 0;
+	int32 MATKMin = 0;
+	int32 MATKMax = 0;
+	int32 WeaponMATK = 0;
 	int32 HIT = 0;
 	int32 FLEE = 0;
 	int32 Critical = 0;
@@ -58,7 +61,19 @@ public:
 	int32 SoftDEF = 0;
 	int32 SoftMDEF = 0;
 	int32 HardDEF = 0;
+	int32 HardMDEF = 0;
 	int32 ASPD = 0;
+
+	// Dual Wield (Assassin/Assassin Cross)
+	bool bIsDualWielding = false;
+	int32 WeaponATK_Right = 0;
+	int32 WeaponATK_Left = 0;
+	int32 RightHandDamagePercent = 50;
+	int32 LeftHandDamagePercent = 30;
+	FString WeaponTypeRight;
+	FString WeaponTypeLeft;
+	FString ElementRight;
+	FString ElementLeft;
 
 	// ---- stat allocation ----
 	void AllocateStat(const FString& StatName);

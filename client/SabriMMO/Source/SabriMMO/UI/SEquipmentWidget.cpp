@@ -4,6 +4,9 @@
 #include "SEquipmentWidget.h"
 #include "EquipmentSubsystem.h"
 #include "InventorySubsystem.h"
+#include "ItemInspectSubsystem.h"
+#include "ItemTooltipBuilder.h"
+#include "Engine/Engine.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/SOverlay.h"
@@ -255,8 +258,8 @@ TSharedRef<SWidget> SEquipmentWidget::BuildEquipSlot(const FString& SlotPosition
 							if (!Sub) return FText::FromString(EquipSlots::GetDisplayName(SlotPos));
 							FInventoryItem Item = Sub->GetEquippedItem(SlotPos);
 							if (Item.IsValid())
-								return FText::FromString(Item.Name);
-							return FText::FromString(EquipSlots::GetDisplayName(SlotPos));
+								return FText::FromString(Item.GetDisplayName());
+							return FText::FromString(EquipSlots::GetDisplayName(SlotPos, Sub->GetLocalJobClass()));
 						})
 						.Font_Lambda([Sub, SlotPos]() -> FSlateFontInfo {
 							if (Sub)
@@ -289,7 +292,7 @@ TSharedRef<SWidget> SEquipmentWidget::BuildEquipSlot(const FString& SlotPosition
 		FInventoryItem Item = Sub->GetEquippedItem(SlotPos);
 		if (Item.IsValid())
 		{
-			SlotBox->SetToolTip(SNew(SToolTip)[ BuildTooltip(Item) ]);
+			SlotBox->SetToolTip(SNew(SToolTip)[ ItemTooltipBuilder::Build(Item) ]);
 		}
 	}
 
@@ -358,6 +361,28 @@ TSharedRef<SWidget> SEquipmentWidget::BuildPortrait()
 
 TSharedRef<SWidget> SEquipmentWidget::BuildEquipmentLayout()
 {
+	// Determine if this character is an Assassin (dual wield capable)
+	// If so, the Shield slot becomes a "Left Hand" weapon slot
+	FString JobClass;
+	if (UEquipmentSubsystem* Sub = OwningSubsystem.Get())
+	{
+		JobClass = Sub->GetLocalJobClass();
+	}
+	const bool bCanDualWield = EquipSlots::CanDualWield(JobClass);
+
+	// For Assassin: show weapon_left slot instead of shield
+	// If weapon_left has an item, show that; otherwise show the shield slot (Assassin can use shields too)
+	FString OffHandSlot = bCanDualWield ? EquipSlots::WeaponLeft : EquipSlots::Shield;
+	// If Assassin has no left-hand weapon but has a shield, fall back to showing shield
+	if (bCanDualWield)
+	{
+		UEquipmentSubsystem* Sub = OwningSubsystem.Get();
+		if (Sub && !Sub->IsSlotOccupied(EquipSlots::WeaponLeft) && Sub->IsSlotOccupied(EquipSlots::Shield))
+		{
+			OffHandSlot = EquipSlots::Shield;
+		}
+	}
+
 	return SNew(SHorizontalBox)
 		// LEFT COLUMN: Head Top, Head Low, Weapon, Garment, Accessory 1
 		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top)
@@ -379,7 +404,7 @@ TSharedRef<SWidget> SEquipmentWidget::BuildEquipmentLayout()
 		[
 			BuildPortrait()
 		]
-		// RIGHT COLUMN: Head Mid, Armor, Shield, Shoes, Accessory 2
+		// RIGHT COLUMN: Head Mid, Armor, Shield/Left Hand, Shoes, Accessory 2
 		+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Top)
 		[
 			SNew(SVerticalBox)
@@ -388,7 +413,7 @@ TSharedRef<SWidget> SEquipmentWidget::BuildEquipmentLayout()
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)
 			[ BuildEquipSlot(EquipSlots::Armor) ]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)
-			[ BuildEquipSlot(EquipSlots::Shield) ]
+			[ BuildEquipSlot(OffHandSlot) ]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)
 			[ BuildEquipSlot(EquipSlots::Footgear) ]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)
@@ -407,7 +432,7 @@ TSharedRef<SWidget> SEquipmentWidget::BuildTooltip(const FInventoryItem& Item)
 	Content->AddSlot().AutoHeight().Padding(4, 4, 4, 2)
 	[
 		SNew(STextBlock)
-		.Text(FText::FromString(Item.Name))
+		.Text(FText::FromString(Item.GetDisplayName()))
 		.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
 		.ColorAndOpacity(FSlateColor(EqColors::GoldHighlight))
 	];
@@ -605,7 +630,7 @@ FReply SEquipmentWidget::OnMouseButtonDown(const FGeometry& MyGeometry, const FP
 		return FReply::Handled();
 	}
 
-	// Right-click: tooltip
+	// Right-click: open item inspect
 	if (MouseEvent.GetEffectingButton() == EKeys::RightMouseButton)
 	{
 		FString SlotPos = GetSlotAtPosition(MyGeometry, ScreenPos);
@@ -615,7 +640,13 @@ FReply SEquipmentWidget::OnMouseButtonDown(const FGeometry& MyGeometry, const FP
 			FInventoryItem Item = EqSub->GetEquippedItem(SlotPos);
 			if (Item.IsValid())
 			{
-				SetToolTip(SNew(SToolTip)[ BuildTooltip(Item) ]);
+				if (UWorld* World = GEngine ? GEngine->GetCurrentPlayWorld() : nullptr)
+				{
+					if (UItemInspectSubsystem* InspectSub = World->GetSubsystem<UItemInspectSubsystem>())
+					{
+						InspectSub->ShowInspect(Item);
+					}
+				}
 			}
 		}
 		return FReply::Handled();

@@ -4,12 +4,13 @@
 **Audited By:** Cross-referencing all 7 plan documents against actual codebase source code
 **Result:** 24 issues found (6 CRITICAL, 4 HIGH, 8 MEDIUM, 6 LOW). All fixes documented below.
 **Post-Audit Fix:** Component 19 gap (target frame widget) resolved — added STargetFrameWidget spec to Plan 02 Section 6.
+**Phase 2 Implementation (2026-03-13):** C1, C3, C5, H1, M2, M4 marked FIXED.
 
 ---
 
 ## CRITICAL Issues (Must Fix Before Implementation)
 
-### C1. Auto-Attack State Ownership Conflict (Plans 01 + 02)
+### C1. Auto-Attack State Ownership Conflict (Plans 01 + 02) -- FIXED (Phase 2)
 
 **Problem:** Both `UPlayerInputSubsystem` (Plan 01) and `UCombatActionSubsystem` (Plan 02) register for the same 5 combat events (`combat:auto_attack_started`, `combat:auto_attack_stopped`, `combat:target_lost`, `combat:out_of_range`, `combat:error`). Both store `bIsAutoAttacking` and `AttackRange`. Both call `SimpleMoveToLocation` on `combat:out_of_range`. This creates triple-handling (Plan 01 + Plan 02 + existing BP bridge).
 
@@ -35,7 +36,7 @@ Apply to ALL actions: left click, right click, mouse move, mouse wheel, WASD. Th
 
 ---
 
-### C3. Double Animation/Death During Transition Period
+### C3. Double Animation/Death During Transition Period -- FIXED (Phase 2)
 
 **Problem:** When `UCombatActionSubsystem` is implemented (Phase 3) but the BP bridge is still active, `combat:damage` fires BOTH the new C++ handler AND the 215-node BP `OnCombatDamage`. Attack animations play twice, death overlay appears twice.
 
@@ -69,7 +70,7 @@ This eliminates the circular dependency. Revised phase list:
 
 ---
 
-### C5. HandleEnemyAttack Breaks in Phase 3 (Not Phase 6)
+### C5. HandleEnemyAttack Breaks in Phase 3 (Not Phase 6) -- FIXED (Phase 2, deferred to Phase 3)
 
 **Problem:** `MultiplayerEventSubsystem::HandleEnemyAttack()` uses `ProcessEvent` to call `BP_EnemyManager.GetEnemyActor()` and `BP_EnemyCharacter.PlayAttackAnimation()`. When Phase 3 replaces BP actors with C++ actors, these ProcessEvent calls fail.
 
@@ -103,7 +104,7 @@ Remove the `HandleEnemyAttack` function, `EnemyManagerActor` reference, and `Fin
 
 ## HIGH Issues (Should Fix)
 
-### H1. SkillTreeSubsystem Targeting Handoff Rules Missing
+### H1. SkillTreeSubsystem Targeting Handoff Rules Missing -- FIXED (Phase 2)
 
 **Problem:** `SkillTreeSubsystem` has a full targeting system (`BeginTargeting`, `CancelTargeting`, `SSkillTargetingOverlay`). `UTargetingSubsystem` also does per-tick cursor traces and target management. No handoff protocol defined.
 
@@ -155,14 +156,14 @@ Additionally, update `SkillTreeSubsystem::GetEnemyIdFromActor()` to handle both 
 ### M1. FindSpringArm May Find Wrong Component
 Use `Cast<ASabriMMOCharacter>(Pawn)->GetCameraBoom()` accessor instead of `FindComponentByClass<USpringArmComponent>()`.
 
-### M2. Actor Classification During Transition
-Use property reflection (check for `EnemyId` property > 0) for enemy identification, not name-contains checks. This is already proven in `SkillTreeSubsystem::GetEnemyIdFromActor()`.
+### M2. Actor Classification During Transition -- FIXED (Phase 2)
+Use property reflection (check for `EnemyId` property > 0) for enemy identification, not name-contains checks. This is already proven in `SkillTreeSubsystem::GetEnemyIdFromActor()`. Implemented in `UTargetingSubsystem::GetEnemyIdFromActor()` static utility.
 
 ### M3. TSubclassOf Hardcoded Path Fragile
 Use `UPROPERTY(config)` with `DefaultGame.ini` entry, or `FSoftClassPath` with fallback to C++ base class + error log.
 
-### M4. Hover Indicator Ownership
-`UTargetingSubsystem` owns hover indicators. For C++ actors (Phase 3), use a Slate overlay ring or add `UStaticMeshComponent` ground ring to actor constructors. Do NOT use WidgetComponents on C++ actors.
+### M4. Hover Indicator Ownership -- FIXED (Phase 2)
+`UTargetingSubsystem` owns hover indicators. Currently uses existing WidgetComponents named "HoverOver" on BP actors. For C++ actors (Phase 3), will switch to Slate overlay ring or `UStaticMeshComponent` ground ring on actor constructors.
 
 ### M5. inventory:used No C++ Handler
 Add `HandleItemUsed` to `InventorySubsystem` before removing bridge. Shows "Used Red Potion" feedback.
@@ -203,22 +204,25 @@ Note in Plan 03: "When per-template enemy meshes are added, switch to runtime me
 ## Revised Implementation Order (100% Confidence)
 
 ```
-PHASE 1: Camera + Movement (Foundation — no dependencies)
-├── UCameraSubsystem (right-click rotate, zoom)
-├── UPlayerInputSubsystem (click-to-move, WASD, click-to-attack EMIT ONLY)
-├── Set bConsumeInput=true on all C++ input mappings
-├── Remove IA_ClickToMove, IA_Attack, IA_CameraRotate from IMC_MMOCharacter in editor
-├── Set AIControllerClass in ASabriMMOCharacter constructor (optional but recommended)
-└── TEST: movement, camera, click emits combat:attack correctly
+PHASE 1: Camera + Movement — COMPLETE (2026-03-14)
+├── UCameraSubsystem (right-click yaw rotation, scroll zoom, fixed -55° pitch)
+├── UPlayerInputSubsystem (click-to-move, click-to-attack EMIT ONLY, click-to-interact, walk-to-NPC/enemy)
+├── Input bound via ASabriMMOCharacter::SetupPlayerInputComponent (NOT from subsystem)
+├── Removed IA_ClickToMove, IA_Attack, IA_CameraRotate, IA_Look, IA_Zoom from IMC_MMOCharacter
+├── Server fix: const dualWield moved before first use (JS Temporal Dead Zone crash)
+└── DONE: movement, camera, click emits, NavMesh projection
 
-PHASE 2: Targeting + Hover (depends on Phase 1)
-├── UTargetingSubsystem (per-tick cursor trace, hover indicators, cursor changes)
-├── SkillTreeSubsystem handoff: pause hover when bIsInTargetingMode
-├── Actor classification via property reflection (not name-contains)
-├── Remove AC_TargetingSystem component from BP_MMOCharacter
-└── TEST: cursor changes, hover indicators, skill targeting still works
+PHASE 2: Targeting + Hover + Combat Actions — COMPLETE (2026-03-13)
+├── UTargetingSubsystem (30Hz hover trace, cursor switching, hover indicators, property reflection)
+├── UCombatActionSubsystem (10 combat events, target frame Z=9, death overlay Z=40)
+├── SkillTreeSubsystem handoff: pause hover when bIsInTargetingMode (H1)
+├── Actor classification via property reflection (M2)
+├── 9 combat bridges removed from MultiplayerEventSubsystem (31→22) (C3)
+├── bOrientRotationToMovement toggling, PlayAttackAnimation reflection
+├── ClearAttackStateNoEmit() + RestoreOrientToMovement() public APIs
+└── DONE: cursor changes, hover indicators, combat events, target frame, death/respawn
 
-PHASE 3: Combat + Entities — MERGED (depends on Phase 2)
+PHASE 3: Entities — COMPLETE (2026-03-14)
 ├── Step 1: Create AMMORemotePlayer + AMMOEnemyActor (C++ actor classes)
 │   ├── Minimal BP subclasses for mesh/anim (BP_MMORemotePlayer, BP_MMOEnemy)
 │   ├── UOtherCharacterMovementComponent reuse for floor snap
@@ -226,16 +230,13 @@ PHASE 3: Combat + Entities — MERGED (depends on Phase 2)
 ├── Step 2: Create UOtherPlayerSubsystem + UEnemySubsystem
 │   ├── Register for player:moved, player:left, enemy:spawn/move/death/health_update/attack
 │   ├── TMap<int32, TWeakObjectPtr<Actor>> entity registries
-│   ├── Remove player/enemy bridges from MultiplayerEventSubsystem (6+1 events)
-│   └── Migrate HandleEnemyAttack from MultiplayerEventSubsystem
-├── Step 3: Create UCombatActionSubsystem
-│   ├── Register for ALL combat events (damage, auto_attack_started/stopped, target_lost, out_of_range, death, respawn, error)
-│   ├── Remove combat bridges from MultiplayerEventSubsystem (8 events)
-│   ├── HandleCombatDamage: attack animation + rotation (replaces 215-node BP)
-│   ├── Death overlay (Slate Z=40), respawn teleport
-│   └── Walk-to-attack mutual cancellation with WalkToCast
+│   ├── Remove player/enemy bridges from MultiplayerEventSubsystem (7 events)
+│   └── Migrate HandleEnemyAttack from MultiplayerEventSubsystem (C5)
+├── Step 3: Update CombatActionSubsystem actor resolution
+│   ├── Replace BP_EnemyManager/BP_OtherPlayerManager ProcessEvent with direct C++ subsystem calls
+│   └── Walk-to-attack mutual cancellation with WalkToCast (H2)
 ├── Step 4: Remove BP_OtherPlayerManager + BP_EnemyManager from levels
-└── TEST: entities spawn/move/die, combat works, animations play, no duplicates
+└── TEST: entities spawn/move/die, combat actor resolution works, no BP manager dependency
 
 PHASE 4: Name Tags + Interaction (depends on Phase 3)
 ├── UNameTagSubsystem + SNameTagOverlay (Slate OnPaint, Z=7)
@@ -255,5 +256,46 @@ PHASE 5: Cleanup
 
 ---
 
-**Last Updated:** 2026-03-13
-**Status:** AUDIT COMPLETE — All fixes documented, ready for implementation
+## Phase 3 Post-Implementation Fixes (2026-03-14)
+
+Phase 3 (Entity Management) implemented EnemySubsystem and OtherPlayerSubsystem, replacing BP_EnemyManager and BP_OtherPlayerManager. The following issues were discovered and fixed during testing.
+
+### P3-1. FindPlayerActor BP Fallback Removed
+
+**Problem:** CombatActionSubsystem::FindPlayerActor retained a fallback path that called ProcessEvent on BP_OtherPlayerManager. This was dead code since the subsystem lookup always succeeds.
+**Fix:** Removed the fallback. `UOtherPlayerSubsystem::GetPlayer(id)` is the sole code path.
+
+### P3-2. Death Does Not Block Movement
+
+**Problem:** After `combat:death` event, players could still click-to-move and WASD-move while dead.
+**Fix:** Added `IsDead()` public method to `UCombatActionSubsystem`. `UPlayerInputSubsystem` checks `IsDead()` before processing click-to-move and click-to-attack. `ASabriMMOCharacter::DoMove()` checks `IsDead()` before executing WASD movement.
+
+### P3-3/4. OtherPlayerSubsystem Teleport Snap Threshold
+
+**Problem:** When other players teleported (zone transitions, respawn, Fly Wing), their actors smoothly interpolated to the distant new position instead of snapping, creating visible "ghosts" sliding across the map.
+**Fix:** Added 200-unit distance threshold in `UOtherPlayerSubsystem::HandlePlayerMoved()`. If `FVector::Dist(CurrentLocation, TargetPosition) > 200.0f`, the actor snaps instantly via `SetActorLocation()` instead of setting TargetPosition for interpolation.
+
+### P3-5. ProcessClickOnEnemy Immediate Emit + Dynamic Range
+
+**Problem:** `ProcessClickOnEnemy` used a hardcoded 150-unit attack range and deferred `combat:attack` emission.
+**Fix:** Emits `combat:attack` immediately on click. Uses `UCombatActionSubsystem::GetAttackRange()` for the actual server-provided attack range instead of hardcoded 150.
+
+### P3-CRASH. CallBPFunction FString Stack Buffer Overrun
+
+**Severity:** CRITICAL (0xc0000409 crash)
+**Problem:** `CallBPFunction()` helper used `UScriptStruct::InitializeStruct()` / `DestroyStruct()` on a stack-allocated `uint8[]` parameter block. When the parameter block contained `FString` fields, `InitializeStruct` would write beyond the stack allocation, causing a stack buffer overrun crash (`0xc0000409` — STATUS_STACK_BUFFER_OVERRUN).
+**Fix:** Replaced with safe manual initialization:
+1. `FMemory::Memzero(ParamBlock, ParamSize)` — zero the entire block
+2. `new (ParamBlock + StringOffset) FString(Value)` — placement new for each FString
+3. After `ProcessEvent()`: `reinterpret_cast<FString*>(ParamBlock + StringOffset)->~FString()` — explicit destructor
+This avoids the struct metadata mismatch that caused InitializeStruct to corrupt the stack.
+
+### P3-BUILD. Editor Build Target
+
+**Problem:** Building the `SabriMMO` game target instead of `SabriMMOEditor` produced `SabriMMO.exe`, which the Unreal Editor does not load. All C++ changes appeared to have no effect.
+**Fix:** Always build `SabriMMOEditor` target for editor testing. The editor loads `UnrealEditor-SabriMMO.dll` from the editor build, not the game executable.
+
+---
+
+**Last Updated:** 2026-03-14
+**Status:** Phase 1 COMPLETE, Phase 2 COMPLETE, Phase 3 COMPLETE — 6 audit fixes applied (C1, C3, C5, H1, M2, M4), 6 Phase 3 fixes (P3-1 through P3-5 + P3-CRASH + P3-BUILD). Next: Phase 4 (Name Tags + Interaction)

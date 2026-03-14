@@ -672,6 +672,9 @@ void USkillVFXSubsystem::HandleGroundEffectCreated(const TSharedPtr<FJsonValue>&
 
 	const FSkillVFXConfig& Config = SkillVFXDataHelper::GetSkillVFXConfig(SkillId);
 
+	UWorld* World = GetWorld();
+	if (!World) return;
+
 	// Use per-skill VFX override if available
 	if (!Config.VFXOverridePath.IsEmpty())
 	{
@@ -684,7 +687,7 @@ void USkillVFXSubsystem::HandleGroundEffectCreated(const TSharedPtr<FJsonValue>&
 			if (CascadeSystem)
 			{
 				UParticleSystemComponent* PSC = UGameplayStatics::SpawnEmitterAtLocation(
-					GetWorld(), CascadeSystem, Location, FRotator::ZeroRotator, FinalScale, false);
+					World, CascadeSystem, Location, FRotator::ZeroRotator, FinalScale, false);
 				if (PSC)
 				{
 					GetCascadeGroundEffects().Add(EffectId, PSC);

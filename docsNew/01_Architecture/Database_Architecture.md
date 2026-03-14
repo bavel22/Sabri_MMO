@@ -151,6 +151,11 @@ await redisClient.connect(); // Required for redis v4+
 | `hit_bonus` | INTEGER | — | 0 | Direct HIT bonus (equipment flat bonus, stacks with DEX-based HIT) |
 | `flee_bonus` | INTEGER | — | 0 | Direct FLEE bonus (equipment flat bonus, stacks with AGI-based FLEE) |
 | `critical_bonus` | INTEGER | — | 0 | Direct CRIT bonus (equipment flat bonus, stacks with LUK-based Crit) |
+| `card_type` | VARCHAR(20) | nullable | NULL | Compound category: weapon, armor, shield, garment, footgear, headgear, accessory |
+
+**Card system notes:**
+- `equip_locations` is used by `canCompoundCardOnEquipment()` for compound validation
+- `script` column is parsed at startup by `ro_card_effects.js` for combat modifiers
 
 ### `character_inventory`
 
@@ -162,6 +167,7 @@ await redisClient.connect(); // Required for redis v4+
 | `quantity` | INTEGER | — | 1 | Stack count |
 | `is_equipped` | BOOLEAN | — | false | Currently equipped |
 | `slot_index` | INTEGER | — | -1 | Grid position (-1 = auto) |
+| `compounded_cards` | JSONB | — | '[]'::jsonb | Array of card item_ids per slot (e.g. [null, 4036, null, null]) |
 | `created_at` | TIMESTAMP | DEFAULT CURRENT_TIMESTAMP | — | When acquired |
 
 ### `character_hotbar`
@@ -191,6 +197,8 @@ CREATE INDEX IF NOT EXISTS idx_inventory_character ON character_inventory(charac
 CREATE INDEX IF NOT EXISTS idx_inventory_item ON character_inventory(item_id);
 CREATE INDEX IF NOT EXISTS idx_hotbar_character ON character_hotbar(character_id);
 CREATE INDEX IF NOT EXISTS idx_characters_deleted ON characters(deleted) WHERE deleted = FALSE;
+CREATE INDEX IF NOT EXISTS idx_ci_equipped_cards ON character_inventory(character_id)
+    WHERE is_equipped = true AND compounded_cards IS NOT NULL AND compounded_cards != '[]'::jsonb;
 ```
 
 ## Seed Data

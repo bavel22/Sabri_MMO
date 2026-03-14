@@ -77,10 +77,27 @@ void SCombatStatsWidget::Construct(const FArguments& InArgs)
 						+ SVerticalBox::Slot().AutoHeight().Padding(6, 0)
 						[
 							BuildStatRow(
-								FText::FromString(TEXT("ATK")),
+								TAttribute<FText>::CreateLambda([this]() -> FText {
+									if (Subsystem && Subsystem->bIsDualWielding) return FText::FromString(TEXT("ATK(R)"));
+									return FText::FromString(TEXT("ATK"));
+								}),
 								TAttribute<FText>::CreateLambda([this]() -> FText {
 									if (!Subsystem) return FText::GetEmpty();
+									if (Subsystem->bIsDualWielding)
+										return FText::FromString(FString::Printf(TEXT("%d + %d (%d%%)"), Subsystem->StatusATK, Subsystem->WeaponATK_Right + Subsystem->PassiveATK, Subsystem->RightHandDamagePercent));
 									return FText::FromString(FString::Printf(TEXT("%d + %d"), Subsystem->StatusATK, Subsystem->WeaponATK + Subsystem->PassiveATK));
+								})
+							)
+						]
+
+						// Left hand ATK (only visible when dual wielding)
+						+ SVerticalBox::Slot().AutoHeight().Padding(6, 0)
+						[
+							BuildStatRow(
+								FText::FromString(TEXT("ATK(L)")),
+								TAttribute<FText>::CreateLambda([this]() -> FText {
+									if (!Subsystem || !Subsystem->bIsDualWielding) return FText::GetEmpty();
+									return FText::FromString(FString::Printf(TEXT("%d + %d (%d%%)"), Subsystem->StatusATK, Subsystem->WeaponATK_Left, Subsystem->LeftHandDamagePercent));
 								})
 							)
 						]
@@ -91,6 +108,10 @@ void SCombatStatsWidget::Construct(const FArguments& InArgs)
 								FText::FromString(TEXT("MATK")),
 								TAttribute<FText>::CreateLambda([this]() -> FText {
 									if (!Subsystem) return FText::GetEmpty();
+									if (Subsystem->MATKMin > 0 && Subsystem->MATKMax > 0 && Subsystem->MATKMin != Subsystem->MATKMax)
+										return FText::FromString(FString::Printf(TEXT("%d~%d"), Subsystem->MATKMin, Subsystem->MATKMax));
+									if (Subsystem->MATKMax > 0)
+										return FText::FromString(FString::FromInt(Subsystem->MATKMax));
 									return FText::FromString(FString::FromInt(Subsystem->StatusMATK));
 								})
 							)
@@ -154,7 +175,7 @@ void SCombatStatsWidget::Construct(const FArguments& InArgs)
 								FText::FromString(TEXT("MDEF")),
 								TAttribute<FText>::CreateLambda([this]() -> FText {
 									if (!Subsystem) return FText::GetEmpty();
-									return FText::FromString(FString::Printf(TEXT("0 + %d"), Subsystem->SoftMDEF));
+									return FText::FromString(FString::Printf(TEXT("%d + %d"), Subsystem->HardMDEF, Subsystem->SoftMDEF));
 								})
 							)
 						]

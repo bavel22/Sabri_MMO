@@ -205,6 +205,23 @@ void UDamageNumberSubsystem::HandleCombatDamage(const TSharedPtr<FJsonValue>& Da
 
 	// ---- Spawn damage number for ALL combat in view (RO-style) ----
 	SpawnDamagePop(DisplayValue, bIsCritical, bIsEnemy, AttackerId, TargetId, TargetWorldPos, HitType, Element);
+
+	// ---- Dual Wield: second damage number for left-hand hit ----
+	double Damage2D = 0;
+	bool bIsDualWield = false;
+	Obj->TryGetNumberField(TEXT("damage2"), Damage2D);
+	Obj->TryGetBoolField(TEXT("isDualWield"), bIsDualWield);
+	const int32 Damage2 = (int32)Damage2D;
+	if (bIsDualWield && Damage2 > 0)
+	{
+		bool bIsCritical2 = false;
+		Obj->TryGetBoolField(TEXT("isCritical2"), bIsCritical2);
+		FString Element2 = TEXT("neutral");
+		Obj->TryGetStringField(TEXT("element2"), Element2);
+		// Slight upward offset so the two numbers don't overlap
+		const FVector LeftHandPos = TargetWorldPos + FVector(0.f, 0.f, 30.f);
+		SpawnDamagePop(Damage2, bIsCritical2, bIsEnemy, AttackerId, TargetId, LeftHandPos, TEXT("normal"), Element2);
+	}
 }
 
 // ============================================================

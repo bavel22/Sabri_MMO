@@ -1,7 +1,7 @@
 // MultiplayerEventSubsystem.h — UWorldSubsystem that bridges Socket.io events
 // from the persistent EventRouter to BP_SocketManager's existing handler functions.
-// This preserves all existing Blueprint logic (OnCombatDamage 221 nodes, etc.)
-// while the event delivery path uses the persistent socket on GameInstance.
+// Bridges 14 events to BP (inventory, loot, chat, stats, hotbar, shop).
+// Player/enemy/combat events migrated to C++ subsystems in Phases 2-3.
 
 #pragma once
 
@@ -38,23 +38,14 @@ private:
 	// Bridge: converts FJsonValue to FString and calls BP handler via ProcessEvent
 	void ForwardToBPHandler(const FString& FunctionName, const TSharedPtr<FJsonValue>& Data);
 
-	// Direct C++ handler for enemy:attack (no BP function exists for this)
-	void HandleEnemyAttack(const TSharedPtr<FJsonValue>& Data);
-
 	// Utility to serialize FJsonValue to a JSON string for BP handler consumption
 	static FString JsonValueToString(const TSharedPtr<FJsonValue>& Value);
 
 	// Cached reference to BP_SocketManager actor (found once on begin play)
 	TWeakObjectPtr<AActor> SocketManagerActor;
 
-	// Cached reference to BP_EnemyManager actor (for enemy:attack handling)
-	TWeakObjectPtr<AActor> EnemyManagerActor;
-
 	// Find BP_SocketManager in the level
 	AActor* FindSocketManagerActor() const;
-
-	// Find BP_EnemyManager in the level
-	AActor* FindEnemyManagerActor() const;
 
 	// Guard: prevents ProcessEvent calls during PostLoad (crashes UE5).
 	// Set to true one frame after OnWorldBeginPlay via SetTimerForNextTick.

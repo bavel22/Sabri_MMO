@@ -1,7 +1,7 @@
 # 04 - Name Tags & Unified Click-to-Interact Pipeline
 
 **Migration Target:** Entity name tags (Slate OnPaint overlay) and unified click-to-interact system
-**Status:** PLANNED
+**Status:** PLANNED (updated 2026-03-14 with accurate RO Classic pre-renewal research)
 **Dependencies:** UOtherPlayerSubsystem, UEnemySubsystem, ASabriMMOCharacter, NPC actors
 **Related Plans:** 01-03 in this migration series
 
@@ -30,33 +30,47 @@
 
 Reference: Pre-Renewal Ragnarok Online name tag conventions.
 
-### 1.1 Player Name Tags
+### 1.1 Player Name Tags (UPDATED — verified via roBrowser source + iRO Wiki)
 
-- Character name displayed above the head at ALL times (always visible while on screen).
-- White text by default.
-- Party members: green-tinted name.
-- Guild members: blue-tinted name (some servers use a lighter blue).
-- PvP enemies: red name (only in PvP-enabled zones).
-- Guild name displayed below the character name in a smaller font and different color.
-- Guild emblem displayed next to guild name (24x24 icon) -- deferred until guild system is implemented.
-- Name always faces the camera (billboard behavior via screen-space projection).
-- Font: clean, readable, with a black outline/shadow for visibility against any background.
+- Character name displayed **below the character** by default (toggled above/below via `/font` command).
+- **Always visible** while on screen.
+- White text (`#FFFFFF`) by default for self + other players.
+- **Party members: BLUE name** (`#5599FF`) — NOT green. Confirmed: "nickname of adventurers in same party display in blue."
+- Guild members: White name (same as default) — identified by guild emblem + guild name line, NOT by name color.
+- GMs: Yellow (`#FFFF00`) — controlled via `<admin>` tags in clientinfo.xml.
+- **PvP: NO name color change** — ally/enemy identification is by guild emblem only. No red hostile names in classic RO.
+- **Display format (2 lines):**
+  - Line 1: `CharacterName (PartyName)` — party name in parentheses if in party.
+  - Line 2: `GuildName [GuildTitle]` — guild rank/title in brackets, 24x24 emblem to left.
+- Name always faces the camera (3D-to-2D matrix projection, billboarded).
+- **Font:** Gulim (official RO client font), Arial 12px fallback.
+- **Shadow/Outline:** 4-pass black outline — text drawn 4× at ±1px cardinal offsets in `#000000`, then colored text on top. Creates crisp 1px stroke effect.
+- **No background** — floating text with outline only.
+- `/showname` command toggles bold font with guild title shown above name.
 
-### 1.2 Monster Name Tags
+### 1.2 Monster Name Tags (UPDATED — verified via roBrowser + rAthena)
 
-- Monster name and level displayed above the head in the format: `Poring Lv.5`
-- Always visible when the monster is on screen.
-- White/yellow text for normal monsters.
-- Boss/MVP monsters use a special colored name (gold or red) to distinguish them.
-- Dead monsters: name tag is hidden immediately on death.
+- Monster names are **HOVER-ONLY** — you must move your mouse cursor over the monster to see its name. They are NOT always visible. (Third-party GRF mods can force always-visible, but this is non-standard.)
+- Name color is **level-based** (player level vs monster level):
+  - **Grey** (`#C0C0C0`): Monster is significantly lower level than player.
+  - **White** (`#FFFFFF`): Monster is roughly the same level.
+  - **Red** (`#FF0000`): Monster is significantly higher level.
+  - Base color (roBrowser default): Light pink (`#FFC6C6`).
+- Boss/MVP monsters have no inherent name color difference — same level-based coloring. Distinguished by larger sprites, unique appearance, and boss protocol.
+- Dead monsters: name tag disappears as sprite fades out.
+- Monster HP bar (optional, toggled via `/monsterhp`):
+  - Pink (`#FF00E7`) at normal HP, Yellow (`#FFFF00`) below 25%.
+  - Border: dark blue (`#10189C`), background: dark grey (`#424242`).
+  - ~60px wide × 5px tall, above sprite, centered.
 - Name always faces camera.
 
-### 1.3 NPC Name Tags
+### 1.3 NPC Name Tags (UPDATED — verified via roBrowser)
 
-- NPC name displayed above the head in green text.
-- Always visible when the NPC is on screen.
-- Some NPCs show a title below the name (e.g., "Tool Dealer", "Kafra Service").
+- NPC names are **HOVER-ONLY** — same as monsters, visible only when mouse cursor is over the NPC.
+- **Light blue** text (`#94BDF7`) — NOT green. This distinguishes NPCs from white player names and pink/red monster names.
+- Some NPCs show a title (e.g., "Tool Dealer", "Kafra Service") but this is displayed in the NPC dialogue, not floating above.
 - Name always faces camera.
+- No background — same floating text with black outline as all other entities.
 
 ---
 

@@ -104,6 +104,8 @@ void UCombatStatsSubsystem::HandlePlayerStats(const TSharedPtr<FJsonValue>& Data
 		if ((*StatsObj)->TryGetNumberField(TEXT("weaponATK"), Val)) WeaponATK = (int32)Val;
 		if ((*StatsObj)->TryGetNumberField(TEXT("passiveATK"), Val)) PassiveATK = (int32)Val;
 		if ((*StatsObj)->TryGetNumberField(TEXT("hardDef"), Val)) HardDEF = (int32)Val;
+		if ((*StatsObj)->TryGetNumberField(TEXT("hardMdef"), Val)) HardMDEF = (int32)Val;
+		if ((*StatsObj)->TryGetNumberField(TEXT("weaponMATK"), Val)) WeaponMATK = (int32)Val;
 		if ((*StatsObj)->TryGetNumberField(TEXT("statPoints"), Val)) StatPoints = (int32)Val;
 	}
 
@@ -146,11 +148,36 @@ void UCombatStatsSubsystem::HandlePlayerStats(const TSharedPtr<FJsonValue>& Data
 		if ((*DerivedObj)->TryGetNumberField(TEXT("perfectDodge"), Val)) PerfectDodge = (int32)Val;
 		if ((*DerivedObj)->TryGetNumberField(TEXT("softDEF"), Val)) SoftDEF = (int32)Val;
 		if ((*DerivedObj)->TryGetNumberField(TEXT("softMDEF"), Val)) SoftMDEF = (int32)Val;
+		if ((*DerivedObj)->TryGetNumberField(TEXT("matkMin"), Val)) MATKMin = (int32)Val;
+		if ((*DerivedObj)->TryGetNumberField(TEXT("matkMax"), Val)) MATKMax = (int32)Val;
 		if ((*DerivedObj)->TryGetNumberField(TEXT("aspd"), Val)) ASPD = (int32)Val;
 	}
 
-	UE_LOG(LogCombatStats, Log, TEXT("Stats updated: ATK=%d+%d(+%d passive) MATK=%d HIT=%d FLEE=%d CRI=%d PD=%d DEF=%d+%d MDEF=%d ASPD=%d StatPts=%d"),
-		StatusATK, WeaponATK, PassiveATK, StatusMATK, HIT, FLEE, Critical, PerfectDodge, HardDEF, SoftDEF, SoftMDEF, ASPD, StatPoints);
+	// ── Parse dual wield info ──
+	const TSharedPtr<FJsonObject>* DualWieldObj = nullptr;
+	if (Obj->TryGetObjectField(TEXT("dualWield"), DualWieldObj) && DualWieldObj)
+	{
+		bool bDW = false;
+		if ((*DualWieldObj)->TryGetBoolField(TEXT("isDualWielding"), bDW)) bIsDualWielding = bDW;
+		double Val = 0;
+		if ((*DualWieldObj)->TryGetNumberField(TEXT("weaponATK_right"), Val)) WeaponATK_Right = (int32)Val;
+		if ((*DualWieldObj)->TryGetNumberField(TEXT("weaponATK_left"), Val)) WeaponATK_Left = (int32)Val;
+		if ((*DualWieldObj)->TryGetNumberField(TEXT("rightHandDamagePercent"), Val)) RightHandDamagePercent = (int32)Val;
+		if ((*DualWieldObj)->TryGetNumberField(TEXT("leftHandDamagePercent"), Val)) LeftHandDamagePercent = (int32)Val;
+		FString Str;
+		if ((*DualWieldObj)->TryGetStringField(TEXT("weaponTypeRight"), Str)) WeaponTypeRight = Str;
+		if ((*DualWieldObj)->TryGetStringField(TEXT("weaponTypeLeft"), Str)) WeaponTypeLeft = Str;
+		if ((*DualWieldObj)->TryGetStringField(TEXT("elementRight"), Str)) ElementRight = Str;
+		if ((*DualWieldObj)->TryGetStringField(TEXT("elementLeft"), Str)) ElementLeft = Str;
+	}
+	else
+	{
+		bIsDualWielding = false;
+	}
+
+	UE_LOG(LogCombatStats, Log, TEXT("Stats updated: ATK=%d+%d(+%d passive) MATK=%d~%d HIT=%d FLEE=%d CRI=%d PD=%d DEF=%d+%d MDEF=%d+%d ASPD=%d StatPts=%d%s"),
+		StatusATK, WeaponATK, PassiveATK, MATKMin, MATKMax, HIT, FLEE, Critical, PerfectDodge, HardDEF, SoftDEF, HardMDEF, SoftMDEF, ASPD, StatPoints,
+		bIsDualWielding ? *FString::Printf(TEXT(" DW:R=%d(%d%%) L=%d(%d%%)"), WeaponATK_Right, RightHandDamagePercent, WeaponATK_Left, LeftHandDamagePercent) : TEXT(""));
 }
 
 // ============================================================

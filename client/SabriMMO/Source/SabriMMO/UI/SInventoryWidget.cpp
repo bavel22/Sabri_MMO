@@ -3,6 +3,9 @@
 
 #include "SInventoryWidget.h"
 #include "InventorySubsystem.h"
+#include "ItemInspectSubsystem.h"
+#include "ItemTooltipBuilder.h"
+#include "Engine/Engine.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SScrollBox.h"
@@ -380,7 +383,7 @@ TSharedRef<SWidget> SInventoryWidget::BuildItemSlot(int32 SlotIndex)
 	// Hover tooltip for filled slots (rebuilt each time grid rebuilds)
 	if (Item.IsValid())
 	{
-		SlotBox->SetToolTip(SNew(SToolTip)[ BuildTooltip(Item) ]);
+		SlotBox->SetToolTip(SNew(SToolTip)[ ItemTooltipBuilder::Build(Item) ]);
 	}
 
 	return SlotBox;
@@ -403,7 +406,7 @@ TSharedRef<SWidget> SInventoryWidget::BuildTooltip(const FInventoryItem& Item)
 	Content->AddSlot().AutoHeight().Padding(4, 4, 4, 2)
 	[
 		SNew(STextBlock)
-		.Text(FText::FromString(Item.Name))
+		.Text(FText::FromString(Item.GetDisplayName()))
 		.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
 		.ColorAndOpacity(FSlateColor(InvColors::GoldHighlight))
 	];
@@ -670,6 +673,24 @@ FReply SInventoryWidget::OnMouseButtonDown(const FGeometry& MyGeometry, const FP
 		return FReply::Handled();
 	}
 
+	// Right-click: open item inspect
+	if (MouseEvent.GetEffectingButton() == EKeys::RightMouseButton)
+	{
+		int32 SlotIdx = GetSlotIndexFromPosition(MyGeometry, ScreenPos);
+		FInventoryItem Item = GetItemAtSlot(SlotIdx);
+		if (Item.IsValid())
+		{
+			if (UWorld* World = GEngine ? GEngine->GetCurrentPlayWorld() : nullptr)
+			{
+				if (UItemInspectSubsystem* InspectSub = World->GetSubsystem<UItemInspectSubsystem>())
+				{
+					InspectSub->ShowInspect(Item);
+				}
+			}
+			return FReply::Handled();
+		}
+	}
+
 	return FReply::Handled();
 }
 
@@ -825,6 +846,10 @@ FReply SInventoryWidget::OnMouseButtonDoubleClick(const FGeometry& MyGeometry, c
 	if (Item.IsConsumable())
 	{
 		Sub->UseItem(Item.InventoryId);
+	}
+	else if (Item.IsCard())
+	{
+		Sub->BeginCardCompound(Item);
 	}
 	else if (Item.IsEquippable())
 	{

@@ -47,24 +47,22 @@ ASPD ranges from 170 (new player) to a theoretical maximum of 199. The **hard ca
 ### ASPD Calculation
 
 ```javascript
-// In calculateDerivedStats() - Square root scaling
-const agiContribution = Math.floor(Math.sqrt(agi) * 1.2);      // Slow sqrt growth
-const dexContribution = Math.floor(Math.sqrt(dex) * 0.6);      // Half of AGI impact
-const aspd = Math.min(COMBAT.ASPD_CAP, Math.floor(170 + agiContribution + dexContribution));
+// In calculateDerivedStats() — RO pre-renewal weapon-type-aware formula
+// Uses per-class per-weapon base delays from ASPD_BASE_DELAYS (ro_exp_tables.js)
+// WD = base delay for (class, weaponType), e.g., Assassin+katar=42, Mage+staff=65
+const WD = baseDelay;  // from ASPD_BASE_DELAYS[class][weaponType]
+const agiReduction = Math.floor(WD * agi / 25);
+const dexReduction = Math.floor(WD * dex / 100);
+const totalReduction = Math.floor((agiReduction + dexReduction) / 10);
+const speedMod = (buffAspdMultiplier - 1);  // e.g., Two-Hand Quicken: 1.3 → 0.3
+const aspd = 200 - Math.floor((WD - totalReduction) * (1 - speedMod));
+// Clamped to [100, 195]
 
 // Final player ASPD (with weapon modifier applied after)
 player.aspd = Math.min(COMBAT.ASPD_CAP, derived.aspd + weaponAspdMod);
 
-// IMPORTANT: player:stats event now sends final ASPD including weapon modifier
+// player:stats event sends final ASPD including weapon modifier
 const finalAspd = Math.min(COMBAT.ASPD_CAP, derived.aspd + weaponAspdMod);
-socket.emit('player:stats', {
-    characterId,
-    stats: {
-        ...baseStats,
-        hardDef: player.hardDef || 0  // Include total hard DEF from armor
-    },
-    derived: { ...derived, aspd: finalAspd }  // Final ASPD with weapon bonus
-});
 ```
 
 **Defense (DEF) System:**
@@ -181,6 +179,77 @@ function calculatePhysicalDamage(attackerStats, targetStats) {
     return { damage: Math.max(1, finalDamage), isCritical };
 }
 ```
+
+### Card Modifiers in the Damage Pipeline
+
+Card modifiers are applied in `calculatePhysicalDamage()` (`ro_damage_formulas.js`) as part of the full RO-style physical damage formula. They are split into offensive (Step 6), defensive (Step 8c), and armor element categories.
+
+#### Offensive Card Modifiers (Step 6)
+
+Applied after the skill multiplier (Step 5), before element modifier (Step 7).
+
+**Format**: `attacker.cardMods[race_X]`, `attacker.cardMods[ele_X]`, `attacker.cardMods[size_X]`
+
+**Stacking rules**:
+- **Within category**: additive — 2x Hydra cards = `race_demihuman: 40` = +40% vs demihuman
+- **Between categories**: multiplicative — `(1 + race/100) * (1 + ele/100) * (1 + size/100)`
+
+```javascript
+// Step 6: Card modifiers (race%, element%, size%)
+if (attacker.cardMods) {
+    const raceBonus = attacker.cardMods[`race_${targetRace}`] || 0;
+    const eleBonus = attacker.cardMods[`ele_${targetElement}`] || 0;
+    const sizeBonus = attacker.cardMods[`size_${targetSize}`] || 0;
+    if (raceBonus !== 0) totalATK = Math.floor(totalATK * (100 + raceBonus) / 100);
+    if (eleBonus !== 0) totalATK = Math.floor(totalATK * (100 + eleBonus) / 100);
+    if (sizeBonus !== 0) totalATK = Math.floor(totalATK * (100 + sizeBonus) / 100);
+}
+```
+
+**Source**: `rebuildCardBonuses()` in `index.js` populates `player.cardMods` from compounded card effects. Passed to the formula via `getAttackerInfo()`.
+
+#### Defensive Card Modifiers (Step 8c)
+
+Applied after DEF reduction (Step 8), before the final result (Step 9).
+
+**Format**: `target.cardDefMods[race_X]`, `target.cardDefMods[ele_X]`, `target.cardDefMods[size_X]`
+
+**Reduction**: `damage * (100 - reduction%) / 100`
+
+```javascript
+// Step 8c: Defensive card modifiers (Thara Frog, Raydric, etc.)
+if (target.cardDefMods) {
+    const raceRed = target.cardDefMods[`race_${attacker.race || 'formless'}`] || 0;
+    const eleRed = target.cardDefMods[`ele_${atkElement}`] || 0;
+    const sizeRed = target.cardDefMods[`size_${attacker.size || 'medium'}`] || 0;
+    if (raceRed !== 0) totalATK = Math.floor(totalATK * (100 - raceRed) / 100);
+    if (eleRed !== 0) totalATK = Math.floor(totalATK * (100 - eleRed) / 100);
+    if (sizeRed !== 0) totalATK = Math.floor(totalATK * (100 - sizeRed) / 100);
+}
+```
+
+**Example**: Thara Frog card = `race_demihuman: 30` = -30% damage from demihuman attackers.
+
+**Source**: `rebuildCardBonuses()` populates `player.cardDefMods` from compounded card effects. Passed to the formula via `getPlayerTargetInfo()`.
+
+#### Armor Element Cards
+
+Armor-slot cards can change `player.armorElement`, which determines the element table lookup in Step 7 when the player is the target.
+
+```javascript
+// In rebuildCardBonuses():
+if (effect.armorElement && row.equip_slot === 'armor') {
+    player.armorElement = { type: armorElement, level: 1 };
+}
+```
+
+**Examples**:
+- Ghostring card -> ghost armor (reduces neutral damage to 25%)
+- Angeling card -> holy armor (immune to holy, weak to shadow)
+
+Default armor element is `{ type: 'neutral', level: 1 }` when no element card is compounded.
+
+> See also: `docsNew/03_Server_Side/Card_System.md` for full card system documentation (card effects, compounding, slot system).
 
 ## Range Checking
 
@@ -305,9 +374,26 @@ Two new steps in the physical damage pipeline:
 
 These are passed through `getAttackerInfo()` (passiveRaceATK) and `getPlayerTargetInfo()` (passiveRaceDEF).
 
+### Dual Wield Auto-Attack (Assassin/Assassin Cross)
+
+When `isDualWielding(player)` is true, the auto-attack tick runs the full physical damage pipeline TWICE per cycle:
+
+1. **Right hand**: Normal auto-attack (can miss via FLEE, can crit). Uses `player.equippedWeaponRight` stats, `cardModsRight` for card mods, right weapon element.
+2. **Left hand**: Force-hit attack (always hits — `forceHit: true`). Never crits independently (`noCrit`). Uses `player.equippedWeaponLeft` stats, `cardModsLeft` for card mods, left weapon element.
+
+**Mastery penalties** (applied AFTER the full damage pipeline per hand):
+- Right hand: `damage = max(1, floor(damage * (50 + rightHandMasteryLv * 10) / 100))`
+- Left hand: `damage2 = max(1, floor(damage2 * (30 + leftHandMasteryLv * 10) / 100))`
+
+**Kill processing**: Right hand damage applied first. If target survives, left hand damage applied. If right hand misses, left hand still hits.
+
+**`combat:damage` event extended** with: `damage2` (left-hand), `isDualWield: true`, `isCritical2` (cosmetic mirror of right crit), `element2` (left weapon element).
+
+**Helpers**: `canDualWield(jobClass)`, `isDualWielding(player)`, `isValidLeftHandWeapon(weaponType)`, `isKatar(subType)`.
+
 ### Double Attack (Auto-Attack Tick)
 
-After normal auto-attack damage on enemy, checks `getEffectiveStats(attacker).doubleAttackChance` (from Thief Double Attack passive, dagger only). If random roll succeeds, calculates second hit with `setTimeout(200ms)`, broadcasts `hitType: 'doubleAttack'`. Can trigger enemy death.
+After normal auto-attack damage on enemy, checks `getEffectiveStats(attacker).doubleAttackChance` (from Thief Double Attack passive, dagger only). If random roll succeeds, calculates second hit with `setTimeout(200ms)`, broadcasts `hitType: 'doubleAttack'`. Can trigger enemy death. **During dual wield**: DA only procs on right-hand dagger; mastery penalty applied to DA hit. Left hand hit occurs independently in the same cycle.
 
 ### Pneuma Ranged Block (Auto-Attack Tick)
 
@@ -328,7 +414,7 @@ When targeting an undead-element enemy: `holyDamage = floor(healAmount/2) * getE
 
 ### buildFullStatsPayload() Buff Multipliers
 
-The `derived` stats in `player:stats` now apply `buffAtkMultiplier` and `buffDefMultiplier` to `statusATK` and `softDEF`. This means all buffs with ATK/DEF multipliers (Auto Berserk, Provoke, etc.) are reflected in the stats panel.
+The `derived` stats in `player:stats` now apply `buffAtkMultiplier` and `buffDefMultiplier` to `statusATK` and `softDEF`. This means all buffs with ATK/DEF multipliers (Auto Berserk, Provoke, etc.) are reflected in the stats panel. Additionally includes `dualWield{}` object with per-hand ATK, mastery percentages, weapon types, and elements when `isDualWielding(player)` is true.
 
 ### Hidden Player Interaction
 
@@ -338,5 +424,5 @@ The `derived` stats in `player:stats` now apply `buffAtkMultiplier` and `buffDef
 
 ---
 
-**Last Updated**: 2026-03-11 (Auto Berserk DEF reduction + stats emit, buildFullStatsPayload buff multipliers, checkAutoBerserk on all HP-changing paths)
-**Previous**: 2026-03-10 (Phase 5: race ATK/DEF, Double Attack, Pneuma, Heal-Undead, movement regen, Auto Berserk, Hidden AI)
+**Last Updated**: 2026-03-12 (Card modifier documentation: offensive Step 6, defensive Step 8c, armor element cards)
+**Previous**: 2026-03-11 (Auto Berserk DEF reduction + stats emit, buildFullStatsPayload buff multipliers, checkAutoBerserk on all HP-changing paths)

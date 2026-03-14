@@ -28,6 +28,28 @@ enum class EItemDropTarget : uint8
 };
 
 // ============================================================
+// Compounded card info — lightweight card data for display
+// ============================================================
+
+USTRUCT()
+struct FCompoundedCardInfo
+{
+	GENERATED_BODY()
+
+	int32 ItemId = 0;
+	FString Name;
+	FString Description;
+	FString FullDescription;
+	FString Icon;
+	FString CardType;       // weapon, armor, shield, garment, footgear, headgear, accessory
+	FString CardPrefix;
+	FString CardSuffix;
+	int32 Weight = 0;
+
+	bool IsValid() const { return ItemId > 0; }
+};
+
+// ============================================================
 // Inventory item — mirrors server inventory:data payload
 // ============================================================
 
@@ -40,14 +62,17 @@ struct FInventoryItem
 	int32 ItemId = 0;
 	FString Name;
 	FString Description;
-	FString ItemType;           // weapon, armor, consumable, etc, card
-	FString EquipSlot;          // weapon, armor, shield, head_top, head_mid, head_low, footgear, garment, accessory
+	FString FullDescription;        // Multi-line formatted description from DB
+	FString ItemType;               // weapon, armor, consumable, etc, card
+	FString EquipSlot;              // weapon, armor, shield, head_top, head_mid, head_low, footgear, garment, accessory
 	int32 Quantity = 1;
 	bool bIsEquipped = false;
-	FString EquippedPosition;   // weapon, armor, shield, head_top, head_mid, head_low, footgear, garment, accessory_1, accessory_2
-	int32 SlotIndex = -1;       // Position in inventory grid (-1 = auto)
+	FString EquippedPosition;       // weapon, armor, shield, head_top, head_mid, head_low, footgear, garment, accessory_1, accessory_2
+	int32 SlotIndex = -1;           // Position in inventory grid (-1 = auto)
 	int32 Weight = 0;
 	int32 Price = 0;
+	int32 BuyPrice = 0;
+	int32 SellPrice = 0;
 	int32 ATK = 0;
 	int32 DEF = 0;
 	int32 MATK = 0;
@@ -60,17 +85,135 @@ struct FInventoryItem
 	int32 LukBonus = 0;
 	int32 MaxHPBonus = 0;
 	int32 MaxSPBonus = 0;
+	int32 HitBonus = 0;
+	int32 FleeBonus = 0;
+	int32 CriticalBonus = 0;
+	int32 PerfectDodgeBonus = 0;
 	int32 RequiredLevel = 1;
 	bool bStackable = false;
 	int32 MaxStack = 1;
 	FString Icon;
-	FString WeaponType;         // dagger, one_hand_sword, bow, mace, staff, spear, axe, whip, instrument
+	FString WeaponType;             // dagger, one_hand_sword, bow, mace, staff, spear, axe, whip, instrument
 	int32 ASPDModifier = 0;
 	int32 WeaponRange = 150;
+
+	// --- Inspect/Tooltip fields ---
+	int32 Slots = 0;                // Card slots (0-4)
+	int32 WeaponLevel = 0;          // Weapon level (1-4), 0 for non-weapons
+	bool bRefineable = false;
+	int32 RefineLevel = 0;          // Current refine level (+0 to +10)
+	FString JobsAllowed;            // "Swordman,Merchant,Thief" or "All"
+	FString CardType;               // For cards: which slot type they compound on
+	FString CardPrefix;             // Card prefix name ("Bloody", "Titan")
+	FString CardSuffix;             // Card suffix name ("of Endure")
+	bool bTwoHanded = false;
+	FString Element;                // Weapon element: "neutral", "fire", etc.
+	TArray<int32> CompoundedCards;  // Card item_ids per slot (-1 = empty, >0 = card ID)
+	TArray<FCompoundedCardInfo> CompoundedCardDetails;  // Parallel card detail data
 
 	bool IsValid() const { return InventoryId > 0; }
 	bool IsEquippable() const { return !EquipSlot.IsEmpty(); }
 	bool IsConsumable() const { return ItemType == TEXT("consumable"); }
+	bool IsCard() const { return ItemType == TEXT("card"); }
+	bool HasSlots() const { return Slots > 0; }
+
+	/**
+	 * Returns formatted display name with RO Classic card naming rules:
+	 * "+7 Triple Bloody Boned Blade [4]"
+	 *
+	 * Duplicate cards get multipliers (Double/Triple/Quadruple) instead of repeating.
+	 * Prefix cards go before name, suffix cards after, in slot insertion order.
+	 * Slot count [N] always shows TOTAL slots, not remaining empty.
+	 */
+	FString GetDisplayName() const
+	{
+		FString Result;
+
+		// 1. Refine prefix
+		if (RefineLevel > 0)
+			Result = FString::Printf(TEXT("+%d "), RefineLevel);
+
+		// 2. Count unique cards and track insertion order
+		static const TCHAR* Multipliers[] = { TEXT(""), TEXT("Double "), TEXT("Triple "), TEXT("Quadruple ") };
+
+		struct FCardNaming
+		{
+			FString PrefixText;
+			FString SuffixText;
+			int32 Count = 0;  // 0-indexed: 0=first, 1=double, 2=triple, 3=quad
+		};
+
+		TMap<int32, FCardNaming> UniqueCards;
+		TArray<int32> InsertionOrder;
+
+		for (const FCompoundedCardInfo& Card : CompoundedCardDetails)
+		{
+			if (!Card.IsValid()) continue;
+
+			if (FCardNaming* Existing = UniqueCards.Find(Card.ItemId))
+			{
+				Existing->Count++;
+			}
+			else
+			{
+				FCardNaming NewEntry;
+				NewEntry.PrefixText = Card.CardPrefix;
+				NewEntry.SuffixText = Card.CardSuffix;
+				NewEntry.Count = 0;
+				UniqueCards.Add(Card.ItemId, NewEntry);
+				InsertionOrder.Add(Card.ItemId);
+			}
+		}
+
+		// 3. Prefix cards (non-empty CardPrefix, in insertion order)
+		for (int32 CardId : InsertionOrder)
+		{
+			const FCardNaming& CN = UniqueCards[CardId];
+			if (CN.PrefixText.IsEmpty()) continue;
+			const int32 MultIdx = FMath::Clamp(CN.Count, 0, 3);
+			Result += Multipliers[MultIdx];
+			Result += CN.PrefixText;
+			Result += TEXT(" ");
+		}
+
+		// 4. Base name
+		Result += Name;
+
+		// 5. Suffix cards (non-empty CardSuffix, in insertion order)
+		for (int32 CardId : InsertionOrder)
+		{
+			const FCardNaming& CN = UniqueCards[CardId];
+			if (CN.SuffixText.IsEmpty()) continue;
+			const int32 MultIdx = FMath::Clamp(CN.Count, 0, 3);
+			Result += TEXT(" ");
+			Result += Multipliers[MultIdx];
+			Result += CN.SuffixText;
+		}
+
+		// 6. Slot count (total slots, NOT remaining empty — matches RO Classic)
+		if (Slots > 0)
+			Result += FString::Printf(TEXT(" [%d]"), Slots);
+
+		return Result;
+	}
+
+	/** Convert a FCompoundedCardInfo into an FInventoryItem for inspect display */
+	static FInventoryItem FromCardInfo(const FCompoundedCardInfo& Card)
+	{
+		FInventoryItem Item;
+		Item.InventoryId = -1;  // Sentinel: not a real inventory item
+		Item.ItemId = Card.ItemId;
+		Item.Name = Card.Name;
+		Item.Description = Card.Description;
+		Item.FullDescription = Card.FullDescription;
+		Item.Icon = Card.Icon;
+		Item.ItemType = TEXT("card");
+		Item.CardType = Card.CardType;
+		Item.CardPrefix = Card.CardPrefix;
+		Item.CardSuffix = Card.CardSuffix;
+		Item.Weight = Card.Weight;
+		return Item;
+	}
 };
 
 // ============================================================
@@ -126,6 +269,7 @@ struct FShopItem
 	int32 ItemId = 0;
 	FString Name;
 	FString Description;
+	FString FullDescription;
 	FString ItemType;       // weapon, armor, consumable, etc
 	FString Icon;
 	int32 BuyPrice = 0;     // NPC buy price (after Discount if applicable)
@@ -149,8 +293,71 @@ struct FShopItem
 	int32 LukBonus = 0;
 	int32 MaxHPBonus = 0;
 	int32 MaxSPBonus = 0;
+	int32 HitBonus = 0;
+	int32 FleeBonus = 0;
+	int32 CriticalBonus = 0;
+	int32 PerfectDodgeBonus = 0;
+
+	// --- Inspect fields ---
+	int32 Slots = 0;
+	int32 WeaponLevel = 0;
+	bool bRefineable = false;
+	FString JobsAllowed;
+	FString CardType;
+	FString CardPrefix;
+	FString CardSuffix;
+	bool bTwoHanded = false;
+	FString Element;
 
 	bool IsValid() const { return ItemId > 0; }
+
+	/** Convert to FInventoryItem for shared tooltip/inspect display */
+	FInventoryItem ToInspectableItem() const
+	{
+		FInventoryItem Item;
+		Item.InventoryId = -1;  // Sentinel: not a real inventory item
+		Item.ItemId = ItemId;
+		Item.Name = Name;
+		Item.Description = Description;
+		Item.FullDescription = FullDescription;
+		Item.ItemType = ItemType;
+		Item.EquipSlot = EquipSlot;
+		Item.Icon = Icon;
+		Item.BuyPrice = BuyPrice;
+		Item.SellPrice = SellPrice;
+		Item.Weight = Weight;
+		Item.ATK = ATK;
+		Item.DEF = DEF;
+		Item.MATK = MATK;
+		Item.MDEF = MDEF;
+		Item.WeaponType = WeaponType;
+		Item.WeaponRange = WeaponRange;
+		Item.ASPDModifier = ASPDModifier;
+		Item.RequiredLevel = RequiredLevel;
+		Item.bStackable = bStackable;
+		Item.StrBonus = StrBonus;
+		Item.AgiBonus = AgiBonus;
+		Item.VitBonus = VitBonus;
+		Item.IntBonus = IntBonus;
+		Item.DexBonus = DexBonus;
+		Item.LukBonus = LukBonus;
+		Item.MaxHPBonus = MaxHPBonus;
+		Item.MaxSPBonus = MaxSPBonus;
+		Item.HitBonus = HitBonus;
+		Item.FleeBonus = FleeBonus;
+		Item.CriticalBonus = CriticalBonus;
+		Item.PerfectDodgeBonus = PerfectDodgeBonus;
+		Item.Slots = Slots;
+		Item.WeaponLevel = WeaponLevel;
+		Item.bRefineable = bRefineable;
+		Item.JobsAllowed = JobsAllowed;
+		Item.CardType = CardType;
+		Item.CardPrefix = CardPrefix;
+		Item.CardSuffix = CardSuffix;
+		Item.bTwoHanded = bTwoHanded;
+		Item.Element = Element;
+		return Item;
+	}
 };
 
 // ============================================================
