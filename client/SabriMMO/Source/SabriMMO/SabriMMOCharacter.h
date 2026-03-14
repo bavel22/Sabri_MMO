@@ -97,6 +97,30 @@ private:
 	UInputAction* HotbarSlotActions[9];
 
 	void CreateUIToggleActions();
+	void CreateGameplayActions();
+
+	// ---- Gameplay input (left-click, camera) ----
+	UPROPERTY()
+	UInputMappingContext* GameplayIMC = nullptr;
+
+	UPROPERTY()
+	UInputAction* LeftClickAction = nullptr;
+
+	UPROPERTY()
+	UInputAction* RightClickAction = nullptr;
+
+	UPROPERTY()
+	UInputAction* MouseDeltaAction = nullptr;
+
+	UPROPERTY()
+	UInputAction* ZoomAction = nullptr;
+
+	void HandleLeftClick();
+	void HandleRightClickStarted();
+	void HandleRightClickCompleted();
+	void HandleMouseDelta(const FInputActionValue& Value);
+	void HandleZoom(const FInputActionValue& Value);
+
 	void HandleToggleCombatStats();
 	void HandleToggleInventory();
 	void HandleToggleEquipment();

@@ -802,7 +802,7 @@ FSlateBrush* USkillTreeSubsystem::GetOrCreateIconBrush(const FString& ContentPat
 	// Without this, UE5 defaults (DXT compression + mipmap chain + streaming) make
 	// 1024px icons look blurry/blocky when rendered at 24-32px in Slate.
 	Tex->LODGroup = TEXTUREGROUP_UI;
-	Tex->MipGenSettings = TMGS_NoMipmaps;
+	Tex->Filter = TF_Bilinear;          // No trilinear (no mipmaps to blend)
 	Tex->NeverStream = true;
 	Tex->UpdateResource();
 
@@ -1836,6 +1836,11 @@ void USkillTreeSubsystem::CancelSkillDrag()
 	DraggedSkillName.Empty();
 	DraggedSkillIcon.Empty();
 	HideSkillDragCursor();
+}
+
+void USkillTreeSubsystem::CancelWalkToCast()
+{
+	WalkToCast::Cancel(GetWorld());
 }
 
 void USkillTreeSubsystem::ShowSkillDragCursor(const FString& IconPath)

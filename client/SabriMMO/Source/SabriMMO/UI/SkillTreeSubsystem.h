@@ -262,6 +262,9 @@ public:
 
 	void StartSkillDrag(int32 SkillId, const FString& Name, const FString& Icon);
 	void CancelSkillDrag();
+
+	/** Cancel any active walk-to-cast movement (called by PlayerInputSubsystem when starting attack). */
+	void CancelWalkToCast();
 	void UpdateSkillDragCursorPosition();  // Call from widget Tick to follow cursor
 
 private:

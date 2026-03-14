@@ -23,6 +23,9 @@
 #include "ShopNPC.h"
 #include "KafraNPC.h"
 #include "UI/ZoneTransitionSubsystem.h"
+#include "UI/PlayerInputSubsystem.h"
+#include "UI/CameraSubsystem.h"
+#include "InputModifiers.h"
 #include "Framework/Application/SlateApplication.h"
 
 ASabriMMOCharacter::ASabriMMOCharacter()
@@ -110,6 +113,9 @@ void ASabriMMOCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 		// Looking
 		EnhancedInputComponent->BindAction(LookAction, ETriggerEvent::Triggered, this, &ASabriMMOCharacter::Look);
 
+		// ---- Gameplay input (left-click, camera) — replaces BP event graph ----
+		CreateGameplayActions();
+
 		// ---- UI toggle keys (programmatic, no Blueprint asset needed) ----
 		CreateUIToggleActions();
 
@@ -123,6 +129,37 @@ void ASabriMMOCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 					Subsystem->AddMappingContext(UIToggleIMC, 1);
 				}
 			}
+		}
+
+		// Register gameplay IMC
+		if (APlayerController* PC2 = Cast<APlayerController>(GetController()))
+		{
+			if (UEnhancedInputLocalPlayerSubsystem* Subsystem2 = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(PC2->GetLocalPlayer()))
+			{
+				if (GameplayIMC)
+				{
+					Subsystem2->AddMappingContext(GameplayIMC, 2);
+				}
+			}
+		}
+
+		// Bind gameplay actions
+		if (LeftClickAction)
+		{
+			EnhancedInputComponent->BindAction(LeftClickAction, ETriggerEvent::Triggered, this, &ASabriMMOCharacter::HandleLeftClick);
+		}
+		if (RightClickAction)
+		{
+			EnhancedInputComponent->BindAction(RightClickAction, ETriggerEvent::Started, this, &ASabriMMOCharacter::HandleRightClickStarted);
+			EnhancedInputComponent->BindAction(RightClickAction, ETriggerEvent::Completed, this, &ASabriMMOCharacter::HandleRightClickCompleted);
+		}
+		if (MouseDeltaAction)
+		{
+			EnhancedInputComponent->BindAction(MouseDeltaAction, ETriggerEvent::Triggered, this, &ASabriMMOCharacter::HandleMouseDelta);
+		}
+		if (ZoomAction)
+		{
+			EnhancedInputComponent->BindAction(ZoomAction, ETriggerEvent::Triggered, this, &ASabriMMOCharacter::HandleZoom);
 		}
 
 		// Bind UI toggle actions
@@ -174,6 +211,94 @@ void ASabriMMOCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 // ============================================================
 // Programmatic UI toggle actions (Enhanced Input)
 // ============================================================
+
+// ============================================================
+// Gameplay input actions (replaces BP event graph IA_Attack, IA_ClickToMove, camera)
+// ============================================================
+
+void ASabriMMOCharacter::CreateGameplayActions()
+{
+	GameplayIMC = NewObject<UInputMappingContext>(this, TEXT("IMC_Gameplay"));
+
+	// Left mouse button — click-to-move, click-to-attack, click-to-interact
+	LeftClickAction = NewObject<UInputAction>(this, TEXT("IA_GameLeftClick"));
+	LeftClickAction->ValueType = EInputActionValueType::Boolean;
+	GameplayIMC->MapKey(LeftClickAction, EKeys::LeftMouseButton);
+
+	// Right mouse button — camera rotation
+	RightClickAction = NewObject<UInputAction>(this, TEXT("IA_GameRightClick"));
+	RightClickAction->ValueType = EInputActionValueType::Boolean;
+	GameplayIMC->MapKey(RightClickAction, EKeys::RightMouseButton);
+
+	// Mouse delta — camera rotation amount
+	MouseDeltaAction = NewObject<UInputAction>(this, TEXT("IA_GameMouseDelta"));
+	MouseDeltaAction->ValueType = EInputActionValueType::Axis2D;
+	GameplayIMC->MapKey(MouseDeltaAction, EKeys::Mouse2D);
+
+	// Mouse wheel — camera zoom
+	// Map both scroll directions explicitly for reliable firing
+	ZoomAction = NewObject<UInputAction>(this, TEXT("IA_GameZoom"));
+	ZoomAction->ValueType = EInputActionValueType::Axis1D;
+	GameplayIMC->MapKey(ZoomAction, EKeys::MouseScrollUp);
+	FEnhancedActionKeyMapping& ScrollDownMap = GameplayIMC->MapKey(ZoomAction, EKeys::MouseScrollDown);
+	UInputModifierNegate* NegMod = NewObject<UInputModifierNegate>(this);
+	ScrollDownMap.Modifiers.Add(NegMod);
+}
+
+void ASabriMMOCharacter::HandleLeftClick()
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (UPlayerInputSubsystem* Sub = World->GetSubsystem<UPlayerInputSubsystem>())
+		{
+			Sub->OnLeftClickFromCharacter(this);
+		}
+	}
+}
+
+void ASabriMMOCharacter::HandleRightClickStarted()
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (UCameraSubsystem* Sub = World->GetSubsystem<UCameraSubsystem>())
+		{
+			Sub->OnRightClickStarted();
+		}
+	}
+}
+
+void ASabriMMOCharacter::HandleRightClickCompleted()
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (UCameraSubsystem* Sub = World->GetSubsystem<UCameraSubsystem>())
+		{
+			Sub->OnRightClickCompleted();
+		}
+	}
+}
+
+void ASabriMMOCharacter::HandleMouseDelta(const FInputActionValue& Value)
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (UCameraSubsystem* Sub = World->GetSubsystem<UCameraSubsystem>())
+		{
+			Sub->OnMouseDelta(Value.Get<FVector2D>());
+		}
+	}
+}
+
+void ASabriMMOCharacter::HandleZoom(const FInputActionValue& Value)
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (UCameraSubsystem* Sub = World->GetSubsystem<UCameraSubsystem>())
+		{
+			Sub->OnZoom(Value.Get<float>());
+		}
+	}
+}
 
 void ASabriMMOCharacter::CreateUIToggleActions()
 {

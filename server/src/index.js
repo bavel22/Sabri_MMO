@@ -9673,12 +9673,12 @@ setInterval(async () => {
                 const cachedEffStats = getEffectiveStats(attacker);
                 const cachedPassive = getPassiveSkillBonuses(attacker);
                 const cachedAtkInfo = getAttackerInfo(attacker, { raceATK: cachedEffStats.passiveRaceATK, bonusATK: cachedEffStats.passiveATK });
+                const dualWield = isDualWielding(attacker);
                 // For dual wield auto-attacks, use per-hand card mods
                 if (dualWield && attacker.cardModsRight) {
                     cachedAtkInfo.cardMods = attacker.cardModsRight;
                 }
                 const atkEnemyZone = enemy.zone || attacker.zone || 'prontera_south';
-                const dualWield = isDualWielding(attacker);
 
                 // === RIGHT HAND damage calculation ===
                 const combatResult = calculatePhysicalDamage(
