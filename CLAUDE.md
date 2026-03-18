@@ -46,58 +46,43 @@ UnrealBuildTool SabriMMO Win64 Development "C:/Sabri_MMO/client/SabriMMO/SabriMM
 ## Architecture
 
 ### Server (`server/src/index.js`)
-Single monolithic file (~2400 lines). Key sections:
+Single monolithic file (~30000 lines). Key sections:
 - **REST API** (`/api/auth/*`, `/api/characters/*`, `/api/servers`) — JWT-based auth, character CRUD, server list
 - **Socket.io events** — `player:join/position/moved/left`, `combat:*`, `inventory:*`, `chat:*`, `enemy:*`, `stats:*`, `skills:*`
 - **Combat tick loop** — 50ms interval, ASPD-based attack timing, dual wield dual-hit per cycle
-- **Dual wield helpers** — `canDualWield()`, `isDualWielding()`, `isValidLeftHandWeapon()`, `isKatar()`
-- **Enemy AI loop** — 509 RO monster templates, 46 active spawn points (zones 1-3 only, zones 4-9 disabled)
-- **Data modules** imported at top: `ro_monster_templates`, `ro_item_mapping`, `ro_exp_tables`, `ro_skill_data`, `ro_monster_ai_codes`, `ro_zone_data`, `ro_card_prefix_suffix`, `ro_card_effects`, `ro_item_groups`
-- **Card effect hooks** — 10+ functions: `processCardKillHooks`, `processCardDrainEffects`, `processCardStatusProcsOnAttack/WhenHit`, `processCardAutoSpellOnAttack/WhenHit`, `processAutobonusOnAttack/WhenHit`, `processCardDropBonuses`, `knockbackTarget`, `executeAutoSpellEffect`
-- **Card system constants** — `SKILL_CATALYSTS` (gem requirements per skill)
+- **Enemy AI loop** — 509 RO monster templates, 46 active spawn points, monster skill casting
+- **Class systems** — Performance (Bard/Dancer), Combo (Monk), Spirit Spheres, Traps (Hunter), Falcon, Cart/Vending, Homunculus, Forging/Refining
+- **Ensemble system** — Bard/Dancer 9 ensemble skills, SP drain tick, 9 effect types (stat/resist/regen/speed zones), partner validation, aftermath debuff on end
+- **Consumable effects** — `sc_start` handler (ASPD potions, stat foods, cure items), `itemskill` scrolls (Fly Wing, Butterfly Wing, identification), elemental converters (fire/water/wind/earth endow)
+- **Abracadabra** — 145 regular + 6 special random skill cast system, weighted selection, Sage skill 1420
+- **Monster summoning** — `NPC_SUMMONSLAVE` slave spawning with master/slave lifecycle (slaves die when master dies, slaves leash to master), `NPC_METAMORPHOSIS` transformation (monster replaces itself with a different template)
+- **Data modules**: `ro_monster_templates`, `ro_exp_tables`, `ro_skill_data` (includes `ro_skill_data_2nd` internally), `ro_monster_ai_codes`, `ro_zone_data`, `ro_card_effects`, `ro_item_groups`, `ro_ground_effects`, `ro_arrow_crafting`, `ro_monster_skills`, `ro_homunculus_data`, `ro_status_effects`, `ro_buff_system`, `ro_item_effects`, `ro_damage_formulas`
+- **Card effect hooks** — `processCardKillHooks`, `processCardDrainEffects`, `processCardStatusProcsOnAttack/WhenHit`, `processCardAutoSpellOnAttack/WhenHit`, `processAutobonusOnAttack/WhenHit`, `processCardDropBonuses`, `knockbackTarget`, `executeAutoSpellEffect`
 - **JWT validation** on `player:join` socket event (character ownership check)
 
 ### Client C++ (`client/SabriMMO/Source/SabriMMO/`)
+
+**Core infrastructure:**
+
 | File | Role |
 |------|------|
-| `CharacterData.h` | `FCharacterData` (30+ fields), `FServerInfo`, `FInventoryItem` (with `GetDisplayName()` card naming), drag-drop structs |
-| `MMOGameInstance.*` | Auth state, server selection, character list, persistent socket (ConnectSocket/EmitSocketEvent/EventRouter) |
-| `MMOHttpManager.*` | BlueprintFunctionLibrary — REST: login, register, servers, characters CRUD, position save |
-| `SabriMMOCharacter.*` | Base player pawn — movement, socket events, stats, BeginPlay ground-snap via `SnapLocationToGround` |
+| `CharacterData.h` | `FCharacterData`, `FServerInfo`, `FInventoryItem`, drag-drop structs |
+| `MMOGameInstance.*` | Auth state, character list, persistent socket (ConnectSocket/EmitSocketEvent/EventRouter) |
+| `MMOHttpManager.*` | BlueprintFunctionLibrary — REST API calls |
+| `SabriMMOCharacter.*` | Local player pawn — movement, stats, BeginPlay ground-snap |
 | `SabriMMOPlayerController.*` | Input mapping (click-to-move + WASD) |
-| `OtherCharacterMovementComponent.*` | Remote player interpolation + per-tick floor-snap (Z correction via line trace) |
-| `UI/LoginFlowSubsystem.*` | Login flow state machine (Login->Server->CharSelect->Create->EnterWorld) |
-| `UI/SLoginWidget.*` | Login screen (username/password, remember me, error display) |
-| `UI/SServerSelectWidget.*` | Server list with population/status, selection highlighting |
-| `UI/SCharacterSelectWidget.*` | 3x3 character card grid + detail panel + delete confirmation |
-| `UI/SCharacterCreateWidget.*` | Name, gender, hair style/color pickers |
-| `UI/SLoadingOverlayWidget.*` | "Please Wait" fullscreen overlay with progress bar |
-| `UI/SBasicInfoWidget.*` | Slate HUD panel (HP/SP/EXP bars, draggable) |
-| `UI/BasicInfoSubsystem.*` | UWorldSubsystem bridging server data -> Slate widget |
-| `UI/ZoneTransitionSubsystem.*` | Zone transitions, loading overlay, pawn teleport, zone:change/error/teleport events, `SnapLocationToGround()` static helper |
-| `UI/KafraSubsystem.*` | Kafra NPC dialog, save point, teleport service |
-| `UI/SKafraWidget.*` | Slate Kafra service dialog (save/teleport/cancel) |
-| `WarpPortal.*` | Overlap trigger actor for zone warps |
-| `KafraNPC.*` | Clickable Kafra NPC actor |
-| `SabriMMOGameMode.*` | Base GameMode — sets DefaultPawnClass=nullptr (Level Blueprint spawns pawn) |
-| `SocketEventRouter.*` | Multi-handler Socket.io event dispatch — allows multiple subsystems per event |
-| `UI/EnemySubsystem.*` | Enemy entity registry (TMap), 5 event handlers (spawn/move/death/health/attack), spawns BP_EnemyCharacter via ProcessEvent reflection |
-| `UI/OtherPlayerSubsystem.*` | Other player entity registry (TMap), 2 event handlers (moved/left), spawns BP_OtherPlayerCharacter, filters local player |
-| `UI/NameTagSubsystem.*` | Single OnPaint overlay renders ALL entity name tags (Z=7). RO Classic: players always visible, monsters/NPCs hover-only, 4-pass black outline, level-based colors |
-| `UI/MultiplayerEventSubsystem.*` | Bridge: forwards 14 events to BP_SocketManager via ProcessEvent (player/enemy/combat events migrated to C++ subsystems) |
-| `UI/PositionBroadcastSubsystem.*` | 30Hz position broadcasting via persistent socket |
-| `UI/TargetingSubsystem.*` | 30Hz hover trace, actor classification via property reflection, cursor switching (Enemy=Crosshairs, NPC=TextEditBeam), hover indicator WidgetComponents, pauses during SkillTreeSubsystem targeting mode |
-| `UI/CombatActionSubsystem.*` | 10 combat event handlers, bOrientRotationToMovement toggling, PlayAttackAnimation via reflection, STargetFrameWidget (Z=9), SDeathOverlayWidget (Z=40), RestoreOrientToMovement() public API |
-| `UI/PlayerInputSubsystem.*` | Click-to-move, click-to-attack (emit only), click-to-interact, walk-to-NPC/enemy, ClearAttackStateNoEmit(), StopAutoAttack() calls RestoreOrientToMovement() |
-| `UI/CameraSubsystem.*` | Right-click yaw rotation, scroll zoom (200-1500 units), fixed -55 degree pitch |
-| `UI/ItemInspectSubsystem.*` | Right-click item inspect window (Z=22), ShowInspect/HideInspect |
-| `UI/SItemInspectWidget.*` | Inspect popup: title bar, icon, formatted description, card slot footer |
-| `UI/ItemTooltipBuilder.*` | Shared hover tooltip builder for all item-showing widgets |
-| `UI/SCardCompoundPopup.*` | Double-click card compound popup: equipment list, slot diamonds, card:compound emit |
+| `SocketEventRouter.*` | Multi-handler Socket.io event dispatch for subsystems |
+| `OtherCharacterMovementComponent.*` | Remote player interpolation + per-tick floor-snap |
+
+**30+ UWorldSubsystem files in `UI/`** — each manages one domain (inventory, equipment, buffs, skills, chat, party, etc.) with a paired Slate widget. Key subsystems: `EnemySubsystem` (enemy registry, 5 events), `OtherPlayerSubsystem` (player registry), `CombatActionSubsystem` (10 combat events), `PlayerInputSubsystem` (click-to-move/attack), `LoginFlowSubsystem` (auth flow state machine), `PositionBroadcastSubsystem` (30Hz updates).
+
+**3 VFX files in `VFX/`** — `SkillVFXSubsystem` (97+ configs), `SkillVFXData` (config structs), `CastingCircleActor`.
+
+Load the relevant `/sabrimmo-*` skill for detailed file documentation per subsystem.
 
 ### Database (PostgreSQL)
-4 core tables: `users`, `characters`, `items` (static definitions), `character_inventory` (per-character).
-Character columns include: hair_style, hair_color, gender, delete_date, deleted (soft-delete flag), plus stats added dynamically by the server.
+Core tables: `users`, `characters`, `items` (static definitions), `character_inventory` (per-character), `character_hotbar`, `character_cart`, `character_homunculus`, `parties`, `party_members`, `vending_shops`, `vending_items`. 25 migration files in `database/migrations/`.
+Character columns include: hair_style, hair_color, gender, delete_date, deleted (soft-delete flag), plagiarized_skill_id/level, plus stats added dynamically by the server.
 Characters are never hard-deleted — `DELETE /api/characters/:id` sets `deleted = TRUE`. All queries filter with `AND deleted = FALSE`.
 
 ---
@@ -127,31 +112,31 @@ Widget prefix: `WBP_`. Blueprint prefix: `BP_`. Interface prefix: `BPI_`.
 
 **Event dispatchers over Tick polling** — Widgets bind to `OnHealthChanged`, `OnStatsUpdated`, etc. Do not poll state on Tick.
 
+**C++ struct registries over BP property reflection** — Entity subsystems store data in C++ structs (`FEnemyEntry`, `FPlayerEntry`) alongside actor pointers. All reads come from the struct (O(1) TMap lookup). BP actors still receive writes via `SetBPVector`/`SetBPBool` for Tick interpolation. Never use `FindPropertyByName`/`GetPropertyValue_InContainer` to read entity data — use the subsystem's public API (`GetEnemyData()`, `GetPlayerData()`, `GetEnemyIdFromActor()`, `GetPlayerIdFromActor()`).
+
 **Component-based** — New gameplay features get a dedicated `UActorComponent`. Do not add movement + combat + inventory logic to one Actor.
+
+**UPROPERTY on loaded classes** — Any `UClass*` obtained via `LoadClass<>()` or `LoadObject<>()` and stored as a member variable MUST be marked `UPROPERTY()`. Without it, UE5's garbage collector cannot see the reference, will collect the class, and the subsystem crashes with an access violation when it tries to use the stale pointer. This applies to `EnemyBPClass`, `PlayerBPClass`, and any future runtime-loaded class references.
+
+**Zone filtering on all AoE loops** — Every server-side AoE skill handler that iterates `enemies.entries()` or `connectedPlayers.entries()` MUST filter by `enemy.zone !== zone` / `ptarget.zone !== zone`. The `enemies` Map is global (all zones). Without zone filtering, enemies from other zones at overlapping coordinates get included, diluting split damage (Napalm Beat) or dealing invisible damage to unreachable targets.
+
+**Auto-create DB columns at server startup** — Any new column added to a migration file MUST also be added to the server startup auto-creation block (near `// Ensure stat columns exist`). The `getPlayerInventory()` query and similar functions reference these columns — if the migration hasn't been run, the query fails and returns empty data. Auto-creation with `ADD COLUMN IF NOT EXISTS` makes the server self-healing.
+
+**Magic Rod absorption in single-target magic paths** — Every single-target magical skill damage path checks for `magic_rod` buff on the target. If active, the spell is absorbed (target recovers SP equal to the skill's SP cost), damage is nullified, and the buff is consumed. This check must appear before damage application in any new single-target magic handler.
+
+**Ensemble ground effects as stationary AoE zones** — Ensemble skills (Bard+Dancer duet) create stationary ground effects at the midpoint of the two performers. Unlike solo performances which follow the caster, ensembles are fixed-position AoE zones that tick effects on all entities within range. Both performers must remain within range or the ensemble ends.
 
 ---
 
 ## Persistent Socket Architecture (Phase 4)
 
-**Persistent socket on GameInstance** — `UMMOGameInstance` owns a `TSharedPtr<FSocketIONative>` that survives `OpenLevel()`. No disconnect/reconnect on zone transitions. `USocketEventRouter` provides multi-handler dispatch (multiple subsystems can register for the same event). All C++ subsystems use `Router->RegisterHandler()` in `OnWorldBeginPlay` and `Router->UnregisterAllForOwner(this)` in `Deinitialize`. Blueprint emit calls use `GI->K2_EmitSocketEvent()` (BlueprintCallable). `MultiplayerEventSubsystem` bridges 14 inbound events to BP_SocketManager (inventory 5, loot 1, chat 1, stats 1, hotbar 2, shop 4). `CombatActionSubsystem` registers for 10 combat events. `EnemySubsystem` registers for 5 enemy events (spawn/move/death/health_update/attack) and owns the enemy actor registry. `OtherPlayerSubsystem` registers for 2 player events (moved/left) and owns the other-player actor registry. `PositionBroadcastSubsystem` handles 30Hz position updates. BP_SocketManager still exists in levels as a handler shell — its SocketIO component is no longer connected. BP_EnemyManager and BP_OtherPlayerManager are now dead code (replaced by C++ subsystems in Phase 3). All subsystem widgets are gated behind `GI->IsSocketConnected()` so they only show in game levels, not the login screen.
+**Persistent socket on GameInstance** — `UMMOGameInstance` owns a `TSharedPtr<FSocketIONative>` that survives `OpenLevel()`. No disconnect/reconnect on zone transitions. `USocketEventRouter` provides multi-handler dispatch (multiple subsystems can register for the same event). All C++ subsystems use `Router->RegisterHandler()` in `OnWorldBeginPlay` and `Router->UnregisterAllForOwner(this)` in `Deinitialize`. Blueprint emit calls use `GI->K2_EmitSocketEvent()` (BlueprintCallable). `MultiplayerEventSubsystem` has 0 bridges — all 14 removed in Phases A-E. Only outbound emit helpers remain (EmitCombatAttack, EmitStopAttack, RequestRespawn, EmitChatMessage). `ChatSubsystem` handles `chat:receive` (Phase E). `CombatActionSubsystem` registers for 10 combat events. `EnemySubsystem` registers for 5 enemy events (spawn/move/death/health_update/attack) and owns the enemy actor registry. `OtherPlayerSubsystem` registers for 2 player events (moved/left) and owns the other-player actor registry. `PositionBroadcastSubsystem` handles 30Hz position updates. BP_SocketManager still exists in levels as a handler shell — its SocketIO component is no longer connected. BP_EnemyManager and BP_OtherPlayerManager were removed from levels in Phase 6 (replaced by C++ subsystems in Phase 3). All subsystem widgets are gated behind `GI->IsSocketConnected()` so they only show in game levels, not the login screen.
 
 ---
 
 ## Dual Wield System (Assassin/Assassin Cross)
 
-**Only Assassin and Assassin Cross can dual wield.** Left hand accepts daggers, 1H swords, and 1H axes. Katars are mutually exclusive with dual wield (they use both hand slots as a single weapon).
-
-**Server helpers** (`index.js`): `canDualWield(jobClass)`, `isDualWielding(player)`, `isValidLeftHandWeapon(weaponType)`, `isKatar(subType)`. Player object tracks `equippedWeaponRight` and `equippedWeaponLeft` (both are `{ atk, weaponType, element, weaponLevel, matk, refineLevel, itemId, subType }` or null).
-
-**Equip logic**: Right hand → left hand → replace right. Katar equip auto-unequips left-hand + shield. Shield equip unequips left-hand for Assassin. DB uses `equipped_position = 'weapon_left'`.
-
-**ASPD** (`ro_damage_formulas.js`): `calculateASPD()` accepts optional `weaponTypeLeft`. Dual wield WD = `floor((WD_right + WD_left) * 7/10)`. Cap 190 (vs 195 single). Assassin axe delay: 75.
-
-**Combat tick**: Both hands hit per attack cycle. Right hand = normal auto-attack (can miss/crit). Left hand = forceHit (always hits), noCrit (never crits independently), per-hand card mods (`cardModsRight`/`cardModsLeft`). Mastery penalties: right `50 + rightHandMasteryLv * 10`%, left `30 + leftHandMasteryLv * 10`%. Double Attack only procs on right-hand dagger. Skills use right-hand weapon only (no left-hand hit, no mastery penalty). Sonic Blow/Grimtooth require Katar.
-
-**`combat:damage` event extended**: `damage2` (left-hand damage), `isDualWield`, `isCritical2` (cosmetic mirror), `element2` (left-hand element). `buildFullStatsPayload()` includes `dualWield{}` object.
-
-**Client**: `EquipSlots::WeaponLeft` in `EquipmentSubsystem.h`. `SEquipmentWidget` shows "Left Hand" slot for Assassin (same position as Shield). `CombatStatsSubsystem` parses + displays ATK(R)/ATK(L). `DamageNumberSubsystem` spawns second damage number with Z offset for left-hand hit.
+Only Assassin/Assassin Cross can dual wield (daggers, 1H swords, 1H axes in left hand). Katars are mutually exclusive. Server helpers: `canDualWield()`, `isDualWielding()`, `isValidLeftHandWeapon()`, `isKatar()`. Both hands hit per attack cycle with per-hand card mods and mastery penalties. Skills use right-hand only. Full details: load `/sabrimmo-skill-assassin` + `/sabrimmo-combat`.
 
 ---
 
@@ -187,22 +172,52 @@ Widget prefix: `WBP_`. Blueprint prefix: `BP_`. Interface prefix: `BPI_`.
 | Persistent socket, EventRouter, BP bridge | `/sabrimmo-persistent-socket` | `memory/persistent-socket.md` |
 | Blueprint / Widget work | `/ui-architect` | unrealMCP first |
 | Enemy AI, monster behavior | `/enemy-ai` | `server/src/ro_monster_ai_codes.js` |
+| Monster skill casting, NPC_ skills | `/sabrimmo-monster-skills` | `docsNew/03_Server_Side/Monster_Skill_System.md` |
 | Slate UI panels | `/sabrimmo-ui` | — |
 | Skill targeting (click-to-cast) | `/sabrimmo-target-skill` | — |
+| Chat messages, chat UI, channels | `/sabrimmo-chat` | — |
+| Combat log, damage/buff/death messages | `/sabrimmo-combat-log` | — |
 | Clickable NPCs, interactables | `/sabrimmo-click-interact` | — |
 | Zones, maps, warp portals | `/sabrimmo-zone` | `docsNew/05_Development/Zone_System_UE5_Setup_Guide.md` |
 | VFX, particles, Niagara | `/sabrimmo-skills-vfx` | `docsNew/05_Development/VFX_Asset_Reference.md` |
 | Skill icon art generation | `/sabrimmo-generate-icons` | — |
 | Stats, leveling, class system | `/sabrimmo-stats` | `RagnaCloneDocs/01_Stats_Leveling_JobSystem.md` |
+| Death penalty (PvE EXP loss) | `/sabrimmo-death` | `docsNew/05_Development/Phase_7_9_12_Completion_Plan.md` |
+| MVP system, monster skills, slaves | `/sabrimmo-mvp` | `docsNew/03_Server_Side/Monster_Skill_System.md` |
 | Damage pipelines, combat formulas | `/sabrimmo-combat` | `RagnaCloneDocs/02_Combat_System.md` |
 | Buffs (Provoke, Blessing, etc.) | `/sabrimmo-buff` | `docsNew/03_Server_Side/Status_Effect_Buff_System.md` |
 | Status effects (stun, freeze, etc.) | `/sabrimmo-debuff` | `docsNew/03_Server_Side/Status_Effect_Buff_System.md` |
 | Skill trees, cast times, cooldowns | `/sabrimmo-skills` | `RagnaCloneDocs/03_Skills_Magic_System.md` |
+| Novice skills (IDs 1-3) | `/sabrimmo-skill-novice` | `docsNew/05_Development/Novice_Skills_Audit_And_Fix_Plan.md` |
+| Swordsman skills (IDs 100-109) | `/sabrimmo-skill-swordsman` | `docsNew/05_Development/Swordsman_Skills_Audit_And_Fix_Plan.md` |
+| Mage skills (IDs 200-213) | `/sabrimmo-skill-mage` | `docsNew/05_Development/Mage_Skills_Audit_And_Fix_Plan.md` |
+| Archer skills (IDs 300-306) | `/sabrimmo-skill-archer` | `docsNew/05_Development/Archer_Skills_Audit_And_Fix_Plan.md` |
+| Acolyte skills (IDs 400-414) | `/sabrimmo-skill-acolyte` | `docsNew/05_Development/Acolyte_Skills_Audit_And_Fix_Plan.md` |
+| Thief skills (IDs 500-509) | `/sabrimmo-skill-thief` | `docsNew/05_Development/Thief_Skills_Audit_And_Fix_Plan.md` |
+| Merchant skills (IDs 600-609) | `/sabrimmo-skill-merchant` | `docsNew/05_Development/Merchant_Skills_Audit_And_Fix_Plan.md` |
+| Knight skills (IDs 700-710) | `/sabrimmo-skill-knight` | `docsNew/05_Development/Knight_Class_Research.md` |
+| Crusader skills (IDs 1300-1313) | `/sabrimmo-skill-crusader` | `docsNew/05_Development/Crusader_Class_Research.md` |
+| Wizard skills (IDs 800-813) | `/sabrimmo-skill-wizard` | `docsNew/05_Development/Wizard_Class_Research.md` |
+| Sage skills (IDs 1400-1421) | `/sabrimmo-skill-sage` | `docsNew/05_Development/Sage_Class_Research.md` |
+| Hunter skills (IDs 900-917) | `/sabrimmo-skill-hunter` | `docsNew/05_Development/Hunter_Class_Research.md` |
+| Bard skills (IDs 1500-1537) | `/sabrimmo-skill-bard` | `docsNew/05_Development/Bard_Class_Research.md` |
+| Dancer skills (IDs 1520-1557) | `/sabrimmo-skill-dancer` | `docsNew/05_Development/Dancer_Skills_Audit_And_Fix_Plan.md` |
+| Priest skills (IDs 1000-1018) | `/sabrimmo-skill-priest` | `docsNew/05_Development/Priest_Class_Research.md` |
+| Monk skills (IDs 1600-1615) | `/sabrimmo-skill-monk` | `docsNew/05_Development/Monk_Class_Research.md` |
+| Assassin skills (IDs 1100-1111) | `/sabrimmo-skill-assassin` | `docsNew/05_Development/Assassin_Class_Research.md` |
+| Rogue skills (IDs 1700-1718) | `/sabrimmo-skill-rogue` | `docsNew/05_Development/Rogue_Class_Research.md` |
+| Blacksmith skills (IDs 1200-1230) | `/sabrimmo-skill-blacksmith` | `docsNew/05_Development/Blacksmith_Class_Research.md` |
+| Alchemist skills (IDs 1800-1815) | `/sabrimmo-skill-alchemist` | `docsNew/05_Development/Alchemist_Class_Research.md` |
 | Items, equipment, refining | `/sabrimmo-items` | `RagnaCloneDocs/06_Items_Equipment.md` |
+| Refine ATK bonus, overupgrade, armor DEF | `/sabrimmo-refine` | `docsNew/05_Development/Refine_ATK_And_Party_System_Plan.md` |
+| Arrows, ammo equip, element override, consumption | `/sabrimmo-ammunition` | — |
 | Weight thresholds, overweight penalties | `/sabrimmo-weight` | `docsNew/03_Server_Side/Inventory_System.md` |
 | Card compounding, card bonuses | `/sabrimmo-cards` | — |
+| Pharmacy crafting, Arrow Crafting, recipes | `/sabrimmo-crafting` | `docsNew/05_Development/Alchemist_Deferred_Skills_Implementation_Plan.md` |
+| Summon Flora, Marine Sphere, summon entities | `/sabrimmo-companions` | `docsNew/05_Development/Alchemist_Deferred_Skills_Implementation_Plan.md` |
 | NPCs, shops, quests, Kafra | `/sabrimmo-npcs` | `RagnaCloneDocs/08_NPCs_Quests.md` |
-| Party, guild, social systems | `/sabrimmo-party-guild` | `RagnaCloneDocs/07_Social_Systems.md` |
+| Party system, EXP share, party chat | `/sabrimmo-party` | `docsNew/05_Development/Refine_ATK_And_Party_System_Plan.md` |
+| Guild system, ranks, skills, storage | `/sabrimmo-guild` | `RagnaCloneDocs/07_Social_Systems.md` |
 | PvP, War of Emperium, siege | `/sabrimmo-pvp-woe` | `RagnaCloneDocs/05_PvP_GvG_WoE.md` |
 | Trading, vending, storage, zeny | `/sabrimmo-economy` | `RagnaCloneDocs/09_Economy_Trading.md` |
 | Pets, homunculus, mercenaries | `/sabrimmo-companions` | `RagnaCloneDocs/12_Pets_Homunculus_Companions.md` |
@@ -224,25 +239,76 @@ Widget prefix: `WBP_`. Blueprint prefix: `BP_`. Interface prefix: `BPI_`.
 
 Many tasks touch multiple systems. **Load ALL relevant skills.** Examples:
 - "Add a new skill with VFX" -> `/sabrimmo-skills` + `/sabrimmo-combat` + `/sabrimmo-skills-vfx` + `/full-stack`
+- "Fix Play Dead or Basic Skill job change gate" -> `/sabrimmo-skill-novice` + `/sabrimmo-skills` + `/sabrimmo-buff`
+- "Fix Bash stun or Magnum Break fire endow" -> `/sabrimmo-skill-swordsman` + `/sabrimmo-skills` + `/sabrimmo-combat`
+- "Fix Mage Thunderstorm or Stone Curse petrification" -> `/sabrimmo-skill-mage` + `/sabrimmo-skills` + `/sabrimmo-debuff`
+- "Fix Archer Double Strafe or Arrow Shower" -> `/sabrimmo-skill-archer` + `/sabrimmo-skills` + `/sabrimmo-combat`
+- "Fix Thief Envenom or Hiding SP drain" -> `/sabrimmo-skill-thief` + `/sabrimmo-skills` + `/sabrimmo-debuff`
+- "Fix Merchant Mammonite or Cart Revolution" -> `/sabrimmo-skill-merchant` + `/sabrimmo-skills` + `/sabrimmo-combat`
 - "Add a new zone with NPCs and warps" -> `/sabrimmo-zone` + `/sabrimmo-npcs` + `/sabrimmo-click-interact`
 - "Fix a crash when casting spells" -> `/debugger` + `/sabrimmo-skills` + `/realtime`
 - "Build a new HUD panel showing buffs" -> `/sabrimmo-buff` + `/sabrimmo-debuff` + `/sabrimmo-ui`
 - "Add a skill that applies poison" -> `/sabrimmo-debuff` + `/sabrimmo-skills` + `/full-stack`
 - "Add a buff skill like Blessing" -> `/sabrimmo-buff` + `/sabrimmo-skills` + `/full-stack`
-- "Add a new monster with special attacks" -> `/enemy-ai` + `/sabrimmo-combat` + `/full-stack`
+- "Add a new monster with special attacks" -> `/enemy-ai` + `/sabrimmo-monster-skills` + `/sabrimmo-combat` + `/full-stack`
 - "Implement the inventory system" -> `/sabrimmo-items` + `/sabrimmo-economy` + `/full-stack` + `/sabrimmo-ui`
 - "Regen not working / can't attack" -> `/debugger` + `/sabrimmo-weight` + `/sabrimmo-buff`
-- "Add party EXP sharing" -> `/sabrimmo-party-guild` + `/sabrimmo-stats` + `/full-stack`
+- "Add party EXP sharing" -> `/sabrimmo-party` + `/sabrimmo-stats` + `/full-stack`
+- "Party EXP not working" -> `/sabrimmo-party` + `/debugger`
+- "Party chat not showing" -> `/sabrimmo-party` + `/sabrimmo-chat` + `/debugger`
+- "Devotion party check failing" -> `/sabrimmo-party` + `/sabrimmo-skill-crusader` + `/debugger`
+- "Refine ATK not applying" -> `/sabrimmo-refine` + `/sabrimmo-combat` + `/debugger`
+- "Overupgrade bonus wrong" -> `/sabrimmo-refine` + `/sabrimmo-combat`
+- "Shield Boomerang refine damage" -> `/sabrimmo-refine` + `/sabrimmo-skill-crusader`
 - "Implement pet taming system" -> `/sabrimmo-companions` + `/sabrimmo-items` + `/full-stack`
-- "Set up WoE castle sieges" -> `/sabrimmo-pvp-woe` + `/sabrimmo-party-guild` + `/sabrimmo-combat`
+- "Set up WoE castle sieges" -> `/sabrimmo-pvp-woe` + `/sabrimmo-guild` + `/sabrimmo-combat`
 - "Add NPC shops and quest givers" -> `/sabrimmo-npcs` + `/sabrimmo-items` + `/sabrimmo-economy`
 - "Add background music per zone" -> `/sabrimmo-audio` + `/sabrimmo-zone`
 - "Create character hair/costume system" -> `/sabrimmo-art` + `/sabrimmo-ui`
-- "Add a new socket event for party invites" -> `/sabrimmo-persistent-socket` + `/sabrimmo-party-guild` + `/full-stack`
+- "Add a new socket event for party invites" -> `/sabrimmo-persistent-socket` + `/sabrimmo-party` + `/full-stack`
 - "New subsystem listening to socket events" -> `/sabrimmo-persistent-socket` + `/sabrimmo-ui`
 - "Debug socket events not arriving" -> `/debugger` + `/sabrimmo-persistent-socket` + `/realtime`
 - "Card bonuses not applying in combat" -> `/sabrimmo-cards` + `/sabrimmo-combat` + `/debugger`
+- "Arrow element not working" -> `/sabrimmo-ammunition` + `/sabrimmo-combat` + `/debugger`
+- "Arrow consumption or crafting issues" -> `/sabrimmo-ammunition` + `/sabrimmo-skill-archer` + `/sabrimmo-items`
 - "Add card compound UI" -> `/sabrimmo-cards` + `/sabrimmo-items` + `/sabrimmo-ui`
+- "Chat messages not showing" -> `/sabrimmo-chat` + `/debugger` + `/sabrimmo-persistent-socket`
+- "Add party/guild chat channels" -> `/sabrimmo-chat` + `/sabrimmo-party` + `/sabrimmo-guild` + `/full-stack`
+- "Combat log missing skill damage" -> `/sabrimmo-combat-log` + `/sabrimmo-combat` + `/debugger`
+- "Implement Bowling Bash or Brandish Spear" -> `/sabrimmo-skill-knight` + `/sabrimmo-skills` + `/sabrimmo-combat`
+- "Implement Storm Gust or Meteor Storm" -> `/sabrimmo-skill-wizard` + `/sabrimmo-skills` + `/sabrimmo-combat` + (ground effects: `ro_ground_effects.js`)
+- "Implement Sanctuary or Magnus Exorcismus" -> `/sabrimmo-skill-priest` + `/sabrimmo-skills` + `/sabrimmo-combat` + (ground effects)
+- "Implement Hunter traps" -> `/sabrimmo-skill-hunter` + `/sabrimmo-skills` + (ground effects: TRAP category)
+- "Implement Bard songs or Dancer dances" -> `/sabrimmo-skill-bard` or `/sabrimmo-skill-dancer` + `/sabrimmo-skills` + (ground effects: BUFF_ZONE)
+- "Implement Asura Strike or combo system" -> `/sabrimmo-skill-monk` + `/sabrimmo-skills` + `/sabrimmo-combat`
+- "Implement Sonic Blow or Venom Splasher" -> `/sabrimmo-skill-assassin` + `/sabrimmo-skills` + `/sabrimmo-combat`
+- "Implement Back Stab or Divest skills" -> `/sabrimmo-skill-rogue` + `/sabrimmo-skills` + `/sabrimmo-combat`
+- "Implement Adrenaline Rush or forging" -> `/sabrimmo-skill-blacksmith` + `/sabrimmo-skills` + `/sabrimmo-combat`
+- "Implement Acid Terror or Potion Pitcher" -> `/sabrimmo-skill-alchemist` + `/sabrimmo-skills` + `/sabrimmo-combat`
+- "Pharmacy crafting not working" -> `/sabrimmo-crafting` + `/sabrimmo-skill-alchemist` + `/debugger`
+- "Add new Pharmacy recipe" -> `/sabrimmo-crafting` + `/sabrimmo-items`
+- "Arrow Crafting UI not showing" -> `/sabrimmo-crafting` + `/sabrimmo-skill-archer` + `/debugger`
+- "Summon Flora plants not attacking" -> `/sabrimmo-companions` + `/sabrimmo-skill-alchemist` + `/debugger`
+- "Marine Sphere not detonating" -> `/sabrimmo-companions` + `/sabrimmo-skill-alchemist` + `/debugger`
+- "Add client-side summon actors" -> `/sabrimmo-companions` + `/sabrimmo-ui` + `/sabrimmo-persistent-socket`
+- "Implement Sage Volcano/Deluge or Land Protector" -> `/sabrimmo-skill-sage` + `/sabrimmo-skills` + (ground effects)
+- "Implement Crusader Grand Cross or Devotion" -> `/sabrimmo-skill-crusader` + `/sabrimmo-skills` + `/sabrimmo-combat`
+- "Mount system not working" -> `/sabrimmo-skill-knight` or `/sabrimmo-skill-crusader` + `/debugger`
+- "Implement Dancer dances" -> `/sabrimmo-skill-dancer` + `/sabrimmo-skills` + (ground effects: BUFF_ZONE)
+- "Cart/vending not working" -> `/sabrimmo-economy` + `/sabrimmo-skill-merchant` + `/debugger`
+- "Homunculus not attacking" -> `/sabrimmo-companions` + `/sabrimmo-skill-alchemist` + `/debugger`
+- "Pet not following" -> `/sabrimmo-companions` + `/debugger`
+- "Pet bonuses not applying" -> `/sabrimmo-companions` + `/sabrimmo-stats` + `/debugger`
+- "Pet hunger/intimacy issues" -> `/sabrimmo-companions` + `/debugger`
+- "Monster skills not casting" -> `/sabrimmo-monster-skills` + `/enemy-ai` + `/debugger`
+- "Plagiarism not copying skills" -> `/sabrimmo-skill-rogue` + `/sabrimmo-monster-skills` + `/debugger`
+- "Death penalty not working" -> `/sabrimmo-death` + `/debugger`
+- "No EXP loss on death" -> `/sabrimmo-death` + `/debugger`
+- "MVP rewards not given" -> `/sabrimmo-mvp` + `/debugger`
+- "MVP not announcing" -> `/sabrimmo-mvp` + `/sabrimmo-chat`
+- "Slave monsters not spawning" -> `/sabrimmo-mvp` + `/enemy-ai` + `/debugger`
+- "Whisper not working" -> `/sabrimmo-chat` + `/debugger`
+- "Block list not working" -> `/sabrimmo-chat` + `/debugger`
 
 **Do NOT skip loading skills to save time.** The cost of reloading context is far less than the cost of implementing something wrong and having to redo it.
 
@@ -250,59 +316,8 @@ Many tasks touch multiple systems. **Load ALL relevant skills.** Examples:
 
 ## Personal Skills Available
 
-Invoke with `/skill-name`. Located at `C:/Users/pladr/.claude/skills/`.
-
-### Core Project Skills
-| Skill | Use when |
-|-------|----------|
-| `/full-stack` | `index.js` changes, DB schema, REST endpoints, server logic |
-| `/realtime` | Socket.io events, combat tick, position sync, multiplayer |
-| `/ui-architect` | UE5 Blueprint / Widget work (unrealMCP first) |
-| `/agent-architect` | Enemy AI, stat formulas, RO game systems architecture |
-| `/enemy-ai` | Monster aggro, chase, attack, AI state machine, per-monster AI codes |
-| `/planner` | Feature planning, development phases, 13-phase roadmap |
-| `/project-docs` | Load full project documentation context |
-
-### RO Game System Skills (sabrimmo-*)
-| Skill | Use when |
-|-------|----------|
-| `/sabrimmo-stats` | Base/derived stats, EXP tables, leveling, class/job system, stat allocation |
-| `/sabrimmo-combat` | Physical/magical damage pipeline, elements, size/race, critical hits, ASPD |
-| `/sabrimmo-buff` | Buff system (Provoke, Endure, Blessing, etc.), stat modifiers, stacking rules, BuffBarWidget |
-| `/sabrimmo-debuff` | Status effects (stun, freeze, poison, etc.), resistance formulas, CC, periodic drains, cleanse |
-| `/sabrimmo-skills` | Skill trees, cast times, cooldowns, SP costs, 86+ skill definitions |
-| `/sabrimmo-items` | Inventory, equipment slots, weapon types, refining, card system, weight |
-| `/sabrimmo-weight` | Weight thresholds (50%/90%/100%), regen/attack/skill blocks, cached weight, `weight:status` event |
-| `/sabrimmo-npcs` | NPC types, dialogue trees, shops, Kafra, quests, job change |
-| `/sabrimmo-party-guild` | Party (12 max), guild (Emperium), EXP sharing, guild skills |
-| `/sabrimmo-pvp-woe` | PvP maps, War of Emperium, castle siege, battlegrounds |
-| `/sabrimmo-economy` | Zeny, trading, vending, buying stores, storage, mail, anti-duplication |
-| `/sabrimmo-companions` | Pets (34 types), homunculus, mercenaries, falcon, cart, mounts |
-| `/sabrimmo-audio` | BGM per zone, SFX categories, UE5 Sound Classes, MetaSounds |
-| `/sabrimmo-art` | Character models, hair system, animations, monster pipeline, LOD |
-| `/sabrimmo-zone` | Zones, maps, warp portals, Kafra NPCs, zone configuration |
-| `/sabrimmo-ui` | Slate UI creation, RO brown/gold theme, drag/resize, HUD panels |
-| `/sabrimmo-target-skill` | Click-to-cast targeting, skill hotbar integration |
-| `/sabrimmo-click-interact` | Left-click interactable actors (NPCs, chests, etc.) |
-| `/sabrimmo-skills-vfx` | Skill VFX, Niagara effects, casting circles, warp portal VFX |
-| `/sabrimmo-persistent-socket` | Persistent socket, EventRouter, BP event bridge, subsystem registration |
-| `/sabrimmo-cards` | Card compounding, card bonuses, offensive/defensive card modifiers, armor element cards |
-| `/sabrimmo-generate-icons` | RO-style skill icon generation via local Stable Diffusion XL |
-| `/sabrimmo-build-compile` | Build/compile UE5 project — editor vs game targets, Live Coding, rebuild procedures |
-
-### Utility Skills
-| Skill | Use when |
-|-------|----------|
-| `/debugger` | Crashes, logic errors, failed connections |
-| `/opus-45-thinking` | Complex multi-system architecture decisions |
-| `/code-quality` | C++/JS coding standards, refactoring, naming, completion audits |
-| `/security` | JWT auth, SQL injection, anti-cheat, rate limiting, input validation |
-| `/performance` | FPS optimization, tick rate tuning, query optimization, bandwidth |
-| `/test` | Quick server tests, Socket.io event validation |
-| `/tester` | Full QA, integration testing, cross-layer behavioral tests |
-| `/docs` | Documentation sync, changelog, docsNew/ updates |
-| `/prompt-engineer` | System prompts, skill definitions, Claude-specific patterns |
-| `/deep-research` | Multi-source web research with reasoning chains |
+51 sabrimmo-* skills + 10 utility skills. Invoke with `/skill-name`. Located at `C:/Users/pladr/.claude/skills/`.
+See `docsNew/00_Global_Rules/Global_Rules.md` → **SKILL INVOCATION** for comprehensive keyword-to-skill mapping, co-load rules, and overlapping skill pairs.
 
 ---
 
@@ -318,22 +333,5 @@ Invoke with `/skill-name`. Located at `C:/Users/pladr/.claude/skills/`.
 | VFX Execution Plan | `docsNew/05_Development/Skill_VFX_Execution_Plan.md` | Step-by-step build status, completion checklist |
 | VFX Research Findings | `docsNew/05_Development/Skill_VFX_Research_Findings.md` | 138-source research on RO effects, UE5 Niagara, AI tools |
 
-### RagnaCloneDocs Reference (RO Classic Game Design)
-
-| Design Doc | Implementation Doc | Covers |
-|-----------|-------------------|--------|
-| `00_Master_Build_Plan.md` | `00_Master_Implementation_Plan.md` | 13-phase roadmap, priorities, dependencies |
-| `01_Stats_Leveling_JobSystem.md` | `02_Stats_Class_System.md` | 6 stats, derived formulas, EXP tables, 30+ classes |
-| `02_Combat_System.md` | `03_Combat_System.md` | Physical/magical damage, elements, status effects |
-| `03_Skills_Magic_System.md` | `04_Skills_System.md` | 86+ skills, cast times, skill trees, SP costs |
-| `04_Monsters_EnemyAI.md` | `05_Enemy_Monster_System.md` | 509 monsters, AI codes, spawn zones, boss mechanics |
-| `05_PvP_GvG_WoE.md` | `06_PvP_WoE_System.md` | PvP maps, castle siege, Emperium, battlegrounds |
-| `06_Items_Equipment.md` | `07_Items_Equipment.md` | Items, equipment, refining, cards, weight |
-| `07_Social_Systems.md` | `08_Social_Systems.md` | Party, guild, friends, chat channels |
-| `08_NPCs_Quests.md` | `09_NPCs_Quests.md` | NPC types, quest system, shops, Kafra |
-| `09_Economy_Trading.md` | `10_Economy_Trading.md` | Zeny, vending, buying stores, storage |
-| `10_World_Zones_Navigation.md` | — | Zone design, world map, navigation |
-| `11_Multiplayer_Networking.md` | `01_Core_Architecture.md` | Socket.io, position sync, zone broadcasting |
-| `12_Pets_Homunculus_Companions.md` | `12_Companions_System.md` | Pets, homunculus, mercenaries, falcon |
-| `13_Audio_Sound_Design.md` | `13_Audio_System.md` | BGM, SFX, audio settings |
-| `14_Art_Visual_Style.md` | `14_Art_Pipeline.md` | Models, animations, hair, UI art |
+### RagnaCloneDocs Reference
+28 RO Classic reference docs in `RagnaCloneDocs/` (14 design + 14 implementation). Key references are linked in the Skill Selection Guide "Also read" column above.

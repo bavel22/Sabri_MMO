@@ -216,7 +216,7 @@ function calculateMaxSP(baseLevel, intStat, jobClass, isTranscendent, bonusMaxSp
  * @param {string|null} weaponTypeLeft — left-hand weapon type (for dual wield, null otherwise)
  * @returns {number} ASPD value (100-190 range, capped at 190 for dual wield, 195 for single)
  */
-function calculateASPD(jobClass, weaponType, agi, dex, buffAspdMultiplier, weaponTypeLeft) {
+function calculateASPD(jobClass, weaponType, agi, dex, buffAspdMultiplier, weaponTypeLeft, isMounted, cavalierMasteryLv) {
     // Resolve transcendent class to base class for ASPD table lookup
     const baseClass = TRANS_TO_BASE_CLASS[jobClass] || jobClass;
     const classDelays = ASPD_BASE_DELAYS[baseClass] || ASPD_BASE_DELAYS['novice'];
@@ -240,10 +240,19 @@ function calculateASPD(jobClass, weaponType, agi, dex, buffAspdMultiplier, weapo
     // Speed modifier from buffs (e.g., Two-Hand Quicken +0.30, Adrenaline Rush +0.30)
     const speedMod = Math.max(0, (buffAspdMultiplier || 1) - 1); // 1.3 → 0.3
 
-    const rawASPD = 200 - Math.floor((WD - totalReduction) * (1 - speedMod));
+    let rawASPD = 200 - Math.floor((WD - totalReduction) * (1 - speedMod));
     // Dual wield cap is 190 (harder to reach max); single weapon cap is 195
     const aspdCap = weaponTypeLeft ? 190 : 195;
-    return Math.min(aspdCap, Math.max(100, rawASPD));
+    rawASPD = Math.min(aspdCap, Math.max(100, rawASPD));
+
+    // Mount ASPD penalty (Knight/Crusader on Peco Peco)
+    // 50% penalty base, +10% restored per Cavalry Mastery level (Lv5 = full restore)
+    if (isMounted) {
+        const mountMultiplier = 0.5 + (cavalierMasteryLv || 0) * 0.1;
+        rawASPD = Math.floor(rawASPD * Math.min(1, mountMultiplier));
+    }
+
+    return rawASPD;
 }
 
 // ============================================================
@@ -271,9 +280,14 @@ function calculateDerivedStats(stats) {
         weaponTypeLeft = null,
     } = stats;
 
-    // ── Status ATK (Pre-Renewal) ──
-    // STR + floor(STR/10)² + floor(DEX/5) + floor(LUK/3)
-    const statusATK = str + Math.floor(str / 10) ** 2 + Math.floor(dex / 5) + Math.floor(luk / 3);
+    // ── Status ATK (Pre-Renewal, rAthena status_base_atk) ──
+    // Melee:  STR + floor(STR/10)² + floor(DEX/5) + floor(LUK/5)
+    // Ranged: DEX + floor(DEX/10)² + floor(STR/5) + floor(LUK/5)
+    // Source: rAthena battle.cpp — STR/DEX swap when flag&2 (ranged)
+    const isRangedWeapon = weaponType === 'bow' || weaponType === 'gun' || weaponType === 'instrument' || weaponType === 'whip';
+    const statusATK = isRangedWeapon
+        ? dex + Math.floor(dex / 10) ** 2 + Math.floor(str / 5) + Math.floor(luk / 5)
+        : str + Math.floor(str / 10) ** 2 + Math.floor(dex / 5) + Math.floor(luk / 5);
 
     // ── Status MATK Min/Max (Pre-Renewal) ──
     // Min = INT + floor(INT/7)²   Max = INT + floor(INT/5)²
@@ -292,7 +306,9 @@ function calculateDerivedStats(stats) {
 
     // ── Critical Rate (Pre-Renewal) ──
     // 1 + floor(LUK * 0.3) + equipment bonus
-    const critical = 1 + Math.floor(luk * 0.3) + bonusCritical;
+    // Katar bonus: total CRI is doubled (rAthena status.cpp: status->cri *= 2)
+    let critical = 1 + Math.floor(luk * 0.3) + bonusCritical;
+    if (weaponType === 'katar') critical *= 2;
 
     // ── Perfect Dodge (Pre-Renewal) ──
     // 1 + floor(LUK / 10) + equipment bonus (bFlee2)
@@ -309,7 +325,8 @@ function calculateDerivedStats(stats) {
     // ── ASPD — weapon-type-aware (RO pre-renewal), dual wield aware ──
     // Combine buff ASPD multiplier with equipment ASPD rate (e.g., Muramasa +8%)
     const totalAspdMultiplier = (buffAspdMultiplier || 1) + (equipAspdRate / 100);
-    const aspd = calculateASPD(jobClass, weaponType, agi, dex, totalAspdMultiplier, weaponTypeLeft);
+    const aspd = calculateASPD(jobClass, weaponType, agi, dex, totalAspdMultiplier, weaponTypeLeft,
+        stats.isMounted || false, stats.cavalierMasteryLv || 0);
 
     // ── MaxHP — class-aware (RO pre-renewal) ──
     const isTranscendent = TRANSCENDENT_CLASSES.has(jobClass);
@@ -374,7 +391,7 @@ function getSizePenalty(weaponType, targetSize) {
  * @param {number} numAttackers — number of entities attacking the target (for FLEE penalty)
  * @returns {number} hit chance percentage (clamped 5-95)
  */
-function calculateHitRate(attackerHit, targetFlee, numAttackers = 1) {
+function calculateHitRate(attackerHit, targetFlee, numAttackers = 1, hitRatePercent = 0) {
     // Multiple attacker FLEE penalty: -10% FLEE per attacker beyond 2
     let effectiveFlee = targetFlee;
     if (numAttackers > 2) {
@@ -382,7 +399,13 @@ function calculateHitRate(attackerHit, targetFlee, numAttackers = 1) {
         effectiveFlee = Math.max(0, effectiveFlee - fleePenalty);
     }
 
-    const hitRate = 80 + attackerHit - effectiveFlee;
+    let hitRate = 80 + attackerHit - effectiveFlee;
+    // rAthena: Skill-specific hitrate multiplier applied before clamp
+    // Bash: hitrate += hitrate * 5 * skill_lv / 100
+    // Magnum Break: hitrate += hitrate * 10 * skill_lv / 100
+    if (hitRatePercent > 0) {
+        hitRate = Math.floor(hitRate * (100 + hitRatePercent) / 100);
+    }
     return Math.max(5, Math.min(95, hitRate));
 }
 
@@ -411,7 +434,7 @@ function calculateCritRate(attackerCri, targetLuk) {
  *
  * @param {Object} attacker — { stats (effective), weaponATK, passiveATK, weaponType, weaponElement, weaponLevel, buffMods, cardMods }
  * @param {Object} target — { stats (effective/enemy), hardDef, element: { type, level }, size, race, numAttackers, buffMods }
- * @param {Object} options — { isSkill, skillMultiplier, skillHitBonus, forceHit, forceCrit, skillElement }
+ * @param {Object} options — { isSkill, skillMultiplier, skillHitBonus, forceHit, forceCrit, ignoreDefense, skillElement }
  * @returns {Object} { damage, hitType, isCritical, isMiss, element, sizePenalty, elementModifier }
  */
 function calculatePhysicalDamage(attacker, target, options = {}) {
@@ -419,10 +442,14 @@ function calculatePhysicalDamage(attacker, target, options = {}) {
         isSkill = false,
         skillMultiplier = 100,
         skillHitBonus = 0,
+        hitRatePercent = 0,
         skillName = null,
+        skillId = 0,
         forceHit = false,
         forceCrit = false,
-        skillElement = null
+        ignoreDefense = false,
+        skillElement = null,
+        isNonElemental = false
     } = options;
 
     const atkDerived = calculateDerivedStats(attacker.stats || attacker);
@@ -473,7 +500,9 @@ function calculatePhysicalDamage(attacker, target, options = {}) {
     let isCritical = false;
     if (forceCrit) {
         isCritical = true;
-    } else {
+    } else if (!isSkill) {
+        // RO pre-renewal: only auto-attacks can critical naturally.
+        // Weapon skills cannot crit (exceptions use forceCrit: Sharp Shooting, Auto Counter).
         const targetLuk = (target.stats || target).luk || 1;
         // Phase 1: Card crit race bonus (bCriticalAddRace)
         let extraCrit = 0;
@@ -504,7 +533,7 @@ function calculatePhysicalDamage(attacker, target, options = {}) {
         const effectiveHit = Math.floor((atkDerived.hit + skillHitBonus) * atkHitMul);
         const effectiveFlee = Math.floor(defDerived.flee * defFleeMul);
         const numAttackers = target.numAttackers || 1;
-        const hitRate = calculateHitRate(effectiveHit, effectiveFlee, numAttackers);
+        const hitRate = calculateHitRate(effectiveHit, effectiveFlee, numAttackers, hitRatePercent);
 
         if (Math.random() * 100 >= hitRate) {
             result.hitType = 'miss';
@@ -514,9 +543,9 @@ function calculatePhysicalDamage(attacker, target, options = {}) {
     }
 
     // ─────────────────────────────────────────────────────
-    // Step 4: Calculate ATK
-    // StatusATK = STR + floor(STR/10)² + floor(DEX/5) + floor(LUK/3)
-    // WeaponATK from equipment
+    // Step 4: Calculate ATK (RO pre-renewal, rAthena battle_calc_base_damage)
+    // StatusATK from calculateDerivedStats (already melee/ranged aware)
+    // WeaponATK from equipment + stat-based bonus + variance
     // PassiveATK from skills (Sword Mastery, etc.)
     // ─────────────────────────────────────────────────────
     const statusATK = atkDerived.statusATK;
@@ -526,27 +555,64 @@ function calculatePhysicalDamage(attacker, target, options = {}) {
     // ── Size penalty (applies to weapon ATK portion only) ──
     // Phase 3: Drake Card (bNoSizeFix) nullifies size penalty
     const weaponType = attacker.weaponType || 'bare_hand';
-    const sizePenaltyPct = attacker.cardNoSizeFix ? 100 : getSizePenalty(weaponType, targetSize);
+    // RO pre-renewal: mounted spear vs Medium = 100% (overrides normal 75% penalty)
+    const isMountedSpear = attacker.isMounted && (weaponType === 'spear' || weaponType === 'one_hand_spear' || weaponType === 'two_hand_spear');
+    const sizePenaltyPct = (attacker.cardNoSizeFix || (attacker.buffMods && attacker.buffMods.noSizePenalty)) ? 100
+        : (isMountedSpear && targetSize === 'medium') ? 100
+        : getSizePenalty(weaponType, targetSize);
     result.sizePenalty = sizePenaltyPct;
 
     // ── Weapon ATK with size penalty ──
     const sizedWeaponATK = Math.floor(weaponATK * sizePenaltyPct / 100);
 
-    // ── Damage variance (weapon level affects range) ──
-    // Critical: always max ATK (no variance)
-    // Normal: random between (1 - weaponLevel * 0.05) and 1.0
+    // ── RO pre-renewal weapon ATK variance (rAthena battle_calc_base_damage) ──
+    // Primary stat adds weapon damage bonus: weaponATK * primaryStat / 200
+    // Secondary stat determines damage consistency: min(secondaryStat * (0.8 + 0.2*WL), weaponATK)
+    // Melee:  primary=STR (max bonus), secondary=DEX (variance min)
+    // Ranged: primary=DEX (max bonus), secondary=STR (variance min)
     const weaponLevel = attacker.weaponLevel || 1;
+    const isMaxPower = attacker.buffMods && attacker.buffMods.maximizePower;
+    const isRanged = weaponType === 'bow' || weaponType === 'gun' || weaponType === 'instrument' || weaponType === 'whip';
+    const atkStats = attacker.stats || attacker;
+    const primaryStat = isRanged ? (atkStats.dex || 1) : (atkStats.str || 1);
+    const secondaryStat = isRanged ? (atkStats.str || 1) : (atkStats.dex || 1);
+
+    // Max weapon ATK = base + stat bonus (rAthena: atkmax += wa->atk * str / 200)
+    const weaponStatBonus = Math.floor(sizedWeaponATK * primaryStat / 200);
+    const atkMax = sizedWeaponATK + weaponStatBonus;
+
     let variancedWeaponATK;
-    if (isCritical) {
-        variancedWeaponATK = sizedWeaponATK; // Max ATK
+    if (isCritical || isMaxPower) {
+        variancedWeaponATK = atkMax; // Critical/Maximize Power: always max ATK
     } else {
-        const varianceMin = 1.0 - weaponLevel * 0.05; // L1=0.95, L2=0.90, L3=0.85, L4=0.80
-        const varianceMul = varianceMin + Math.random() * (1.0 - varianceMin);
-        variancedWeaponATK = Math.floor(sizedWeaponATK * varianceMul);
+        // Min weapon ATK = min(secondaryStat * (0.8 + 0.2*WL), weaponATK)
+        const atkMin = Math.min(
+            Math.floor(secondaryStat * (0.8 + 0.2 * weaponLevel)),
+            sizedWeaponATK
+        );
+        // Random between atkMin and atkMax
+        variancedWeaponATK = atkMax > atkMin
+            ? atkMin + Math.floor(Math.random() * (atkMax - atkMin + 1))
+            : atkMax;
     }
 
-    // ── Total base ATK ──
-    let totalATK = statusATK + variancedWeaponATK + passiveATK;
+    // ── Arrow/Ammo ATK contribution (RO pre-renewal) ──
+    // Normal: rnd(0, ArrowATK - 1) random variance added to weapon ATK
+    // Critical: full ArrowATK added (no variance)
+    // Arrow ATK is part of WeaponATK — subject to size penalty (iRO Classic Attacks formula)
+    const arrowATK = attacker.arrowATK || 0;
+    if (arrowATK > 0) {
+        let arrowContrib;
+        if (isCritical || isMaxPower) {
+            arrowContrib = arrowATK;
+        } else {
+            arrowContrib = Math.floor(Math.random() * arrowATK);
+        }
+        variancedWeaponATK += Math.floor(arrowContrib * sizePenaltyPct / 100);
+    }
+
+    // ── Total base ATK (mastery added after skill ratio + DEF per rAthena pre-renewal) ──
+    let totalATK = statusATK + variancedWeaponATK;
 
     // ── Critical damage bonus (+40% base, plus equipment bCritAtkRate) ──
     if (isCritical) {
@@ -635,9 +701,20 @@ function calculatePhysicalDamage(attacker, target, options = {}) {
     }
 
     // ─────────────────────────────────────────────────────
-    // Step 7: Element modifier
+    // Step 7: Element modifier (DEFERRED — applied after DEF+refine+mastery per rAthena pre-renewal)
+    // Computed here but applied at Step 8i below
+    // RO Classic: Monster auto-attacks are "non-elemental" — they bypass the element table
+    // entirely (always 100% damage regardless of target armor element). Player neutral attacks
+    // ARE Neutral element and use the table. This means Ghostring Card (Ghost Lv1 armor)
+    // protects against player attacks but NOT monster basic attacks.
     // ─────────────────────────────────────────────────────
-    const eleModifier = getElementModifier(atkElement, targetElement, targetElementLevel);
+    let eleModifier;
+    if (isNonElemental) {
+        // Monster auto-attacks: bypass element table, always 100%
+        eleModifier = 100;
+    } else {
+        eleModifier = getElementModifier(atkElement, targetElement, targetElementLevel);
+    }
     result.elementModifier = eleModifier;
 
     if (eleModifier <= 0) {
@@ -647,25 +724,33 @@ function calculatePhysicalDamage(attacker, target, options = {}) {
         result.isMiss = true;
         return result;
     }
-    totalATK = Math.floor(totalATK * eleModifier / 100);
+    // Element applied at Step 8i (after DEF + refine + mastery + defensive cards)
 
     // ─────────────────────────────────────────────────────
     // Step 8: DEF reduction
     // System D: bIgnoreDefClass (Samurai Spector) skips both hard+soft DEF
     // System D: bDefRatioAtkClass (Thanatos/Ice Pick) converts DEF into bonus damage
     // ─────────────────────────────────────────────────────
-    const rawHardDef = Math.min(99, target.hardDef || 0);
+    // Steel Body override: overrideHardDEF replaces equipment DEF (pre-renewal: DEF 90 = 90% reduction)
+    const overrideDef = (target.buffMods && target.buffMods.overrideHardDEF != null) ? target.buffMods.overrideHardDEF : null;
+    const rawHardDef = Math.min(99, overrideDef !== null ? overrideDef : (target.hardDef || 0));
     const defMultiplier = (target.buffMods && target.buffMods.defMultiplier) || 1.0;
     const defPercentBonus = (target.buffMods && target.buffMods.defPercent) || 0;
     const angelusMultiplier = defPercentBonus > 0 ? (1 + defPercentBonus / 100) : 1.0;
-    const effectiveSoftDef = Math.floor(defDerived.softDEF * angelusMultiplier);
+    // Strip Armor (vitMultiplier) reduces VIT-based soft DEF
+    const vitMul = (target.buffMods && target.buffMods.vitMultiplier) || 1.0;
+    // Provoke / Auto Berserk (softDefMultiplier) reduces VIT soft DEF (rAthena: def2)
+    const softDefMul = (target.buffMods && target.buffMods.softDefMultiplier) || 1.0;
+    // Eternal Chaos ensemble: VIT-derived DEF reduced to 0 for enemies in AoE
+    const ensembleVitDefZero = target._ensembleVitDefZero ? 0 : 1;
+    const effectiveSoftDef = Math.floor(defDerived.softDEF * angelusMultiplier * vitMul * softDefMul * ensembleVitDefZero);
 
-    // Check DEF bypass cards
-    let skipDEF = false;
+    // Check DEF bypass: ignoreDefense option (Auto Counter, pre-renewal criticals) or cards
+    let skipDEF = ignoreDefense || false;
     const targetMonsterClass = (target.modeFlags && target.modeFlags.isBoss) ? 'boss' : 'normal';
 
     // bIgnoreDefClass: skip both hard DEF and soft DEF entirely
-    if (attacker.cardIgnoreDefClass) {
+    if (!skipDEF && attacker.cardIgnoreDefClass) {
         if (attacker.cardIgnoreDefClass === targetMonsterClass || attacker.cardIgnoreDefClass === 'all') {
             skipDEF = true;
         }
@@ -683,7 +768,10 @@ function calculatePhysicalDamage(attacker, target, options = {}) {
 
     if (!skipDEF) {
         // Normal DEF reduction path
-        const hardDef = Math.floor(rawHardDef * defMultiplier);
+        // Strip Shield (hardDefReduction) reduces raw hard DEF percentage (e.g., 0.15 = -15%)
+        const hardDefReduction = (target.buffMods && target.buffMods.hardDefReduction) || 0;
+        const strippedHardDef = hardDefReduction > 0 ? Math.floor(rawHardDef * (1 - hardDefReduction)) : rawHardDef;
+        const hardDef = Math.floor(strippedHardDef * defMultiplier);
         if (hardDef > 0) {
             totalATK = Math.floor(totalATK * (100 - hardDef) / 100);
         }
@@ -696,6 +784,30 @@ function calculatePhysicalDamage(attacker, target, options = {}) {
         if (raceDEFBonus > 0) {
             totalATK = Math.max(1, totalATK - raceDEFBonus);
         }
+    }
+
+    // ── Post-DEF bonuses (rAthena battle_calc_attack_post_defense) ──
+    // Refine ATK, overupgrade, mastery ATK all bypass DEF and skill ratio
+
+    // Refine ATK: flat bonus per weapon refine level, bypasses DEF + size + skill ratio
+    // Excluded from: Shield Boomerang (1305), Acid Terror (1801), Investigate (1606), Asura Strike (1605)
+    const REFINE_EXCLUDE_SKILLS = [1305, 1801, 1606, 1605];
+    const refATK = attacker.refineATK || 0;
+    if (refATK > 0 && !REFINE_EXCLUDE_SKILLS.includes(skillId)) {
+        totalATK += refATK;
+    }
+
+    // Overupgrade random bonus: 1 to overrefineMax per hit (above safe refine limit)
+    const overrefMax = attacker.overrefineMax || 0;
+    if (overrefMax > 0 && !REFINE_EXCLUDE_SKILLS.includes(skillId)) {
+        totalATK += Math.floor(Math.random() * overrefMax) + 1;
+    }
+
+    totalATK = Math.max(1, totalATK);
+
+    // Mastery ATK: passive skill bonuses (Sword Mastery, Demon Bane, etc.)
+    if (passiveATK > 0) {
+        totalATK += passiveATK;
     }
 
     // ─────────────────────────────────────────────────────
@@ -738,6 +850,48 @@ function calculatePhysicalDamage(attacker, target, options = {}) {
     if (target.cardAddDefMonster && attacker.templateId) {
         const monsterDef = target.cardAddDefMonster[attacker.templateId] || 0;
         if (monsterDef !== 0) totalATK = totalATK - monsterDef;
+    }
+
+    // ─────────────────────────────────────────────────────
+    // Step 8g: Sage zone elemental damage boost (Volcano/Deluge/Violent Gale)
+    // ─────────────────────────────────────────────────────
+    const physAtkElement = options.skillElement || attacker.weaponElement || 'neutral';
+    const physABM = attacker.buffMods || {};
+    if (physAtkElement === 'fire' && physABM.fireDmgBoost) {
+        totalATK = Math.floor(totalATK * (100 + physABM.fireDmgBoost) / 100);
+    } else if (physAtkElement === 'water' && physABM.waterDmgBoost) {
+        totalATK = Math.floor(totalATK * (100 + physABM.waterDmgBoost) / 100);
+    } else if (physAtkElement === 'wind' && physABM.windDmgBoost) {
+        totalATK = Math.floor(totalATK * (100 + physABM.windDmgBoost) / 100);
+    }
+
+    // ─────────────────────────────────────────────────────
+    // Step 8h: Dragonology race resist (defender passive)
+    // ─────────────────────────────────────────────────────
+    const physAttackerRace = attacker.race || 'demihuman';
+    if (target.passiveRaceResist && target.passiveRaceResist[physAttackerRace]) {
+        totalATK = Math.floor(totalATK * (100 - target.passiveRaceResist[physAttackerRace]) / 100);
+    }
+
+    // ─────────────────────────────────────────────────────
+    // Step 8i: Element modifier (rAthena: battle_calc_element_damage — applied LAST)
+    // Multiplies the total (base + refine + mastery - DEF - defensive cards) by element table
+    // ─────────────────────────────────────────────────────
+    totalATK = Math.floor(totalATK * eleModifier / 100);
+
+    // Element resistance (Skin Tempering, etc.)
+    if (target.elementResist && target.elementResist[atkElement]) {
+        const resistPct = target.elementResist[atkElement];
+        totalATK = Math.floor(totalATK * (100 - resistPct) / 100);
+    }
+
+    // ─────────────────────────────────────────────────────
+    // Step 8j: Raid debuff — Pre-renewal: +20% incoming damage (bosses +10%), 5s/7 hits
+    // Applied as a final damage multiplier after all other calculations
+    // ─────────────────────────────────────────────────────
+    const tgtBM = target.buffMods || {};
+    if (tgtBM.raidDamageIncrease && tgtBM.raidDamageIncrease > 0) {
+        totalATK = Math.floor(totalATK * (1 + tgtBM.raidDamageIncrease));
     }
 
     // ─────────────────────────────────────────────────────
@@ -835,7 +989,9 @@ function calculateMagicalDamage(attacker, target, options = {}) {
 
     // ── MDEF reduction ──
     // Phase 1: Card ignore MDEF (Vesper, High Wizard Card)
-    let effectiveHardMdef = Math.min(99, target.hardMdef || target.magicDefense || 0);
+    // Steel Body override: overrideHardMDEF replaces equipment MDEF (pre-renewal: MDEF 90 = 90% reduction)
+    const overrideMdef = (target.buffMods && target.buffMods.overrideHardMDEF != null) ? target.buffMods.overrideHardMDEF : null;
+    let effectiveHardMdef = Math.min(99, overrideMdef !== null ? overrideMdef : (target.hardMdef || target.magicDefense || 0));
     if (attacker.cardIgnoreMdefClass) {
         const targetClass = (target.modeFlags && target.modeFlags.isBoss) ? 'boss' : 'normal';
         const ignorePercent = attacker.cardIgnoreMdefClass[targetClass] || 0;
@@ -849,7 +1005,9 @@ function calculateMagicalDamage(attacker, target, options = {}) {
     }
 
     // Soft MDEF (INT-based): flat subtraction
-    const effectiveSoftMdef = defDerived.softMDEF;
+    // Strip Helm (intMultiplier) reduces INT-based soft MDEF
+    const intMul = (target.buffMods && target.buffMods.intMultiplier) || 1.0;
+    const effectiveSoftMdef = Math.floor(defDerived.softMDEF * intMul);
     totalDamage = totalDamage - effectiveSoftMdef;
 
     // ── Buff MDEF bonus (Endure etc.) ──
@@ -861,6 +1019,34 @@ function calculateMagicalDamage(attacker, target, options = {}) {
     const mdefMultiplier = (target.buffMods && target.buffMods.mdefMultiplier) || 1.0;
     if (mdefMultiplier !== 1.0) {
         totalDamage = Math.floor(totalDamage * mdefMultiplier);
+    }
+
+    // ── Sage zone elemental damage boost (Volcano/Deluge/Violent Gale) ──
+    // Pre-renewal: +10-20% damage for matching element attacks
+    const aBM = attacker.buffMods || {};
+    if (skillElement === 'fire' && aBM.fireDmgBoost) {
+        totalDamage = Math.floor(totalDamage * (100 + aBM.fireDmgBoost) / 100);
+    } else if (skillElement === 'water' && aBM.waterDmgBoost) {
+        totalDamage = Math.floor(totalDamage * (100 + aBM.waterDmgBoost) / 100);
+    } else if (skillElement === 'wind' && aBM.windDmgBoost) {
+        totalDamage = Math.floor(totalDamage * (100 + aBM.windDmgBoost) / 100);
+    }
+
+    // ── Dragonology magic ATK bonus vs Dragon race (Sage passive, +2%/lv) ──
+    if (attacker.passiveRaceMATK && attacker.passiveRaceMATK[targetRace]) {
+        totalDamage = Math.floor(totalDamage * (100 + attacker.passiveRaceMATK[targetRace]) / 100);
+    }
+
+    // ── Dragonology race resist (defender passive, -4%/lv vs Dragon attacks) ──
+    const attackerRace = (attacker.race) || 'demihuman';
+    if (target.passiveRaceResist && target.passiveRaceResist[attackerRace]) {
+        totalDamage = Math.floor(totalDamage * (100 - target.passiveRaceResist[attackerRace]) / 100);
+    }
+
+    // ── Raid debuff — Pre-renewal: +20% incoming damage (bosses +10%), 5s/7 hits ──
+    const tBM = target.buffMods || {};
+    if (tBM.raidDamageIncrease && tBM.raidDamageIncrease > 0) {
+        totalDamage = Math.floor(totalDamage * (1 + tBM.raidDamageIncrease));
     }
 
     result.damage = Math.max(1, totalDamage);

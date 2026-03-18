@@ -1,7 +1,7 @@
 # Sabri_MMO — Strategic Implementation Plan v3
 
 **Created**: 2026-03-09
-**Last Updated**: 2026-03-11
+**Last Updated**: 2026-03-14
 **Based on**: Full codebase audit, skills/VFX audit, all RagnaCloneDocs, all docsNew/, complete server + client C++ analysis, external architecture review, Persistent Socket Connection Plan
 
 ## Progress Tracker
@@ -12,25 +12,25 @@
 | Phase 1: Server Extraction | DEFERRED | — | New modules created instead (ro_status_effects.js, ro_buff_system.js); full extraction deferred — AI-assisted dev neutralizes monolith pain |
 | Phase 2: Status Effects + Buffs | **COMPLETE** | 2026-03-09 | 10 status effects, buff system, BuffBarWidget, AI CC lock, reconnect cache |
 | Phase 3: Element Table + Formula Audit | **COMPLETE** | 2026-03-09 | Replaced entire ELEMENT_TABLE (100+ wrong values), verified SIZE_PENALTY (all correct), fixed card modifier stacking, added element immunity/heal hit types, 537 tests passing |
-| Phase 4: Persistent Socket Connection | **COMPLETE** | 2026-03-10 | Persistent socket on GameInstance, SocketEventRouter, MultiplayerEventSubsystem bridge, PositionBroadcastSubsystem, reconnectBuffCache removed, all 14+ subsystems migrated |
+| Phase 4: Persistent Socket Connection | **COMPLETE** | 2026-03-10 | Persistent socket on GameInstance, SocketEventRouter, MultiplayerEventSubsystem bridge, PositionBroadcastSubsystem, reconnectBuffCache removed, all 14+ subsystems migrated. BP bridge migration complete (14→0 bridges, Phases A-F). ChatSubsystem handles chat:receive. |
 | Phase 5: Passive Skills + Classes | **COMPLETE** | 2026-03-10 | All 6 first classes playable (151 defs, 43 handlers, 12 passives, 31 VFX), canonical item migration (6,169 items), passive engine, heal formula, Auto Berserk |
-| Phase 6: Party System | NOT STARTED | — | Party create/invite/leave, EXP sharing, HP broadcasting ← **NEXT** |
-| Phase 7: Chat Expansion | NOT STARTED | — | Whisper, party chat, chat channels |
+| Phase 6: Party System | NOT STARTED | — | Party create/invite/leave, EXP sharing, HP broadcasting ← **NEXT PRIORITY** |
+| Phase 7: Chat Expansion | **PARTIALLY COMPLETE** | 2026-03-14 | ChatSubsystem built (global chat, combat log, 3 tabs). Whisper/party channels still needed. |
 | Phase 8: Second Classes | NOT STARTED | — | Knight, Priest, Wizard, Assassin, Hunter |
 | Phase 9: Monster Skills | NOT STARTED | — | Monster skill AI, MVP bosses |
 | Phase 10: World Expansion | NOT STARTED | — | 15-20 zones from current 4 |
 | Phase 11: Quests | NOT STARTED | — | NPC dialogue engine, job change quests |
-| Phase 12: Items Deep Dive | NOT STARTED | — | Refining, cards, weight, 500+ items |
+| Phase 12: Items Deep Dive | **PARTIALLY COMPLETE** | 2026-03-14 | Card system (538/538), weight system, dual wield, item descriptions, item inspect, icon pipeline all done. Refining system still needed. |
 
 ---
 
 ## Executive Summary
 
-The project has a **solid foundation**: auth, 17 C++ UI subsystems, 4 working zones, auto-attack + 43 active skill handlers with 31 VFX configs, RO damage formulas (element table + size penalties verified with 537 tests), 509 monster templates, inventory/equipment/hotbar, NPC shops, complete status effect system (10 statuses) + buff system (24 types), persistent socket surviving zone transitions, and all 6 first classes fully playable. The architecture (server-authoritative, UWorldSubsystem pattern, persistent socket + SocketEventRouter, event wrapping) is sound.
+The project has a **solid foundation**: auth, 25 C++ UI subsystems (including ChatSubsystem with combat log, loot notification overlay, ItemInspectSubsystem, CardCompoundPopup, TargetingSubsystem), 4 working zones, auto-attack + 43 active skill handlers with 31 VFX configs, RO damage formulas (element table + size penalties verified with 537 tests), 509 monster templates, inventory/equipment/hotbar, NPC shops, complete status effect system (10 statuses) + buff system (24 types), persistent socket surviving zone transitions, all 6 first classes fully playable, complete card system (538/538 cards), dual wield system, and the full Blueprint-to-C++ migration (Phases 1-6 + BP bridge Phases A-F). BP bridge migration is complete (0 bridges remaining, BP_SocketManager is dead code). Struct refactor eliminated property reflection (FEnemyEntry/FPlayerEntry). The architecture (server-authoritative, UWorldSubsystem pattern, persistent socket + SocketEventRouter) is sound.
 
-**Current state**: All 6 first classes are playable with 151 skill definitions, 43 active handlers, 12 passives, and 31 VFX configs. The server is ~10,000 lines (monolithic, working well with AI-assisted dev). Item database migrated to 6,169 canonical rAthena items. **Zero social systems exist** (no party, guild, chat channels, trading). The game has strong combat and class variety but is still a single-player experience.
+**Current state**: All 6 first classes are playable with 151 skill definitions, 43 active handlers, 12 passives, and 31 VFX configs. The server is ~10,000 lines (monolithic, working well with AI-assisted dev). Item database migrated to 6,169 canonical rAthena items. Card system complete (538/538 cards, 13/14 deferred systems implemented). Item descriptions audited for pre-renewal compliance. Login flow fully redesigned with 5 Slate widgets. ChatSubsystem provides global chat and combat log (whisper/party channels still needed). **Zero social systems exist** (no party, guild, trading). The game has strong combat, class variety, and a polished UI but is still a single-player experience.
 
-**The strategy going forward**: Add party play (the #1 feature that converts a tech demo to an MMO), expand chat, then build second-class skills for endgame progression. Social systems before more content.
+**The strategy going forward**: Add party play (the #1 feature that converts a tech demo to an MMO), finish chat expansion (whisper/party channels), then build second-class skills for endgame progression. Social systems before more content.
 
 ---
 
@@ -139,13 +139,13 @@ The project has a **solid foundation**: auth, 17 C++ UI subsystems, 4 working zo
 > - `MMOGameInstance` owns `TSharedPtr<FSocketIONative> NativeSocket` — survives `OpenLevel()`, no disconnect on zone change
 > - `USocketEventRouter` — multi-handler dispatch (multiple subsystems can register for the same event)
 > - All 14+ C++ subsystems migrated from `FindSocketIOComponent()` actor iteration to `Router->RegisterHandler()` / `Router->UnregisterAllForOwner(this)` pattern
-> - `MultiplayerEventSubsystem` — bridges 30+ inbound socket events to BP_SocketManager handler functions via `ProcessEvent`
+> - `MultiplayerEventSubsystem` — outbound emit helpers only (all 31 inbound bridges removed in Phases A-F; BP_SocketManager is fully dead code)
 > - `PositionBroadcastSubsystem` — 30Hz position broadcasting via persistent socket (replaces BP_SocketManager timer)
 > - Server `zone:ready` event sends zone data without requiring `player:join` re-emit
 > - `reconnectBuffCache` removed — buffs persist naturally in server memory across zone transitions
 > - All subsystem widgets gated behind `GI->IsSocketConnected()` (only show in game levels, not login screen)
 >
-> **New files**: `SocketEventRouter.h/.cpp`, `MultiplayerEventSubsystem.h/.cpp`, `PositionBroadcastSubsystem.h/.cpp`
+> **New files**: `SocketEventRouter.h/.cpp`, `MultiplayerEventSubsystem.h/.cpp`, `PositionBroadcastSubsystem.h/.cpp`, `ChatSubsystem.h/.cpp`
 
 **Why now**: Every zone change currently causes a full socket disconnect → reconnect → `player:join` cycle. This is wrong architecturally — every real MMO (WoW, FFXIV, rAthena/Hercules) uses persistent connections. Doing this BEFORE Phase 5 means every new subsystem built for the 4 new classes (Archer, Acolyte, Thief, Merchant) uses the clean GameInstance socket pattern from day one, instead of building with the old actor-search pattern and then migrating.
 
@@ -174,6 +174,10 @@ Currently, every zone change causes:
 
 ### Current Architecture
 
+> **UPDATE (2026-03-14):** Target architecture fully implemented. BP_SocketManager is dead code (all functions deleted, bridge infrastructure removed). MultiplayerEventSubsystem has 0 bridges. ChatSubsystem handles chat:receive. See `BP_Bridge_Migration_Plan.md` for full details.
+
+The following describes the OLD broken pattern (preserved as historical context):
+
 ```
 UE5 Level (L_Prontera)
   └── BP_SocketManager (Actor)           ← DESTROYED on OpenLevel
@@ -184,17 +188,19 @@ UMMOGameInstance                          ← SURVIVES OpenLevel
   └── Auth token, character data, zone state
 ```
 
-All 17 C++ subsystems find the socket via `FindSocketIOComponent()` which iterates world actors looking for a `USocketIOClientComponent`. When the level changes, the actor is gone.
+All 17 C++ subsystems (at the time) found the socket via `FindSocketIOComponent()` which iterated world actors looking for a `USocketIOClientComponent`. When the level changed, the actor was gone.
 
-### Target Architecture
+### Target Architecture (IMPLEMENTED)
 
 ```
 UMMOGameInstance                          ← SURVIVES OpenLevel
-  └── USocketIOClientComponent (UPROPERTY) ← Connection persists here
+  └── TSharedPtr<FSocketIONative>         ← Connection persists here
+  └── USocketEventRouter*                 ← Multi-handler dispatch
   └── Auth token, character data, zone state
 
 UE5 Level (any)
-  └── Subsystems find socket via GameInstance, not actor search
+  └── 25 C++ subsystems register via Router->RegisterHandler()
+  └── BP_SocketManager is dead code (0 bridges)
 ```
 
 ### Phase 4a: Move SocketIO to GameInstance (1-2 days)
@@ -353,7 +359,7 @@ Passive skills modified derived stats on learn/level. Completing all 6 first cla
 
 ---
 
-## Phase 6: Party System (1-1.5 weeks)
+## Phase 6: Party System (1-1.5 weeks) — NEXT PRIORITY
 
 **Why now**: With 6 playable classes including a healer, players need parties. Without parties, healing is useless (you can only heal yourself), tanking is pointless (no aggro management for a group), and the MMO is still a single-player game.
 
@@ -379,21 +385,33 @@ Passive skills modified derived stats on learn/level. Completing all 6 first cla
 
 ---
 
-## Phase 7: Chat System Expansion (3-5 days)
+## Phase 7: Chat System Expansion (3-5 days) — PARTIALLY COMPLETE
+
+> **Partially completed 2026-03-14.** ChatSubsystem built with global chat, combat log, and 3 filter tabs (All/System/Combat).
+>
+> **What was built**:
+> - `UChatSubsystem` (UWorldSubsystem) with inline `SChatWidget` at Z=13
+> - RO brown/gold themed chat window, bottom-left, draggable
+> - 3 filter tabs: All, System, Combat
+> - Scrollable message log (SScrollBox), input field (SEditableTextBox)
+> - Enter to send, local echo for own messages
+> - Channel colors: Normal=cream, Party=blue, Guild=green, Whisper=pink, System=yellow, Combat=orange-red
+> - Full combat log: 8 event handlers (combat:damage, skill:effect_damage, status:applied/removed, skill:buff_applied/removed, combat:death, combat:respawn)
+> - Combat log filters by LocalCharacterId (only shows local player events)
+> - MAX_MESSAGES = 100, auto-scroll to bottom
+>
+> **Still needed**: Whisper, party chat, `/w` and `/p` commands, server-side whisper event
 
 **Why now**: Currently only zone-wide chat exists. With parties, you need party chat. Whisper is essential for social interaction. This is a relatively small effort that dramatically improves the social experience.
 
-**Server-side**:
+**Remaining server-side**:
 - Whisper: `chat:whisper` event (recipient name lookup, offline check)
 - Party chat: route through party member list
-- Chat message types: public, whisper, party, guild (guild placeholder)
-- Message length limit (prevent spam)
-- Basic profanity filter (optional, configurable)
 - `/commands`: `/w <name> <msg>` (whisper), `/p <msg>` (party)
 
-**Client-side**:
-- Expand existing chat handling with message type routing
-- Chat tabs or color coding by channel (RO Classic: white=public, yellow=whisper, green=party, blue=guild)
+**Remaining client-side**:
+- Whisper tab / whisper routing in ChatSubsystem
+- Party chat tab (after Phase 6 party system)
 - Input prefix parsing for `/w`, `/p` commands
 
 **Deliverable**: Whisper and party chat. Players can have private conversations and coordinate in parties.
@@ -499,27 +517,80 @@ Target: **15-20 zones** (from current 4). This creates a meaningful world with d
 
 ---
 
-## Phase 12: Item & Equipment Deep Dive (2 weeks)
+## Phase 12: Item & Equipment Deep Dive (2 weeks) — PARTIALLY COMPLETE
 
-**Why now**: With 5+ second classes, players need class-appropriate equipment. While the DB now has 6,169 canonical rAthena item definitions, most lack server-side effect handlers, and refining/card systems don't exist yet. Refining adds equipment progression. Cards add build diversity.
+> **Partially completed (2026-03-12 through 2026-03-14).** Major subsystems completed ahead of schedule:
+> - **Card system COMPLETE**: 538/538 cards, 65 bonus types, 45 active hooks, 13/14 deferred systems implemented (only magic reflection deferred pending enemy spellcasters). Client compound UI: `SCardCompoundPopup` (Z=23). See `Card_Deferred_Systems_Implementation_Plan.md`.
+> - **Weight system COMPLETE**: 3 thresholds (50%/90%/100%), cached weight, 5 helper functions, 12 mutation update points, `weight:status` event. See `/sabrimmo-weight` skill.
+> - **Item description audit COMPLETE**: All pre-renewal item descriptions audited and corrected (1,772/1,923 perfect, 92.1%).
+> - **Dual wield system COMPLETE**: Assassin/Assassin Cross dual wield with per-hand card mods, mastery penalties, ASPD cap 190.
+> - **Item inspect UI COMPLETE**: `ItemInspectSubsystem` (Z=22), `SItemInspectWidget`, `ItemTooltipBuilder`.
+> - **Item icon generation COMPLETE**: 1,676 consumable + 61 garment icons generated.
 
-**Server-side**:
-- Expand item DB to 500+ items (weapons for all weapon types, armor sets per level tier)
+**Remaining**:
 - Refining system: +0 to +10, success rates per weapon level, Refine NPC, Elunium/Oridecon consumables
-- Card system: compound cards into slotted equipment, card effects applied to stats
-- **Boss/Normal monster class card category**: Add `class_boss` and `class_normal` card modifier types to `calculatePhysicalDamage`. Abysmal Knight Card = +25% vs Boss class. Currently only race/element/size card categories exist (Phase 3 audit finding).
-- **Non-elemental vs Neutral distinction**: Monster auto-attacks should be non-elemental (bypass element table, always 100% damage to all armor elements). Player neutral attacks use Neutral element and ARE affected by the table. Ghost-armor players would be immune to player neutral attacks but NOT to monster auto-attacks. Implement when armor element cards (Ghostring, etc.) are added.
-- Weight limit enforcement: 50% (natural regen stops), 70% (skills blocked), 90% (movement blocked)
+- **Boss/Normal monster class card category**: Add `class_boss` and `class_normal` card modifier types to `calculatePhysicalDamage`. Abysmal Knight Card = +25% vs Boss class.
+- **Non-elemental vs Neutral distinction**: Monster auto-attacks should be non-elemental (bypass element table, always 100% damage to all armor elements).
 - Class-specific equipment restrictions (Knight can't use bows, Mage can't use swords, etc.)
 - Death penalty: 1% base EXP loss on death (RO Classic)
 
-**Client-side**:
+**Remaining client-side**:
 - Refine NPC interaction UI
-- Card compound UI
-- Weight indicator on BasicInfoWidget (color changes at thresholds)
-- Equipment tooltip showing card slots, refine level
 
-**Deliverable**: Meaningful equipment progression. Players can refine weapons, socket cards, and build unique gear combinations.
+**Deliverable**: Remaining items focus on refining system and class-specific equipment restrictions.
+
+---
+
+## Completed Work Outside Original Plan (2026-03-10 through 2026-03-14)
+
+The following major systems were built outside the original Phase 0-12 plan:
+
+### Blueprint-to-C++ Migration (Phases 1-6)
+- **Phase 1**: Camera (`CameraSubsystem`), input (`PlayerInputSubsystem`), movement
+- **Phase 2**: Targeting (`TargetingSubsystem` — 30Hz hover trace, cursor switching), combat actions (`CombatActionSubsystem` — 10 event handlers, attack animations, death overlay)
+- **Phase 3**: Entity management (`EnemySubsystem` — enemy registry + 5 event handlers, `OtherPlayerSubsystem` — player registry + 2 event handlers). Replaced BP_EnemyManager and BP_OtherPlayerManager.
+- **Phase 5**: Name tags (`NameTagSubsystem` — single OnPaint overlay for ALL entity name tags, RO Classic styling)
+- **Phase 6**: Cleanup — removed BP_EnemyManager/BP_OtherPlayerManager from all levels, deleted 17 dead functions from BP_SocketManager, removed AC_TargetingSystem/AC_CameraController components
+
+### BP Bridge Migration (Phases A-F)
+- Removed all 14 BP_SocketManager bridges from MultiplayerEventSubsystem (14→0)
+- Added C++ handlers for `hotbar:data`, `inventory:used`, `loot:drop`, `chat:receive`
+- Created `ChatSubsystem` (Z=13) for chat:receive with combat log
+- Deleted all bridge infrastructure from MultiplayerEventSubsystem
+- BP_SocketManager and AC_HUDManager are now fully dead code
+
+### Struct Refactor
+- Replaced property reflection in `EnemySubsystem` and `OtherPlayerSubsystem` with typed structs (`FEnemyEntry`, `FPlayerEntry`)
+- Direct field access instead of `UProperty::ContainerPtrToValuePtr` chains
+
+### Login Flow Redesign
+- `LoginFlowSubsystem` state machine with 5 Slate widgets (Login, ServerSelect, CharacterSelect, CharacterCreate, LoadingOverlay)
+- Replaced Blueprint-based `BP_GameFlow` + `WBP_LoginScreen`
+
+### Card Compound System
+- 538/538 cards at 100% coverage, 65 bonus types, 45 active hooks
+- 13/14 deferred systems implemented (A-N, only magic reflection deferred)
+- Client compound UI: `SCardCompoundPopup` (Z=23)
+
+### Dual Wield System
+- Assassin/Assassin Cross only, per-hand card mods, mastery penalties
+- ASPD: `WD = floor((WD_R + WD_L) * 7/10)`, cap 190
+- `combat:damage` extended with `damage2`, `isDualWield`, `isCritical2`, `element2`
+
+### Item Description Audit
+- All pre-renewal item descriptions audited (1,772/1,923 perfect, 92.1%)
+- Generator rewrites Renewal text to pre-renewal
+
+### Item Icon Generation Pipeline
+- 1,676 consumable + 61 garment icons generated via local Stable Diffusion XL
+
+### Loot Notification Overlay
+- `InventorySubsystem` handles `loot:drop` event, shows loot notifications
+
+### Combat Formula Audit
+- 6 bugs fixed in damage/defense pipelines
+- Energy Coat, Provoke, Fatal Blow formulas corrected
+- Derived stats formula fixes (SoftMDEF, MATK, PerfectDodge, MaxHP, MaxSP, ASPD)
 
 ---
 
@@ -620,7 +691,7 @@ Phase 5: Passive Skills + 6 First Classes  2 weeks       ✓ DONE (2026-03-10)
 
 ## What MUST Be Refactored Now vs Later
 
-### Already Refactored (Phases 0, 2, 3, 4, 5):
+### Already Refactored (Phases 0-5 + unplanned work):
 
 1. **Element table correction** ✓ — Replaced entire 400-value table with rAthena canonical, fixed card modifier stacking, 537 tests passing.
 
@@ -632,7 +703,7 @@ Phase 5: Passive Skills + 6 First Classes  2 weeks       ✓ DONE (2026-03-10)
 
 5. **Security fixes** ✓ — JWT auth, DB transactions, rate limiting all fixed.
 
-6. **Persistent socket connection** ✓ — Socket on GameInstance survives zone changes. SocketEventRouter for multi-handler dispatch. All 17 subsystems migrated. reconnectBuffCache removed. BP event bridge via MultiplayerEventSubsystem.
+6. **Persistent socket connection** ✓ — Socket on GameInstance survives zone changes. SocketEventRouter for multi-handler dispatch. All 25 subsystems migrated. reconnectBuffCache removed. BP bridge migration complete (14→0 bridges, Phases A-F). BP_SocketManager is dead code.
 
 7. **Passive skill engine** ✓ — `getPassiveSkillBonuses()` for 12 passives, `getEffectiveStats()` merges buff+passive bonuses. Race ATK/DEF in damage formula.
 
@@ -640,11 +711,27 @@ Phase 5: Passive Skills + 6 First Classes  2 weeks       ✓ DONE (2026-03-10)
 
 9. **First class completion** ✓ — All 6 classes playable with 43 handlers. `executePhysicalSkillOnEnemy()` shared helper for physical skills.
 
+10. **Blueprint-to-C++ migration** ✓ — 6 phases complete. Camera, input, targeting, combat actions, entity management, name tags all in C++. BP_EnemyManager/BP_OtherPlayerManager deleted. AC_TargetingSystem/AC_CameraController removed.
+
+11. **Card compound system** ✓ — 538/538 cards, 65 bonus types, 13/14 deferred systems implemented. Client compound UI built.
+
+12. **Dual wield system** ✓ — Assassin/Assassin Cross with per-hand card mods, mastery penalties, ASPD cap.
+
+13. **Weight threshold system** ✓ — 3 thresholds, cached weight, 12 mutation update points, `weight:status` event.
+
+14. **Item description audit** ✓ — Pre-renewal compliance, 1,772/1,923 perfect (92.1%).
+
+15. **Login flow redesign** ✓ — 5 Slate widgets, state machine, replaced BP_GameFlow.
+
+16. **Chat + combat log** ✓ — ChatSubsystem with 3 tabs, 8 combat event handlers.
+
+17. **Struct refactor** ✓ — FEnemyEntry/FPlayerEntry eliminate property reflection in entity subsystems.
+
 ### Refactor LATER (Fine to defer):
 
 1. **Full server modularization** — The REST API, inventory handlers, enemy AI, zone management work fine in index.js. Extract them when they need changes, not proactively. AI navigates the monolith without issue.
 
-2. **AC_HUDManager Blueprint cleanup** — The old Blueprint HUD manager is legacy code alongside the new C++ subsystems. It works. Clean it up when you need to modify those Blueprints.
+2. ~~**AC_HUDManager Blueprint cleanup**~~ ✓ **DONE** — AC_HUDManager is fully dead code. All 42 functions replaced by 25 C++ Slate subsystems. Can be deleted from BP_MMOCharacter in the editor.
 
 3. **Test infrastructure** — The 196 test function stubs are aspirational. Don't try to fill them all in. Write tests alongside the features they test.
 
@@ -656,7 +743,7 @@ Phase 5: Passive Skills + 6 First Classes  2 weeks       ✓ DONE (2026-03-10)
 
 ## Success Criteria
 
-### Already achieved (Phases 0-5):
+### Already achieved (Phases 0-5 + unplanned work):
 - ✓ Correct element table matching rAthena pre-renewal (Phase 3)
 - ✓ Persistent socket connection, no disconnect on zone change (Phase 4)
 - ✓ 6 fully playable first classes with all skills working (Phase 5)
@@ -665,6 +752,16 @@ Phase 5: Passive Skills + 6 First Classes  2 weeks       ✓ DONE (2026-03-10)
 - ✓ Generic buff system (24 types) with buff bar UI (Phase 2)
 - ✓ 6,169 canonical rAthena items in database (Phase 5)
 - ✓ Security fixes: JWT auth, DB transactions, rate limiting (Phase 0)
+- ✓ Complete card system: 538/538 cards, 13/14 deferred systems (Phase 12 early)
+- ✓ BP bridge migration complete: 14→0 bridges (Phases A-F)
+- ✓ Blueprint-to-C++ migration: 6 phases, 25 total subsystems (Phases 1-6)
+- ✓ ChatSubsystem with global chat + combat log (Phase 7 partial)
+- ✓ Dual wield system for Assassin/Assassin Cross
+- ✓ Login flow redesign with 5 Slate widgets
+- ✓ Item description audit for pre-renewal compliance
+- ✓ Weight threshold system (50%/90%/100%)
+- ✓ Item icon generation pipeline (1,676 consumable + 61 garment icons)
+- ✓ Struct refactor: FEnemyEntry/FPlayerEntry eliminate property reflection
 
 ### After completing Phases 6-8, the game should also have:
 - Party system with EXP sharing
