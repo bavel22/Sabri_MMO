@@ -2038,12 +2038,15 @@ function applyDeathPenalty(player, characterId, socket) {
     }
 
     // Save to DB (fire-and-forget, non-blocking)
-    pool.query('UPDATE characters SET base_exp = $1, job_exp = $2 WHERE id = $3',
+    pool.query('UPDATE characters SET base_exp = $1, job_exp = $2 WHERE character_id = $3',
         [player.baseExp || 0, player.jobExp || 0, characterId])
         .catch(err => logger.warn(`[DEATH PENALTY] DB save failed for ${characterId}: ${err.message}`));
     // Notify client of updated EXP
     if (socket) {
-        socket.emit('player:stats', buildFullStatsPayload(characterId, player, getEffectiveStats(player), calculateDerivedStats(player.stats, player), calculateASPD(player)));
+        const effStats = getEffectiveStats(player);
+        const derived = roDerivedStats(effStats);
+        const finalAspd = Math.min(COMBAT.ASPD_CAP, derived.aspd + (player.weaponAspdMod || 0));
+        socket.emit('player:stats', buildFullStatsPayload(characterId, player, effStats, derived, finalAspd));
     }
 
     // Pet intimacy loss on owner death: -20 (rAthena: IntimacyOwnerDie)
@@ -3131,7 +3134,7 @@ function processCardKillHooks(attacker, enemy, attackerId, io) {
     if (attacker.cardGetZenyNum > 0) {
         const zeny = Math.floor(Math.random() * attacker.cardGetZenyNum) + 1;
         attacker.zeny = (attacker.zeny || 0) + zeny;
-        // Could emit zeny:gain event here if we add one later
+        attacker.zuzucoin = attacker.zeny; // Keep in sync
     }
 
     // bExpAddRace: EXP bonus % by race
@@ -4059,30 +4062,34 @@ function buildFullStatsPayload(characterId, player, effectiveStats, derived, fin
             hardMdef: player.hardMdef || 0,
             weaponMATK: player.weaponMATK || 0,
             passiveATK: effectiveStats.passiveATK || 0,
-            refineATK: getAttackerInfo(player).refineATK || 0
+            refineATK: getAttackerInfo(player).refineATK || 0,
+            arrowATK: (player.equippedAmmo && player.equippedAmmo.atk) || 0
         },
         baseStats: {
             str: player.stats.str || 1, agi: player.stats.agi || 1, vit: player.stats.vit || 1,
             int: player.stats.int || 1, dex: player.stats.dex || 1, luk: player.stats.luk || 1
         },
         statCosts,
-        derived: {
-            ...derived,
-            statusATK: Math.floor(derived.statusATK * (effectiveStats.buffAtkMultiplier || 1)),
-            softDEF: Math.floor(derived.softDEF * (effectiveStats.buffDefMultiplier || 1)),
-            softMDEF: derived.softMDEF + (effectiveStats.buffBonusMDEF || 0),
-            aspd: finalAspd,
-            // System J: Movement speed (base 150ms/cell, lower = faster)
-            // moveSpeedBonus: +25 (Increase AGI), -25 (Decrease AGI), etc.
-            // Mounted: ~36% speed (0.15s→0.11s/cell, iRO Wiki Classic). Card speed bonus. All stack multiplicatively.
-            moveSpeed: Math.max(20, Math.floor(
-                150 * (100 - (player.cardSpeedRate || 0)) / 100
-                / (1 + (effectiveStats.moveSpeedBonus || 0) / 100)
-                / (player.isMounted ? 1.36 : 1)
-                // Cart speed penalty: (50 + 5*PushcartLv)% of normal speed (rAthena formula)
-                * (player.hasCart ? (100 / (50 + 5 * ((player.learnedSkills || {})[604] || 0))) : 1)
-            )),
-        },
+        derived: (() => {
+            // Get buff modifiers directly for stats not in effectiveStats (moveSpeed, defPercent)
+            const statBuffMods = getCombinedModifiers(player);
+            const angelusDEF = (statBuffMods.defPercent || 0) > 0 ? (1 + statBuffMods.defPercent / 100) : 1;
+            const buffMoveSpeedBonus = statBuffMods.moveSpeedBonus || 0;
+            return {
+                ...derived,
+                statusATK: Math.floor(derived.statusATK * (effectiveStats.buffAtkMultiplier || 1)),
+                softDEF: Math.floor(derived.softDEF * (effectiveStats.buffDefMultiplier || 1) * angelusDEF),
+                softMDEF: derived.softMDEF + (effectiveStats.buffBonusMDEF || 0),
+                aspd: finalAspd,
+                // Movement speed (base 150ms/cell, lower = faster)
+                moveSpeed: Math.max(20, Math.floor(
+                    150 * (100 - (player.cardSpeedRate || 0)) / 100
+                    / (1 + buffMoveSpeedBonus / 100)
+                    / (player.isMounted ? 1.36 : 1)
+                    * (player.hasCart ? (100 / (50 + 5 * ((player.learnedSkills || {})[604] || 0))) : 1)
+                )),
+            };
+        })(),
         exp: buildExpPayload(player),
         dualWield: dualWieldInfo,
         isMounted: player.isMounted || false,
@@ -4321,6 +4328,7 @@ function spawnEnemy(spawnConfig) {
         lastMoveBroadcast: 0,
         pendingTargetSwitch: null,
         inCombatWith: new Map(), // Map<charId, { totalDamage, name }> for MVP tracking
+        activeBuffs: [],        // Buffs applied to this enemy (Decrease AGI, Lex Aeterna, etc.)
         // Monster Skill System fields
         _skillCooldowns: {},
         _casting: null,
@@ -4414,10 +4422,22 @@ const NPC_SHOPS = {
     },
     5: {
         name: 'Arrow Dealer',
-        // Arrow(1750), Silver Arrow(1751), Fire Arrow(1752), Steel Arrow(1753),
-        // Crystal Arrow(1754), Arrow of Wind(1755), Stone Arrow(1756), Immaterial Arrow(1757),
-        // Iron Arrow(1770), Oridecon Arrow(1765), Arrow of Shadow(1767)
-        itemIds: [1750, 1751, 1752, 1753, 1754, 1755, 1756, 1757, 1770, 1765, 1767]
+        // Elemental: Arrow(1750), Silver Arrow(1751), Fire Arrow(1752), Steel Arrow(1753),
+        //   Crystal Arrow(1754), Arrow of Wind(1755), Stone Arrow(1756), Immaterial Arrow(1757),
+        //   Iron Arrow(1770), Oridecon Arrow(1765), Arrow of Shadow(1767),
+        //   Rusty Arrow(1762), Holy Arrow(1772), Arrow of Counter Evil(1766)
+        // Status: Stun Arrow(1758), Frozen Arrow(1759), Flash Arrow(1760), Cursed Arrow(1761),
+        //   Poison Arrow(1763), Sleep Arrow(1768), Mute Arrow(1769)
+        // Special: Sharp Arrow(1764)
+        // Quivers: Arrow(12004), Iron(12005), Steel(12006), Oridecon(12007), Fire(12008),
+        //   Silver(12009), Wind(12010), Stone(12011), Crystal(12012), Shadow(12013),
+        //   Immaterial(12014), Rusty(12015), Holy(12183)
+        itemIds: [
+            1750, 1751, 1752, 1753, 1754, 1755, 1756, 1757, 1770, 1765, 1767, 1762, 1772, 1766,
+            1758, 1759, 1760, 1761, 1763, 1768, 1769,
+            1764,
+            12004, 12005, 12006, 12007, 12008, 12009, 12010, 12011, 12012, 12013, 12014, 12015, 12183
+        ]
     }
 };
 
@@ -4788,10 +4808,11 @@ async function addFullItemToInventory(characterId, itemId, quantity, attrs = {})
         }
         const maxSlot = await pool.query('SELECT COALESCE(MAX(slot_index), -1) as max_slot FROM character_inventory WHERE character_id = $1', [characterId]);
         const result = await pool.query(
-            `INSERT INTO character_inventory (character_id, item_id, quantity, slot_index, identified, refine_level, compounded_cards)
-             VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING inventory_id`,
+            `INSERT INTO character_inventory (character_id, item_id, quantity, slot_index, identified, refine_level, compounded_cards, forged_by, forged_element, forged_star_crumbs)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING inventory_id`,
             [characterId, itemId, quantity, maxSlot.rows[0].max_slot + 1,
-             attrs.identified !== false, attrs.refine_level || 0, attrs.compounded_cards || '[]']
+             attrs.identified !== false, attrs.refine_level || 0, attrs.compounded_cards || '[]',
+             attrs.forged_by || null, attrs.forged_element || null, attrs.forged_star_crumbs || 0]
         );
         return { inventoryId: result.rows[0].inventory_id };
     } catch (err) {
@@ -4869,7 +4890,8 @@ async function getPlayerHotbar(characterId) {
                     COALESCE(ci.quantity, 0) as quantity,
                     COALESCE(ch.slot_type, 'item') as slot_type,
                     COALESCE(ch.skill_id, 0) as skill_id,
-                    COALESCE(ch.skill_name, '') as skill_name
+                    COALESCE(ch.skill_name, '') as skill_name,
+                    COALESCE(ch.skill_level, 0) as skill_level
              FROM character_hotbar ch
              LEFT JOIN character_inventory ci ON ch.inventory_id = ci.inventory_id
              WHERE ch.character_id = $1
@@ -4921,6 +4943,17 @@ function findPlayerBySocketId(socketId) {
 // Zone-scoped broadcasting helpers
 // ============================================================
 function broadcastToZone(zone, event, data) {
+    // Auto-enrich skill:effect_damage with element modifier for combat log effectiveness display
+    if (event === 'skill:effect_damage' && data.isEnemy && data.element && data.targetId) {
+        const tgtEnemy = enemies.get(data.targetId);
+        if (tgtEnemy) {
+            const tgtEle = tgtEnemy.element?.type || 'neutral';
+            const tgtEleLv = tgtEnemy.element?.level || 1;
+            if (data.element !== 'neutral' || tgtEle !== 'neutral') {
+                data.eleMod = getElementModifier(data.element, tgtEle, tgtEleLv);
+            }
+        }
+    }
     io.to('zone:' + zone).emit(event, data);
 }
 function broadcastToZoneExcept(socket, zone, event, data) {
@@ -5136,9 +5169,10 @@ io.on('connection', (socket) => {
         let playerZone = 'prontera_south';
         let playerGender = 'male';
         let dbPlagiarizedSkillId = null, dbPlagiarizedSkillLevel = 0;
+        let dbHasCart = false, dbCartType = 0;
         try {
             const charResult = await pool.query(
-                'SELECT x, y, z, health, max_health, mana, max_mana, zuzucoin, zone_name, gender, plagiarized_skill_id, plagiarized_skill_level FROM characters WHERE character_id = $1',
+                'SELECT x, y, z, health, max_health, mana, max_mana, zuzucoin, zone_name, gender, plagiarized_skill_id, plagiarized_skill_level, has_cart, cart_type FROM characters WHERE character_id = $1',
                 [characterId]
             );
             if (charResult.rows.length > 0) {
@@ -5155,6 +5189,8 @@ io.on('connection', (socket) => {
                 playerGender = row.gender || 'male';
                 dbPlagiarizedSkillId = row.plagiarized_skill_id || null;
                 dbPlagiarizedSkillLevel = row.plagiarized_skill_level || 0;
+                dbHasCart = !!row.has_cart;
+                dbCartType = row.cart_type || 0;
 
                 // Cache correct position in Redis
                 await setPlayerPosition(characterId, row.x, row.y, row.z);
@@ -5440,6 +5476,7 @@ io.on('connection', (socket) => {
             weaponMATK,
             stats: baseStats,
             zuzucoin,
+            zeny: zuzucoin, // Alias — many skill handlers use player.zeny (RO canonical name)
             // EXP & Leveling (RO-style dual progression)
             jobLevel,
             baseExp,
@@ -5510,8 +5547,8 @@ io.on('connection', (socket) => {
             // Ammunition System (Arrows/Bullets — RO Classic)
             equippedAmmo, // { itemId, name, atk, element, ammoType, inventoryId, quantity, statusProcs } or null
             // Cart System (Merchant/Blacksmith/Alchemist — Pushcart)
-            hasCart: !!charRow.has_cart,
-            cartType: charRow.cart_type || 0,
+            hasCart: dbHasCart,
+            cartType: dbCartType,
             cartWeight: 0,          // Calculated from character_cart on load
             cartMaxWeight: 8000,    // rAthena MAX_CART_WEIGHT
             cartItems: [],          // Loaded from character_cart
@@ -5569,7 +5606,7 @@ io.on('connection', (socket) => {
                     `SELECT cc.cart_id, cc.item_id, cc.quantity, cc.slot_index, cc.identified,
                             cc.refine_level, cc.compounded_cards, cc.forged_by, cc.forged_element, cc.forged_star_crumbs,
                             i.name, i.item_type, i.weight, i.price, i.atk, i.def, i.slots,
-                            i.description, i.equip_slot, i.sub_type, i.buy_price, i.sell_price
+                            i.description, i.equip_slot, i.sub_type, i.buy_price, i.sell_price, i.icon
                      FROM character_cart cc JOIN items i ON cc.item_id = i.item_id
                      WHERE cc.character_id = $1 ORDER BY cc.slot_index`, [characterId]
                 );
@@ -5932,31 +5969,86 @@ io.on('connection', (socket) => {
         await setPlayerPosition(characterId, x, y, z);
 
         // Warp Portal collision: teleport player if they walk into an active portal
+        // Full zone transition — must match kafra:teleport / zone:warp flow exactly
         if (player) {
             const posEffects = getGroundEffectsAtPosition(x, y, z, 100);
             const portal = posEffects.find(e => e.type === 'warp_portal');
             if (portal && portal.destZone) {
                 const portalZone = player.zone || 'prontera_south';
                 if (portal.destZone !== portalZone) {
-                    // Cross-zone teleport
+                    // Cross-zone teleport — full zone transition sequence
                     const destZoneData = ZONE_REGISTRY[portal.destZone];
                     if (destZoneData) {
+                        // 1. Cancel active combat/casting
+                        if (autoAttackState.has(characterId)) {
+                            autoAttackState.delete(characterId);
+                            socket.emit('combat:auto_attack_stopped', { reason: 'Zone change' });
+                        }
+                        if (activeCasts.has(characterId)) activeCasts.delete(characterId);
+                        afterCastDelayEnd.delete(characterId);
+
+                        // 2. Remove from enemy combat sets in old zone
+                        for (const [, enemy] of enemies.entries()) {
+                            if (enemy.zone === portalZone) {
+                                enemy.inCombatWith.delete(characterId);
+                                if (enemy.targetPlayerId === characterId) {
+                                    enemy.targetPlayerId = null;
+                                    const next = typeof pickNextTarget === 'function' ? pickNextTarget(enemy) : null;
+                                    if (next) enemy.targetPlayerId = next;
+                                    else { enemy.aiState = AI_STATE.IDLE; enemy.isWandering = false; }
+                                }
+                            }
+                        }
+
+                        // 3. Broadcast departure + switch Socket.io rooms
+                        broadcastToZone(portalZone, 'player:left', {
+                            characterId, characterName: player.characterName, reason: 'zone_change'
+                        });
+                        socket.leave('zone:' + portalZone);
+                        socket.join('zone:' + portal.destZone);
+
+                        // 4. Update player state
                         player.zone = portal.destZone;
                         player.lastX = portal.destX || 0;
                         player.lastY = portal.destY || 0;
                         player.lastZ = portal.destZ || 580;
-                        // Party map broadcast
+                        await setPlayerPosition(characterId, player.lastX, player.lastY, player.lastZ);
+
+                        // 5. Mark as transitioning
+                        zoneTransitioning.add(characterId);
+
+                        // 6. Lazy-spawn enemies in destination zone if first player
+                        if (!spawnedZones.has(portal.destZone)) {
+                            if (destZoneData.enemySpawns && destZoneData.enemySpawns.length > 0) {
+                                logger.info(`[ZONE] First player in '${portal.destZone}' via warp portal — spawning ${destZoneData.enemySpawns.length} enemies`);
+                                for (const spawn of destZoneData.enemySpawns) {
+                                    spawnEnemy({ ...spawn, zone: portal.destZone });
+                                }
+                            }
+                            spawnedZones.add(portal.destZone);
+                        }
+
+                        // 7. Save to DB
+                        try {
+                            await pool.query('UPDATE characters SET zone_name = $1, x = $2, y = $3, z = $4 WHERE character_id = $5',
+                                [portal.destZone, player.lastX, player.lastY, player.lastZ, characterId]);
+                        } catch (dbErr) { logger.warn(`[WARP PORTAL] DB save failed: ${dbErr.message}`); }
+
+                        // 8. Party map broadcast
                         if (player.partyId) {
                             const prt = activeParties.get(player.partyId);
                             if (prt) { const mem = prt.members.get(characterId); if (mem) mem.map = portal.destZone; }
                             broadcastToParty(player.partyId, 'party:member_update', { characterId, map: portal.destZone });
                         }
-                        await setPlayerPosition(characterId, player.lastX, player.lastY, player.lastZ);
+
+                        // 9. Tell client to load the new level
                         socket.emit('zone:change', {
                             zoneName: portal.destZone,
                             levelName: destZoneData.levelName,
                             x: player.lastX, y: player.lastY, z: player.lastZ
                         });
+
+                        logger.info(`[WARP PORTAL] ${player.characterName} zone transition: ${portalZone} → ${portal.destZone}`);
                     }
                 } else {
                     // Same-zone teleport
@@ -6263,7 +6355,10 @@ io.on('connection', (socket) => {
             kafraName: kafra.name,
             destinations: kafra.destinations,
             playerZuzucoin: player.zuzucoin,
-            currentSaveMap
+            currentSaveMap,
+            hasCart: player.hasCart || false,
+            jobClass: player.jobClass || 'novice',
+            pushcartLevel: (player.learnedSkills || {})[604] || 0
         });
     });
 
@@ -6331,6 +6426,7 @@ io.on('connection', (socket) => {
 
         // Deduct cost
         player.zuzucoin -= dest.cost;
+        player.zeny = player.zuzucoin; // Keep in sync
         try {
             await pool.query('UPDATE characters SET zuzucoin = $1 WHERE character_id = $2', [player.zuzucoin, characterId]);
         } catch (err) {
@@ -6422,6 +6518,16 @@ io.on('connection', (socket) => {
     // Cart class check helper
     const CART_CLASSES = new Set(['merchant', 'blacksmith', 'alchemist', 'whitesmith', 'creator', 'biochemist', 'mastersmith', 'super_novice']);
 
+    // cart:load — client requests cart data after subsystem initializes (data from player:join may have been missed)
+    socket.on('cart:load', async () => {
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { characterId, player } = playerInfo;
+        if (!player.hasCart) return; // No cart — nothing to send
+        socket.emit('cart:data', { items: player.cartItems || [], cartWeight: player.cartWeight || 0, cartMaxWeight: player.cartMaxWeight || 8000 });
+        logger.info(`[CART] Sent cart:data to ${player.characterName} on cart:load request (${(player.cartItems || []).length} items)`);
+    });
+
     socket.on('cart:rent', async (data) => {
         const playerInfo = findPlayerBySocketId(socket.id);
         if (!playerInfo) return;
@@ -6437,13 +6543,14 @@ io.on('connection', (socket) => {
         if ((player.zeny || 0) < rentalCost) { socket.emit('cart:error', { message: `Not enough Zeny (need ${rentalCost}).` }); return; }
 
         player.zeny = (player.zeny || 0) - rentalCost;
+        player.zuzucoin = player.zeny; // Keep in sync
         player.hasCart = true;
         player.cartType = 1; // Default cart
         player.cartWeight = 0;
         player.cartItems = [];
 
         try {
-            await pool.query('UPDATE characters SET zeny = $1, has_cart = true, cart_type = 1 WHERE character_id = $2', [player.zeny, characterId]);
+            await pool.query('UPDATE characters SET zuzucoin = $1, has_cart = true, cart_type = 1 WHERE character_id = $2', [player.zeny, characterId]);
             // Load any persisted cart items from previous cart
             const cartResult = await pool.query(
                 `SELECT cc.cart_id, cc.item_id, cc.quantity, cc.slot_index, cc.identified,
@@ -6603,10 +6710,12 @@ io.on('connection', (socket) => {
                 await pool.query('UPDATE character_cart SET quantity = quantity - $1 WHERE cart_id = $2', [amount, cartId]);
             }
 
-            // Add to inventory (preserve all equipment attributes)
+            // Add to inventory (preserve all equipment attributes including forge data)
             await addFullItemToInventory(characterId, item.item_id, amount, {
                 identified: item.identified, refine_level: item.refine_level,
-                compounded_cards: item.compounded_cards
+                compounded_cards: item.compounded_cards,
+                forged_by: item.forged_by, forged_element: item.forged_element,
+                forged_star_crumbs: item.forged_star_crumbs
             });
 
             // Reload cart + inventory
@@ -6757,21 +6866,49 @@ io.on('connection', (socket) => {
             socket.emit('vending:error', { message: 'Shop not found.' }); return;
         }
 
-        // Build item list from DB for freshness
+        // Build item list from DB for freshness (join cart for refine/card data)
         try {
             const itemsResult = await pool.query(
                 `SELECT vi.vend_item_id, vi.cart_id, vi.item_id, vi.amount, vi.price,
                         i.name, i.item_type, i.weight, i.atk, i.def, i.slots, i.description,
-                        i.equip_slot, i.sub_type, i.buy_price, i.sell_price
-                 FROM vending_items vi JOIN items i ON vi.item_id = i.item_id
+                        i.equip_slot, i.sub_type, i.buy_price, i.sell_price, i.icon,
+                        cc.refine_level, cc.identified, cc.compounded_cards
+                 FROM vending_items vi
+                 JOIN items i ON vi.item_id = i.item_id
+                 LEFT JOIN character_cart cc ON vi.cart_id = cc.cart_id
                  WHERE vi.shop_id = $1 AND vi.amount > 0`, [vendor.vendingShop.shopId]
             );
+
+            // Remap SQL snake_case to client camelCase
+            const mappedItems = itemsResult.rows.map(r => ({
+                vendItemId: r.vend_item_id,
+                cartId: r.cart_id,
+                itemId: r.item_id,
+                amount: r.amount,
+                price: r.price,
+                name: r.name,
+                icon: r.icon || '',
+                itemType: r.item_type,
+                weight: r.weight || 0,
+                atk: r.atk || 0,
+                def: r.def || 0,
+                slots: r.slots || 0,
+                description: r.description || '',
+                refineLevel: r.refine_level || 0,
+                identified: r.identified !== false,
+                compoundedCards: r.compounded_cards || '[]'
+            }));
+
+            // Get buyer's zeny for display
+            const buyerInfo = findPlayerBySocketId(socket.id);
+            const buyerZeny = buyerInfo ? (buyerInfo.player.zuzucoin || buyerInfo.player.zeny || 0) : 0;
 
             socket.emit('vending:item_list', {
                 shopId: vendor.vendingShop.shopId,
                 vendorId, vendorName: vendor.characterName,
-                title: vendor.vendingShop.title,
-                items: itemsResult.rows
+                shopTitle: vendor.vendingShop.title,
+                playerZeny: buyerZeny,
+                items: mappedItems
             });
         } catch (e) {
             logger.error(`[VENDING] Browse error: ${e.message}`);
@@ -6822,20 +6959,24 @@ io.on('connection', (socket) => {
 
             // Process transaction
             player.zeny = (player.zeny || 0) - totalCost;
+            player.zuzucoin = player.zeny; // Keep in sync
             vendor.zeny = (vendor.zeny || 0) + totalCost;
+            vendor.zuzucoin = vendor.zeny; // Keep in sync
 
-            await pool.query('UPDATE characters SET zeny = $1 WHERE character_id = $2', [player.zeny, characterId]);
-            await pool.query('UPDATE characters SET zeny = $1 WHERE character_id = $2', [vendor.zeny, vendorId]);
+            await pool.query('UPDATE characters SET zuzucoin = $1 WHERE character_id = $2', [player.zeny, characterId]);
+            await pool.query('UPDATE characters SET zuzucoin = $1 WHERE character_id = $2', [vendor.zeny, vendorId]);
 
             for (const vp of validPurchases) {
                 // Give item to buyer (preserve equipment attributes from vendor's cart)
                 const cartItemAttrs = await pool.query(
-                    'SELECT identified, refine_level, compounded_cards FROM character_cart WHERE cart_id = $1', [vp.cartId]
+                    'SELECT identified, refine_level, compounded_cards, forged_by, forged_element, forged_star_crumbs FROM character_cart WHERE cart_id = $1', [vp.cartId]
                 );
                 const attrs = cartItemAttrs.rows.length > 0 ? cartItemAttrs.rows[0] : {};
                 await addFullItemToInventory(characterId, vp.itemId, vp.qty, {
                     identified: attrs.identified, refine_level: attrs.refine_level,
-                    compounded_cards: attrs.compounded_cards
+                    compounded_cards: attrs.compounded_cards,
+                    forged_by: attrs.forged_by, forged_element: attrs.forged_element,
+                    forged_star_crumbs: attrs.forged_star_crumbs
                 });
 
                 // Reduce vending stock
@@ -6857,10 +6998,10 @@ io.on('connection', (socket) => {
                     }
                 }
 
-                // Notify vendor of sale
-                const vendorSocket = [...io.sockets.sockets.values()].find(s => s.characterId === vendorId || s.id === vendor.socketId);
+                // Notify vendor of sale (with stock update for live shop view)
+                const vendorSocket = io.sockets.sockets.get(vendor.socketId);
                 if (vendorSocket) {
-                    vendorSocket.emit('vending:sold', { buyerName: player.characterName, itemName: vp.name, amount: vp.qty, price: vp.price * vp.qty });
+                    vendorSocket.emit('vending:sold', { buyerName: player.characterName, itemName: vp.name, amount: vp.qty, price: vp.price * vp.qty, vendItemId: vp.vendItemId, remainingAmount: shopMap.get(vp.vendItemId).amount - vp.qty });
                     vendorSocket.emit('inventory:zeny_update', { zeny: vendor.zeny });
                 }
             }
@@ -7534,11 +7675,7 @@ io.on('connection', (socket) => {
     // ============================================================
     // Mount Toggle (Knight/Crusader — Peco Peco)
     // ============================================================
-    socket.on('mount:toggle', (data) => {
-        const playerInfo = findPlayerBySocketId(socket.id);
-        if (!playerInfo) return;
-        const { characterId, player } = playerInfo;
-
+    function handleMountToggle(socket, characterId, player) {
         // Must know Riding (708)
         const ridingLv = (player.learnedSkills || {})[708] || 0;
         if (ridingLv === 0) {
@@ -7584,6 +7721,14 @@ io.on('connection', (socket) => {
         player.aspd = finalAspd;
 
         socket.emit('player:stats', buildFullStatsPayload(characterId, player, effStats, derived, finalAspd));
+        socket.emit('chat:receive', { type: 'chat:receive', channel: 'SYSTEM', senderId: 0, senderName: 'SYSTEM',
+            message: player.isMounted ? 'You mounted your Peco Peco.' : 'You dismounted your Peco Peco.', timestamp: Date.now() });
+    }
+
+    socket.on('mount:toggle', (data) => {
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        handleMountToggle(socket, playerInfo.characterId, playerInfo.player);
     });
 
     // Stat allocation handler (RO Classic: cost = floor((currentStat - 1) / 10) + 2, max 99)
@@ -8320,7 +8465,7 @@ io.on('connection', (socket) => {
     });
 
     // Chat message handler (expandable for multiple channels)
-    socket.on('chat:message', (data) => {
+    socket.on('chat:message', async (data) => {
         logger.info(`[RECV] chat:message from ${socket.id}: ${JSON.stringify(data)}`);
         const { channel, message } = data;
         
@@ -8457,6 +8602,52 @@ io.on('connection', (socket) => {
         if (trimmedMsg === '/am') {
             player.autoReplyMessage = null;
             socket.emit('chat:receive', { type: 'chat:receive', channel: 'SYSTEM', senderId: 0, senderName: 'SYSTEM', message: 'Auto-reply cleared.', timestamp: Date.now() });
+            return;
+        }
+
+        // ── Warp Portal memo: /memo1, /memo2, /memo3 ──
+        const memoMatch = trimmedMsg.match(/^\/memo([123])$/);
+        if (memoMatch) {
+            const memoSlot = parseInt(memoMatch[1]) - 1; // 0-indexed
+            const memoZone = player.zone || 'prontera_south';
+            const memoX = player.lastX || 0;
+            const memoY = player.lastY || 0;
+            const memoZ = player.lastZ || 580;
+
+            // Check if player has Warp Portal learned at sufficient level
+            const wpLevel = (player.learnedSkills || {})[410] || 0;
+            const maxSlots = Math.max(0, wpLevel - 1); // Lv1=0, Lv2=1, Lv3=2, Lv4=3
+            if (wpLevel <= 0) {
+                socket.emit('chat:receive', { type: 'chat:receive', channel: 'SYSTEM', senderId: 0, senderName: 'SYSTEM', message: 'You need Warp Portal to memorize locations.', timestamp: Date.now() });
+                return;
+            }
+            if (memoSlot >= maxSlots) {
+                socket.emit('chat:receive', { type: 'chat:receive', channel: 'SYSTEM', senderId: 0, senderName: 'SYSTEM', message: `Warp Portal Lv${wpLevel} only supports ${maxSlots} memo slot(s). Learn a higher level.`, timestamp: Date.now() });
+                return;
+            }
+
+            try {
+                await pool.query(
+                    `INSERT INTO character_memo (character_id, slot_index, zone_name, x, y, z)
+                     VALUES ($1, $2, $3, $4, $5, $6)
+                     ON CONFLICT (character_id, slot_index)
+                     DO UPDATE SET zone_name = $3, x = $4, y = $5, z = $6`,
+                    [characterId, memoSlot, memoZone, memoX, memoY, memoZ]
+                );
+                const zoneDisplay = memoZone.replace(/_/g, ' ');
+                socket.emit('chat:receive', { type: 'chat:receive', channel: 'SYSTEM', senderId: 0, senderName: 'SYSTEM',
+                    message: `Memo ${memoSlot + 1} saved: ${zoneDisplay} (${Math.floor(memoX)}, ${Math.floor(memoY)})`, timestamp: Date.now() });
+                logger.info(`[MEMO] ${player.characterName} saved memo ${memoSlot + 1}: ${memoZone} (${Math.floor(memoX)}, ${Math.floor(memoY)})`);
+            } catch (err) {
+                logger.error(`[MEMO] Save failed: ${err.message}`);
+                socket.emit('chat:receive', { type: 'chat:receive', channel: 'SYSTEM', senderId: 0, senderName: 'SYSTEM', message: 'Failed to save memo location.', timestamp: Date.now() });
+            }
+            return;
+        }
+
+        // ── Mount toggle: /mount ──
+        if (trimmedMsg === '/mount') {
+            handleMountToggle(socket, characterId, player);
             return;
         }
 
@@ -8627,6 +8818,7 @@ io.on('connection', (socket) => {
         let slotIndex = parseInt(data.slotIndex);
         const skillId = parseInt(data.skillId);
         const skillName = data.skillName || '';
+        const skillLevel = parseInt(data.skillLevel) || 0;
 
         if (isNaN(rowIndex) || rowIndex < 0 || rowIndex > 3) {
             logger.warn(`[HOTBAR] Invalid rowIndex ${data.rowIndex} from char ${characterId}`);
@@ -8661,15 +8853,19 @@ io.on('connection', (socket) => {
                     return;
                 }
 
-                // UPSERT the skill slot (clear item fields, set skill fields)
+                // Validate skill_level <= learned level
+                const learnedLv = verify.rows[0].level;
+                const validLevel = (skillLevel >= 1 && skillLevel <= learnedLv) ? skillLevel : learnedLv;
+
+                // UPSERT the skill slot (clear item fields, set skill fields + level)
                 await pool.query(
-                    `INSERT INTO character_hotbar (character_id, row_index, slot_index, inventory_id, item_id, item_name, slot_type, skill_id, skill_name)
-                     VALUES ($1, $2, $3, NULL, NULL, '', 'skill', $4, $5)
+                    `INSERT INTO character_hotbar (character_id, row_index, slot_index, inventory_id, item_id, item_name, slot_type, skill_id, skill_name, skill_level)
+                     VALUES ($1, $2, $3, NULL, NULL, '', 'skill', $4, $5, $6)
                      ON CONFLICT (character_id, row_index, slot_index)
-                     DO UPDATE SET inventory_id = NULL, item_id = NULL, item_name = '', slot_type = 'skill', skill_id = $4, skill_name = $5`,
-                    [characterId, rowIndex, slotIndex, skillId, skillName]
+                     DO UPDATE SET inventory_id = NULL, item_id = NULL, item_name = '', slot_type = 'skill', skill_id = $4, skill_name = $5, skill_level = $6`,
+                    [characterId, rowIndex, slotIndex, skillId, skillName, validLevel]
                 );
-                logger.info(`[HOTBAR] Char ${characterId} assigned skill ${skillName} (${skillId}) to row ${rowIndex} slot ${slotIndex}`);
+                logger.info(`[HOTBAR] Char ${characterId} assigned skill ${skillName} (${skillId}) Lv${validLevel} to row ${rowIndex} slot ${slotIndex}`);
             }
 
             // Send updated hotbar to client
@@ -8912,6 +9108,13 @@ io.on('connection', (socket) => {
             return;
         }
 
+        // RO Classic: allow using a lower level than max learned (hotbar skill level selection)
+        const requestedLevel = parseInt(data.skillLevel) || 0;
+        logger.info(`[SKILL-LEVEL] ${player.characterName} ${skill.displayName}: requested=${requestedLevel} learned=${learnedLevel}`);
+        if (requestedLevel >= 1 && requestedLevel <= learnedLevel) {
+            learnedLevel = requestedLevel;
+        }
+
         // Get SP cost and effect at current level
         const levelData = skill.levels[Math.min(learnedLevel - 1, skill.levels.length - 1)];
         const baseSpCost = levelData ? levelData.spCost : 0;
@@ -8974,10 +9177,19 @@ io.on('connection', (socket) => {
             }
         }
 
-        // PvP disabled — block skills targeting other players
-        if (!PVP_ENABLED && !isEnemy && targetId) {
+        // PvP disabled — block OFFENSIVE skills targeting other players
+        // Supportive skills (heal, buff, cure) are always allowed on friendly players
+        const SUPPORTIVE_SKILLS = new Set([
+            'heal', 'blessing', 'increase_agi', 'cure', 'resurrection',
+            'status_recovery', 'slow_poison', 'kyrie_eleison', 'magnificat',
+            'gloria', 'suffragium', 'potion_pitcher', 'slim_potion_pitcher',
+            'chemical_protection_weapon', 'chemical_protection_shield',
+            'chemical_protection_armor', 'chemical_protection_helm',
+            'detoxify', 'dispell'
+        ]);
+        if (!PVP_ENABLED && !isEnemy && targetId && targetId !== characterId) {
             const ptarget = connectedPlayers.get(targetId);
-            if (ptarget) {
+            if (ptarget && !SUPPORTIVE_SKILLS.has(skill.name)) {
                 socket.emit('skill:error', { message: 'PvP is currently disabled' });
                 return;
             }
@@ -11367,41 +11579,109 @@ io.on('connection', (socket) => {
             player.mana = Math.max(0, player.mana - spCost);
             applySkillDelays(characterId, player, skillId, levelData, socket);
 
+            // Cancel auto-attack
+            if (autoAttackState.has(characterId)) {
+                autoAttackState.delete(characterId);
+                socket.emit('combat:auto_attack_stopped', { reason: 'Teleport' });
+            }
+
             // Close Confine breaks on teleport (RO Classic pre-renewal)
             if (player.activeBuffs && player.activeBuffs.some(b => b.name === 'close_confine')) {
                 breakCloseConfine(player, player.zone || 'prontera_south', io, 'teleport');
             }
 
+            const oldZone = player.zone || 'prontera_south';
+
+            logger.info(`[TELEPORT] ${player.characterName} Teleport learnedLevel=${learnedLevel}`);
             if (learnedLevel === 1) {
-                const zoneData = ZONE_REGISTRY[player.zone];
+                // Lv1: Random warp within current zone
+                const zoneData = ZONE_REGISTRY[oldZone];
                 const spawnX = (zoneData && zoneData.spawnX) || 0;
                 const spawnY = (zoneData && zoneData.spawnY) || 0;
                 const newX = spawnX + (Math.random() - 0.5) * 2000;
                 const newY = spawnY + (Math.random() - 0.5) * 2000;
-                player.lastX = newX; player.lastY = newY; player.lastZ = player.z || 580;
-                await setPlayerPosition(characterId, newX, newY, player.lastZ);
-                socket.emit('player:teleport', { characterId, x: newX, y: newY, z: player.lastZ, teleportType: 'teleport' });
+                const newZ = player.lastZ || 580;
+                player.lastX = newX; player.lastY = newY; player.lastZ = newZ;
+                await setPlayerPosition(characterId, newX, newY, newZ);
+
+                // Broadcast to zone so other players see the teleport
+                broadcastToZoneExcept(socket, oldZone, 'player:moved', {
+                    characterId, characterName: player.characterName,
+                    x: newX, y: newY, z: newZ,
+                    health: player.health, maxHealth: player.maxHealth,
+                    timestamp: Date.now()
+                });
+                socket.emit('player:teleport', { characterId, x: newX, y: newY, z: newZ, teleportType: 'teleport' });
             } else {
+                // Lv2: Teleport to save point (like Butterfly Wing)
+                logger.info(`[TELEPORT] ${player.characterName} using Teleport Lv2 (save point) from zone=${oldZone}`);
                 try {
-                    const saveResult = await pool.query('SELECT save_zone, save_x, save_y, save_z FROM characters WHERE id = $1', [characterId]);
+                    const saveResult = await pool.query('SELECT save_map, save_x, save_y, save_z FROM characters WHERE character_id = $1', [characterId]);
+                    logger.info(`[TELEPORT] Save point query result: ${JSON.stringify(saveResult.rows[0] || 'NO ROWS')}`);
                     if (saveResult.rows.length > 0) {
                         const save = saveResult.rows[0];
-                        if (save.save_zone && save.save_zone !== player.zone) {
-                            const destZone = ZONE_REGISTRY[save.save_zone];
+                        const destZoneName = save.save_map || 'prontera_south';
+                        const destX = save.save_x || 0;
+                        const destY = save.save_y || 0;
+                        const destZ = save.save_z || 580;
+
+                        if (destZoneName !== oldZone) {
+                            // Cross-zone: full zone transition (same as Kafra/Warp Portal)
+                            const destZone = ZONE_REGISTRY[destZoneName];
                             if (destZone) {
-                                socket.emit('zone:change', { zoneName: save.save_zone, levelName: destZone.levelName, x: save.save_x || 0, y: save.save_y || 0, z: save.save_z || 580 });
-                                // Party map broadcast for Teleport Lv2 cross-zone
+                                // Remove from enemy combat sets in old zone
+                                for (const [, enemy] of enemies.entries()) {
+                                    if (enemy.zone === oldZone) {
+                                        enemy.inCombatWith.delete(characterId);
+                                        if (enemy.targetPlayerId === characterId) {
+                                            enemy.targetPlayerId = null;
+                                            const next = typeof pickNextTarget === 'function' ? pickNextTarget(enemy) : null;
+                                            if (next) enemy.targetPlayerId = next;
+                                            else { enemy.aiState = AI_STATE.IDLE; enemy.isWandering = false; }
+                                        }
+                                    }
+                                }
+
+                                broadcastToZone(oldZone, 'player:left', { characterId, characterName: player.characterName, reason: 'teleport' });
+                                socket.leave('zone:' + oldZone);
+                                socket.join('zone:' + destZoneName);
+
+                                player.zone = destZoneName;
+                                player.lastX = destX; player.lastY = destY; player.lastZ = destZ;
+                                await setPlayerPosition(characterId, destX, destY, destZ);
+                                zoneTransitioning.add(characterId);
+
+                                // Lazy-spawn enemies in destination zone if first player
+                                if (!spawnedZones.has(destZoneName)) {
+                                    if (destZone.enemySpawns && destZone.enemySpawns.length > 0) {
+                                        logger.info(`[ZONE] First player in '${destZoneName}' via Teleport Lv2 — spawning ${destZone.enemySpawns.length} enemies`);
+                                        for (const spawn of destZone.enemySpawns) {
+                                            spawnEnemy({ ...spawn, zone: destZoneName });
+                                        }
+                                    }
+                                    spawnedZones.add(destZoneName);
+                                }
+
+                                try {
+                                    await pool.query('UPDATE characters SET zone_name = $1, x = $2, y = $3, z = $4 WHERE character_id = $5',
+                                        [destZoneName, destX, destY, destZ, characterId]);
+                                } catch (dbErr) { logger.warn(`[TELEPORT] DB save failed: ${dbErr.message}`); }
+
+                                socket.emit('zone:change', { zoneName: destZoneName, levelName: destZone.levelName, x: destX, y: destY, z: destZ });
+
                                 if (player.partyId) {
                                     const tpParty = activeParties.get(player.partyId);
-                                    if (tpParty) { const tpMem = tpParty.members.get(characterId); if (tpMem) tpMem.map = save.save_zone; }
-                                    broadcastToParty(player.partyId, 'party:member_update', { characterId, map: save.save_zone });
+                                    if (tpParty) { const tpMem = tpParty.members.get(characterId); if (tpMem) tpMem.map = destZoneName; }
+                                    broadcastToParty(player.partyId, 'party:member_update', { characterId, map: destZoneName });
                                 }
+
+                                logger.info(`[TELEPORT] ${player.characterName} Lv2 cross-zone: ${oldZone} → ${destZoneName}`);
                             }
                         } else {
-                            const tpX = save.save_x || 0, tpY = save.save_y || 0, tpZ = save.save_z || 580;
-                            player.lastX = tpX; player.lastY = tpY; player.lastZ = tpZ;
-                            await setPlayerPosition(characterId, tpX, tpY, tpZ);
-                            socket.emit('player:teleport', { characterId, x: tpX, y: tpY, z: tpZ, teleportType: 'teleport' });
+                            // Same zone: just teleport position
+                            player.lastX = destX; player.lastY = destY; player.lastZ = destZ;
+                            await setPlayerPosition(characterId, destX, destY, destZ);
+                            socket.emit('player:teleport', { characterId, x: destX, y: destY, z: destZ, teleportType: 'teleport' });
                         }
                     }
                 } catch (err) {
@@ -11409,20 +11689,69 @@ io.on('connection', (socket) => {
                 }
             }
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
+            socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
             return;
         }
 
-        // --- WARP PORTAL (ID 410) — Ground portal to save point (requires Blue Gemstone) ---
+        // --- WARP PORTAL (ID 410) — Ground portal with destination selection ---
         if (skill.name === 'warp_portal') {
             if (!hasGroundPos) { socket.emit('skill:error', { message: 'Select ground position' }); return; }
 
-            // Consume 1 Blue Gemstone (item 717) — skip if player has cardNoGemStone or Into the Abyss
+            // If data.destIndex is set, this is the destination confirmation (Phase 2)
+            const destIndex = parseInt(data.destIndex);
+            if (!isNaN(destIndex) && destIndex >= 0 && player._pendingWarpPortal) {
+                const pending = player._pendingWarpPortal;
+                player._pendingWarpPortal = null;
+
+                const destinations = pending.destinations;
+                if (destIndex >= destinations.length) {
+                    socket.emit('skill:error', { message: 'Invalid destination' });
+                    return;
+                }
+
+                const dest = destinations[destIndex];
+
+                // RO Classic: max 3 portals per caster — remove oldest if at limit
+                const existingPortals = [];
+                for (const [eid, eff] of activeGroundEffects.entries()) {
+                    if (eff.type === 'warp_portal' && eff.casterId === characterId && Date.now() < eff.expiresAt) {
+                        existingPortals.push({ id: eid, createdAt: eff.createdAt });
+                    }
+                }
+                if (existingPortals.length >= 3) {
+                    existingPortals.sort((a, b) => a.createdAt - b.createdAt);
+                    const oldest = existingPortals[0];
+                    removeGroundEffect(oldest.id);
+                    broadcastToZone(player.zone || 'prontera_south', 'skill:ground_effect_removed', { effectId: oldest.id, type: 'warp_portal', reason: 'limit_reached' });
+                }
+
+                const portalId = createGroundEffect({
+                    type: 'warp_portal', casterId: characterId, casterName: player.characterName,
+                    x: pending.groundX, y: pending.groundY, z: pending.groundZ,
+                    radius: 100, duration: pending.duration,
+                    zone: player.zone, skillId,
+                    destZone: dest.zone, destX: dest.x, destY: dest.y, destZ: dest.z,
+                    usesRemaining: 8
+                });
+
+                const wpZone = player.zone || 'prontera_south';
+                broadcastToZone(wpZone, 'skill:ground_effect_spawned', {
+                    effectId: portalId, type: 'warp_portal', skillId,
+                    casterId: characterId, casterName: player.characterName,
+                    x: pending.groundX, y: pending.groundY, z: pending.groundZ,
+                    radius: 100, duration: pending.duration
+                });
+                logger.info(`[WARP PORTAL] ${player.characterName} created portal → ${dest.name} (${dest.zone})`);
+                return;
+            }
+
+            // Phase 1: Consume gem, deduct SP, build destination list, send to client
             if (!player.cardNoGemStone && !hasBuff(player, 'ensemble_into_abyss')) {
                 try {
                     const gemResult = await pool.query(
                         `UPDATE character_inventory SET quantity = quantity - 1
                          WHERE character_id = $1 AND item_id = 717 AND is_equipped = false AND quantity >= 1
-                         RETURNING id`,
+                         RETURNING inventory_id`,
                         [characterId]
                     );
                     if (gemResult.rowCount === 0) {
@@ -11439,45 +11768,57 @@ io.on('connection', (socket) => {
             player.mana = Math.max(0, player.mana - spCost);
             applySkillDelays(characterId, player, skillId, levelData, socket);
 
-            let save = {};
+            // Build destination list: save point + memo slots
+            const destinations = [];
+
+            // Always include save point
             try {
-                const saveResult = await pool.query('SELECT save_zone, save_x, save_y, save_z FROM characters WHERE id = $1', [characterId]);
-                save = saveResult.rows[0] || {};
+                const saveResult = await pool.query('SELECT save_map, save_x, save_y, save_z FROM characters WHERE character_id = $1', [characterId]);
+                const save = saveResult.rows[0] || {};
+                destinations.push({
+                    name: 'Save Point',
+                    zone: save.save_map || 'prontera_south',
+                    x: save.save_x || 0, y: save.save_y || 0, z: save.save_z || 580
+                });
             } catch (err) {
-                logger.error(`[WARP PORTAL] Error reading save point: ${err.message}`);
+                destinations.push({ name: 'Save Point', zone: 'prontera_south', x: 0, y: 0, z: 580 });
             }
 
-            // RO Classic: max 3 portals per caster — remove oldest if at limit
-            const existingPortals = [];
-            for (const [eid, eff] of activeGroundEffects.entries()) {
-                if (eff.type === 'warp_portal' && eff.casterId === characterId && Date.now() < eff.expiresAt) {
-                    existingPortals.push({ id: eid, createdAt: eff.createdAt });
+            // Load memo slots (up to wpLevel - 1 slots)
+            const maxMemoSlots = Math.max(0, learnedLevel - 1);
+            if (maxMemoSlots > 0) {
+                try {
+                    const memoResult = await pool.query(
+                        'SELECT slot_index, zone_name, x, y, z FROM character_memo WHERE character_id = $1 ORDER BY slot_index',
+                        [characterId]
+                    );
+                    for (const memo of memoResult.rows) {
+                        if (memo.slot_index < maxMemoSlots) {
+                            const zoneName = memo.zone_name.replace(/_/g, ' ');
+                            destinations.push({
+                                name: `Memo ${memo.slot_index + 1}: ${zoneName}`,
+                                zone: memo.zone_name,
+                                x: memo.x, y: memo.y, z: memo.z
+                            });
+                        }
+                    }
+                } catch (err) {
+                    logger.error(`[WARP PORTAL] Memo load error: ${err.message}`);
                 }
             }
-            if (existingPortals.length >= 3) {
-                existingPortals.sort((a, b) => a.createdAt - b.createdAt);
-                const oldest = existingPortals[0];
-                removeGroundEffect(oldest.id);
-                broadcastToZone(player.zone || 'prontera_south', 'skill:ground_effect_removed', { effectId: oldest.id, type: 'warp_portal', reason: 'limit_reached' });
-            }
 
-            const portalId = createGroundEffect({
-                type: 'warp_portal', casterId: characterId, casterName: player.characterName,
-                x: groundX, y: groundY, z: groundZ || 0,
-                radius: 100, duration: (duration || 10000),
-                zone: player.zone, skillId,
-                destZone: save.save_zone || player.zone,
-                destX: save.save_x || 0, destY: save.save_y || 0, destZ: save.save_z || 580,
-                usesRemaining: 8
+            // Store pending portal data so Phase 2 can create the portal
+            player._pendingWarpPortal = {
+                groundX, groundY, groundZ: groundZ || 0,
+                duration: duration || 10000,
+                destinations
+            };
+
+            // Send destination list to client for selection
+            socket.emit('warp_portal:select', {
+                destinations: destinations.map((d, i) => ({ index: i, name: d.name, zone: d.zone }))
             });
 
-            const wpZone = player.zone || 'prontera_south';
-            broadcastToZone(wpZone, 'skill:ground_effect_spawned', {
-                effectId: portalId, type: 'warp_portal', skillId,
-                casterId: characterId, casterName: player.characterName,
-                x: groundX, y: groundY, z: groundZ || 0,
-                radius: 100, duration: (duration || 10000)
-            });
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
             socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
             return;
@@ -12116,9 +12457,12 @@ io.on('connection', (socket) => {
                 if (!isBoss && !isUndead) {
                     const poisonChance = 10 + 4 * learnedLevel;
                     const poisonResult = applyStatusEffect(player, enemy, 'poison', poisonChance, 60000);
+                    logger.info(`[ENVENOM] Poison roll on ${enemy.name}(${targetId}): chance=${poisonChance}% applied=${poisonResult?.applied} reason=${poisonResult?.reason || 'n/a'}`);
                     if (poisonResult && poisonResult.applied) {
                         broadcastToZone(envZone, 'status:applied', { targetId, isEnemy: true, targetName: enemy.name, statusType: 'poison', duration: poisonResult.duration, sourceId: characterId, sourceName: player.characterName });
                     }
+                } else {
+                    logger.info(`[ENVENOM] ${enemy.name}(${targetId}) immune to poison (boss=${isBoss} undead=${isUndead})`);
                 }
             }
 
@@ -12181,18 +12525,23 @@ io.on('connection', (socket) => {
                 socket.emit('combat:auto_attack_stopped', { reason: 'Back Slide' });
             }
 
-            const currentPos = await getPlayerPosition(characterId);
-            if (currentPos) {
+            // Use in-memory position (always available from player:position handler, no Redis dependency)
+            const curX = player.lastX;
+            const curY = player.lastY;
+            const curZ = player.lastZ;
+            if (curX !== undefined && curY !== undefined) {
                 // Use last movement direction; fallback to negative Y (south) if no movement recorded
                 const dirX = player.lastDirX || 0;
                 const dirY = player.lastDirY || -1;
                 const magnitude = Math.sqrt(dirX * dirX + dirY * dirY) || 1;
                 // Slide BACKWARD (opposite to facing): subtract normalized direction * 250 UE (5 cells)
-                const newX = currentPos.x - (dirX / magnitude) * 250;
-                const newY = currentPos.y - (dirY / magnitude) * 250;
-                const newZ = currentPos.z;
+                const newX = curX - (dirX / magnitude) * 250;
+                const newY = curY - (dirY / magnitude) * 250;
+                const newZ = curZ || 0;
 
-                // Update server-side position state + Redis cache (like Back Stab does)
+                logger.info(`[BACKSLIDE] char=${characterId} from=(${curX.toFixed(0)},${curY.toFixed(0)},${(curZ||0).toFixed(0)}) dir=(${dirX.toFixed(1)},${dirY.toFixed(1)}) to=(${newX.toFixed(0)},${newY.toFixed(0)},${newZ.toFixed(0)})`);
+
+                // Update server-side position state + Redis cache
                 player.lastX = newX;
                 player.lastY = newY;
                 player.lastZ = newZ;
@@ -12210,6 +12559,8 @@ io.on('connection', (socket) => {
                     isMounted: player.isMounted || false,
                     timestamp: Date.now()
                 });
+            } else {
+                logger.warn(`[BACKSLIDE] char=${characterId} — no position data, cannot teleport`);
             }
 
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
@@ -12357,7 +12708,8 @@ io.on('connection', (socket) => {
 
             // Deduct zeny before the helper (helper handles SP + delays)
             player.zeny = (player.zeny || 0) - zenyCost;
-            try { await pool.query('UPDATE characters SET zeny = $1 WHERE id = $2', [player.zeny, characterId]); } catch (e) { logger.error(`[MAMMONITE] Zeny update error: ${e.message}`); }
+            player.zuzucoin = player.zeny; // Keep in sync
+            try { await pool.query('UPDATE characters SET zuzucoin = $1 WHERE character_id = $2', [player.zeny, characterId]); } catch (e) { logger.error(`[MAMMONITE] Zeny update error: ${e.message}`); }
             socket.emit('inventory:zeny_update', { zeny: player.zeny });
 
             await executePhysicalSkillOnEnemy(player, characterId, socket, skill, skillId, learnedLevel, levelData, effectVal, spCost, targetId);
@@ -12469,6 +12821,13 @@ io.on('connection', (socket) => {
             broadcastToZone(player.zone || 'prontera_south', 'skill:buff_applied', { targetId: characterId, targetName: player.characterName, isEnemy: false, casterId: characterId, casterName: player.characterName, skillId, buffName: 'Loud Exclamation', duration: duration || 300000, effects: { strBonus: effectVal } });
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
             socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
+            // Re-emit stats so STR bonus appears in the stats panel immediately
+            const leEffective = getEffectiveStats(player);
+            const leDerived = calculateDerivedStats(leEffective);
+            const leFinalAspd = Math.min(COMBAT.ASPD_CAP, leDerived.aspd + (player.weaponAspdMod || 0));
+            socket.emit('player:stats', buildFullStatsPayload(characterId, player, leEffective, leDerived, leFinalAspd));
+            // Update weight too (STR affects max weight)
+            emitWeightStatus(characterId, player);
             return;
         }
 
@@ -12625,24 +12984,29 @@ io.on('connection', (socket) => {
             const ssAtkInfo = getAttackerInfo(player);
             ssAtkInfo.buffMods = ssAtkMods;
 
-            // Line AoE: find enemies along the line from caster to target (within 50 UE unit width tolerance)
-            const lineDx = primaryTarget.x - attackerPos.x;
-            const lineDy = primaryTarget.y - attackerPos.y;
+            // Line AoE (rAthena KN_SPEARSTAB): hit primary target, then scan 4 cells
+            // from target position BACK TOWARD the caster (1-cell-wide line).
+            // Direction: target -> caster. Enemies in those 4 cells also take damage + knockback.
+            // Adapted for continuous coordinates: perpendicular distance from line, max 200 UE depth.
+            const lineDx = attackerPos.x - primaryTarget.x; // target-to-caster direction
+            const lineDy = attackerPos.y - primaryTarget.y;
             const lineLen = Math.sqrt(lineDx * lineDx + lineDy * lineDy);
             const lineNormX = lineLen > 0 ? lineDx / lineLen : 0;
             const lineNormY = lineLen > 0 ? lineDy / lineLen : 0;
-            const LINE_WIDTH = 50; // perpendicular tolerance in UE units
+            const SS_LINE_DEPTH = 200; // 4 cells toward caster from target
+            const SS_LINE_WIDTH = 75;  // 1.5 cell perpendicular tolerance (continuous coords)
 
             const ssTargets = [targetId]; // primary always included
             for (const [eid, enemy] of enemies.entries()) {
                 if (eid === targetId || enemy.isDead || enemy.zone !== ssZone) continue;
-                // Project enemy position onto line
-                const toDx = enemy.x - attackerPos.x, toDy = enemy.y - attackerPos.y;
+                // Vector from target to this enemy
+                const toDx = enemy.x - primaryTarget.x, toDy = enemy.y - primaryTarget.y;
+                // Project onto the target-to-caster line direction
                 const proj = toDx * lineNormX + toDy * lineNormY;
-                if (proj < 0 || proj > lineLen) continue; // behind caster or past target
-                // Perpendicular distance from line
+                if (proj < -25 || proj > SS_LINE_DEPTH) continue; // not in the 4-cell scan range
+                // Perpendicular distance from the line
                 const perpDist = Math.abs(toDx * (-lineNormY) + toDy * lineNormX);
-                if (perpDist <= LINE_WIDTH) ssTargets.push(eid);
+                if (perpDist <= SS_LINE_WIDTH) ssTargets.push(eid);
             }
 
             for (const eid of ssTargets) {
@@ -12869,6 +13233,11 @@ io.on('connection', (socket) => {
                 effects: { aspdIncrease: 30 }
             });
 
+            // Send stats update so ASPD/CRI/HIT changes appear in stats window
+            const thqEffStats = getEffectiveStats(player);
+            const thqDerived = roDerivedStats(thqEffStats);
+            socket.emit('player:stats', buildFullStatsPayload(characterId, player, thqEffStats, thqDerived, Math.min(COMBAT.ASPD_CAP, thqDerived.aspd + (player.weaponAspdMod || 0))));
+
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
             socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
             return;
@@ -12899,9 +13268,11 @@ io.on('connection', (socket) => {
             return;
         }
 
-        // --- BOWLING BASH (ID 707) — Always hits TWICE, 3x3 AoE splash, knockback 1 ---
-        // RO Classic: No weapon restriction. Two independent damage results. (100+40*Lv)% ATK per hit.
-        // SP: 12+lv. Knockback 1 on primary, splash hits secondary targets once.
+        // --- BOWLING BASH (ID 707) — Chain reaction knockback + splash (rAthena pre-re) ---
+        // rAthena: Primary target hit once + knocked back cell-by-cell. At each cell, 3x3 splash
+        // check — if enemies found, stop knockback, hit those enemies recursively. Target gets a
+        // second "self-collision" hit if it collides with others. Chain direction is RANDOM for
+        // secondary targets. Knockback distance c = floor((skillLv - depth + 1) / 2).
         if (skill.name === 'bowling_bash') {
             if (!targetId || !isEnemy) { socket.emit('skill:error', { message: 'No enemy target selected' }); return; }
 
@@ -12921,145 +13292,126 @@ io.on('connection', (socket) => {
             const bbAtkMods = getBuffStatModifiers(player);
             const bbAtkInfo = getAttackerInfo(player);
             bbAtkInfo.buffMods = bbAtkMods;
-            const bbDefMods = getCombinedModifiers(bbPrimary);
-            const bbTargetInfo = getEnemyTargetInfo(bbPrimary);
-            bbTargetInfo.buffMods = bbDefMods;
+            const bbHitSet = new Set(); // Track already-hit enemies (rAthena: bowling_db)
+            const BB_SPLASH = 75; // 3x3 = 1 cell radius = ~75 UE (continuous coords)
+            const CELL_SIZE = 50;
+            // rAthena 8-direction vectors (dir 0-7): S,SW,W,NW,N,NE,E,SE
+            const DIR_X = [0, -1, -1, -1, 0, 1, 1, 1];
+            const DIR_Y = [1, 1, 0, -1, -1, -1, 0, 1];
 
-            // Two independent damage calculations on primary target
-            const bbResult1 = calculateSkillDamage(
-                getEffectiveStats(player), bbPrimary.stats, bbPrimary.hardDef || 0,
-                effectVal, bbAtkMods, bbDefMods, bbTargetInfo, bbAtkInfo, { skillElement: null }
-            );
-            const bbResult2 = calculateSkillDamage(
-                getEffectiveStats(player), bbPrimary.stats, bbPrimary.hardDef || 0,
-                effectVal, bbAtkMods, bbDefMods, bbTargetInfo, bbAtkInfo, { skillElement: null }
-            );
-
-            // Apply hit 1 to primary
-            let bbHit1Damage = bbResult1.isMiss ? 0 : bbResult1.damage;
-
-            // Check for Lex Aeterna between hits — consumes on first hit and doubles it
-            if (bbHit1Damage > 0 && bbPrimary.activeBuffs) {
-                const lexBuff = bbPrimary.activeBuffs.find(b => b.name === 'lex_aeterna' && Date.now() < b.expiresAt);
-                if (lexBuff) {
-                    bbHit1Damage = bbHit1Damage * 2;
-                    removeBuff(bbPrimary, 'lex_aeterna');
-                    broadcastToZone(bbZone, 'skill:buff_removed', { targetId, isEnemy: true, buffName: 'lex_aeterna', reason: 'consumed' });
-                }
+            // Get the closest 8-direction index from a vector
+            function getDir8(fx, fy) {
+                const len = Math.sqrt(fx * fx + fy * fy);
+                if (len < 0.01) return 0;
+                const nx = fx / len, ny = fy / len;
+                const angle = Math.atan2(ny, nx); // radians
+                // Map angle to 0-7 direction index
+                const idx = Math.round(angle / (Math.PI / 4));
+                return ((idx % 8) + 8) % 8;
             }
 
-            // Apply hit 2 to primary (Lex Aeterna already consumed)
-            const bbHit2Damage = bbResult2.isMiss ? 0 : bbResult2.damage;
-            const bbTotalPrimary = bbHit1Damage + bbHit2Damage;
-
-            if (bbTotalPrimary > 0) {
-                bbPrimary.health = Math.max(0, bbPrimary.health - bbTotalPrimary);
-                bbPrimary.lastDamageTime = Date.now();
-                if (typeof setEnemyAggro === 'function') setEnemyAggro(bbPrimary, characterId, 'skill');
-                const broken = checkDamageBreakStatuses(bbPrimary);
-                for (const bt of broken) {
-                    broadcastToZone(bbZone, 'status:removed', { targetId, isEnemy: true, statusType: bt, reason: 'damage_break' });
-                    broadcastToZone(bbZone, 'skill:buff_removed', { targetId, isEnemy: true, buffName: bt, reason: 'damage_break' });
+            // Helper: deal BB damage to an enemy, broadcast, return result
+            function bbDealDamage(enemy, eid, isLexEligible) {
+                const defMods = getCombinedModifiers(enemy);
+                const tInfo = getEnemyTargetInfo(enemy);
+                tInfo.buffMods = defMods;
+                const result = calculateSkillDamage(
+                    getEffectiveStats(player), enemy.stats, enemy.hardDef || 0,
+                    effectVal, bbAtkMods, defMods, tInfo, bbAtkInfo, { skillElement: null }
+                );
+                let dmg = result.isMiss ? 0 : result.damage;
+                // Lex Aeterna check (only on first hit of a target)
+                if (isLexEligible && dmg > 0 && enemy.activeBuffs) {
+                    const lex = enemy.activeBuffs.find(b => b.name === 'lex_aeterna' && Date.now() < b.expiresAt);
+                    if (lex) { dmg *= 2; removeBuff(enemy, 'lex_aeterna'); broadcastToZone(bbZone, 'skill:buff_removed', { targetId: eid, isEnemy: true, buffName: 'lex_aeterna', reason: 'consumed' }); }
                 }
-            }
-
-            // Emit hit 1 (may include Lex Aeterna doubled damage)
-            broadcastToZone(bbZone, 'skill:effect_damage', {
-                attackerId: characterId, attackerName: player.characterName,
-                targetId, targetName: bbPrimary.name, isEnemy: true,
-                skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: bbResult1.element || 'neutral',
-                damage: bbResult1.isMiss ? 0 : bbHit1Damage, isCritical: bbResult1.isCritical, isMiss: bbResult1.isMiss, hitType: bbResult1.hitType,
-                targetHealth: bbPrimary.health, targetMaxHealth: bbPrimary.maxHealth,
-                attackerX: attackerPos.x, attackerY: attackerPos.y, attackerZ: attackerPos.z,
-                targetX: bbPrimary.x, targetY: bbPrimary.y, targetZ: bbPrimary.z,
-                hits: 2, hitNumber: 1, totalHits: 2,
-                timestamp: Date.now()
-            });
-            // Emit hit 2 after short delay
-            setTimeout(() => {
+                if (dmg > 0) {
+                    enemy._lastDamageDealt = dmg;
+                    enemy.health = Math.max(0, enemy.health - dmg);
+                    enemy.lastDamageTime = Date.now();
+                    if (typeof setEnemyAggro === 'function') setEnemyAggro(enemy, characterId, 'skill');
+                    const broken = checkDamageBreakStatuses(enemy);
+                    for (const bt of broken) {
+                        broadcastToZone(bbZone, 'status:removed', { targetId: eid, isEnemy: true, statusType: bt, reason: 'damage_break' });
+                        broadcastToZone(bbZone, 'skill:buff_removed', { targetId: eid, isEnemy: true, buffName: bt, reason: 'damage_break' });
+                    }
+                }
                 broadcastToZone(bbZone, 'skill:effect_damage', {
                     attackerId: characterId, attackerName: player.characterName,
-                    targetId, targetName: bbPrimary.name, isEnemy: true,
-                    skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: bbResult2.element || 'neutral',
-                    damage: bbResult2.isMiss ? 0 : bbResult2.damage, isCritical: bbResult2.isCritical, isMiss: bbResult2.isMiss, hitType: bbResult2.hitType,
-                    targetHealth: bbPrimary.health, targetMaxHealth: bbPrimary.maxHealth,
-                    targetX: bbPrimary.x, targetY: bbPrimary.y, targetZ: bbPrimary.z,
-                    hits: 2, hitNumber: 2, totalHits: 2,
+                    targetId: eid, targetName: enemy.name, isEnemy: true,
+                    skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: result.element || 'neutral',
+                    damage: result.isMiss ? 0 : dmg, isCritical: result.isCritical, isMiss: result.isMiss, hitType: result.hitType,
+                    targetHealth: enemy.health, targetMaxHealth: enemy.maxHealth,
+                    attackerX: attackerPos.x, attackerY: attackerPos.y, attackerZ: attackerPos.z,
+                    targetX: enemy.x, targetY: enemy.y, targetZ: enemy.z,
                     timestamp: Date.now()
                 });
-            }, 150);
-
-            // Knockback primary 1 cell
-            knockbackTarget(bbPrimary, attackerPos.x, attackerPos.y, 1, bbZone, io);
-
-            broadcastToZone(bbZone, 'enemy:health_update', { enemyId: targetId, health: bbPrimary.health, maxHealth: bbPrimary.maxHealth, inCombat: true });
-
-            // Bowling Bash chain reaction splash (rAthena pre-renewal: recursive)
-            // Secondary targets in 3x3 around knockback position get hit once + knocked back.
-            // Their knockback can hit more targets (chain reaction), up to learnedLevel depth.
-            const BB_SPLASH_RADIUS = 75;
-            const bbHitSet = new Set([targetId]); // Track already-hit enemies to prevent infinite loops
-            const bbChainQueue = [{ sourceX: bbPrimary.x, sourceY: bbPrimary.y, depth: 0 }];
-            const maxChainDepth = learnedLevel; // Max chain depth = skill level
-
-            while (bbChainQueue.length > 0) {
-                const { sourceX, sourceY, depth } = bbChainQueue.shift();
-                if (depth >= maxChainDepth) continue;
-
-                for (const [eid, enemy] of enemies.entries()) {
-                    if (bbHitSet.has(eid) || enemy.isDead || enemy.zone !== bbZone) continue;
-                    const sdx = sourceX - enemy.x, sdy = sourceY - enemy.y;
-                    if (Math.sqrt(sdx * sdx + sdy * sdy) > BB_SPLASH_RADIUS) continue;
-
-                    bbHitSet.add(eid);
-
-                    const splashDefMods = getCombinedModifiers(enemy);
-                    const splashTargetInfo = getEnemyTargetInfo(enemy);
-                    splashTargetInfo.buffMods = splashDefMods;
-
-                    const splashResult = calculateSkillDamage(
-                        getEffectiveStats(player), enemy.stats, enemy.hardDef || 0,
-                        effectVal, bbAtkMods, splashDefMods, splashTargetInfo, bbAtkInfo, { skillElement: null }
-                    );
-
-                    if (!splashResult.isMiss) {
-                        enemy._lastDamageDealt = splashResult.damage;
-                        enemy.health = Math.max(0, enemy.health - splashResult.damage);
-                        enemy.lastDamageTime = Date.now();
-                        if (typeof setEnemyAggro === 'function') setEnemyAggro(enemy, characterId, 'skill');
-                        const broken = checkDamageBreakStatuses(enemy);
-                        for (const bt of broken) {
-                            broadcastToZone(bbZone, 'status:removed', { targetId: eid, isEnemy: true, statusType: bt, reason: 'damage_break' });
-                            broadcastToZone(bbZone, 'skill:buff_removed', { targetId: eid, isEnemy: true, buffName: bt, reason: 'damage_break' });
-                        }
-                    }
-
-                    broadcastToZone(bbZone, 'skill:effect_damage', {
-                        attackerId: characterId, attackerName: player.characterName,
-                        targetId: eid, targetName: enemy.name, isEnemy: true,
-                        skillId, skillName: skill.displayName, skillLevel: learnedLevel, element: splashResult.element || 'neutral',
-                        damage: splashResult.isMiss ? 0 : splashResult.damage, isCritical: splashResult.isCritical, isMiss: splashResult.isMiss, hitType: splashResult.hitType,
-                        targetHealth: enemy.health, targetMaxHealth: enemy.maxHealth,
-                        attackerX: attackerPos.x, attackerY: attackerPos.y, attackerZ: attackerPos.z,
-                        targetX: enemy.x, targetY: enemy.y, targetZ: enemy.z,
-                        timestamp: Date.now()
-                    });
-                    broadcastToZone(bbZone, 'enemy:health_update', { enemyId: eid, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: true });
-
-                    // Knockback secondary target 1 cell and queue chain reaction check
-                    if (!splashResult.isMiss && !enemy.isDead) {
-                        const kbResult = knockbackTarget(enemy, sourceX, sourceY, 1, bbZone, io);
-                        if (kbResult) {
-                            // Queue chain reaction check at new position
-                            bbChainQueue.push({ sourceX: enemy.x, sourceY: enemy.y, depth: depth + 1 });
-                        }
-                    }
-
-                    if (enemy.health <= 0) await processEnemyDeathFromSkill(enemy, player, characterId, io);
-                }
+                broadcastToZone(bbZone, 'enemy:health_update', { enemyId: eid, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: true });
+                return result;
             }
 
-            if (bbPrimary.health <= 0) await processEnemyDeathFromSkill(bbPrimary, player, characterId, io);
+            // Helper: find enemies in 3x3 splash around a position (excluding already-hit)
+            function bbFindSplashTargets(cx, cy) {
+                const found = [];
+                for (const [eid, enemy] of enemies.entries()) {
+                    if (bbHitSet.has(eid) || enemy.isDead || enemy.zone !== bbZone) continue;
+                    const sdx = Math.abs(cx - enemy.x), sdy = Math.abs(cy - enemy.y);
+                    if (sdx <= BB_SPLASH && sdy <= BB_SPLASH) found.push(eid);
+                }
+                return found;
+            }
+
+            // rAthena chain reaction: knock target cell-by-cell, splash check at each step
+            async function bbChainReaction(eid, depth, dir) {
+                if (bbHitSet.has(eid)) return;
+                bbHitSet.add(eid);
+                const enemy = enemies.get(eid);
+                if (!enemy || enemy.isDead) return;
+
+                // Boss immunity to knockback — still takes damage but no chain
+                const isBoss = enemy.modeFlags && enemy.modeFlags.isBoss;
+
+                // Knockback distance: c = floor((skillLv - depth + 1) / 2)
+                const c = Math.floor((learnedLevel - depth + 1) / 2);
+                let collided = false;
+
+                // Knock back cell-by-cell, splash check at each step
+                if (!isBoss) {
+                    for (let step = 0; step < c; step++) {
+                        // Push 1 cell in knockback direction (8-dir system)
+                        enemy.x += DIR_X[dir] * CELL_SIZE;
+                        enemy.y += DIR_Y[dir] * CELL_SIZE;
+
+                        // Broadcast position update
+                        if (io) broadcastToZone(bbZone, 'enemy:moved', { enemyId: eid, x: enemy.x, y: enemy.y, z: enemy.z || 0 });
+
+                        // 3x3 splash check at new position
+                        const splashTargets = bbFindSplashTargets(enemy.x, enemy.y);
+                        if (splashTargets.length > 0) {
+                            collided = true;
+                            // Self-collision: extra hit on the knocked target (rAthena line 109)
+                            bbDealDamage(enemy, eid, false);
+                            // Process each splashed enemy recursively
+                            for (const splashEid of splashTargets) {
+                                // Random knockback direction for chain targets (rAthena: rnd()%8)
+                                const chainDir = Math.floor(Math.random() * 8);
+                                await bbChainReaction(splashEid, depth + 1, chainDir);
+                            }
+                            break; // Stop knockback after collision
+                        }
+                    }
+                }
+
+                // Original/chain hit (rAthena line 114 — always happens)
+                bbDealDamage(enemy, eid, true);
+
+                if (enemy.health <= 0) await processEnemyDeathFromSkill(enemy, player, characterId, io);
+            }
+
+            // Initial knockback direction: away from caster (rAthena: opposite of caster facing)
+            const initDir = getDir8(bbPrimary.x - attackerPos.x, bbPrimary.y - attackerPos.y);
+
+            await bbChainReaction(targetId, 0, initDir);
 
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
             socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
@@ -13101,9 +13453,13 @@ io.on('connection', (socket) => {
                 const caDist2 = Math.sqrt(caDx2*caDx2 + caDy2*caDy2);
                 const caNx = caDist2 > 0 ? caDx2/caDist2 : 0, caNy = caDist2 > 0 ? caDy2/caDist2 : 0;
                 const newPosX = caEnemyPost.x - caNx * 50, newPosY = caEnemyPost.y - caNy * 50;
-                await pool.query('UPDATE characters SET position_x = $1, position_y = $2 WHERE id = $3', [newPosX, newPosY, characterId]);
+                // Update in-memory position
+                player.lastX = newPosX;
+                player.lastY = newPosY;
+                player.lastZ = caEnemyPost.z || player.lastZ || 0;
+                await pool.query('UPDATE characters SET x = $1, y = $2 WHERE character_id = $3', [newPosX, newPosY, characterId]);
                 const caZone = player.zone || 'prontera_south';
-                broadcastToZone(caZone, 'player:moved', { characterId, x: newPosX, y: newPosY, z: caEnemyPost.z || 0, isTeleport: true });
+                broadcastToZone(caZone, 'player:moved', { characterId, x: newPosX, y: newPosY, z: player.lastZ, isTeleport: true });
 
                 // Knockback 1 cell in random direction (pre-renewal)
                 if (caResult && !caResult.result.isMiss && caEnemyPost && !caEnemyPost.isDead) {
@@ -13726,6 +14082,11 @@ io.on('connection', (socket) => {
                 skillId, buffName: 'Spear Quicken', duration: sqDuration,
                 effects: { aspdIncrease: sqAspdBonus }
             });
+            // Send stats update so ASPD changes appear in stats window
+            const sqEffStats = getEffectiveStats(player);
+            const sqDerived = roDerivedStats(sqEffStats);
+            socket.emit('player:stats', buildFullStatsPayload(characterId, player, sqEffStats, sqDerived, Math.min(COMBAT.ASPD_CAP, sqDerived.aspd + (player.weaponAspdMod || 0))));
+
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
             socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
             return;
@@ -15131,13 +15492,13 @@ io.on('connection', (socket) => {
                 // --- Merchant (1) ---
                 { id: 602, name: 'mammonite', displayName: 'Mammonite', type: 'physical' },
                 // --- Knight (7) ---
-                { id: 700, name: 'pierce', displayName: 'Pierce', type: 'physical' },
-                { id: 701, name: 'brandish_spear', displayName: 'Brandish Spear', type: 'physical' },
+                { id: 701, name: 'pierce', displayName: 'Pierce', type: 'physical' },
                 { id: 702, name: 'spear_stab', displayName: 'Spear Stab', type: 'physical' },
-                { id: 703, name: 'spear_boomerang', displayName: 'Spear Boomerang', type: 'physical' },
-                { id: 704, name: 'two_hand_quicken', displayName: 'Two-Hand Quicken', type: 'self_buff' },
-                { id: 705, name: 'auto_counter', displayName: 'Auto Counter', type: 'self_buff' },
-                { id: 706, name: 'bowling_bash', displayName: 'Bowling Bash', type: 'physical' },
+                { id: 703, name: 'brandish_spear', displayName: 'Brandish Spear', type: 'physical' },
+                { id: 704, name: 'spear_boomerang', displayName: 'Spear Boomerang', type: 'physical' },
+                { id: 705, name: 'two_hand_quicken', displayName: 'Two-Hand Quicken', type: 'self_buff' },
+                { id: 706, name: 'auto_counter', displayName: 'Auto Counter', type: 'self_buff' },
+                { id: 707, name: 'bowling_bash', displayName: 'Bowling Bash', type: 'physical' },
                 // --- Priest (13) ---
                 { id: 1000, name: 'impositio_manus', displayName: 'Impositio Manus', type: 'self_buff' },
                 { id: 1001, name: 'suffragium', displayName: 'Suffragium', type: 'self_buff' },
@@ -15458,6 +15819,7 @@ io.on('connection', (socket) => {
                             if (targetEnemy && !targetEnemy.isDead) {
                                 const stolenZeny = Math.floor(Math.random() * 500) + 100 + (targetEnemy.level || 1) * 10;
                                 player.zuzucoin = (player.zuzucoin || 0) + stolenZeny;
+                                player.zeny = player.zuzucoin; // Keep in sync
                                 socket.emit('inventory:data', { zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
                                 broadcastToZone(abraZone, 'chat:receive', JSON.stringify({
                                     type: 'system', message: `Abracadabra: Gold Digger! ${player.characterName} stole ${stolenZeny} Zeny!`
@@ -19060,6 +19422,7 @@ io.on('connection', (socket) => {
                     enemy.zenyStolen = true;
                     const stolenZeny = Math.floor(Math.random() * (2 * monLv + 1)) + 8 * monLv;
                     player.zeny = (player.zeny || 0) + stolenZeny;
+                    player.zuzucoin = player.zeny; // Keep in sync
                     socket.emit('zeny:update', { zeny: player.zeny });
                     socket.emit('chat:receive', { type: 'chat:receive', channel: 'SYSTEM', senderId: 0, senderName: 'SYSTEM', message: `Stole ${stolenZeny} Zeny from ${enemy.name}!`, timestamp: Date.now() });
                     broadcastToZone(zone, 'skill:effect_damage', {
@@ -19297,6 +19660,11 @@ io.on('connection', (socket) => {
                 skillId, buffName: 'Adrenaline Rush', duration: buffDuration,
                 effects: { aspdMultiplier: 1.3 }
             });
+            // Send stats update so ASPD changes appear in stats window
+            const arEffStats = getEffectiveStats(player);
+            const arDerived = roDerivedStats(arEffStats);
+            socket.emit('player:stats', buildFullStatsPayload(characterId, player, arEffStats, arDerived, Math.min(COMBAT.ASPD_CAP, arDerived.aspd + (player.weaponAspdMod || 0))));
+
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
             socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
             return;
@@ -19566,14 +19934,20 @@ io.on('connection', (socket) => {
             // Scan inventory for unidentified items
             try {
                 const unidResult = await pool.query(
-                    `SELECT ci.inventory_id, ci.item_id, i.name, i.item_type, ci.slot_index
+                    `SELECT ci.inventory_id, ci.item_id, i.name, i.item_type, ci.slot_index, i.icon, i.equip_slot, i.sub_type
                      FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
                      WHERE ci.character_id = $1 AND ci.identified = false`, [characterId]
                 );
                 if (unidResult.rows.length === 0) {
                     socket.emit('skill:error', { message: 'No unidentified items in inventory.' });
                 } else {
-                    socket.emit('identify:item_list', { items: unidResult.rows });
+                    // Remap snake_case to camelCase for client
+                    const items = unidResult.rows.map(r => ({
+                        inventory_id: r.inventory_id, item_id: r.item_id,
+                        name: r.name, item_type: r.item_type, slot_index: r.slot_index,
+                        icon: r.icon || '', equip_slot: r.equip_slot || '', weapon_type: r.sub_type || ''
+                    }));
+                    socket.emit('identify:item_list', { items });
                 }
             } catch (e) {
                 logger.error(`[IDENTIFY] Error scanning unidentified items: ${e.message}`);
@@ -19637,6 +20011,10 @@ io.on('connection', (socket) => {
                         });
                     }
                 }
+                if (craftable.length === 0) {
+                    socket.emit('skill:error', { message: 'You have no items that can be converted into arrows.' });
+                    return;
+                }
                 socket.emit('arrow_crafting:recipes', { craftable });
                 return;
             }
@@ -19667,9 +20045,10 @@ io.on('connection', (socket) => {
             const srcWeight = srcDef ? srcDef.weight : 0;
             player.currentWeight = Math.max(0, player.currentWeight - srcWeight + arrowWeight * recipe.qty);
 
-            // Refresh inventory
+            // Refresh inventory — emit updated item list so client sees the new arrows
             const inv = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: inv, zuzucoin: player.zuzucoin || player.zeny, currentWeight: player.currentWeight, maxWeight: getPlayerMaxWeight(player) });
+            logger.info(`[ARROW_CRAFT] Refreshing inventory for ${player.characterName}: ${inv.length} items`);
+            socket.emit('inventory:data', { items: inv, zuzucoin: player.zuzucoin || player.zeny || 0, currentWeight: player.currentWeight, maxWeight: getPlayerMaxWeight(player) });
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost: 0, remainingMana: player.mana, maxMana: player.maxMana });
             socket.emit('arrow_crafting:result', {
                 success: true, sourceName: srcItem.name,
@@ -21949,14 +22328,19 @@ io.on('connection', (socket) => {
             if (pendingItemSkill === 'MC_IDENTIFY') {
                 try {
                     const unidResult = await pool.query(
-                        `SELECT ci.inventory_id, ci.item_id, i.name, i.item_type, ci.slot_index
+                        `SELECT ci.inventory_id, ci.item_id, i.name, i.item_type, ci.slot_index, i.icon, i.equip_slot, i.sub_type
                          FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
                          WHERE ci.character_id = $1 AND ci.identified = false`, [characterId]
                     );
                     if (unidResult.rows.length === 0) {
                         socket.emit('skill:error', { message: 'No unidentified items in inventory.' });
                     } else {
-                        socket.emit('identify:item_list', { items: unidResult.rows, source: 'magnifier' });
+                        const items = unidResult.rows.map(r => ({
+                            inventory_id: r.inventory_id, item_id: r.item_id,
+                            name: r.name, item_type: r.item_type, slot_index: r.slot_index,
+                            icon: r.icon || '', equip_slot: r.equip_slot || '', weapon_type: r.sub_type || ''
+                        }));
+                        socket.emit('identify:item_list', { items, source: 'magnifier' });
                     }
                 } catch (e) { logger.error(`[IDENTIFY] Magnifier error: ${e.message}`); }
             }
@@ -22475,12 +22859,9 @@ io.on('connection', (socket) => {
                 logger.warn(`[DB] Could not update max_health/max_mana for char ${characterId}: ${err.message}`);
             }
             
-            // Send updated stats (effective values so UI shows total stats including equipment)
-            const finalAspd = Math.min(COMBAT.ASPD_CAP, derived.aspd + (player.weaponAspdMod || 0));
-            socket.emit('player:stats', buildFullStatsPayload(characterId, player, effectiveStats, derived, finalAspd));
-            
-            // Broadcast updated maxHealth so other clients in zone show correct HP bars
             const equipZone = player.zone || 'prontera_south';
+
+            // Broadcast updated maxHealth so other clients in zone show correct HP bars
             broadcastToZone(equipZone, 'combat:health_update', {
                 characterId, health: player.health, maxHealth: player.maxHealth,
                 mana: player.mana, maxMana: player.maxMana
@@ -22535,6 +22916,12 @@ io.on('connection', (socket) => {
                 }
             }
 
+            // Send updated stats AFTER all buff cancellations so ASPD/CRI/HIT reflect removed buffs
+            const finalEffStats = getEffectiveStats(player);
+            const finalDerived = roDerivedStats(finalEffStats);
+            const finalAspd = Math.min(COMBAT.ASPD_CAP, finalDerived.aspd + (player.weaponAspdMod || 0));
+            socket.emit('player:stats', buildFullStatsPayload(characterId, player, finalEffStats, finalDerived, finalAspd));
+
             // Send updated inventory
             const inventory = await getPlayerInventory(characterId);
             socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
@@ -22546,7 +22933,7 @@ io.on('connection', (socket) => {
                 weaponType: item.weapon_type, attackRange: player.attackRange,
                 aspd: player.aspd, attackIntervalMs: getAttackIntervalMs(player.aspd),
                 maxHealth: player.maxHealth, maxMana: player.maxMana,
-                critical: derived.critical, hit: derived.hit, flee: derived.flee
+                critical: finalDerived.critical, hit: finalDerived.hit, flee: finalDerived.flee
             });
             
         } catch (err) {
@@ -22581,7 +22968,8 @@ io.on('connection', (socket) => {
             // Repair
             await pool.query('UPDATE character_inventory SET is_broken = false WHERE inventory_id = $1', [inventoryId]);
             player.zeny = (player.zeny || 0) - REPAIR_COST;
-            await pool.query('UPDATE characters SET zeny = $1 WHERE id = $2', [player.zeny, characterId]);
+            player.zuzucoin = player.zeny; // Keep in sync
+            await pool.query('UPDATE characters SET zuzucoin = $1 WHERE character_id = $2', [player.zeny, characterId]);
 
             socket.emit('equipment:repaired', { inventoryId, zenyRemaining: player.zeny });
             logger.info(`[REPAIR] ${player.characterName} repaired item ${inventoryId} for ${REPAIR_COST} Zeny`);
@@ -22789,6 +23177,62 @@ io.on('connection', (socket) => {
         }
     });
 
+    // Warp Portal destination confirmation (client selected a destination from the popup)
+    socket.on('warp_portal:confirm', async (data) => {
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+
+        const { characterId, player } = playerInfo;
+        const destIndex = parseInt(data.destIndex);
+        if (isNaN(destIndex) || destIndex < 0 || !player._pendingWarpPortal) {
+            socket.emit('skill:error', { message: 'No pending warp portal' });
+            return;
+        }
+
+        const pending = player._pendingWarpPortal;
+        player._pendingWarpPortal = null;
+
+        const destinations = pending.destinations;
+        if (destIndex >= destinations.length) {
+            socket.emit('skill:error', { message: 'Invalid destination' });
+            return;
+        }
+
+        const dest = destinations[destIndex];
+
+        // Max 3 portals per caster
+        const existingPortals = [];
+        for (const [eid, eff] of activeGroundEffects.entries()) {
+            if (eff.type === 'warp_portal' && eff.casterId === characterId && Date.now() < eff.expiresAt) {
+                existingPortals.push({ id: eid, createdAt: eff.createdAt });
+            }
+        }
+        if (existingPortals.length >= 3) {
+            existingPortals.sort((a, b) => a.createdAt - b.createdAt);
+            const oldest = existingPortals[0];
+            removeGroundEffect(oldest.id);
+            broadcastToZone(player.zone || 'prontera_south', 'skill:ground_effect_removed', { effectId: oldest.id, type: 'warp_portal', reason: 'limit_reached' });
+        }
+
+        const portalId = createGroundEffect({
+            type: 'warp_portal', casterId: characterId, casterName: player.characterName,
+            x: pending.groundX, y: pending.groundY, z: pending.groundZ,
+            radius: 100, duration: pending.duration,
+            zone: player.zone, skillId: 410,
+            destZone: dest.zone, destX: dest.x, destY: dest.y, destZ: dest.z,
+            usesRemaining: 8
+        });
+
+        const wpZone = player.zone || 'prontera_south';
+        broadcastToZone(wpZone, 'skill:ground_effect_spawned', {
+            effectId: portalId, type: 'warp_portal', skillId: 410,
+            casterId: characterId, casterName: player.characterName,
+            x: pending.groundX, y: pending.groundY, z: pending.groundZ,
+            radius: 100, duration: pending.duration
+        });
+        logger.info(`[WARP PORTAL] ${player.characterName} created portal → ${dest.name} (${dest.zone})`);
+    });
+
     // Move/reorder an inventory item (persist slot_index for client grid position)
     socket.on('inventory:move', async (data) => {
         const playerInfo = findPlayerBySocketId(socket.id);
@@ -22841,6 +23285,73 @@ io.on('connection', (socket) => {
         } catch (err) {
             logger.error(`[ITEMS] Move error: ${err.message}`);
             socket.emit('inventory:error', { message: 'Failed to move item' });
+        }
+    });
+
+    // Merge two stacks of the same item (drag one stack onto another)
+    socket.on('inventory:merge', async (data) => {
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+
+        const { characterId, player } = playerInfo;
+        const sourceInvId = parseInt(data.sourceInventoryId);
+        const targetInvId = parseInt(data.targetInventoryId);
+
+        if (isNaN(sourceInvId) || isNaN(targetInvId) || sourceInvId === targetInvId) {
+            socket.emit('inventory:error', { message: 'Invalid merge parameters' });
+            return;
+        }
+
+        try {
+            const result = await pool.query(
+                `SELECT ci.inventory_id, ci.item_id, ci.quantity, ci.is_equipped,
+                        i.stackable, i.max_stack, i.name
+                 FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
+                 WHERE ci.inventory_id IN ($1, $2) AND ci.character_id = $3`,
+                [sourceInvId, targetInvId, characterId]
+            );
+
+            if (result.rows.length !== 2) { socket.emit('inventory:error', { message: 'Items not found' }); return; }
+
+            const source = result.rows.find(r => r.inventory_id === sourceInvId);
+            const target = result.rows.find(r => r.inventory_id === targetInvId);
+            if (!source || !target) { socket.emit('inventory:error', { message: 'Items not found' }); return; }
+
+            if (source.item_id !== target.item_id) { socket.emit('inventory:error', { message: 'Cannot merge different items' }); return; }
+            if (!source.stackable) { socket.emit('inventory:error', { message: 'Item is not stackable' }); return; }
+
+            const maxStack = source.max_stack || 30000;
+            if (target.quantity >= maxStack) { socket.emit('inventory:error', { message: 'Target stack is full' }); return; }
+
+            const totalQty = source.quantity + target.quantity;
+            const targetNewQty = Math.min(totalQty, maxStack);
+            const sourceRemaining = totalQty - targetNewQty;
+
+            await pool.query('UPDATE character_inventory SET quantity = $1 WHERE inventory_id = $2', [targetNewQty, targetInvId]);
+
+            if (sourceRemaining <= 0) {
+                await pool.query('DELETE FROM character_inventory WHERE inventory_id = $1', [sourceInvId]);
+            } else {
+                await pool.query('UPDATE character_inventory SET quantity = $1 WHERE inventory_id = $2', [sourceRemaining, sourceInvId]);
+            }
+
+            // If target is equipped ammo, update in-memory ammo state
+            if (target.is_equipped && player.equippedAmmo && player.equippedAmmo.inventoryId === targetInvId) {
+                player.equippedAmmo.quantity = targetNewQty;
+                socket.emit('ammo:equipped', {
+                    itemId: player.equippedAmmo.itemId, name: player.equippedAmmo.name,
+                    atk: player.equippedAmmo.atk, element: player.equippedAmmo.element,
+                    quantity: targetNewQty
+                });
+            }
+
+            logger.info(`[ITEMS] Char ${characterId} merged ${source.name}: ${source.quantity}+${target.quantity}→${targetNewQty}${sourceRemaining > 0 ? ' (overflow: ' + sourceRemaining + ')' : ' (source consumed)'}`);
+
+            const inventory = await getPlayerInventory(characterId);
+            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin || player.zeny || 0, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+        } catch (err) {
+            logger.error(`[ITEMS] Merge error: ${err.message}`);
+            socket.emit('inventory:error', { message: 'Failed to merge items' });
         }
     });
 
@@ -22992,6 +23503,7 @@ io.on('connection', (socket) => {
 
             await client.query('COMMIT');
             player.zuzucoin = newZeny;
+            player.zeny = newZeny; // Keep in sync
 
             logger.info(`[SHOP] ${player.characterName} bought ${quantity}x ${itemDef.name} for ${totalCost}z (remaining: ${newZeny}z)`);
 
@@ -23058,6 +23570,7 @@ io.on('connection', (socket) => {
                 await removeItemFromInventory(inventoryId, sellQty, client);
                 await client.query('COMMIT');
                 player.zuzucoin = newZeny;
+                player.zeny = newZeny; // Keep in sync
             } catch (txErr) {
                 await client.query('ROLLBACK').catch(() => {});
                 client.release();
@@ -23217,6 +23730,7 @@ io.on('connection', (socket) => {
 
             await client.query('COMMIT');
             player.zuzucoin = newZeny;
+            player.zeny = newZeny; // Keep in sync
 
             logger.info(`[SHOP] ${player.characterName} batch-bought: ${boughtItems.map(i => `${i.quantity}x ${i.itemName}`).join(', ')} for ${totalCost}z (remaining: ${newZeny}z)`);
 
@@ -23332,6 +23846,7 @@ io.on('connection', (socket) => {
 
             await client.query('COMMIT');
             player.zuzucoin = newZeny;
+            player.zeny = newZeny; // Keep in sync
 
             logger.info(`[SHOP] ${player.characterName} batch-sold: ${soldItems.map(i => `${i.quantity}x ${i.itemName}`).join(', ')} for ${totalRevenue}z (total: ${newZeny}z)`);
 
@@ -23446,7 +23961,8 @@ io.on('connection', (socket) => {
                 await pool.query('DELETE FROM character_inventory WHERE inventory_id = $1', [oreRow.inventory_id]);
             }
             player.zeny = (player.zeny || 0) - material.zenyFee;
-            await pool.query('UPDATE characters SET zeny = $1 WHERE character_id = $2', [player.zeny, characterId]);
+            player.zuzucoin = player.zeny; // Keep in sync
+            await pool.query('UPDATE characters SET zuzucoin = $1 WHERE character_id = $2', [player.zeny, characterId]);
 
             // Roll success
             const targetRefine = currentRefine + 1;
@@ -23910,6 +24426,7 @@ async function executeCastComplete(characterId, cast) {
             handlers[0]({
                 skillId: cast.skillId, targetId: cast.targetId,
                 isEnemy: cast.isEnemy, _castComplete: true,
+                skillLevel: cast.learnedLevel,
                 groundX: cast.groundX, groundY: cast.groundY, groundZ: cast.groundZ
             });
         }
@@ -24247,6 +24764,13 @@ setInterval(async () => {
                     timestamp: now
                 };
 
+                // Add element modifier for combat log effectiveness display
+                const enemyEleType = enemy.element?.type || 'neutral';
+                const enemyEleLv = enemy.element?.level || 1;
+                if (atkElement !== 'neutral' || enemyEleType !== 'neutral') {
+                    damagePayload.eleMod = getElementModifier(atkElement, enemyEleType, enemyEleLv);
+                }
+
                 if (isMiss && !dualWield) {
                     // Miss/Dodge (single weapon): don't deal damage, still broadcast event
                     broadcastToZone(atkEnemyZone, 'combat:damage', damagePayload);
@@ -24385,13 +24909,19 @@ setInterval(async () => {
                     const mbFireBuff = attacker.activeBuffs?.find(b => b.name === 'magnum_break_fire' && Date.now() < b.expiresAt);
                     if (mbFireBuff) {
                         const fireBonus = Math.floor(damage * 0.20);
-                        const fireEleMod = getElementModifier('fire', (enemy.element?.type || 'neutral'), (enemy.element?.level || 1));
+                        const enemyEleType = enemy.element?.type || 'neutral';
+                        const enemyEleLv = enemy.element?.level || 1;
+                        const fireEleMod = getElementModifier('fire', enemyEleType, enemyEleLv);
                         const fireBonusDmg = Math.max(0, Math.floor(fireBonus * fireEleMod / 100));
                         if (fireBonusDmg > 0) {
                             enemy.health = Math.max(0, enemy.health - fireBonusDmg);
                             damagePayload.damage += fireBonusDmg;
                             damagePayload.targetHealth = enemy.health;
                         }
+                        // Send fire breakdown so client combat log can show it separately
+                        damagePayload.fireBonusDmg = fireBonusDmg;
+                        damagePayload.fireEleMod = fireEleMod;
+                        logger.info(`[MB_FIRE] ${attacker.characterName} fire endow on ${enemy.name}: base=${fireBonus} mod=${fireEleMod}% (fire→${enemyEleType}) final=${fireBonusDmg}`);
                     }
                 }
 
@@ -28888,8 +29418,9 @@ function processWander(enemy, now) {
             enemy.nextWanderTime = now + ENEMY_AI.WANDER_PAUSE_MIN + Math.random() * (ENEMY_AI.WANDER_PAUSE_MAX - ENEMY_AI.WANDER_PAUSE_MIN);
             enemyStopMoving(enemy);
         } else {
-            // Wander at 60% of chase speed (slower, relaxed movement)
-            const wanderSpeed = enemy.moveSpeed * 0.6;
+            // Wander at 60% of chase speed (slower, relaxed movement), apply buff speed mods
+            const wanderMods = getCombinedModifiers(enemy);
+            const wanderSpeed = enemy.moveSpeed * 0.6 * Math.max(0.1, 1 + (wanderMods.moveSpeedBonus || 0) / 100);
             enemyMoveToward(enemy, enemy.wanderTargetX, enemy.wanderTargetY, now, wanderSpeed);
         }
     }
@@ -28996,6 +29527,19 @@ setInterval(async () => {
             if (enemy.modeFlags.aggressive && enemy.aggroRange > 0) {
                 if (now - (enemy.lastAggroScan || 0) >= ENEMY_AI.AGGRO_SCAN_MS) {
                     enemy.lastAggroScan = now;
+                    // DEBUG: Log scan with nearest player distance (every 5 seconds to avoid spam)
+                    if (now - (enemy._lastDebugLog || 0) >= 5000) {
+                        enemy._lastDebugLog = now;
+                        let nearestDist = Infinity, nearestName = 'none';
+                        for (const [cid, p] of connectedPlayers.entries()) {
+                            if (p.isDead || p.zone !== enemy.zone || p.lastX === undefined) continue;
+                            const d = Math.sqrt((enemy.x - p.lastX) ** 2 + (enemy.y - p.lastY) ** 2);
+                            if (d < nearestDist) { nearestDist = d; nearestName = p.characterName; }
+                        }
+                        if (nearestDist < 2000) {
+                            logger.info(`[AGGRO DEBUG] ${enemy.name}(${enemyId}) at (${Math.round(enemy.x)},${Math.round(enemy.y)}) zone=${enemy.zone} — nearest player: ${nearestName} dist=${Math.round(nearestDist)} aggroRange=${enemy.aggroRange}`);
+                        }
+                    }
                     const targetCharId = findAggroTarget(enemy);
                     if (targetCharId) {
                         enemy.targetPlayerId = targetCharId;
@@ -29130,7 +29674,10 @@ setInterval(async () => {
 
             // Move toward target (skip if in hit stun)
             if (!inHitStun) {
-                enemyMoveToward(enemy, targetPos.x, targetPos.y, now, enemy.moveSpeed);
+                // Apply buff speed modifiers (e.g. Decrease AGI -25%)
+                const chaseMods = getCombinedModifiers(enemy);
+                const chaseSpeed = enemy.moveSpeed * Math.max(0.1, 1 + (chaseMods.moveSpeedBonus || 0) / 100);
+                enemyMoveToward(enemy, targetPos.x, targetPos.y, now, chaseSpeed);
             }
 
             // ChangeChase: while chasing, switch to a closer player within attack range
@@ -31286,6 +31833,22 @@ server.listen(PORT, async () => {
     logger.info('[DB] Party tables verified/created');
   } catch (err) {
     logger.warn(`[DB] Party tables issue: ${err.message}`);
+  }
+
+  // Auto-create memo table (Warp Portal memorized locations)
+  try {
+    await pool.query(`CREATE TABLE IF NOT EXISTS character_memo (
+        character_id INTEGER NOT NULL,
+        slot_index INTEGER NOT NULL CHECK (slot_index >= 0 AND slot_index <= 2),
+        zone_name VARCHAR(50) NOT NULL,
+        x FLOAT NOT NULL DEFAULT 0,
+        y FLOAT NOT NULL DEFAULT 0,
+        z FLOAT NOT NULL DEFAULT 580,
+        PRIMARY KEY (character_id, slot_index)
+    )`);
+    logger.info('[DB] Memo table verified/created');
+  } catch (err) {
+    logger.warn(`[DB] Memo table issue: ${err.message}`);
   }
 
   // Ensure Stone item (7049) exists — required by Pick Stone / Throw Stone skills
