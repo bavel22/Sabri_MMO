@@ -11,6 +11,22 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Full rules and design standards: `docsNew/00_Global_Rules/Global_Rules.md`
 Architecture reference: `docsNew/00_Project_Overview.md`
 RO Classic game design reference: `RagnaCloneDocs/` (28 files — 14 design + 14 implementation guides)
+Documentation index: `docsNew/INDEX.md`
+Dashboard: `_journal/Dashboard.md`
+Session tracker: `_journal/Session Tracker.md`
+Prompt library: `_prompts/README.md`
+
+---
+
+## Session Workflow
+
+**At the start of each session**, check `_journal/` for the most recent daily note. If the user has written goals, blockers, or context there, use it to inform your work.
+
+**At the end of a session** (when the user says they're done, or after completing a major task), offer to:
+1. Update `_journal/Session Tracker.md` with the current session's resume ID and summary
+2. Update `_journal/Dashboard.md` if completed items or next steps changed
+3. Move any reusable prompts to `_prompts/`
+4. Update `docsNew/` if any system documentation is now outdated
 
 ---
 
@@ -126,6 +142,8 @@ Widget prefix: `WBP_`. Blueprint prefix: `BP_`. Interface prefix: `BPI_`.
 
 **Ensemble ground effects as stationary AoE zones** — Ensemble skills (Bard+Dancer duet) create stationary ground effects at the midpoint of the two performers. Unlike solo performances which follow the caster, ensembles are fixed-position AoE zones that tick effects on all entities within range. Both performers must remain within range or the ensemble ends.
 
+**Remote visual sync via zone:ready, NOT player:join** — Any multiplayer visual data (weapon sprites, equipment appearance, buff visuals, costumes, mount state) that needs to be received by a client's subsystem handlers MUST be sent in the `zone:ready` handler, NOT during `player:join`. During `player:join`, the client is doing a zone transition (OpenLevel) — subsystems are destroyed and recreated, so socket events are silently dropped. By `zone:ready`, all handlers are registered. The `player:join` early broadcast block also has a JavaScript temporal dead zone issue: variables declared with `let` later in the function (e.g., `jobClass`) cannot be referenced in the early block — use `var` or query the DB row directly.
+
 ---
 
 ## Persistent Socket Architecture (Phase 4)
@@ -223,6 +241,7 @@ Only Assassin/Assassin Cross can dual wield (daggers, 1H swords, 1H axes in left
 | Pets, homunculus, mercenaries | `/sabrimmo-companions` | `RagnaCloneDocs/12_Pets_Homunculus_Companions.md` |
 | Audio, BGM, SFX, sound design | `/sabrimmo-audio` | `RagnaCloneDocs/13_Audio_Sound_Design.md` |
 | Art, models, animations, hair | `/sabrimmo-art` | `RagnaCloneDocs/14_Art_Visual_Style.md` |
+| 3D-to-2D sprite pipeline, Blender render, Tripo3D | `/sabrimmo-3d-to-2d` | `2D animations/SESSION_CONTEXT.md` |
 | New feature planning | `/planner` | `RagnaCloneDocs/00_Master_Build_Plan.md` |
 | Complex architecture decisions | `/opus-45-thinking` | `/project-docs` |
 | Full project context dump | `/project-docs` | All of `docsNew/` |
@@ -265,6 +284,8 @@ Many tasks touch multiple systems. **Load ALL relevant skills.** Examples:
 - "Add NPC shops and quest givers" -> `/sabrimmo-npcs` + `/sabrimmo-items` + `/sabrimmo-economy`
 - "Add background music per zone" -> `/sabrimmo-audio` + `/sabrimmo-zone`
 - "Create character hair/costume system" -> `/sabrimmo-art` + `/sabrimmo-ui`
+- "Render character sprites from 3D models" -> `/sabrimmo-3d-to-2d`
+- "Convert hero ref to GLB and render sprites" -> `/sabrimmo-3d-to-2d` + `/sabrimmo-art`
 - "Add a new socket event for party invites" -> `/sabrimmo-persistent-socket` + `/sabrimmo-party` + `/full-stack`
 - "New subsystem listening to socket events" -> `/sabrimmo-persistent-socket` + `/sabrimmo-ui`
 - "Debug socket events not arriving" -> `/debugger` + `/sabrimmo-persistent-socket` + `/realtime`

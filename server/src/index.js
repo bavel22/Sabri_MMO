@@ -197,6 +197,59 @@ const SKILL_CATALYSTS = {
     'summon_marine_sphere':      [{ itemId: 7138, quantity: 1 }],  // Marine Sphere Bottle (rAthena: Mini_Bottle = 7138)
 };
 
+// Helper: consume skill catalysts from inventory (used by custom skill handlers that bypass the generic path)
+async function consumeSkillCatalysts(characterId, skillName, learnedLevel, player) {
+    const catalysts = SKILL_CATALYSTS[skillName];
+    if (!catalysts || player.cardNoGemStone || hasBuff(player, 'ensemble_into_abyss')) return;
+    for (const cat of catalysts) {
+        if (cat.minLevel && learnedLevel < cat.minLevel) continue;
+        await pool.query(
+            `UPDATE character_inventory SET quantity = quantity - $3
+             WHERE ctid = (SELECT ctid FROM character_inventory WHERE character_id = $1 AND item_id = $2 AND is_equipped = false AND quantity >= $3 LIMIT 1)`,
+            [characterId, cat.itemId, cat.quantity]
+        );
+        // Clean up zero-quantity rows
+        await pool.query('DELETE FROM character_inventory WHERE character_id = $1 AND item_id = $2 AND quantity <= 0', [characterId, cat.itemId]);
+    }
+    // Refresh client inventory so consumed items update immediately
+    await updatePlayerWeightCache(characterId, player);
+    const freshInv = await getPlayerInventory(characterId);
+    const sock = io.sockets.sockets.get(player.socketId);
+    if (sock) sock.emit('inventory:data', { items: freshInv, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+}
+
+// Broadcast equipment visual changes to other players in the zone
+async function broadcastEquipAppearance(characterId, player) {
+    try {
+        // Query ALL equipped items (not just those with view_sprite) to detect weapon mode
+        const vizResult = await pool.query(
+            `SELECT ci.equipped_position, i.view_sprite, i.two_handed, i.equip_slot
+             FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
+             WHERE ci.character_id = $1 AND ci.is_equipped = true`,
+            [characterId]
+        );
+        const ev = { weapon: 0, shield: 0, head_top: 0, head_mid: 0, head_low: 0, garment: 0 };
+        let weaponMode = 0; // 0=unarmed, 1=onehand, 2=twohand
+        for (const row of vizResult.rows) {
+            const pos = row.equipped_position;
+            // Visual sprites (only items with view_sprite > 0 have sprite atlases)
+            if (pos && ev.hasOwnProperty(pos) && row.view_sprite > 0) {
+                ev[pos] = row.view_sprite;
+            }
+            // Weapon mode detection (works even if weapon has no sprite atlas yet)
+            if ((pos === 'weapon' || row.equip_slot === 'weapon') && pos !== 'ammo') {
+                weaponMode = row.two_handed ? 2 : 1;
+            }
+        }
+        player.equipVisuals = ev;
+        player.weaponMode = weaponMode;
+        const zone = player.zone || 'prontera_south';
+        broadcastToZone(zone, 'player:appearance', { characterId, equipVisuals: ev, weaponMode });
+    } catch (err) {
+        logger.warn(`broadcastEquipAppearance error: ${err.message}`);
+    }
+}
+
 // Plagiarism (Rogue 1714): skills that can be copied when they hit the Rogue
 const PLAGIARISM_COPYABLE_SKILLS = new Set([
     // Swordsman / Knight / Crusader
@@ -760,7 +813,8 @@ function getPassiveSkillBonuses(player) {
 
     // Spear Mastery (700): +4 ATK/level with spears (+5/lv when mounted)
     const spMasLv = learned[700] || 0;
-    if (spMasLv > 0 && (wType === 'spear' || wType === 'one_hand_spear' || wType === 'two_hand_spear')) {
+    const wSubType = player.equippedWeaponRight?.subType || '';
+    if (spMasLv > 0 && (wType === 'spear' || wSubType === '1hSpear' || wSubType === '2hSpear')) {
         const perLevel = player.isMounted ? 5 : 4;
         bonuses.bonusATK += spMasLv * perLevel;
         bonuses.spearMasteryLv = spMasLv;
@@ -926,7 +980,6 @@ const SONG_SP_DRAIN = {
     'service_for_you': 5000,
     'please_dont_forget_me': 10000,
     'ugly_dance': 3000,
-    'moonlit_water_mill': 10000,
 };
 
 // Map skill name to the buff it applies (null = damage-only, no lingering buff)
@@ -941,13 +994,11 @@ const PERFORMANCE_BUFF_MAP = {
     'please_dont_forget_me': 'dance_pdfm',
     'ugly_dance': 'dance_ugly',
     'dissonance': null,            // Damage only, MISC type
-    'moonlit_water_mill': null,    // Block only (deferred)
 };
 
 // Which performances are "offensive" (debuff enemies) vs "supportive" (buff allies)
 const OFFENSIVE_PERFORMANCES = new Set([
     'dissonance', 'please_dont_forget_me', 'ugly_dance',
-    'moonlit_water_mill',
 ]);
 
 // ============================================================
@@ -967,7 +1018,6 @@ const ENSEMBLE_SP_DRAIN = {
     'lokis_veil': 4000,
     'into_the_abyss': 5000,
     'invulnerable_siegfried': 3000,
-    'moonlit_water_mill': 10000,
 };
 
 // Ensemble effect types and tick configurations
@@ -980,7 +1030,6 @@ const ENSEMBLE_EFFECTS = {
     'lokis_veil': { type: 'skill_block' },
     'into_the_abyss': { type: 'no_catalysts' },
     'invulnerable_siegfried': { type: 'element_status_resist' },
-    'moonlit_water_mill': { type: 'movement_barrier' },
 };
 
 // Map ensemble skill name variants (Bard/Dancer have different skill names for same ensemble)
@@ -994,8 +1043,6 @@ const ENSEMBLE_CANONICAL_NAME = {
     'lokis_veil': 'lokis_veil', 'lokis_veil_dancer': 'lokis_veil',
     'into_the_abyss': 'into_the_abyss', 'into_abyss_dancer': 'into_the_abyss',
     'invulnerable_siegfried': 'invulnerable_siegfried', 'siegfried_dancer': 'invulnerable_siegfried',
-    'moonlit_water_mill': 'moonlit_water_mill',
-    'moonlit_water_mill_bard': 'moonlit_water_mill',
 };
 
 // Bard class set for ensemble partner matching
@@ -1117,8 +1164,7 @@ function startPerformance(characterId, player, skillId, skillName, skillLevel, s
     player.mana = Math.max(0, player.mana - spCost);
 
     // Set performance state
-    // Moonlit Water Mill drains 4*skillLevel SP per tick instead of 1
-    const spDrainAmount = (skillName === 'moonlit_water_mill') ? 4 * skillLevel : 1;
+    const spDrainAmount = 1;
 
     player.performanceState = {
         skillId,
@@ -1230,6 +1276,13 @@ function endEnsemble(ensembleId, ens, reason) {
             casterId: ens.casterId, casterName: ens.casterName, skillId: ens.skillId,
             buffName: 'ensemble_aftermath', duration: 10000, effects: { noSkills: true, moveSpeedReduction: 50 },
         });
+        // Emit stats so client sees aftermath move speed reduction
+        const cEffStats = getEffectiveStats(caster);
+        const cDerived = roDerivedStats(cEffStats);
+        const cSock = io.sockets.sockets.get(caster.socketId);
+        if (cSock) {
+            cSock.emit('player:stats', buildFullStatsPayload(ens.casterId, caster, cEffStats, cDerived, Math.min(COMBAT.ASPD_CAP, cDerived.aspd + (caster.weaponAspdMod || 0))));
+        }
     }
 
     // Clean up partner state
@@ -1247,6 +1300,12 @@ function endEnsemble(ensembleId, ens, reason) {
             casterId: ens.partnerId, casterName: ens.partnerName, skillId: ens.skillId,
             buffName: 'ensemble_aftermath', duration: 10000, effects: { noSkills: true, moveSpeedReduction: 50 },
         });
+        const pEffStats = getEffectiveStats(partner);
+        const pDerived = roDerivedStats(pEffStats);
+        const pSock = io.sockets.sockets.get(partner.socketId);
+        if (pSock) {
+            pSock.emit('player:stats', buildFullStatsPayload(ens.partnerId, partner, pEffStats, pDerived, Math.min(COMBAT.ASPD_CAP, pDerived.aspd + (partner.weaponAspdMod || 0))));
+        }
     }
 
     // Remove ground effect
@@ -1278,6 +1337,34 @@ function endEnsemble(ensembleId, ens, reason) {
 }
 
 /**
+ * Emit buff icon + stats update when an ensemble buff is first applied to a player.
+ * Shared helper for all 5 ensemble buff types to avoid duplication.
+ */
+function emitEnsembleBuffStats(pid, ally, buffName, ens, zone) {
+    const buffConfig = BUFF_TYPES[buffName];
+    broadcastToZone(zone, 'skill:buff_applied', {
+        targetId: pid, targetName: ally.characterName, isEnemy: false,
+        casterId: ens.casterId, casterName: ens.casterName,
+        skillId: ens.skillId,
+        buffName: buffConfig ? buffConfig.displayName : buffName,
+        duration: PERFORMANCE_CONSTANTS.EFFECT_LINGER_DURATION,
+    });
+    const effStats = getEffectiveStats(ally);
+    const derived = roDerivedStats(effStats);
+    const aspd = Math.min(COMBAT.ASPD_CAP, derived.aspd + (ally.weaponAspdMod || 0));
+    ally.maxHealth = derived.maxHP;
+    ally.maxMana = derived.maxSP;
+    const sock = io.sockets.sockets.get(ally.socketId);
+    if (sock) {
+        sock.emit('player:stats', buildFullStatsPayload(pid, ally, effStats, derived, aspd));
+        sock.emit('combat:health_update', {
+            characterId: pid, health: ally.health,
+            maxHealth: ally.maxHealth, mana: ally.mana, maxMana: ally.maxMana
+        });
+    }
+}
+
+/**
  * Process ensemble effect tick. Called once per tick for each active ensemble.
  * Different ensemble types have different tick intervals and effects.
  */
@@ -1291,6 +1378,7 @@ function processEnsembleEffect(ens, now) {
     switch (ens.effectType) {
         case 'sleep_aoe': {
             // Lullaby: Apply sleep to enemies in AoE every 6s
+            const sleepSource = connectedPlayers.get(ens.casterId) || null;
             for (const [eid, enemy] of enemies.entries()) {
                 if (enemy.isDead) continue;
                 if ((enemy.zone || 'prontera_south') !== ensZone) continue;
@@ -1298,8 +1386,8 @@ function processEnsembleEffect(ens, now) {
                 const dx = enemy.x - ens.x, dy = enemy.y - ens.y;
                 if (Math.sqrt(dx * dx + dy * dy) > ens.radius) continue;
                 // Apply sleep status (30% base chance, 30s duration — resisted by INT/MDEF)
-                if (typeof applyStatusEffect === 'function') {
-                    applyStatusEffect(null, enemy, 'sleep', 30, 30000);
+                if (typeof applyStatusEffect === 'function' && sleepSource) {
+                    applyStatusEffect(sleepSource, enemy, 'sleep', 30, 30000);
                 }
             }
             // Also affect players in AoE (PvP/friendly fire per RO Classic)
@@ -1309,7 +1397,7 @@ function processEnsembleEffect(ens, now) {
                 if (p.partyId === ens.casterPartyId) continue; // Party members immune in PvE
                 const dx = p.x - ens.x, dy = p.y - ens.y;
                 if (Math.sqrt(dx*dx + dy*dy) <= ens.radius) {
-                    applyStatusEffect(pid, p, 'sleep', 30, 30000, ens.zone, null);
+                    if (sleepSource) applyStatusEffect(pid, p, 'sleep', 30, 30000, ens.zone, sleepSource);
                 }
             }
             break;
@@ -1341,18 +1429,19 @@ function processEnsembleEffect(ens, now) {
             for (const [pid, ally] of connectedPlayers.entries()) {
                 if (ally.isDead) continue;
                 if ((ally.zone || 'prontera_south') !== ensZone) continue;
-                // Only party members receive the buff
                 if (!casterPartyId || ally.partyId !== casterPartyId) continue;
                 const ax = ally.lastX || 0, ay = ally.lastY || 0;
                 const dx = ax - ens.x, dy = ay - ens.y;
                 if (Math.sqrt(dx * dx + dy * dy) > ens.radius) continue;
 
+                const isNew = !hasBuff(ally, 'ensemble_drum');
                 applyBuff(ally, {
                     name: 'ensemble_drum', skillId: ens.skillId,
                     casterId: ens.casterId, casterName: ens.casterName,
                     duration: PERFORMANCE_CONSTANTS.EFFECT_LINGER_DURATION,
                     atkBonus, defBonus,
                 });
+                if (isNew) emitEnsembleBuffStats(pid, ally, 'ensemble_drum', ens, ensZone);
             }
             break;
         }
@@ -1367,18 +1456,19 @@ function processEnsembleEffect(ens, now) {
                 if (ally.isDead) continue;
                 if ((ally.zone || 'prontera_south') !== ensZone) continue;
                 if (!casterPartyId || ally.partyId !== casterPartyId) continue;
-                // Only applies to Weapon Level 4 weapons
                 if (!ally.equippedWeaponRight || ally.equippedWeaponRight.weaponLevel !== 4) continue;
                 const ax = ally.lastX || 0, ay = ally.lastY || 0;
                 const dx = ax - ens.x, dy = ay - ens.y;
                 if (Math.sqrt(dx * dx + dy * dy) > ens.radius) continue;
 
+                const isNew = !hasBuff(ally, 'ensemble_nibelungen');
                 applyBuff(ally, {
                     name: 'ensemble_nibelungen', skillId: ens.skillId,
                     casterId: ens.casterId, casterName: ens.casterName,
                     duration: PERFORMANCE_CONSTANTS.EFFECT_LINGER_DURATION,
                     atkBonus,
                 });
+                if (isNew) emitEnsembleBuffStats(pid, ally, 'ensemble_nibelungen', ens, ensZone);
             }
             break;
         }
@@ -1398,12 +1488,14 @@ function processEnsembleEffect(ens, now) {
                 const dx = ax - ens.x, dy = ay - ens.y;
                 if (Math.sqrt(dx * dx + dy * dy) > ens.radius) continue;
 
+                const isNew = !hasBuff(ally, 'ensemble_mr_kim');
                 applyBuff(ally, {
                     name: 'ensemble_mr_kim', skillId: ens.skillId,
                     casterId: ens.casterId, casterName: ens.casterName,
                     duration: PERFORMANCE_CONSTANTS.EFFECT_LINGER_DURATION,
                     expBonusPct,
                 });
+                if (isNew) emitEnsembleBuffStats(pid, ally, 'ensemble_mr_kim', ens, ensZone);
             }
             break;
         }
@@ -1429,12 +1521,14 @@ function processEnsembleEffect(ens, now) {
                 const dx = ax - ens.x, dy = ay - ens.y;
                 if (Math.sqrt(dx * dx + dy * dy) > ens.radius) continue;
 
+                const isNew = !hasBuff(ally, 'ensemble_siegfried');
                 applyBuff(ally, {
                     name: 'ensemble_siegfried', skillId: ens.skillId,
                     casterId: ens.casterId, casterName: ens.casterName,
                     duration: PERFORMANCE_CONSTANTS.EFFECT_LINGER_DURATION,
                     elementResist, statusResist,
                 });
+                if (isNew) emitEnsembleBuffStats(pid, ally, 'ensemble_siegfried', ens, ensZone);
             }
             break;
         }
@@ -1452,12 +1546,14 @@ function processEnsembleEffect(ens, now) {
                 const dx = ax - ens.x, dy = ay - ens.y;
                 if (Math.sqrt(dx * dx + dy * dy) > ens.radius) continue;
 
+                const isNew = !hasBuff(ally, 'ensemble_into_abyss');
                 applyBuff(ally, {
                     name: 'ensemble_into_abyss', skillId: ens.skillId,
                     casterId: ens.casterId, casterName: ens.casterName,
                     duration: PERFORMANCE_CONSTANTS.EFFECT_LINGER_DURATION,
                     noGemStone: true,
                 });
+                if (isNew) emitEnsembleBuffStats(pid, ally, 'ensemble_into_abyss', ens, ensZone);
             }
             break;
         }
@@ -2173,7 +2269,12 @@ async function processEnemyDeathFromSkill(enemy, attacker, attackerId, io) {
                 enemyLevel: enemy.level,
                 exp: buildExpPayload(recipient.player),
                 baseLevelUps: expResult.baseLevelUps,
-                jobLevelUps: expResult.jobLevelUps
+                jobLevelUps: expResult.jobLevelUps,
+                partyShared: recipient.partyShared || false,
+                originalBaseExp: recipient.originalBaseExp || 0,
+                originalJobExp: recipient.originalJobExp || 0,
+                partyBonusPct: recipient.partyBonusPct || 0,
+                memberCount: recipient.memberCount || 1
             });
 
             if (expResult.baseLevelUps.length > 0 || expResult.jobLevelUps.length > 0) {
@@ -2552,6 +2653,7 @@ function calculatePhysicalDamage(attackerStats, targetStats, targetHardDef = 0, 
         subRace: targetInfo.subRace || null,
         cardDefMods: targetInfo.cardDefMods || null,
         cardSubClass: targetInfo.cardSubClass || null,
+        _ensembleVitDefZero: targetInfo._ensembleVitDefZero || false,
     };
 
     return roPhysicalDamage(attacker, target, options);
@@ -3332,13 +3434,30 @@ function knockbackTarget(target, sourceX, sourceY, cells, zone, io) {
     else { dx = dx / dist; dy = dy / dist; }
 
     // Move target by `cells` * cell size (50 UE units per cell, matching codebase standard)
+    // Check each cell step for Ice Wall collision — stop at wall edge
     const cellSize = 50;
-    const newX = targetX + Math.floor(dx * cells * cellSize);
-    const newY = targetY + Math.floor(dy * cells * cellSize);
+    let finalX = targetX, finalY = targetY;
+    for (let c = 1; c <= cells; c++) {
+        const stepX = targetX + Math.floor(dx * c * cellSize);
+        const stepY = targetY + Math.floor(dy * c * cellSize);
+        let blocked = false;
+        for (const [, eff] of activeGroundEffects.entries()) {
+            if (eff.type !== 'ice_wall' || eff.zone !== zone) continue;
+            if (Date.now() >= eff.expiresAt) continue;
+            const iwdx = stepX - eff.x, iwdy = stepY - eff.y;
+            if (Math.sqrt(iwdx * iwdx + iwdy * iwdy) <= (eff.radius || 125)) {
+                blocked = true;
+                break;
+            }
+        }
+        if (blocked) break;
+        finalX = stepX;
+        finalY = stepY;
+    }
 
     // Update target position
-    target.x = newX;
-    target.y = newY;
+    target.x = finalX;
+    target.y = finalY;
 
     // Close Confine breaks on knockback (RO Classic pre-renewal)
     if (target.activeBuffs && target.activeBuffs.some(b => b.name === 'close_confine')) {
@@ -3349,11 +3468,11 @@ function knockbackTarget(target, sourceX, sourceY, cells, zone, io) {
     const targetId = target.enemyId || target.characterId || 0;
     const isEnemy = !!target.enemyId;
     broadcastToZone(zone, 'combat:knockback', {
-        targetId, isEnemy, newX, newY, newZ: targetZ, cells,
+        targetId, isEnemy, newX: finalX, newY: finalY, newZ: targetZ, cells,
         sourceX, sourceY
     });
 
-    return { x: newX, y: newY, z: targetZ };
+    return { x: finalX, y: finalY, z: targetZ };
 }
 
 /**
@@ -3701,7 +3820,7 @@ function getEffectiveStats(player) {
         str: (player.stats.str || 1) + (bonuses.str || 0) + (cardB.str || 0) + (buffMods.strBonus || 0) + (passive.bonusSTR || 0) + (pet.str || 0),
         agi: (player.stats.agi || 1) + (bonuses.agi || 0) + (cardB.agi || 0) + (buffMods.agiBonus || 0) + (pet.agi || 0),
         vit: (player.stats.vit || 1) + (bonuses.vit || 0) + (cardB.vit || 0) + (buffMods.vitBonus || 0) + (pet.vit || 0),
-        int: (player.stats.int || 1) + (bonuses.int || 0) + (cardB.int || 0) + (buffMods.intBonus || 0) + (pet.int || 0),
+        int: (player.stats.int || 1) + (bonuses.int || 0) + (cardB.int || 0) + (buffMods.intBonus || 0) + (passive.bonusINT || 0) + (pet.int || 0),
         dex: (player.stats.dex || 1) + (bonuses.dex || 0) + (cardB.dex || 0) + (buffMods.dexBonus || 0) + (passive.bonusDEX || 0) + (pet.dex || 0),
         luk: (player.stats.luk || 1) + (bonuses.luk || 0) + (cardB.luk || 0) + (buffMods.lukBonus || 0) + (pet.luk || 0),
         level: player.stats.level || 1,
@@ -3711,8 +3830,8 @@ function getEffectiveStats(player) {
         bonusHit: (bonuses.hit || 0) + (cardB.hit || 0) + (passive.bonusHIT || 0) + (buffMods.bonusHit || 0) + (pet.hit || 0),
         bonusFlee: (bonuses.flee || 0) + (cardB.flee || 0) + (passive.bonusFLEE || 0) + (buffMods.bonusFlee || 0) + (pet.flee || 0),
         bonusCritical: (bonuses.critical || 0) + (cardB.critical || 0) + (buffMods.bonusCritical || 0) + (pet.critical || 0),
-        bonusPerfectDodge: (bonuses.perfectDodge || 0) + (cardB.perfectDodge || 0) + (pet.perfectDodge || 0),
-        bonusMaxHp: (bonuses.maxHp || 0) + (cardB.maxHp || 0) + (buffMods.bonusMaxHp || 0) + (pet.maxHP || 0),
+        bonusPerfectDodge: (bonuses.perfectDodge || 0) + (cardB.perfectDodge || 0) + (buffMods.bonusPerfectDodge || 0) + (pet.perfectDodge || 0),
+        bonusMaxHp: (bonuses.maxHp || 0) + (cardB.maxHp || 0) + (buffMods.bonusMaxHp || 0) + (pet.maxHP || 0) + (passive.bonusMaxHp || 0),
         bonusMaxSp: (bonuses.maxSp || 0) + (cardB.maxSp || 0) + (buffMods.bonusMaxSp || 0) + (pet.maxSP || 0),
         bonusMaxHpRate: (player.cardMaxHpRate || 0) + (player.equipMaxHpRate || 0) + (buffMods.bonusMaxHpPercent || 0) + (pet.maxHPPercent || 0),
         bonusMaxSpRate: (player.cardMaxSpRate || 0) + (player.equipMaxSpRate || 0) + (buffMods.bonusMaxSpPercent || 0) + (pet.maxSPPercent || 0),
@@ -3820,7 +3939,8 @@ function getEnemyTargetInfo(enemy) {
         race: enemy.race || 'formless',
         numAttackers: Math.max(1, numAttackers),
         buffMods: getBuffStatModifiers(enemy),
-        passiveRaceDEF: null // enemies don't have passive skills
+        passiveRaceDEF: null, // enemies don't have passive skills
+        _ensembleVitDefZero: enemy._ensembleVitDefZero || false,
     };
 }
 
@@ -4052,14 +4172,41 @@ function buildFullStatsPayload(characterId, player, effectiveStats, derived, fin
         dualWieldInfo.isDualWielding = false;
     }
 
+    // Aggregate elemental resistances from all sources for advanced stats display
+    const passiveBonuses = getPassiveSkillBonuses(player);
+    const buffModsForResist = getBuffStatModifiers(player);
+    const elementResist = { neutral: 0, fire: 0, water: 0, earth: 0, wind: 0, poison: 0, holy: 0, dark: 0, ghost: 0, undead: 0 };
+    // Passive element resists (Skin Tempering fire/neutral, etc.)
+    if (passiveBonuses.elementResist) {
+        for (const [el, pct] of Object.entries(passiveBonuses.elementResist)) {
+            if (elementResist.hasOwnProperty(el)) elementResist[el] += pct;
+        }
+    }
+    // Faith holy resist (passive, separate field)
+    if (passiveBonuses.holyResist) elementResist.holy += passiveBonuses.holyResist;
+    // Buff element resists (Invulnerable Siegfried, etc.)
+    if (buffModsForResist.elementResist && typeof buffModsForResist.elementResist === 'object') {
+        for (const [el, pct] of Object.entries(buffModsForResist.elementResist)) {
+            if (elementResist.hasOwnProperty(el)) elementResist[el] += pct;
+        }
+    }
+    // Providence holy resist (buff, separate field)
+    if (buffModsForResist.holyResist) elementResist.holy += buffModsForResist.holyResist;
+    // Card-based element resists
+    if (player.cardElementResist) {
+        for (const [el, pct] of Object.entries(player.cardElementResist)) {
+            if (elementResist.hasOwnProperty(el)) elementResist[el] += pct;
+        }
+    }
+
     return {
         characterId,
         stats: {
             ...player.stats,
             str: effectiveStats.str, agi: effectiveStats.agi, vit: effectiveStats.vit,
             int: effectiveStats.int, dex: effectiveStats.dex, luk: effectiveStats.luk,
-            hardDef: player.hardDef || 0,
-            hardMdef: player.hardMdef || 0,
+            hardDef: (player.hardDef || 0) + (effectiveStats.bonusHardDef || 0),
+            hardMdef: (player.hardMdef || 0) + (effectiveStats.bonusHardMDEF || 0),
             weaponMATK: player.weaponMATK || 0,
             passiveATK: effectiveStats.passiveATK || 0,
             refineATK: getAttackerInfo(player).refineATK || 0,
@@ -4095,6 +4242,45 @@ function buildFullStatsPayload(characterId, player, effectiveStats, derived, fin
         isMounted: player.isMounted || false,
         spiritSpheres: player.spiritSpheres || 0,
         maxSpiritSpheres: player.maxSpiritSpheres || 0,
+        elementResist,
+        blockChance: (() => {
+            const agBuff = (player.activeBuffs || []).find(b => b.name === 'auto_guard' && Date.now() < b.expiresAt);
+            return agBuff ? (agBuff.blockChance || 0) : 0;
+        })(),
+        // Race/Size/Element offense & defense for advanced stats display
+        advancedCombat: (() => {
+            const cm = player.cardMods || {};
+            const cd = player.cardDefMods || {};
+            const races = ['formless', 'undead', 'brute', 'plant', 'insect', 'fish', 'demon', 'demihuman', 'angel', 'dragon'];
+            const sizes = ['small', 'medium', 'large'];
+            const raceAtk = {};
+            const raceDef = {};
+            const sizeAtk = {};
+            const sizeDef = {};
+            const eleAtk = {};
+            // Card-based race/size/element ATK bonuses
+            for (const r of races) { raceAtk[r] = (cm[`race_${r}`] || 0); raceDef[r] = (cd[`race_${r}`] || 0); }
+            for (const s of sizes) { sizeAtk[s] = (cm[`size_${s}`] || 0); sizeDef[s] = (cd[`size_${s}`] || 0); }
+            for (const el of ['neutral','fire','water','earth','wind','poison','holy','dark','ghost','undead']) {
+                eleAtk[el] = cm[`ele_${el}`] || 0;
+                // Card ele defense already in elementResist via cardElementResist — skip to avoid double
+            }
+            // Passive race ATK (Demon Bane, Beast Bane, Dragonology)
+            if (passiveBonuses.raceATK) {
+                for (const [r, v] of Object.entries(passiveBonuses.raceATK)) raceAtk[r] = (raceAtk[r] || 0) + v;
+            }
+            // Passive race DEF (Divine Protection)
+            if (passiveBonuses.raceDEF) {
+                for (const [r, v] of Object.entries(passiveBonuses.raceDEF)) raceDef[r] = (raceDef[r] || 0) + v;
+            }
+            // Passive race resist % (Dragonology)
+            if (passiveBonuses.raceResist) {
+                for (const [r, v] of Object.entries(passiveBonuses.raceResist)) raceDef[r] = (raceDef[r] || 0) + v;
+            }
+            // Buff demon/holy resist (Providence)
+            if (buffModsForResist.demonResist) raceDef.demon = (raceDef.demon || 0) + buffModsForResist.demonResist;
+            return { raceAtk, raceDef, sizeAtk, sizeDef, eleAtk };
+        })(),
     };
 }
 
@@ -4839,7 +5025,7 @@ async function getPlayerInventory(characterId) {
                     i.weapon_type, i.aspd_modifier, i.weapon_range,
                     i.slots, i.weapon_level, i.refineable, i.jobs_allowed,
                     i.card_type, i.card_prefix, i.card_suffix,
-                    i.two_handed, i.element
+                    i.two_handed, i.element, i.view_sprite
              FROM character_inventory ci
              JOIN items i ON ci.item_id = i.item_id
              WHERE ci.character_id = $1
@@ -4954,6 +5140,11 @@ function broadcastToZone(zone, event, data) {
             }
         }
     }
+    // Auto-enrich status:removed / status:applied on enemies with targetName for combat log
+    if ((event === 'status:removed' || event === 'status:applied') && data.isEnemy && data.targetId && !data.targetName) {
+        const tgtEnemy = enemies.get(data.targetId);
+        if (tgtEnemy) data.targetName = tgtEnemy.name;
+    }
     io.to('zone:' + zone).emit(event, data);
 }
 function broadcastToZoneExcept(socket, zone, event, data) {
@@ -5005,8 +5196,9 @@ function buildPartyPayload(party) {
         members.push({
             characterId: charId, characterName: m.characterName,
             jobClass: m.jobClass, level: m.level, map: m.map,
-            hp: m.hp, maxHp: m.maxHp, online: m.online,
-            isLeader: charId === party.leaderId
+            hp: m.hp, maxHp: m.maxHp,
+            sp: m.sp || 0, maxSp: m.maxSp || 1,
+            online: m.online, isLeader: charId === party.leaderId
         });
     }
     return {
@@ -5027,9 +5219,10 @@ function recalcEvenShareEligibility(party) {
 }
 
 function distributePartyEXP(killer, killerCharId, baseExp, jobExp, enemyZone) {
-    if (!killer.partyId) return [{ player: killer, charId: killerCharId, baseExp, jobExp }];
+    const soloResult = { player: killer, charId: killerCharId, baseExp, jobExp, partyShared: false, originalBaseExp: baseExp, originalJobExp: jobExp, partyBonusPct: 0, memberCount: 1 };
+    if (!killer.partyId) return [soloResult];
     const party = activeParties.get(killer.partyId);
-    if (!party || party.expShare !== 'even_share') return [{ player: killer, charId: killerCharId, baseExp, jobExp }];
+    if (!party || party.expShare !== 'even_share') return [soloResult];
 
     let minLv = Infinity, maxLv = 0;
     for (const [, member] of party.members) {
@@ -5038,7 +5231,7 @@ function distributePartyEXP(killer, killerCharId, baseExp, jobExp, enemyZone) {
         maxLv = Math.max(maxLv, member.level);
     }
     if (maxLv - minLv > PARTY_SHARE_LEVEL_GAP) {
-        return [{ player: killer, charId: killerCharId, baseExp, jobExp }];
+        return [soloResult];
     }
 
     const eligible = [];
@@ -5053,7 +5246,7 @@ function distributePartyEXP(killer, killerCharId, baseExp, jobExp, enemyZone) {
     const bonus = 100 + PARTY_EVEN_SHARE_BONUS * (eligible.length - 1);
     const sharedBase = Math.floor(baseExp * bonus / 100 / eligible.length);
     const sharedJob = Math.floor(jobExp * bonus / 100 / eligible.length);
-    return eligible.map(e => ({ player: e.player, charId: e.charId, baseExp: sharedBase, jobExp: sharedJob }));
+    return eligible.map(e => ({ player: e.player, charId: e.charId, baseExp: sharedBase, jobExp: sharedJob, partyShared: true, originalBaseExp: baseExp, originalJobExp: jobExp, partyBonusPct: bonus - 100, memberCount: eligible.length }));
 }
 
 // Socket.io connection handler
@@ -5172,7 +5365,7 @@ io.on('connection', (socket) => {
         let dbHasCart = false, dbCartType = 0;
         try {
             const charResult = await pool.query(
-                'SELECT x, y, z, health, max_health, mana, max_mana, zuzucoin, zone_name, gender, plagiarized_skill_id, plagiarized_skill_level, has_cart, cart_type FROM characters WHERE character_id = $1',
+                'SELECT x, y, z, health, max_health, mana, max_mana, zuzucoin, zone_name, gender, job_class, plagiarized_skill_id, plagiarized_skill_level, has_cart, cart_type FROM characters WHERE character_id = $1',
                 [characterId]
             );
             if (charResult.rows.length > 0) {
@@ -5187,6 +5380,7 @@ io.on('connection', (socket) => {
                 initialZ = row.z;
                 playerZone = row.zone_name || 'prontera_south';
                 playerGender = row.gender || 'male';
+                var earlyJobClass = row.job_class || 'novice'; // for initial broadcast (before let jobClass at line 5446)
                 dbPlagiarizedSkillId = row.plagiarized_skill_id || null;
                 dbPlagiarizedSkillLevel = row.plagiarized_skill_level || 0;
                 dbHasCart = !!row.has_cart;
@@ -5196,10 +5390,39 @@ io.on('connection', (socket) => {
                 await setPlayerPosition(characterId, row.x, row.y, row.z);
                 // Join the Socket.io room for this zone
                 socket.join('zone:' + playerZone);
-                // Broadcast correct position to other players in same zone
+
+                // Load weapon mode BEFORE broadcasting so other players get correct value on first spawn
+                let earlyWeaponMode = 0;
+                const earlyEquipViz = { weapon: 0, shield: 0, head_top: 0, head_mid: 0, head_low: 0, garment: 0 };
+                try {
+                    const earlyVizResult = await pool.query(
+                        `SELECT ci.equipped_position, i.view_sprite, i.two_handed, i.equip_slot
+                         FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
+                         WHERE ci.character_id = $1 AND ci.is_equipped = true`,
+                        [characterId]
+                    );
+                    for (const vr of earlyVizResult.rows) {
+                        const vpos = vr.equipped_position;
+                        if (vpos && earlyEquipViz.hasOwnProperty(vpos) && vr.view_sprite > 0) {
+                            earlyEquipViz[vpos] = vr.view_sprite;
+                        }
+                        if ((vpos === 'weapon' || vr.equip_slot === 'weapon') && vpos !== 'ammo') {
+                            earlyWeaponMode = vr.two_handed ? 2 : 1;
+                        }
+                    }
+                } catch (vizErr) {
+                    logger.warn(`Early equip viz query failed: ${vizErr.message}`);
+                }
+
+                // Broadcast correct position + weapon mode + equipment visuals to other players in same zone
+                // NOTE: 'player' object doesn't exist yet — use local vars (jobClass from line 5445, playerGender from line 5382)
                 broadcastToZoneExcept(socket, playerZone, 'player:moved', {
                     characterId,
                     characterName,
+                    jobClass: earlyJobClass || 'novice',
+                    gender: playerGender || 'male',
+                    weaponMode: earlyWeaponMode,
+                    equipVisuals: earlyEquipViz,
                     x: row.x,
                     y: row.y,
                     z: row.z,
@@ -5207,7 +5430,12 @@ io.on('connection', (socket) => {
                     maxHealth,
                     timestamp: Date.now()
                 });
-                logger.info(`Broadcasted initial position for ${characterName} (Character ${characterId}) at (${row.x}, ${row.y}, ${row.z}) zone=${playerZone}`);
+                logger.info(`Broadcasted initial position for ${characterName} (Character ${characterId}) at (${row.x}, ${row.y}, ${row.z}) zone=${playerZone} weaponMode=${earlyWeaponMode}`);
+
+                // Broadcast equipment visuals to other players
+                broadcastToZoneExcept(socket, playerZone, 'player:appearance', {
+                    characterId, equipVisuals: earlyEquipViz, weaponMode: earlyWeaponMode
+                });
             }
         } catch (err) {
             logger.error(`Failed to fetch initial data for character ${characterId}:`, err.message);
@@ -5385,6 +5613,31 @@ io.on('connection', (socket) => {
             logger.debug(`[SKILLS] Could not load learned skills for char ${characterId}: ${err.message}`);
         }
 
+        // Build equipment visual IDs for sprite layers + detect weapon mode
+        const equipVisuals = { weapon: 0, shield: 0, head_top: 0, head_mid: 0, head_low: 0, garment: 0 };
+        let initialWeaponMode = 0; // 0=unarmed, 1=onehand, 2=twohand
+        try {
+            // Query ALL equipped items (not just view_sprite > 0) to detect weapon mode
+            const vizResult = await pool.query(
+                `SELECT ci.equipped_position, i.view_sprite, i.two_handed, i.equip_slot
+                 FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
+                 WHERE ci.character_id = $1 AND ci.is_equipped = true`,
+                [characterId]
+            );
+            for (const row of vizResult.rows) {
+                const pos = row.equipped_position;
+                if (pos && equipVisuals.hasOwnProperty(pos) && row.view_sprite > 0) {
+                    equipVisuals[pos] = row.view_sprite;
+                }
+                if ((pos === 'weapon' || row.equip_slot === 'weapon') && pos !== 'ammo') {
+                    initialWeaponMode = row.two_handed ? 2 : 1;
+                }
+            }
+            // NOTE: player object doesn't exist yet — weaponMode is set via connectedPlayers.set() later
+        } catch (err) {
+            logger.warn(`Failed to load equip visuals for ${characterId}: ${err.message}`);
+        }
+
         // Load stat bonuses and hardDEF from ALL equipped items (armor, accessories, etc.)
         const equipmentBonuses = { str: 0, agi: 0, vit: 0, int: 0, dex: 0, luk: 0, maxHp: 0, maxSp: 0, hit: 0, flee: 0, critical: 0, perfectDodge: 0 };
         let hardDef = 0;
@@ -5460,6 +5713,8 @@ io.on('connection', (socket) => {
             characterId: characterId,
             characterName: characterName || 'Unknown',
             gender: playerGender,
+            equipVisuals,
+            weaponMode: initialWeaponMode,
             zone: playerZone,
             health: Math.min(health, maxHealth),
             maxHealth,
@@ -5648,6 +5903,7 @@ io.on('connection', (socket) => {
                             jobClass: m.job_class || 'novice', level: m.level || 1,
                             map: onlinePlayer?.zone || 'unknown',
                             hp: onlinePlayer?.health || 0, maxHp: onlinePlayer?.maxHealth || 1,
+                            sp: onlinePlayer?.mana || 0, maxSp: onlinePlayer?.maxMana || 1,
                             online, socketId: onlinePlayer?.socketId || null
                         });
                     }
@@ -5676,8 +5932,9 @@ io.on('connection', (socket) => {
                 socket.emit('party:update', buildPartyPayload(party));
                 broadcastToParty(partyId, 'party:member_update', {
                     characterId, hp: player.health, maxHp: player.maxHealth,
+                    sp: player.mana || 0, maxSp: player.maxMana || 1,
                     map: player.zone || 'prontera_south', online: true
-                }, characterId);
+                });
 
                 logger.info(`[PARTY] ${player.characterName} reconnected to party "${party.name}"`);
             }
@@ -5721,7 +5978,7 @@ io.on('connection', (socket) => {
         broadcastToZoneExcept(socket, playerZone, 'combat:health_update', broadcastHealthPayload);
         logger.info(`[BROADCAST] combat:health_update to zone:${playerZone} (excl ${socket.id}): ${JSON.stringify(broadcastHealthPayload)}`);
 
-        // Send existing players' health to the joining player (only same zone)
+        // Send existing players' health and equipment appearance to the joining player (only same zone)
         for (const [existingCharId, existingPlayer] of connectedPlayers.entries()) {
             if (existingCharId !== characterId && existingPlayer.zone === playerZone) {
                 socket.emit('combat:health_update', {
@@ -5731,6 +5988,14 @@ io.on('connection', (socket) => {
                     mana: existingPlayer.mana,
                     maxMana: existingPlayer.maxMana
                 });
+                // Send existing player's equipment visuals so weapon sprites load immediately
+                if (existingPlayer.equipVisuals) {
+                    socket.emit('player:appearance', {
+                        characterId: existingCharId,
+                        equipVisuals: existingPlayer.equipVisuals,
+                        weaponMode: existingPlayer.weaponMode || 0
+                    });
+                }
             }
         }
         
@@ -5842,7 +6107,16 @@ io.on('connection', (socket) => {
                 return;
             }
             // Performance movement speed restriction: (25+2.5*LessonsLv)% of normal (RO Classic Bug #7)
+            // Ensembles: 0% speed (fully immobilized) — reject all movement
             if (player.performanceMoveSpeedMultiplier != null && player.performanceMoveSpeedMultiplier < 1.0) {
+                if (player.performanceMoveSpeedMultiplier === 0) {
+                    // Ensemble: fully immobilized — reject movement entirely
+                    socket.emit('player:position_rejected', {
+                        x: player.lastX || x, y: player.lastY || y, z: player.lastZ || z,
+                        reason: 'ensemble'
+                    });
+                    return;
+                }
                 const dx = x - (player.lastX || x), dy = y - (player.lastY || y);
                 const dist = Math.sqrt(dx * dx + dy * dy);
                 // Allow small movements (client rounding), but clamp large ones
@@ -5924,6 +6198,22 @@ io.on('connection', (socket) => {
                             socket.emit('player:position_rejected', { reason: 'moonlit_barrier', x: player.lastX || x, y: player.lastY || y });
                             return;
                         }
+                    }
+                }
+            }
+            // Ice Wall: block player movement through ice wall cells
+            if (activeGroundEffects.size > 0) {
+                const zone = player.zone || 'prontera_south';
+                for (const [, eff] of activeGroundEffects.entries()) {
+                    if (eff.type !== 'ice_wall' || eff.zone !== zone) continue;
+                    if (Date.now() >= eff.expiresAt) continue;
+                    const iwdx = x - eff.x, iwdy = y - eff.y;
+                    if (Math.sqrt(iwdx * iwdx + iwdy * iwdy) <= (eff.radius || 125)) {
+                        socket.emit('player:position_rejected', {
+                            x: player.lastX || x, y: player.lastY || y, z: player.lastZ || z,
+                            reason: 'ice_wall'
+                        });
+                        return;
                     }
                 }
             }
@@ -6062,6 +6352,9 @@ io.on('connection', (socket) => {
                     });
                     broadcastToZoneExcept(socket, portalZone, 'player:moved', {
                         characterId, characterName,
+                        jobClass: player.jobClass || 'novice',
+                        gender: player.gender || 'male',
+                        weaponMode: player.weaponMode || 0,
                         x: player.lastX, y: player.lastY, z: player.lastZ,
                         health: player.health, maxHealth: player.maxHealth,
                         isMounted: player.isMounted || false,
@@ -6085,6 +6378,9 @@ io.on('connection', (socket) => {
         broadcastToZoneExcept(socket, posZone, 'player:moved', {
             characterId,
             characterName,
+            jobClass: player ? (player.jobClass || 'novice') : 'novice',
+            gender: player ? (player.gender || 'male') : 'male',
+            weaponMode: player ? (player.weaponMode || 0) : 0,
             x, y, z,
             health: player ? player.health : 100,
             maxHealth: player ? player.maxHealth : 100,
@@ -6232,10 +6528,14 @@ io.on('connection', (socket) => {
         const { characterId, player } = playerInfo;
         const zone = player.zone || 'prontera_south';
 
-        // Broadcast this player's arrival to others in the zone
+        // Broadcast this player's arrival to others in the zone (include equipVisuals for weapon sprites)
         broadcastToZoneExcept(socket, zone, 'player:moved', {
             characterId,
             characterName: player.characterName,
+            jobClass: player.jobClass || 'novice',
+            gender: player.gender || 'male',
+            weaponMode: player.weaponMode || 0,
+            equipVisuals: player.equipVisuals || {},
             x: player.lastX || 0,
             y: player.lastY || 0,
             z: player.lastZ || 300,
@@ -6243,6 +6543,15 @@ io.on('connection', (socket) => {
             maxHealth: player.maxHealth,
             timestamp: Date.now()
         });
+
+        // Also broadcast this player's equipment appearance to others
+        if (player.equipVisuals) {
+            broadcastToZoneExcept(socket, zone, 'player:appearance', {
+                characterId,
+                equipVisuals: player.equipVisuals,
+                weaponMode: player.weaponMode || 0
+            });
+        }
 
         // Send this player's health to the zone (others see our HP bar)
         broadcastToZoneExcept(socket, zone, 'combat:health_update', {
@@ -6262,6 +6571,21 @@ io.on('connection', (socket) => {
             mana: player.mana,
             maxMana: player.maxMana
         });
+
+        // Send existing players' equipment appearance to the joining player
+        // (must happen here in zone:ready, NOT in player:join — the client's
+        // OtherPlayerSubsystem isn't registered until after the zone transition)
+        for (const [existingCharId, existingPlayer] of connectedPlayers.entries()) {
+            if (existingCharId !== characterId && existingPlayer.zone === zone) {
+                if (existingPlayer.equipVisuals) {
+                    socket.emit('player:appearance', {
+                        characterId: existingCharId,
+                        equipVisuals: existingPlayer.equipVisuals,
+                        weaponMode: existingPlayer.weaponMode || 0
+                    });
+                }
+            }
+        }
 
         // Send all zone enemies to this client
         for (const [eid, enemy] of enemies.entries()) {
@@ -7947,14 +8271,16 @@ io.on('connection', (socket) => {
         }
 
         // Build skill tree payload grouped by class
+        // Shared skills (e.g. Knight skills with sharedClasses: ['crusader']) go into the player's class tab
         const skillTree = {};
         for (const skill of availableSkills) {
-            if (!skillTree[skill.classId]) skillTree[skill.classId] = [];
+            const tabClass = (skill.sharedClasses && skill.sharedClasses.includes(jobClass)) ? jobClass : skill.classId;
+            if (!skillTree[tabClass]) skillTree[tabClass] = [];
             const currentLevel = learnedSkills[skill.id] || 0;
             const levelData = skill.levels[Math.min(currentLevel, skill.levels.length - 1)] || skill.levels[0];
             const nextLevelData = currentLevel < skill.maxLevel ? skill.levels[currentLevel] : null;
 
-            skillTree[skill.classId].push({
+            skillTree[tabClass].push({
                 skillId: skill.id,
                 name: skill.name,
                 displayName: skill.displayName,
@@ -7966,8 +8292,9 @@ io.on('connection', (socket) => {
                 range: skill.range,
                 description: skill.description,
                 icon: skill.icon,
-                treeRow: skill.treeRow,
-                treeCol: skill.treeCol,
+                iconClassId: skill.classId,
+                treeRow: (skill.sharedTreePos && skill.sharedTreePos[jobClass]) ? skill.sharedTreePos[jobClass].treeRow : skill.treeRow,
+                treeCol: (skill.sharedTreePos && skill.sharedTreePos[jobClass]) ? skill.sharedTreePos[jobClass].treeCol : skill.treeCol,
                 prerequisites: skill.prerequisites,
                 spCost: levelData ? levelData.spCost : 0,
                 nextSpCost: nextLevelData ? nextLevelData.spCost : 0,
@@ -8154,6 +8481,19 @@ io.on('connection', (socket) => {
     // ═══ PARTY SYSTEM (RO Classic pre-renewal) ═══════════
     // ══════════════════════════════════════════════════════
 
+    // party:load — client re-requests party state after subsystem registers handlers
+    // (party:update from player:join may arrive before the subsystem is ready)
+    socket.on('party:load', () => {
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { player } = playerInfo;
+        if (!player.partyId) return;
+        const party = activeParties.get(player.partyId);
+        if (!party) return;
+        socket.emit('party:update', buildPartyPayload(party));
+        logger.info(`[PARTY] Sent party:update to ${player.characterName} on party:load request`);
+    });
+
     socket.on('party:create', async (data) => {
         const playerInfo = findPlayerBySocketId(socket.id);
         if (!playerInfo) return;
@@ -8202,6 +8542,7 @@ io.on('connection', (socket) => {
                     jobClass: player.jobClass || 'novice', level: player.stats?.level || 1,
                     map: player.zone || 'prontera_south',
                     hp: player.health, maxHp: player.maxHealth,
+                    sp: player.mana || 0, maxSp: player.maxMana || 1,
                     online: true, socketId: socket.id
                 }]])
             };
@@ -8293,6 +8634,7 @@ io.on('connection', (socket) => {
                 jobClass: player.jobClass || 'novice', level: player.stats?.level || 1,
                 map: player.zone || 'prontera_south',
                 hp: player.health, maxHp: player.maxHealth,
+                sp: player.mana || 0, maxSp: player.maxMana || 1,
                 online: true, socketId: socket.id
             });
             player.partyId = invite.partyId;
@@ -8444,6 +8786,14 @@ io.on('connection', (socket) => {
             party.expShare = newMode;
             await pool.query('UPDATE parties SET exp_share = $1 WHERE party_id = $2', [newMode === 'even_share' ? 1 : 0, party.partyId]);
             broadcastToParty(party.partyId, 'party:update', buildPartyPayload(party));
+
+            // Notify all party members of the change via chat
+            const modeLabel = newMode === 'even_share' ? 'Even Share' : 'Each Take';
+            broadcastToParty(party.partyId, 'chat:receive', {
+                type: 'chat:receive', channel: 'PARTY', senderId: 0, senderName: 'SYSTEM',
+                message: `EXP sharing changed to ${modeLabel} by ${player.characterName}.`,
+                timestamp: Date.now()
+            });
             logger.info(`[PARTY] "${party.name}" EXP share changed to ${newMode}`);
         } catch (err) {
             logger.error(`[PARTY] Change exp share error: ${err.message}`);
@@ -8942,34 +9292,37 @@ io.on('connection', (socket) => {
             return;
         }
 
+        // Early skill lookup for Steel Body / Blade Stop checks (full lookup + validation at line ~9236)
+        const earlySkill = SKILL_MAP.get(skillId);
+
         // Steel Body: blocks ALL active skills while active
-        if (ccMods.blockActiveSkills && skill.type !== 'passive') {
+        if (ccMods.blockActiveSkills && earlySkill && earlySkill.type !== 'passive') {
             socket.emit('skill:error', { message: 'Cannot use active skills while Steel Body is active' });
             return;
         }
 
         // Blade Stop root_lock: only specific skills allowed based on Blade Stop level
-        if (hasBuff(player, 'root_lock') && skill.type !== 'passive') {
+        if (hasBuff(player, 'root_lock') && earlySkill && earlySkill.type !== 'passive') {
             const rlBuff = player.activeBuffs.find(b => b.name === 'root_lock' && b.isPlayer && Date.now() < b.expiresAt);
             if (rlBuff) {
                 const bsLv = rlBuff.bladeStopLevel || 0;
                 const BLADE_STOP_SKILLS = { 1: [], 2: [1604], 3: [1604, 1602], 4: [1604, 1602, 1610], 5: [1604, 1602, 1610, 1605] };
                 const allowedSkills = BLADE_STOP_SKILLS[bsLv] || [];
                 if (!allowedSkills.includes(skillId)) {
-                    socket.emit('skill:error', { message: `Cannot use ${skill.displayName} during Blade Stop (Lv${bsLv})` });
+                    socket.emit('skill:error', { message: `Cannot use ${earlySkill ? earlySkill.displayName : 'this skill'} during Blade Stop (Lv${bsLv})` });
                     return;
                 }
             }
         }
 
         // Blade Stop catching stance: block all active skills
-        if (hasBuff(player, 'blade_stop_catching') && skill.type !== 'passive') {
+        if (hasBuff(player, 'blade_stop_catching') && earlySkill && earlySkill.type !== 'passive') {
             socket.emit('skill:error', { message: 'Cannot use skills during Blade Stop stance' });
             return;
         }
 
         // Sitting: auto-stand on skill use (RO Classic: skill use breaks sitting, doesn't block)
-        if (player.isSitting && skill.type !== 'passive') {
+        if (player.isSitting && earlySkill && earlySkill.type !== 'passive') {
             player.isSitting = false;
             player.lastSRTick = 0;
             removeBuff(player, 'sitting');
@@ -8990,13 +9343,16 @@ io.on('connection', (socket) => {
             return;
         }
 
+        // Early skill lookup for performance/ensemble checks (full lookup + validation happens later at line ~9183)
+        const skillForPerfCheck = SKILL_MAP.get(skillId);
+
         // RO Classic: while performing, only certain skills are allowed
         // rAthena AllowWhenPerforming: Adaptation, Musical Strike, Slinging Arrow only
         // Frost Joker/Scream/Pang Voice do NOT have this flag — they are blocked during performance
-        if (isPerforming(player)) {
-            const isAllowed = skill.usableDuringPerformance  // Musical Strike, Slinging Arrow
-                || skill.name === 'adaptation' || skill.name === 'adaptation_dancer'
-                || skill.isPerformance;  // Starting a new performance cancels the old one
+        if (isPerforming(player) && skillForPerfCheck) {
+            const isAllowed = skillForPerfCheck.usableDuringPerformance  // Musical Strike, Slinging Arrow
+                || skillForPerfCheck.name === 'adaptation' || skillForPerfCheck.name === 'adaptation_dancer'
+                || skillForPerfCheck.isPerformance;  // Starting a new performance cancels the old one
             if (!isAllowed) {
                 socket.emit('skill:error', { message: 'Cannot use skills while performing. Cancel with Adaptation first.' });
                 return;
@@ -9005,8 +9361,8 @@ io.on('connection', (socket) => {
 
         // RO Classic: ensemble performers cannot use ANY skills (fully immobilized)
         // Adaptation can cancel the ensemble, but nothing else is allowed
-        if (player.isPerformingEnsemble) {
-            if (skill.name === 'adaptation' || skill.name === 'adaptation_dancer') {
+        if (player.isPerformingEnsemble && skillForPerfCheck) {
+            if (skillForPerfCheck.name === 'adaptation' || skillForPerfCheck.name === 'adaptation_dancer') {
                 // Allow Adaptation to cancel ensemble — handled in the Adaptation handler below
             } else {
                 socket.emit('skill:error', { message: 'Cannot use skills during an ensemble performance.' });
@@ -9185,7 +9541,8 @@ io.on('connection', (socket) => {
             'gloria', 'suffragium', 'potion_pitcher', 'slim_potion_pitcher',
             'chemical_protection_weapon', 'chemical_protection_shield',
             'chemical_protection_armor', 'chemical_protection_helm',
-            'detoxify', 'dispell'
+            'detoxify', 'dispell',
+            'providence', 'devotion', 'heal_crusader', 'cure_crusader'
         ]);
         if (!PVP_ENABLED && !isEnemy && targetId && targetId !== characterId) {
             const ptarget = connectedPlayers.get(targetId);
@@ -9296,10 +9653,15 @@ io.on('connection', (socket) => {
                 // Broadcast cast start to zone clients (for cast bar rendering)
                 const castStartZone = player.zone || 'prontera_south';
                 const castAttackerPos = await getPlayerPosition(characterId);
+                // Free Cast (Sage passive): movement speed penalty during cast
+                // RO Classic: (50 + 5*level)% of normal speed, Lv10 = full speed
+                const freeCastLv = player.learnedSkills ? (player.learnedSkills[1405] || 0) : 0;
+                const freeCastSpeedPct = freeCastLv > 0 ? (50 + 5 * freeCastLv) : 0;
                 broadcastToZone(castStartZone, 'skill:cast_start', {
                     casterId: characterId, casterName: player.characterName,
                     skillId, skillName: skill.displayName,
                     actualCastTime, targetId, isEnemy,
+                    freeCastSpeedPct,
                     casterX: castAttackerPos?.x || 0, casterY: castAttackerPos?.y || 0, casterZ: castAttackerPos?.z || 0
                 });
                 logger.info(`[CAST] ${player.characterName} begins casting ${skill.displayName} Lv${learnedLevel} (${actualCastTime}ms, base ${baseCastTime}ms, DEX ${effectiveStats.dex})`);
@@ -11607,6 +11969,9 @@ io.on('connection', (socket) => {
                 // Broadcast to zone so other players see the teleport
                 broadcastToZoneExcept(socket, oldZone, 'player:moved', {
                     characterId, characterName: player.characterName,
+                    jobClass: player.jobClass || 'novice',
+                    gender: player.gender || 'male',
+                    weaponMode: player.weaponMode || 0,
                     x: newX, y: newY, z: newZ,
                     health: player.health, maxHealth: player.maxHealth,
                     timestamp: Date.now()
@@ -12554,6 +12919,9 @@ io.on('connection', (socket) => {
                 const bsZone = player.zone || 'prontera_south';
                 broadcastToZoneExcept(socket, bsZone, 'player:moved', {
                     characterId, characterName: player.characterName,
+                    jobClass: player.jobClass || 'novice',
+                    gender: player.gender || 'male',
+                    weaponMode: player.weaponMode || 0,
                     x: newX, y: newY, z: newZ,
                     health: player.health, maxHealth: player.maxHealth,
                     isMounted: player.isMounted || false,
@@ -12872,7 +13240,7 @@ io.on('connection', (socket) => {
         //   already in getPassiveSkillBonuses() — no handler needed.
 
         // Helper: check if weapon is any spear type
-        const isSpearWeapon = (wt) => wt === 'spear' || wt === 'one_hand_spear' || wt === 'two_hand_spear';
+        const isSpearWeapon = (wt) => wt === 'spear' || wt === '1hSpear' || wt === '2hSpear';
 
         // --- PIERCE (ID 701) — Bundled multi-hit by target size ---
         // RO Classic (rAthena verified): Single damage calc × hit count (bundled packet).
@@ -13495,8 +13863,8 @@ io.on('connection', (socket) => {
 
             const hcZone = player.zone || 'prontera_south';
             // 2H spear doubles damage
-            const hcWeapon = player.weaponType || player.equippedWeaponRight?.weaponType || 'bare_hand';
-            const hcIs2H = hcWeapon === 'two_hand_spear';
+            const hcSubType = player.equippedWeaponRight?.subType || '';
+            const hcIs2H = hcSubType === '2hSpear';
             const hcMultiplier = hcIs2H ? effectVal * 2 : effectVal;
 
             const hcAtkMods = getBuffStatModifiers(player);
@@ -13855,6 +14223,11 @@ io.on('connection', (socket) => {
                 removeBuff(player, 'auto_guard');
                 broadcastToZone(agZone, 'skill:buff_removed', { targetId: characterId, isEnemy: false, buffName: 'auto_guard', reason: 'toggled_off' });
                 socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost: 0, remainingMana: player.mana, maxMana: player.maxMana });
+                // Re-send stats so block chance updates in UI
+                const agOffStats = getEffectiveStats(player);
+                const agOffDerived = calculateDerivedStats(agOffStats);
+                const agOffAspd = Math.min(COMBAT.ASPD_CAP, agOffDerived.aspd + (player.weaponAspdMod || 0));
+                socket.emit('player:stats', buildFullStatsPayload(characterId, player, agOffStats, agOffDerived, agOffAspd));
                 return;
             }
 
@@ -13878,6 +14251,11 @@ io.on('connection', (socket) => {
             });
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
             socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
+            // Re-send stats so block chance updates in UI
+            const agOnStats = getEffectiveStats(player);
+            const agOnDerived = calculateDerivedStats(agOnStats);
+            const agOnAspd = Math.min(COMBAT.ASPD_CAP, agOnDerived.aspd + (player.weaponAspdMod || 0));
+            socket.emit('player:stats', buildFullStatsPayload(characterId, player, agOnStats, agOnDerived, agOnAspd));
             return;
         }
 
@@ -13926,6 +14304,11 @@ io.on('connection', (socket) => {
                 removeBuff(player, 'defender');
                 broadcastToZone(dfZone, 'skill:buff_removed', { targetId: characterId, isEnemy: false, buffName: 'defender', reason: 'toggled_off' });
                 socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost: 0, remainingMana: player.mana, maxMana: player.maxMana });
+                // Re-send stats so move speed updates in client
+                const dfOffStats = getEffectiveStats(player);
+                const dfOffDerived = calculateDerivedStats(dfOffStats);
+                const dfOffAspd = Math.min(COMBAT.ASPD_CAP, dfOffDerived.aspd + (player.weaponAspdMod || 0));
+                socket.emit('player:stats', buildFullStatsPayload(characterId, player, dfOffStats, dfOffDerived, dfOffAspd));
                 return;
             }
 
@@ -13949,6 +14332,11 @@ io.on('connection', (socket) => {
             });
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
             socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
+            // Re-send stats so move speed + ASPD updates in client
+            const dfOnStats = getEffectiveStats(player);
+            const dfOnDerived = calculateDerivedStats(dfOnStats);
+            const dfOnAspd = Math.min(COMBAT.ASPD_CAP, dfOnDerived.aspd + (player.weaponAspdMod || 0));
+            socket.emit('player:stats', buildFullStatsPayload(characterId, player, dfOnStats, dfOnDerived, dfOnAspd));
             return;
         }
 
@@ -14054,14 +14442,22 @@ io.on('connection', (socket) => {
             });
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
             socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
+            // Re-send stats to the TARGET so their advanced stats panel updates (demon resist)
+            const prvTargetSock = io.sockets.sockets.get(prvTarget.socketId);
+            if (prvTargetSock) {
+                const prvTStats = getEffectiveStats(prvTarget);
+                const prvTDerived = calculateDerivedStats(prvTStats);
+                const prvTAspd = Math.min(COMBAT.ASPD_CAP, prvTDerived.aspd + (prvTarget.weaponAspdMod || 0));
+                prvTargetSock.emit('player:stats', buildFullStatsPayload(targetId, prvTarget, prvTStats, prvTDerived, prvTAspd));
+            }
             return;
         }
 
         // --- SPEAR QUICKEN (ID 1310) — ASPD buff for 2H Spear ---
         // RO Classic: +21-30% ASPD. Duration 30*Lv seconds. Requires two_hand_spear.
         if (skill.name === 'spear_quicken') {
-            const sqWeapon = player.weaponType || player.equippedWeaponRight?.weaponType || 'bare_hand';
-            if (sqWeapon !== 'two_hand_spear') { socket.emit('skill:error', { message: 'Requires a Two-Handed Spear' }); return; }
+            const sqSubType = player.equippedWeaponRight?.subType || '';
+            if (sqSubType !== '2hSpear') { socket.emit('skill:error', { message: 'Requires a Two-Handed Spear' }); return; }
 
             player.mana = Math.max(0, player.mana - spCost);
             applySkillDelays(characterId, player, skillId, levelData, socket);
@@ -14391,9 +14787,13 @@ io.on('connection', (socket) => {
         }
 
         // --- HEAVEN'S DRIVE (ID 805) / HEAVEN'S DRIVE SAGE (ID 1418) — AoE earth multi-hit ---
-        // RO Classic: 5x5 AoE, 1-5 hits * 100% MATK per target. Ground targeted (pre-renewal).
+        // RO Classic: 5x5 AoE, 1-5 hits * 125% MATK per target (pre-renewal). NOT 100%.
         if (skill.name === 'heavens_drive' || skill.name === 'heavens_drive_sage') {
-            if (!hasGroundPos) { socket.emit('skill:error', { message: 'No ground position' }); return; }
+            if (!hasGroundPos) {
+                logger.warn(`[SKILLS] ${player.characterName} Heaven's Drive: no ground position (hasGroundPos=${hasGroundPos}, gX=${groundX}, gY=${groundY})`);
+                socket.emit('skill:error', { message: 'No ground position' });
+                return;
+            }
             player.mana = Math.max(0, player.mana - spCost);
             applySkillDelays(characterId, player, skillId, levelData, socket);
 
@@ -14401,6 +14801,9 @@ io.on('connection', (socket) => {
             const hdNumHits = effectVal; // 1-5
             const hdCasterStats = getEffectiveStats(player);
             const HD_RADIUS = 125; // 5x5 cells
+            const HD_MATK_PCT = 125; // rAthena pre-renewal: 125% MATK per hit (was incorrectly 100%)
+
+            logger.info(`[SKILLS] ${player.characterName} Heaven's Drive Lv${learnedLevel} at (${Math.round(groundX)}, ${Math.round(groundY)}): ${hdNumHits} hits, zone=${hdZone}`);
 
             for (const [eid, enemy] of enemies.entries()) {
                 if (enemy.isDead || enemy.zone !== hdZone) continue;
@@ -14411,7 +14814,7 @@ io.on('connection', (socket) => {
                 let hdTotalDmg = 0;
                 const hdHitDmgs = [];
                 for (let h = 0; h < hdNumHits; h++) {
-                    const hitResult = calculateMagicSkillDamage(hdCasterStats, enemy.stats, enemy.hardMdef || enemy.magicDefense || 0, 100, 'earth', hdTargetInfo);
+                    const hitResult = calculateMagicSkillDamage(hdCasterStats, enemy.stats, enemy.hardMdef || enemy.magicDefense || 0, HD_MATK_PCT, 'earth', hdTargetInfo);
                     hdHitDmgs.push(hitResult.damage);
                     hdTotalDmg += hitResult.damage;
                 }
@@ -14607,9 +15010,10 @@ io.on('connection', (socket) => {
             applySkillDelays(characterId, player, skillId, levelData, socket);
 
             const msZone = player.zone || 'prontera_south';
-            const msNumMeteors = [2,3,3,4,4,5,5,6,6,7][learnedLevel - 1]; // rAthena pre-renewal canonical
+            const msNumMeteors = [2,2,3,3,4,4,5,5,6,6][learnedLevel - 1]; // rAthena pre-renewal: floor((Lv+2)/2)
             const msHitsPerMeteor = Math.floor((learnedLevel + 1) / 2); // 1,1,2,2,3,3,4,4,5,5
-            const msDuration = msNumMeteors * 500 + 1000; // staggered meteor drops
+            const msWaveInterval = 300; // ~300ms between meteors (rAthena stagger)
+            const msDuration = msNumMeteors * msWaveInterval + 500; // enough time for all meteors + brief linger
 
             createGroundEffect({
                 type: 'meteor_storm', casterId: characterId, casterName: player.characterName,
@@ -14620,7 +15024,7 @@ io.on('connection', (socket) => {
                 numMeteors: msNumMeteors, hitsPerMeteor: msHitsPerMeteor,
                 meteorRadius: 150, // 7x7 splash per meteor (rAthena pre-renewal)
                 stunChance: learnedLevel * 3,
-                meteorsSent: 0, waveInterval: 400,
+                meteorsSent: 0, waveInterval: msWaveInterval,
                 lastTickTime: Date.now(),
                 lastHitTargets: {}
             });
@@ -14976,6 +15380,7 @@ io.on('connection', (socket) => {
             if (!endowTarget) { socket.emit('skill:error', { message: 'Target not found' }); return; }
 
             player.mana = Math.max(0, player.mana - spCost);
+            await consumeSkillCatalysts(characterId, skill.name, learnedLevel, player);
             applySkillDelays(characterId, player, skillId, levelData, socket);
 
             // Success rate check
@@ -14990,11 +15395,17 @@ io.on('connection', (socket) => {
             const endowBuffName = 'endow_' + endowElement;
             const endowDuration = duration || 1200000; // 20 min default
 
-            // Remove any existing endow buffs (mutual exclusion)
-            for (const eName of ['endow_fire', 'endow_water', 'endow_wind', 'endow_earth', 'aspersio', 'enchant_poison']) {
+            // Remove any existing endow buffs (mutual exclusion — skill + item endows)
+            // Display names must match what was sent in skill:buff_applied for client buff bar removal
+            const ENDOW_DISPLAY = {
+                'endow_fire': 'Endow Blaze', 'endow_water': 'Endow Tsunami', 'endow_wind': 'Endow Tornado', 'endow_earth': 'Endow Quake',
+                'aspersio': 'Aspersio', 'enchant_poison': 'Enchant Poison',
+                'item_endow_fire': 'Fire Endow', 'item_endow_water': 'Water Endow', 'item_endow_wind': 'Wind Endow', 'item_endow_earth': 'Earth Endow', 'item_endow_dark': 'Dark Endow'
+            };
+            for (const eName of Object.keys(ENDOW_DISPLAY)) {
                 if (hasBuff(endowTarget, eName)) {
                     removeBuff(endowTarget, eName);
-                    broadcastToZone(player.zone || 'prontera_south', 'skill:buff_removed', { targetId: endowTargetId, isEnemy: false, buffName: eName, reason: 'overwritten' });
+                    broadcastToZone(player.zone || 'prontera_south', 'skill:buff_removed', { targetId: endowTargetId, isEnemy: false, buffName: ENDOW_DISPLAY[eName], reason: 'overwritten' });
                 }
             }
 
@@ -15033,6 +15444,7 @@ io.on('connection', (socket) => {
             if (!dispTarget) { socket.emit('skill:error', { message: 'Target not found' }); return; }
 
             player.mana = Math.max(0, player.mana - spCost);
+            await consumeSkillCatalysts(characterId, skill.name, learnedLevel, player);
             applySkillDelays(characterId, player, skillId, levelData, socket);
 
             const dispZone = player.zone || 'prontera_south';
@@ -15068,7 +15480,7 @@ io.on('connection', (socket) => {
                     broadcastToZone(dispZone, 'skill:buff_removed', { targetId, isEnemy, buffName, reason: 'dispelled' });
                 }
                 // Revert weapon element if endow was removed
-                if (removed.some(n => n.startsWith('endow_'))) {
+                if (removed.some(n => n.startsWith('endow_') || n.startsWith('item_endow_') || n === 'aspersio' || n === 'enchant_poison')) {
                     dispTarget.weaponElement = dispTarget.baseWeaponElement || 'neutral';
                 }
             }
@@ -15205,7 +15617,7 @@ io.on('connection', (socket) => {
             applySkillDelays(characterId, player, skillId, levelData, socket);
 
             const hsZone = player.zone || 'prontera_south';
-            const hsChance = [7, 9, 11, 13, 15, 17, 20, 22, 23, 25][learnedLevel - 1];
+            const hsChance = [7, 9, 11, 13, 15, 17, 19, 21, 23, 25][learnedLevel - 1];
             const hsDuration = (90 + learnedLevel * 30) * 1000; // 120s - 390s
 
             applyBuff(player, {
@@ -15229,6 +15641,7 @@ io.on('connection', (socket) => {
         if (skill.name === 'volcano') {
             if (!hasGroundPos) { socket.emit('skill:error', { message: 'No ground position' }); return; }
             player.mana = Math.max(0, player.mana - spCost);
+            await consumeSkillCatalysts(characterId, skill.name, learnedLevel, player);
             applySkillDelays(characterId, player, skillId, levelData, socket);
 
             const volcZone = player.zone || 'prontera_south';
@@ -15269,6 +15682,7 @@ io.on('connection', (socket) => {
         if (skill.name === 'deluge') {
             if (!hasGroundPos) { socket.emit('skill:error', { message: 'No ground position' }); return; }
             player.mana = Math.max(0, player.mana - spCost);
+            await consumeSkillCatalysts(characterId, skill.name, learnedLevel, player);
             applySkillDelays(characterId, player, skillId, levelData, socket);
 
             const delZone = player.zone || 'prontera_south';
@@ -15308,6 +15722,7 @@ io.on('connection', (socket) => {
         if (skill.name === 'violent_gale') {
             if (!hasGroundPos) { socket.emit('skill:error', { message: 'No ground position' }); return; }
             player.mana = Math.max(0, player.mana - spCost);
+            await consumeSkillCatalysts(characterId, skill.name, learnedLevel, player);
             applySkillDelays(characterId, player, skillId, levelData, socket);
 
             const vgZone = player.zone || 'prontera_south';
@@ -15347,6 +15762,7 @@ io.on('connection', (socket) => {
         if (skill.name === 'land_protector') {
             if (!hasGroundPos) { socket.emit('skill:error', { message: 'No ground position' }); return; }
             player.mana = Math.max(0, player.mana - spCost);
+            await consumeSkillCatalysts(characterId, skill.name, learnedLevel, player);
             applySkillDelays(characterId, player, skillId, levelData, socket);
 
             const lpZone = player.zone || 'prontera_south';
@@ -16574,12 +16990,16 @@ io.on('connection', (socket) => {
             player.mana = Math.max(0, player.mana - spCost);
             applySkillDelays(characterId, player, skillId, levelData, socket);
 
-            // Remove existing weapon element endows (buff names are endow_{element}, not skill names)
-            const endowBuffs = ['aspersio', 'enchant_poison', 'endow_fire', 'endow_water', 'endow_wind', 'endow_earth'];
-            for (const eb of endowBuffs) {
+            // Remove existing weapon element endows (skill + item endows)
+            const ENDOW_DISPLAY_EP = {
+                'endow_fire': 'Endow Blaze', 'endow_water': 'Endow Tsunami', 'endow_wind': 'Endow Tornado', 'endow_earth': 'Endow Quake',
+                'aspersio': 'Aspersio', 'enchant_poison': 'Enchant Poison',
+                'item_endow_fire': 'Fire Endow', 'item_endow_water': 'Water Endow', 'item_endow_wind': 'Wind Endow', 'item_endow_earth': 'Earth Endow', 'item_endow_dark': 'Dark Endow'
+            };
+            for (const eb of Object.keys(ENDOW_DISPLAY_EP)) {
                 if (hasBuff(player, eb)) {
                     removeBuff(player, eb);
-                    broadcastToZone(player.zone || 'prontera_south', 'skill:buff_removed', { targetId: characterId, isEnemy: false, buffName: eb, reason: 'overwritten' });
+                    broadcastToZone(player.zone || 'prontera_south', 'skill:buff_removed', { targetId: characterId, isEnemy: false, buffName: ENDOW_DISPLAY_EP[eb], reason: 'overwritten' });
                 }
             }
 
@@ -17334,12 +17754,16 @@ io.on('connection', (socket) => {
             player.mana = Math.max(0, player.mana - spCost);
             applySkillDelays(characterId, player, skillId, levelData, socket);
 
-            // Remove existing weapon element endows (buff names are endow_{element}, not skill names)
-            const endowBuffs = ['aspersio', 'enchant_poison', 'endow_fire', 'endow_water', 'endow_wind', 'endow_earth'];
-            for (const eb of endowBuffs) {
+            // Remove existing weapon element endows (skill + item endows)
+            const ENDOW_DISPLAY_ASP = {
+                'endow_fire': 'Endow Blaze', 'endow_water': 'Endow Tsunami', 'endow_wind': 'Endow Tornado', 'endow_earth': 'Endow Quake',
+                'aspersio': 'Aspersio', 'enchant_poison': 'Enchant Poison',
+                'item_endow_fire': 'Fire Endow', 'item_endow_water': 'Water Endow', 'item_endow_wind': 'Wind Endow', 'item_endow_earth': 'Earth Endow', 'item_endow_dark': 'Dark Endow'
+            };
+            for (const eb of Object.keys(ENDOW_DISPLAY_ASP)) {
                 if (hasBuff(aspTarget, eb)) {
                     removeBuff(aspTarget, eb);
-                    broadcastToZone(player.zone || 'prontera_south', 'skill:buff_removed', { targetId: aspTargetId, isEnemy: false, buffName: eb, reason: 'overwritten' });
+                    broadcastToZone(player.zone || 'prontera_south', 'skill:buff_removed', { targetId: aspTargetId, isEnemy: false, buffName: ENDOW_DISPLAY_ASP[eb], reason: 'overwritten' });
                 }
             }
 
@@ -17536,7 +17960,7 @@ io.on('connection', (socket) => {
             const trapItemCost = (skill.name === 'claymore_trap' || skill.name === 'shockwave_trap') ? 2 : 1; // rAthena: only Claymore+Shockwave cost 2 Traps
             // Check inventory for Trap items (ID 1065)
             const trapInvResult = await pool.query(
-                `SELECT id, quantity FROM character_inventory WHERE character_id = $1 AND item_id = 1065 AND is_equipped = false AND quantity >= $2 LIMIT 1`,
+                `SELECT inventory_id, quantity FROM character_inventory WHERE character_id = $1 AND item_id = 1065 AND is_equipped = false AND quantity >= $2 LIMIT 1`,
                 [characterId, trapItemCost]
             );
             if (trapInvResult.rows.length === 0) {
@@ -17562,8 +17986,8 @@ io.on('connection', (socket) => {
             player.mana = Math.max(0, player.mana - spCost);
             applySkillDelays(characterId, player, skillId, levelData, socket);
             await pool.query(
-                `UPDATE character_inventory SET quantity = quantity - $3 WHERE id = $1 AND quantity >= $3`,
-                [trapInvResult.rows[0].id, trapItemCost, trapItemCost]
+                `UPDATE character_inventory SET quantity = quantity - $2 WHERE inventory_id = $1 AND quantity >= $2`,
+                [trapInvResult.rows[0].inventory_id, trapItemCost]
             );
             if (typeof updateCachedWeight === 'function') updateCachedWeight(player, characterId);
             // Compute trap-specific params
@@ -18840,6 +19264,7 @@ io.on('connection', (socket) => {
                     partnerId: partnerId,
                     casterName: player.characterName,
                     partnerName: partner.characterName,
+                    casterPartyId: player.partyId || null,
                     x: centerX, y: centerY, z: centerZ,
                     radius: ensembleRadius,
                     zone: zone,
@@ -19125,14 +19550,30 @@ io.on('connection', (socket) => {
             const zone = player.zone || 'prontera_south';
             const enemy = enemies.get(targetId);
             if (enemy && !enemy.isDead) {
-                if (!(enemy.modeFlags && enemy.modeFlags.bossProtocol)) {
+                const isBoss = enemy.modeFlags && enemy.modeFlags.bossProtocol;
+                let pvApplied = false;
+                if (!isBoss) {
                     // Formula: 50 + (casterBaseLv - targetBaseLv) - targetVIT/5 - targetLUK/5, clamped 5-95%
                     const pvChance = Math.max(5, Math.min(95, 50 + (player.baseLv || 1) - (enemy.level || 1) - Math.floor((enemy.vit || 0) / 5) - Math.floor((enemy.luk || 0) / 5)));
                     const confResult = applyStatusEffect(player, enemy, 'confusion', pvChance, 15000);
-                    if (confResult && confResult.applied) {
+                    pvApplied = confResult && confResult.applied;
+                    if (pvApplied) {
                         broadcastToZone(zone, 'status:applied', { targetId, isEnemy: true, statusType: 'confusion', duration: 15000, sourceId: characterId, sourceName: player.characterName });
                     }
                 }
+                // Broadcast skill effect so caster sees hit/miss feedback
+                broadcastToZone(zone, 'skill:effect_damage', {
+                    attackerId: characterId, attackerName: player.characterName,
+                    targetId, targetName: enemy.name, isEnemy: true,
+                    skillId, skillName: 'Pang Voice', element: 'neutral',
+                    damage: 0, isCritical: false, isMiss: !pvApplied,
+                    hitType: pvApplied ? 'status' : (isBoss ? 'immune' : 'resist'),
+                    statusEffect: pvApplied ? 'confusion' : null,
+                    targetX: enemy.x, targetY: enemy.y, targetZ: enemy.z || 0,
+                    targetHealth: enemy.health, targetMaxHealth: enemy.maxHealth,
+                    timestamp: Date.now()
+                });
+                logger.info(`[BARD] ${player.characterName} Pang Voice on ${enemy.name}: ${pvApplied ? 'Confusion applied' : (isBoss ? 'Boss immune' : 'Resisted')}`);
             }
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
             socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
@@ -19150,7 +19591,10 @@ io.on('connection', (socket) => {
             const zone = player.zone || 'prontera_south';
             const enemy = enemies.get(targetId);
             if (enemy && !enemy.isDead) {
-                if (!(enemy.modeFlags && enemy.modeFlags.bossProtocol)) {
+                const isBoss = enemy.modeFlags && enemy.modeFlags.bossProtocol;
+                let cwApplied = false;
+                let cwReason = 'resist';
+                if (!isBoss) {
                     // Race restriction — only affects Demi-Human, Angel, Demon
                     const eRace = enemy.race || 'formless';
                     if (['demi_human', 'angel', 'demon'].includes(eRace)) {
@@ -19162,10 +19606,27 @@ io.on('connection', (socket) => {
                             enemy.charmedBy = characterId;
                             enemy.aggroTarget = null;
                             enemy.state = 'idle';
+                            cwApplied = true;
                             broadcastToZone(zone, 'status:applied', { targetId, isEnemy: true, statusType: 'charm', duration: 10000, sourceId: characterId, sourceName: player.characterName });
                         }
+                    } else {
+                        cwReason = 'wrong_race';
                     }
+                } else {
+                    cwReason = 'immune';
                 }
+                broadcastToZone(zone, 'skill:effect_damage', {
+                    attackerId: characterId, attackerName: player.characterName,
+                    targetId, targetName: enemy.name, isEnemy: true,
+                    skillId, skillName: 'Charming Wink', element: 'neutral',
+                    damage: 0, isCritical: false, isMiss: !cwApplied,
+                    hitType: cwApplied ? 'status' : cwReason,
+                    statusEffect: cwApplied ? 'charm' : null,
+                    targetX: enemy.x, targetY: enemy.y, targetZ: enemy.z || 0,
+                    targetHealth: enemy.health, targetMaxHealth: enemy.maxHealth,
+                    timestamp: Date.now()
+                });
+                logger.info(`[DANCER] ${player.characterName} Charming Wink on ${enemy.name}: ${cwApplied ? 'Charmed' : cwReason}`);
             }
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
             socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
@@ -19296,12 +19757,12 @@ io.on('connection', (socket) => {
                     });
                     // Roll stun
                     if (!(enemy.modeFlags?.statusImmune)) {
-                        const stunResult = applyStatusEffect({ level: player.stats.level || 1, luk: player.stats.luk || 1 }, enemy, 'stun', statusChance, { duration: 5000 });
+                        const stunResult = applyStatusEffect({ level: player.stats.level || 1, luk: player.stats.luk || 1 }, enemy, 'stun', statusChance, 5000);
                         if (stunResult?.applied) broadcastToZone(zone, 'status:applied', { targetId: eid, isEnemy: true, statusType: 'stun', duration: stunResult.duration || 5000 });
                     }
                     // Roll blind
                     if (!(enemy.modeFlags?.statusImmune)) {
-                        const blindResult = applyStatusEffect({ level: player.stats.level || 1, luk: player.stats.luk || 1 }, enemy, 'blind', statusChance, { duration: 30000 });
+                        const blindResult = applyStatusEffect({ level: player.stats.level || 1, luk: player.stats.luk || 1 }, enemy, 'blind', statusChance, 30000);
                         if (blindResult?.applied) broadcastToZone(zone, 'status:applied', { targetId: eid, isEnemy: true, statusType: 'blind', duration: blindResult.duration || 30000 });
                     }
                     // Apply raid debuff — Pre-renewal: +20% incoming damage (bosses +10%), 5s OR 7 hits
@@ -22161,15 +22622,30 @@ io.on('connection', (socket) => {
                             const endowBuffName = `item_endow_${element}`;
 
                             // Remove existing endow buffs (both skill endows and item endows)
-                            const endowBuffs = ['endow_fire', 'endow_water', 'endow_wind', 'endow_earth', 'endow_dark',
-                                                'item_endow_fire', 'item_endow_water', 'item_endow_wind', 'item_endow_earth', 'item_endow_dark'];
+                            const ENDOW_DISPLAY_ITEM = {
+                                'endow_fire': 'Endow Blaze', 'endow_water': 'Endow Tsunami', 'endow_wind': 'Endow Tornado', 'endow_earth': 'Endow Quake',
+                                'aspersio': 'Aspersio', 'enchant_poison': 'Enchant Poison',
+                                'item_endow_fire': 'Fire Endow', 'item_endow_water': 'Water Endow', 'item_endow_wind': 'Wind Endow', 'item_endow_earth': 'Earth Endow', 'item_endow_dark': 'Dark Endow'
+                            };
                             if (player.activeBuffs) {
-                                player.activeBuffs = player.activeBuffs.filter(b => !endowBuffs.includes(b.name) || Date.now() >= b.expiresAt);
+                                for (const oldName of Object.keys(ENDOW_DISPLAY_ITEM)) {
+                                    if (hasBuff(player, oldName)) {
+                                        removeBuff(player, oldName);
+                                        broadcastToZone(player.zone || 'prontera_south', 'skill:buff_removed', { targetId: characterId, isEnemy: false, buffName: ENDOW_DISPLAY_ITEM[oldName], reason: 'overwritten' });
+                                    }
+                                }
                             }
 
                             applyBuff(player, {
                                 name: endowBuffName, casterId: characterId, casterName: player.characterName,
                                 duration: 1200000, weaponElement: element // 20 min
+                            });
+                            // Broadcast buff so client buff bar shows the endow icon
+                            broadcastToZone(player.zone || 'prontera_south', 'skill:buff_applied', {
+                                targetId: characterId, targetName: player.characterName, isEnemy: false,
+                                casterId: characterId, casterName: player.characterName,
+                                skillId: 0, buffName: `${element.charAt(0).toUpperCase() + element.slice(1)} Endow`, duration: 1200000,
+                                effects: { weaponElement: element }
                             });
                             socket.emit('chat:receive', JSON.stringify({ type: 'system', message: `Weapon endowed with ${element} element!` }));
                             break;
@@ -22749,8 +23225,9 @@ io.on('connection', (socket) => {
                         weaponLevel: item.weapon_level || 1, matk: item.matk || 0,
                         refineLevel: item.refine_level || 0, itemId: item.item_id, subType: item.sub_type
                     };
-                    // RO Classic: weapon switch removes all weapon element endow buffs
-                    const weaponEndowBuffs = ['enchant_poison', 'aspersio', 'endow_fire', 'endow_water', 'endow_wind', 'endow_earth'];
+                    // RO Classic: weapon switch removes all weapon element endow buffs (skill + item)
+                    const weaponEndowBuffs = ['enchant_poison', 'aspersio', 'endow_fire', 'endow_water', 'endow_wind', 'endow_earth',
+                                              'item_endow_fire', 'item_endow_water', 'item_endow_wind', 'item_endow_earth', 'item_endow_dark'];
                     for (const weBuff of weaponEndowBuffs) {
                         if (hasBuff(player, weBuff)) {
                             removeBuff(player, weBuff);
@@ -22806,8 +23283,9 @@ io.on('connection', (socket) => {
                     player.weaponElement = 'neutral';
                     player.weaponMATK = 0;
                     player.equippedWeaponRight = null;
-                    // RO Classic: removing weapon cancels all weapon element endow buffs
-                    const unequipEndowBuffs = ['enchant_poison', 'aspersio', 'endow_fire', 'endow_water', 'endow_wind', 'endow_earth'];
+                    // RO Classic: removing weapon cancels all weapon element endow buffs (skill + item)
+                    const unequipEndowBuffs = ['enchant_poison', 'aspersio', 'endow_fire', 'endow_water', 'endow_wind', 'endow_earth',
+                                               'item_endow_fire', 'item_endow_water', 'item_endow_wind', 'item_endow_earth', 'item_endow_dark'];
                     for (const ueBuff of unequipEndowBuffs) {
                         if (hasBuff(player, ueBuff)) {
                             removeBuff(player, ueBuff);
@@ -22892,7 +23370,7 @@ io.on('connection', (socket) => {
                 removeBuff(player, 'one_hand_quicken');
                 broadcastToZone(equipZone, 'skill:buff_removed', { targetId: characterId, isEnemy: false, buffName: 'one_hand_quicken', reason: 'weapon_change' });
             }
-            if (hasBuff(player, 'spear_quicken') && !(player.weaponType === 'spear' || player.weaponType === 'one_hand_spear' || player.weaponType === 'two_hand_spear')) {
+            if (hasBuff(player, 'spear_quicken') && player.equippedWeaponRight?.subType !== '2hSpear') {
                 removeBuff(player, 'spear_quicken');
                 broadcastToZone(equipZone, 'skill:buff_removed', { targetId: characterId, isEnemy: false, buffName: 'spear_quicken', reason: 'weapon_change' });
             }
@@ -22935,7 +23413,10 @@ io.on('connection', (socket) => {
                 maxHealth: player.maxHealth, maxMana: player.maxMana,
                 critical: finalDerived.critical, hit: finalDerived.hit, flee: finalDerived.flee
             });
-            
+
+            // Broadcast equipment sprite visuals to other players
+            await broadcastEquipAppearance(characterId, player);
+
         } catch (err) {
             logger.error(`[ITEMS] Equip error: ${err.message}`);
             socket.emit('inventory:error', { message: 'Failed to equip item' });
@@ -24653,18 +25134,20 @@ setInterval(async () => {
                     continue;
                 }
 
-                // Pneuma check: if target is inside Pneuma and attacker is ranged, block
+                // Pneuma check: if target is inside Pneuma and attacker uses BF_LONG weapon, block
+                // RO Classic: only bow/gun auto-attacks are BF_LONG. Instruments/whips/spears are BF_SHORT (range <4 cells).
                 const pneumas = getGroundEffectsAtPosition(enemy.x, enemy.y, enemy.z || 0, 100);
                 const pneumaEffect = pneumas.find(e => e.type === 'pneuma');
-                if (pneumaEffect && attacker.attackRange > COMBAT.MELEE_RANGE + COMBAT.RANGE_TOLERANCE) {
+                if (pneumaEffect && ['bow', 'gun'].includes(attacker.weaponType)) {
                     attacker.lastAttackTime = now;
                     continue; // Silently blocked
                 }
 
                 // IN RANGE: Execute attack on enemy using full RO damage formula
                 // Includes: HIT/FLEE check, Critical, Perfect Dodge, Size Penalty, Element, DEF
-                // Arrow/ammo check: ranged weapon users must have ammo equipped (consumption happens AFTER damage — rAthena official)
-                const pveNeedsAmmo = ['bow', 'gun', 'instrument', 'whip'].includes(attacker.weaponType);
+                // Arrow/ammo check: bow/gun users must have ammo equipped (consumption happens AFTER damage — rAthena official)
+                // RO Classic: instruments/whips do NOT require arrows for auto-attacks (only Musical Strike/Slinging Arrow use arrows)
+                const pveNeedsAmmo = ['bow', 'gun'].includes(attacker.weaponType);
                 if (pveNeedsAmmo) {
                     if (!attacker.equippedAmmo || attacker.equippedAmmo.quantity <= 0) {
                         const atkSock = io.sockets.sockets.get(attacker.socketId);
@@ -24775,6 +25258,53 @@ setInterval(async () => {
                     // Miss/Dodge (single weapon): don't deal damage, still broadcast event
                     broadcastToZone(atkEnemyZone, 'combat:damage', damagePayload);
                     logger.info(`[COMBAT] ${attacker.characterName} ${hitType} against ${enemy.name}(${enemy.enemyId})`);
+
+                    // rAthena: Auto-Blitz triggers even on missed attacks — check before continue
+                    if (attacker.hasFalcon && attacker.weaponType === 'bow') {
+                        const abBlitzLv = (attacker.learnedSkills || {})[900] || 0;
+                        if (abBlitzLv > 0) {
+                            const abLuk = cachedEffStats.luk || 0;
+                            const abChance = Math.floor(abLuk / 3);
+                            if (Math.random() * 100 < abChance) {
+                                const jobLv = attacker.stats?.jobLevel || 1;
+                                const abHits = Math.min(abBlitzLv, Math.min(5, Math.floor((jobLv + 9) / 10)));
+                                const abSteelCrow = (attacker.learnedSkills || {})[901] || 0;
+                                const abPerHit = (Math.floor((cachedEffStats.dex || 0) / 10) + Math.floor((cachedEffStats.int || 0) / 2) + abSteelCrow * 3 + 40) * 2;
+                                const abTotalBase = abPerHit * abHits;
+                                // On miss path, target is the primary enemy (damage still applies as MISC)
+                                const abTargets = [];
+                                for (const [sid, se] of enemies.entries()) {
+                                    if (se.isDead || se.zone !== atkEnemyZone) continue;
+                                    const sdx = enemy.x - se.x, sdy = enemy.y - se.y;
+                                    if (Math.sqrt(sdx * sdx + sdy * sdy) <= 125) abTargets.push({ id: sid, enemy: se });
+                                }
+                                if (abTargets.length === 0) abTargets.push({ id: enemy.enemyId, enemy });
+                                const abSplitDmg = Math.max(1, Math.floor(abTotalBase / Math.max(1, abTargets.length)));
+                                for (const { id: sid, enemy: se } of abTargets) {
+                                    const sEleMod = getElementModifier('neutral', (se.element?.type || 'neutral'), (se.element?.level || 1));
+                                    const abFinal = Math.max(1, Math.floor(abSplitDmg * sEleMod / 100));
+                                    const wasAlive = se.health > 0;
+                                    se.health = Math.max(0, se.health - abFinal);
+                                    se.lastDamageTime = now;
+                                    setTimeout(() => {
+                                        broadcastToZone(atkEnemyZone, 'skill:effect_damage', {
+                                            attackerId, attackerName: attacker.characterName,
+                                            targetId: sid, targetName: se.name, isEnemy: true,
+                                            skillId: 900, skillName: 'Blitz Beat', skillLevel: abBlitzLv, element: 'neutral',
+                                            damage: abFinal, isCritical: false, isMiss: false, hitType: 'misc',
+                                            isAutoBlitz: true,
+                                            targetHealth: se.health, targetMaxHealth: se.maxHealth,
+                                            targetX: se.x, targetY: se.y, targetZ: se.z,
+                                            timestamp: Date.now()
+                                        });
+                                        broadcastToZone(atkEnemyZone, 'enemy:health_update', { enemyId: sid, health: se.health, maxHealth: se.maxHealth, inCombat: true });
+                                        if (wasAlive && se.health <= 0) processEnemyDeathFromSkill(se, attacker, attackerId, io);
+                                    }, 300);
+                                }
+                                logger.info(`[HUNTER] ${attacker.characterName} Auto-Blitz Beat (on miss): ${abHits} hits, ${abTargets.length} targets, ${abSplitDmg} per target`);
+                            }
+                        }
+                    }
                     continue;
                 }
 
@@ -24988,72 +25518,74 @@ setInterval(async () => {
                         }
                     }
 
-                    // Hindsight (Sage autocast): chance to auto-cast bolt on melee hit
-                    if (attacker.activeBuffs && enemy.health > 0) {
-                        const hsBuff = attacker.activeBuffs.find(b => b.name === 'hindsight' && Date.now() < b.expiresAt);
-                        if (hsBuff && Math.random() * 100 < (hsBuff.autocastChance || 0)) {
-                            // Pre-renewal Hindsight spell pool (per iRO Wiki Classic)
-                            // Each Hindsight level unlocks one spell at one level
-                            // Lv1: Napalm Beat, Lv2-4: Bolts Lv1-3, Lv5-7: Soul Strike Lv1-3,
-                            // Lv8-9: Fire Ball Lv1-2, Lv10: Frost Diver Lv1
-                            const hsLv = hsBuff.hindsightLevel || 1;
-                            const learned = attacker.learnedSkills || {};
-                            const hsPool = [];
-                            const maxBoltLvFromHS = Math.min(3, Math.max(0, hsLv - 1)); // Lv2->1, Lv3->2, Lv4+->3
-                            const maxSSLvFromHS = Math.min(3, Math.max(0, hsLv - 4)); // Lv5->1, Lv6->2, Lv7+->3
-                            const maxFBLvFromHS = Math.min(2, Math.max(0, hsLv - 7)); // Lv8->1, Lv9+->2
-                            const maxFDLvFromHS = hsLv >= 10 ? 1 : 0;
+                }
 
-                            // Napalm Beat (209) — available from Lv1, up to Lv3
-                            if (learned[209] && hsLv >= 1) hsPool.push({ skillId: 209, name: 'Napalm Beat', element: 'ghost', baseSP: 9, maxLv: Math.min(3, learned[209]) });
-                            // Cold Bolt (200) — available from Lv2
-                            if (learned[200] && maxBoltLvFromHS > 0) hsPool.push({ skillId: 200, name: 'Cold Bolt', element: 'water', baseSP: 12, maxLv: Math.min(maxBoltLvFromHS, learned[200]) });
-                            // Fire Bolt (201) — available from Lv2
-                            if (learned[201] && maxBoltLvFromHS > 0) hsPool.push({ skillId: 201, name: 'Fire Bolt', element: 'fire', baseSP: 12, maxLv: Math.min(maxBoltLvFromHS, learned[201]) });
-                            // Lightning Bolt (202) — available from Lv2
-                            if (learned[202] && maxBoltLvFromHS > 0) hsPool.push({ skillId: 202, name: 'Lightning Bolt', element: 'wind', baseSP: 12, maxLv: Math.min(maxBoltLvFromHS, learned[202]) });
-                            // Soul Strike (210) — available from Lv5
-                            if (learned[210] && maxSSLvFromHS > 0) hsPool.push({ skillId: 210, name: 'Soul Strike', element: 'ghost', baseSP: 18, maxLv: Math.min(maxSSLvFromHS, learned[210]) });
-                            // Fire Ball (207) — available from Lv8
-                            if (learned[207] && maxFBLvFromHS > 0) hsPool.push({ skillId: 207, name: 'Fire Ball', element: 'fire', baseSP: 25, maxLv: Math.min(maxFBLvFromHS, learned[207]) });
-                            // Frost Diver (208) — available from Lv10
-                            if (learned[208] && maxFDLvFromHS > 0) hsPool.push({ skillId: 208, name: 'Frost Diver', element: 'water', baseSP: 25, maxLv: Math.min(maxFDLvFromHS, learned[208]) });
+                // Hindsight (Sage autocast): chance to auto-cast bolt on melee attack
+                // RO Classic: triggers even on miss (iRO Wiki: "attacks do not have to hit")
+                if (attacker.activeBuffs && enemy.health > 0) {
+                    const hsBuff = attacker.activeBuffs.find(b => b.name === 'hindsight' && Date.now() < b.expiresAt);
+                    if (hsBuff && Math.random() * 100 < (hsBuff.autocastChance || 0)) {
+                        // Pre-renewal Hindsight spell pool (per iRO Wiki Classic)
+                        // Each Hindsight level unlocks one spell at one level
+                        // Lv1: Napalm Beat, Lv2-4: Bolts Lv1-3, Lv5-7: Soul Strike Lv1-3,
+                        // Lv8-9: Fire Ball Lv1-2, Lv10: Frost Diver Lv1
+                        const hsLv = hsBuff.hindsightLevel || 1;
+                        const learned = attacker.learnedSkills || {};
+                        const hsPool = [];
+                        const maxBoltLvFromHS = Math.min(3, Math.max(0, hsLv - 1)); // Lv2->1, Lv3->2, Lv4+->3
+                        const maxSSLvFromHS = Math.min(3, Math.max(0, hsLv - 4)); // Lv5->1, Lv6->2, Lv7+->3
+                        const maxFBLvFromHS = Math.min(2, Math.max(0, hsLv - 7)); // Lv8->1, Lv9+->2
+                        const maxFDLvFromHS = hsLv >= 10 ? 1 : 0;
 
-                            if (hsPool.length > 0) {
-                                const hsSpell = hsPool[Math.floor(Math.random() * hsPool.length)];
-                                const hsSPCost = Math.floor(hsSpell.baseSP * 2 / 3); // 66% SP cost
-                                if (attacker.mana >= hsSPCost) {
-                                    attacker.mana -= hsSPCost;
-                                    // Roll bolt level: 50% Lv1, 35% Lv2, 15% Lv3 (capped by hsSpell.maxLv)
-                                    const maxBoltLv = hsSpell.maxLv || 1;
-                                    let boltLv = 1;
-                                    if (maxBoltLv >= 2) {
-                                        const r = Math.random() * 100;
-                                        if (maxBoltLv >= 3 && r >= 85) boltLv = 3;
-                                        else if (r >= 50) boltLv = Math.min(2, maxBoltLv);
-                                    }
-                                    // Calculate and apply damage (instant, no cast time)
-                                    // All pre-renewal autocast spells use 100% MATK per level
-                                    const hsStats = getEffectiveStats(attacker);
-                                    const hsTargetInfo = getEnemyTargetInfo(enemy);
-                                    const hsResult = calculateMagicSkillDamage(hsStats, enemy.stats, enemy.hardMdef || enemy.magicDefense || 0, 100 * boltLv, hsSpell.element, hsTargetInfo);
-                                    enemy.health = Math.max(0, enemy.health - hsResult.damage);
-                                    enemy.lastDamageTime = Date.now();
+                        // Napalm Beat (209) — available from Lv1, up to Lv3
+                        if (learned[209] && hsLv >= 1) hsPool.push({ skillId: 209, name: 'Napalm Beat', element: 'ghost', baseSP: 9, maxLv: Math.min(3, learned[209]) });
+                        // Cold Bolt (200) — available from Lv2
+                        if (learned[200] && maxBoltLvFromHS > 0) hsPool.push({ skillId: 200, name: 'Cold Bolt', element: 'water', baseSP: 12, maxLv: Math.min(maxBoltLvFromHS, learned[200]) });
+                        // Fire Bolt (201) — available from Lv2
+                        if (learned[201] && maxBoltLvFromHS > 0) hsPool.push({ skillId: 201, name: 'Fire Bolt', element: 'fire', baseSP: 12, maxLv: Math.min(maxBoltLvFromHS, learned[201]) });
+                        // Lightning Bolt (202) — available from Lv2
+                        if (learned[202] && maxBoltLvFromHS > 0) hsPool.push({ skillId: 202, name: 'Lightning Bolt', element: 'wind', baseSP: 12, maxLv: Math.min(maxBoltLvFromHS, learned[202]) });
+                        // Soul Strike (210) — available from Lv5
+                        if (learned[210] && maxSSLvFromHS > 0) hsPool.push({ skillId: 210, name: 'Soul Strike', element: 'ghost', baseSP: 18, maxLv: Math.min(maxSSLvFromHS, learned[210]) });
+                        // Fire Ball (207) — available from Lv8
+                        if (learned[207] && maxFBLvFromHS > 0) hsPool.push({ skillId: 207, name: 'Fire Ball', element: 'fire', baseSP: 25, maxLv: Math.min(maxFBLvFromHS, learned[207]) });
+                        // Frost Diver (208) — available from Lv10
+                        if (learned[208] && maxFDLvFromHS > 0) hsPool.push({ skillId: 208, name: 'Frost Diver', element: 'water', baseSP: 25, maxLv: Math.min(maxFDLvFromHS, learned[208]) });
 
-                                    broadcastToZone(atkEnemyZone, 'skill:effect_damage', {
-                                        attackerId, attackerName: attacker.characterName,
-                                        targetId: enemy.enemyId, targetName: enemy.name, isEnemy: true,
-                                        skillId: hsSpell.skillId, skillName: hsSpell.name + ' (Auto)', skillLevel: boltLv, element: hsSpell.element,
-                                        damage: hsResult.damage, isCritical: false, isMiss: false, hitType: 'skill',
-                                        targetHealth: enemy.health, targetMaxHealth: enemy.maxHealth,
-                                        targetX: enemy.x, targetY: enemy.y, targetZ: enemy.z,
-                                        timestamp: Date.now()
-                                    });
-                                    broadcastToZone(atkEnemyZone, 'enemy:health_update', { enemyId: enemy.enemyId, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: true });
+                        if (hsPool.length > 0) {
+                            const hsSpell = hsPool[Math.floor(Math.random() * hsPool.length)];
+                            const hsSPCost = Math.floor(hsSpell.baseSP * 2 / 3); // 66% SP cost
+                            if (attacker.mana >= hsSPCost) {
+                                attacker.mana -= hsSPCost;
+                                // Roll bolt level: 50% Lv1, 35% Lv2, 15% Lv3 (capped by hsSpell.maxLv)
+                                const maxBoltLv = hsSpell.maxLv || 1;
+                                let boltLv = 1;
+                                if (maxBoltLv >= 2) {
+                                    const r = Math.random() * 100;
+                                    if (maxBoltLv >= 3 && r >= 85) boltLv = 3;
+                                    else if (r >= 50) boltLv = Math.min(2, maxBoltLv);
+                                }
+                                // Calculate and apply damage (instant, no cast time)
+                                // All pre-renewal autocast spells use 100% MATK per level
+                                const hsStats = getEffectiveStats(attacker);
+                                const hsTargetInfo = getEnemyTargetInfo(enemy);
+                                const hsResult = calculateMagicSkillDamage(hsStats, enemy.stats, enemy.hardMdef || enemy.magicDefense || 0, 100 * boltLv, hsSpell.element, hsTargetInfo);
+                                enemy.health = Math.max(0, enemy.health - hsResult.damage);
+                                enemy.lastDamageTime = Date.now();
 
-                                    if (enemy.health <= 0) {
-                                        await processEnemyDeathFromSkill(enemy, attacker, attackerId, io);
-                                    }
+                                broadcastToZone(atkEnemyZone, 'skill:effect_damage', {
+                                    attackerId, attackerName: attacker.characterName,
+                                    targetId: enemy.enemyId, targetName: enemy.name, isEnemy: true,
+                                    skillId: hsSpell.skillId, skillName: hsSpell.name + ' (Auto)', skillLevel: boltLv, element: hsSpell.element,
+                                    damage: hsResult.damage, isCritical: false, isMiss: false, hitType: 'skill',
+                                    targetHealth: enemy.health, targetMaxHealth: enemy.maxHealth,
+                                    targetX: enemy.x, targetY: enemy.y, targetZ: enemy.z,
+                                    timestamp: Date.now()
+                                });
+                                broadcastToZone(atkEnemyZone, 'enemy:health_update', { enemyId: enemy.enemyId, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: true });
+
+                                if (enemy.health <= 0) {
+                                    await processEnemyDeathFromSkill(enemy, attacker, attackerId, io);
                                 }
                             }
                         }
@@ -25270,8 +25802,9 @@ setInterval(async () => {
                 }
 
                 // Auto-Blitz Beat (Hunter, bow, falcon, LUK/3% chance)
-                // Triggers even on missed attacks. Damage SPLIT among 3x3 targets.
-                if (attacker.hasFalcon && attacker.weaponType === 'bow' && enemy.health > 0) {
+                // rAthena: triggers even on missed attacks AND even if main attack killed the target
+                // (falcon is part of the attack action, not conditional on survival)
+                if (attacker.hasFalcon && attacker.weaponType === 'bow') {
                     const abBlitzLv = (attacker.learnedSkills || {})[900] || 0;
                     if (abBlitzLv > 0) {
                         const abLuk = cachedEffStats.luk || 0;
@@ -25283,17 +25816,23 @@ setInterval(async () => {
                             const abSteelCrow = (attacker.learnedSkills || {})[901] || 0;
                             const abPerHit = (Math.floor((cachedEffStats.dex || 0) / 10) + Math.floor((cachedEffStats.int || 0) / 2) + abSteelCrow * 3 + 40) * 2; // rAthena canonical
                             const abTotalBase = abPerHit * abHits;
-                            // Find all targets in 3x3 (125 UE) — damage SPLIT
+                            // Find all alive targets in 3x3 (125 UE) for damage split count
                             const abTargets = [];
                             for (const [sid, se] of enemies.entries()) {
                                 if (se.isDead || se.zone !== atkEnemyZone) continue;
                                 const sdx = enemy.x - se.x, sdy = enemy.y - se.y;
                                 if (Math.sqrt(sdx * sdx + sdy * sdy) <= 125) abTargets.push({ id: sid, enemy: se });
                             }
+                            // If main attack killed the target and no other alive targets in 3x3,
+                            // still include the primary target for the visual/combat log (overkill)
+                            if (abTargets.length === 0) {
+                                abTargets.push({ id: enemy.enemyId, enemy });
+                            }
                             const abSplitDmg = Math.max(1, Math.floor(abTotalBase / Math.max(1, abTargets.length)));
                             for (const { id: sid, enemy: se } of abTargets) {
                                 const sEleMod = getElementModifier('neutral', (se.element?.type || 'neutral'), (se.element?.level || 1));
                                 const abFinal = Math.max(1, Math.floor(abSplitDmg * sEleMod / 100));
+                                const wasAlive = se.health > 0;
                                 se.health = Math.max(0, se.health - abFinal);
                                 se.lastDamageTime = now;
                                 setTimeout(() => {
@@ -25302,12 +25841,14 @@ setInterval(async () => {
                                         targetId: sid, targetName: se.name, isEnemy: true,
                                         skillId: 900, skillName: 'Blitz Beat', skillLevel: abBlitzLv, element: 'neutral',
                                         damage: abFinal, isCritical: false, isMiss: false, hitType: 'misc',
+                                        isAutoBlitz: true,
                                         targetHealth: se.health, targetMaxHealth: se.maxHealth,
                                         targetX: se.x, targetY: se.y, targetZ: se.z,
                                         timestamp: Date.now()
                                     });
                                     broadcastToZone(atkEnemyZone, 'enemy:health_update', { enemyId: sid, health: se.health, maxHealth: se.maxHealth, inCombat: true });
-                                    if (se.health <= 0) processEnemyDeathFromSkill(se, attacker, attackerId, io);
+                                    // Only process death if the target was alive before auto-blitz
+                                    if (wasAlive && se.health <= 0) processEnemyDeathFromSkill(se, attacker, attackerId, io);
                                 }, 300);
                             }
                             logger.info(`[HUNTER] ${attacker.characterName} Auto-Blitz Beat: ${abHits} hits, ${abTargets.length} targets, ${abSplitDmg} per target`);
@@ -25423,7 +25964,12 @@ setInterval(async () => {
                             characterId: aaR.charId, baseExpGained: expResult.baseExpGained,
                             jobExpGained: expResult.jobExpGained, enemyName: enemy.name,
                             enemyLevel: enemy.level, exp: buildExpPayload(aaR.player),
-                            baseLevelUps: expResult.baseLevelUps, jobLevelUps: expResult.jobLevelUps
+                            baseLevelUps: expResult.baseLevelUps, jobLevelUps: expResult.jobLevelUps,
+                            partyShared: aaR.partyShared || false,
+                            originalBaseExp: aaR.originalBaseExp || 0,
+                            originalJobExp: aaR.originalJobExp || 0,
+                            partyBonusPct: aaR.partyBonusPct || 0,
+                            memberCount: aaR.memberCount || 1
                         });
                         logger.info(`[EXP] ${aaR.player.characterName} gained +${aaR.baseExp} BaseEXP +${aaR.jobExp} JobEXP from ${enemy.name}`);
 
@@ -25734,7 +26280,8 @@ setInterval(async () => {
             }
 
             // Arrow/ammo check for PvP ranged auto-attacks (consumption AFTER damage — rAthena official)
-            const pvpNeedsAmmo = ['bow', 'gun', 'instrument', 'whip'].includes(attacker.weaponType);
+            // RO Classic: instruments/whips do NOT require arrows for auto-attacks
+            const pvpNeedsAmmo = ['bow', 'gun'].includes(attacker.weaponType);
             if (pvpNeedsAmmo) {
                 if (!attacker.equippedAmmo || attacker.equippedAmmo.quantity <= 0) {
                     const atkSock = io.sockets.sockets.get(attacker.socketId);
@@ -26139,8 +26686,9 @@ function syncPartyMemberHP(charId, player) {
     member.hp = player.health;
     member.maxHp = player.maxHealth;
     broadcastToParty(player.partyId, 'party:member_update', {
-        characterId: charId, hp: player.health, maxHp: player.maxHealth
-    }, charId); // exclude self (they already see their own HP via combat:health_update)
+        characterId: charId, hp: player.health, maxHp: player.maxHealth,
+        sp: player.mana || 0, maxSp: player.maxMana || 1
+    }); // include self so party UI HP/SP bar stays accurate
 }
 
 // --- Party HP Sync (every 1 second, matches rAthena party_update_interval) ---
@@ -26151,12 +26699,17 @@ setInterval(() => {
             if (!member.online) continue;
             const p = connectedPlayers.get(charId);
             if (!p) continue;
-            if (member.hp !== p.health || member.maxHp !== p.maxHealth) {
+            const hpChanged = member.hp !== p.health || member.maxHp !== p.maxHealth;
+            const spChanged = member.sp !== (p.mana || 0) || member.maxSp !== (p.maxMana || 1);
+            if (hpChanged || spChanged) {
                 member.hp = p.health;
                 member.maxHp = p.maxHealth;
+                member.sp = p.mana || 0;
+                member.maxSp = p.maxMana || 1;
                 broadcastToParty(partyId, 'party:member_update', {
-                    characterId: charId, hp: p.health, maxHp: p.maxHealth
-                }, charId);
+                    characterId: charId, hp: p.health, maxHp: p.maxHealth,
+                    sp: p.mana || 0, maxSp: p.maxMana || 1
+                }); // include self so party UI stays accurate
             }
         }
     }
@@ -26499,18 +27052,35 @@ setInterval(() => {
             }
         }
         // Endow buff expiry: revert weaponElement when endow buffs expire
-        if (expiredBuffs.some(b => b.name && b.name.startsWith('endow_'))) {
+        if (expiredBuffs.some(b => b.name && (b.name.startsWith('endow_') || b.name.startsWith('item_endow_') || b.name === 'aspersio' || b.name === 'enchant_poison'))) {
             // Only revert if no other active endow buff remains
-            const hasActiveEndow = player.activeBuffs && player.activeBuffs.some(b => b.name && b.name.startsWith('endow_') && Date.now() < b.expiresAt);
+            const hasActiveEndow = player.activeBuffs && player.activeBuffs.some(b => Date.now() < b.expiresAt &&
+                (b.name.startsWith('endow_') || b.name.startsWith('item_endow_') || b.name === 'aspersio' || b.name === 'enchant_poison'));
             if (!hasActiveEndow) {
                 player.weaponElement = player.baseWeaponElement || 'neutral';
             }
         }
-        // Refresh client stats window when stat-affecting buffs expire (IC, Blessing, IncAGI, Provoke, etc.)
+        // Refresh client stats window when stat-affecting buffs expire (IC, Blessing, IncAGI, Provoke, songs, etc.)
         if (expiredBuffs.length > 0 && sock) {
+            const expBuffNames = expiredBuffs.map(b => b.name);
             const expEffStats = getEffectiveStats(player);
             const expDerived = roDerivedStats(expEffStats);
-            sock.emit('player:stats', buildFullStatsPayload(charId, player, expEffStats, expDerived, Math.min(COMBAT.ASPD_CAP, expDerived.aspd + (player.weaponAspdMod || 0))));
+            // Update maxHealth/maxMana when MaxHP%/MaxSP% buffs expire (Apple of Idun, Service for You, etc.)
+            const oldMaxHP = player.maxHealth;
+            const oldMaxSP = player.maxMana;
+            player.maxHealth = expDerived.maxHP;
+            player.maxMana = expDerived.maxSP;
+            // Cap HP/SP to new max if buff expiry lowered them
+            if (player.health > player.maxHealth) player.health = player.maxHealth;
+            if (player.mana > player.maxMana) player.mana = player.maxMana;
+            const expAspd = Math.min(COMBAT.ASPD_CAP, expDerived.aspd + (player.weaponAspdMod || 0));
+            logger.info(`[BUFF_EXPIRY] ${player.characterName}: expired=[${expBuffNames.join(',')}] ASPD=${expAspd} MaxHP=${oldMaxHP}->${player.maxHealth} MaxSP=${oldMaxSP}->${player.maxMana}`);
+            sock.emit('player:stats', buildFullStatsPayload(charId, player, expEffStats, expDerived, expAspd));
+            // Also emit health_update so HP/SP bars reflect updated maxHealth/maxMana
+            sock.emit('combat:health_update', {
+                characterId: charId, health: player.health,
+                maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana
+            });
         }
 
         // --- Spirit Sphere expiry (Monk) ---
@@ -26641,62 +27211,71 @@ setInterval(() => {
         }
 
         // --- SIGHT BLASTER proximity trigger ---
+        // rAthena: SC_SIGHTBLASTER checked every 20ms via status_change_timer.
+        // SplashArea=1 → 3x3 cells (1 cell from center = 75 UE). Hits ALL enemies in range
+        // simultaneously in the same tick before consuming the buff (map_foreachinallrange
+        // iterates all, val2=0 only prevents NEXT tick). 100% MATK Fire, 3-cell knockback.
+        // Boss: damage YES, knockback NO (MD_KNOCKBACKIMMUNE via knockbackTarget).
+        // Does NOT reveal hidden/cloaked enemies. Hitting traps does NOT consume buff.
         if (!player.isDead && hasBuff(player, 'sight_blaster')) {
             const sbBuff = player.activeBuffs?.find(b => b.name === 'sight_blaster' && Date.now() < b.expiresAt);
             if (sbBuff) {
                 const pZone = player.zone || 'prontera_south';
                 const px = player.lastX || 0, py = player.lastY || 0;
-                const SB_TRIGGER_RADIUS = 75; // 3x3 cells = 1.5 cells from center
+                const SB_TRIGGER_RADIUS = 75; // SplashArea 1 = 3x3 cells = 1.5 cells from center
 
-                let sbTriggered = false;
+                // Collect ALL enemies in range first (rAthena: map_foreachinallrange processes all before buff ends)
+                const sbTargets = [];
                 for (const [eid, enemy] of enemies.entries()) {
                     if (enemy.isDead || enemy.zone !== pZone) continue;
                     const dx = enemy.x - px, dy = enemy.y - py;
-                    if (Math.sqrt(dx * dx + dy * dy) > SB_TRIGGER_RADIUS) continue;
-
-                    // Trigger! Deal 100% MATK Fire + knockback 3 cells
-                    const sbStats = getEffectiveStats(player);
-                    const sbTargetInfo = getEnemyTargetInfo(enemy);
-                    const sbResult = calculateMagicSkillDamage(sbStats, enemy.stats, enemy.hardMdef || enemy.magicDefense || 0, sbBuff.matkPct || 100, 'fire', sbTargetInfo);
-
-                    // Lex Aeterna check
-                    if (enemy.activeBuffs) {
-                        const lexBuff = enemy.activeBuffs.find(b => b.name === 'lex_aeterna' && Date.now() < b.expiresAt);
-                        if (lexBuff) {
-                            sbResult.damage *= 2;
-                            removeBuff(enemy, 'lex_aeterna');
-                            broadcastToZone(pZone, 'skill:buff_removed', { targetId: eid, isEnemy: true, buffName: 'lex_aeterna', reason: 'consumed' });
-                        }
+                    if (Math.sqrt(dx * dx + dy * dy) <= SB_TRIGGER_RADIUS) {
+                        sbTargets.push([eid, enemy]);
                     }
-
-                    enemy.health = Math.max(0, enemy.health - sbResult.damage);
-                    enemy.lastDamageTime = Date.now();
-                    if (typeof setEnemyAggro === 'function') setEnemyAggro(enemy, charId, 'skill');
-                    checkDamageBreakStatuses(enemy).forEach(bt => {
-                        broadcastToZone(pZone, 'status:removed', { targetId: eid, isEnemy: true, statusType: bt, reason: 'damage_break' });
-                    });
-
-                    broadcastToZone(pZone, 'skill:effect_damage', {
-                        attackerId: charId, attackerName: player.characterName,
-                        targetId: eid, targetName: enemy.name, isEnemy: true,
-                        skillId: 813, skillName: 'Sight Blaster', skillLevel: 1, element: 'fire',
-                        damage: sbResult.damage, isCritical: false, isMiss: false, hitType: 'skill',
-                        targetHealth: enemy.health, targetMaxHealth: enemy.maxHealth,
-                        targetX: enemy.x, targetY: enemy.y, targetZ: enemy.z,
-                        timestamp: Date.now()
-                    });
-                    broadcastToZone(pZone, 'enemy:health_update', { enemyId: eid, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: true });
-
-                    // Knockback 3 cells (boss immune to KB via knockbackTarget)
-                    knockbackTarget(enemy, px, py, 3, pZone, io);
-
-                    if (enemy.health <= 0) processEnemyDeathFromSkill(enemy, player, charId, io);
-
-                    sbTriggered = true;
-                    break; // Single-use: only trigger on first enemy found
                 }
 
-                if (sbTriggered) {
+                if (sbTargets.length > 0) {
+                    const sbStats = getEffectiveStats(player);
+
+                    for (const [eid, enemy] of sbTargets) {
+                        const sbTargetInfo = getEnemyTargetInfo(enemy);
+                        const sbResult = calculateMagicSkillDamage(sbStats, enemy.stats, enemy.hardMdef || enemy.magicDefense || 0, sbBuff.matkPct || 100, 'fire', sbTargetInfo);
+
+                        // Lex Aeterna check
+                        if (enemy.activeBuffs) {
+                            const lexBuff = enemy.activeBuffs.find(b => b.name === 'lex_aeterna' && Date.now() < b.expiresAt);
+                            if (lexBuff) {
+                                sbResult.damage *= 2;
+                                removeBuff(enemy, 'lex_aeterna');
+                                broadcastToZone(pZone, 'skill:buff_removed', { targetId: eid, isEnemy: true, buffName: 'lex_aeterna', reason: 'consumed' });
+                            }
+                        }
+
+                        enemy.health = Math.max(0, enemy.health - sbResult.damage);
+                        enemy.lastDamageTime = Date.now();
+                        if (typeof setEnemyAggro === 'function') setEnemyAggro(enemy, charId, 'skill');
+                        checkDamageBreakStatuses(enemy).forEach(bt => {
+                            broadcastToZone(pZone, 'status:removed', { targetId: eid, isEnemy: true, statusType: bt, reason: 'damage_break' });
+                        });
+
+                        broadcastToZone(pZone, 'skill:effect_damage', {
+                            attackerId: charId, attackerName: player.characterName,
+                            targetId: eid, targetName: enemy.name, isEnemy: true,
+                            skillId: 813, skillName: 'Sight Blaster', skillLevel: 1, element: 'fire',
+                            damage: sbResult.damage, isCritical: false, isMiss: false, hitType: 'skill',
+                            targetHealth: enemy.health, targetMaxHealth: enemy.maxHealth,
+                            targetX: enemy.x, targetY: enemy.y, targetZ: enemy.z,
+                            timestamp: Date.now()
+                        });
+                        broadcastToZone(pZone, 'enemy:health_update', { enemyId: eid, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: true });
+
+                        // Knockback 3 cells away from caster (boss immune via knockbackTarget)
+                        knockbackTarget(enemy, px, py, 3, pZone, io);
+
+                        if (enemy.health <= 0) processEnemyDeathFromSkill(enemy, player, charId, io);
+                    }
+
+                    // Consume buff after hitting all targets (rAthena: val2=0 ends on next tick)
                     removeBuff(player, 'sight_blaster');
                     broadcastToZone(pZone, 'skill:buff_removed', { targetId: charId, isEnemy: false, buffName: 'sight_blaster', reason: 'triggered' });
                 }
@@ -26887,12 +27466,42 @@ setInterval(() => {
                             }
 
                             if (inAoe && buffName) {
+                                const isNewSongBuff = !hasBuff(ally, buffName);
                                 applyBuff(ally, {
                                     name: buffName, skillId: perf.skillId,
                                     casterId: charId, casterName: player.characterName,
                                     duration: PERFORMANCE_CONSTANTS.EFFECT_LINGER_DURATION,
                                     ...perf.effectValues,
                                 });
+
+                                // First-time buff application: emit buff icon + recalculate stats for client
+                                if (isNewSongBuff) {
+                                    const buffConfig = BUFF_TYPES[buffName];
+                                    broadcastToZone(playerZone, 'skill:buff_applied', {
+                                        targetId: pid, targetName: ally.characterName, isEnemy: false,
+                                        casterId: charId, casterName: player.characterName,
+                                        skillId: perf.skillId,
+                                        buffName: buffConfig ? buffConfig.displayName : buffName,
+                                        duration: PERFORMANCE_CONSTANTS.EFFECT_LINGER_DURATION,
+                                        effects: perf.effectValues
+                                    });
+                                    // Recalculate and emit stats so client sees ASPD/MaxHP/FLEE/etc. changes
+                                    const songEffStats = getEffectiveStats(ally);
+                                    const songDerived = roDerivedStats(songEffStats);
+                                    const songAspd = Math.min(COMBAT.ASPD_CAP, songDerived.aspd + (ally.weaponAspdMod || 0));
+                                    // Update maxHealth/maxMana for MaxHP%/MaxSP% songs (Apple of Idun, Service for You)
+                                    ally.maxHealth = songDerived.maxHP;
+                                    ally.maxMana = songDerived.maxSP;
+                                    const songAllySock = io.sockets.sockets.get(ally.socketId);
+                                    if (songAllySock) {
+                                        songAllySock.emit('player:stats', buildFullStatsPayload(pid, ally, songEffStats, songDerived, songAspd));
+                                        // Also emit health_update so HP/SP bars reflect new maxHealth/maxMana
+                                        songAllySock.emit('combat:health_update', {
+                                            characterId: pid, health: ally.health,
+                                            maxHealth: ally.maxHealth, mana: ally.mana, maxMana: ally.maxMana
+                                        });
+                                    }
+                                }
 
                                 // Apple of Idun: HP regen every 6 seconds (counter incremented above, outside loop)
                                 if (appleHealThisTick) {
@@ -27213,7 +27822,9 @@ setInterval(() => {
 }, 10000); // Every 10 seconds (aligned with homunculus tick)
 
 // ============================================================
-// Ground Effects Tick (500ms — Fire Wall damage, expired effect cleanup)
+// Ground Effects Tick (250ms — Fire Wall damage, SG/LoV/MS waves, expired effect cleanup)
+// Reduced from 500ms to 250ms so Storm Gust's 460ms wave interval isn't
+// rounded up to 500ms per wave (which made 10 waves take 5s instead of 4.6s).
 // ============================================================
 setInterval(async () => {
     const now = Date.now();
@@ -27404,152 +28015,176 @@ setInterval(async () => {
         }
 
         // --- STORM GUST wave tick ---
+        // rAthena: 10 waves at 460ms intervals = 4600ms total.
+        // Our tick loop runs every 500ms. To avoid 400ms drift over 10 waves,
+        // use a while-loop that fires all pending waves per tick (catch-up).
+        // With 460ms interval and 500ms tick, wave pairs fire together every
+        // ~11-12 ticks when accumulated leftover crosses the threshold.
         if (effect.type === 'storm_gust') {
-            if (effect.wavesSent >= (effect.wavesTotal || 10)) {
+            const sgWavesTotal = effect.wavesTotal || 10;
+            if (effect.wavesSent >= sgWavesTotal) {
                 effectsToRemove.push(effectId); continue;
             }
-            if (now - effect.lastTickTime < (effect.waveInterval || 460)) continue;
-            effect.lastTickTime = now;
-            effect.wavesSent++;
+            const sgInterval = effect.waveInterval || 460;
+            if (now - effect.lastTickTime < sgInterval) continue;
 
             const sgCaster = connectedPlayers.get(effect.casterId);
             if (!sgCaster) continue;
             const sgStats = getEffectiveStats(sgCaster);
             const sgRadius = effect.radius || 225;
 
-            for (const [eid, enemy] of enemies.entries()) {
-                if (enemy.isDead || (enemy.zone || 'prontera_south') !== (effect.zone || 'prontera_south')) continue;
-                if (enemy.activeStatusEffects?.has('freeze')) continue; // Frozen targets immune to Storm Gust ticks
-                const dx = enemy.x - effect.x, dy = enemy.y - effect.y;
-                if (Math.sqrt(dx * dx + dy * dy) > sgRadius) continue;
+            // Fire all waves whose time has come (catch-up for sub-tick intervals)
+            while (now - effect.lastTickTime >= sgInterval && effect.wavesSent < sgWavesTotal) {
+                effect.lastTickTime += sgInterval;
+                effect.wavesSent++;
 
-                const sgTargetInfo = getEnemyTargetInfo(enemy);
-                const sgResult = calculateMagicSkillDamage(sgStats, enemy.stats, enemy.hardMdef || enemy.magicDefense || 0, effect.matkPct || 100, 'water', sgTargetInfo);
+                for (const [eid, enemy] of enemies.entries()) {
+                    if (enemy.isDead || (enemy.zone || 'prontera_south') !== (effect.zone || 'prontera_south')) continue;
+                    if (enemy.activeStatusEffects?.has('freeze')) continue; // Frozen targets immune to Storm Gust ticks
+                    const dx = enemy.x - effect.x, dy = enemy.y - effect.y;
+                    if (Math.sqrt(dx * dx + dy * dy) > sgRadius) continue;
 
-                // Lex Aeterna: double first tick damage on this target
-                if (enemy.activeBuffs) {
-                    const lexBuff = enemy.activeBuffs.find(b => b.name === 'lex_aeterna' && Date.now() < b.expiresAt);
-                    if (lexBuff) {
-                        sgResult.damage *= 2;
-                        removeBuff(enemy, 'lex_aeterna');
-                        broadcastToZone(effect.zone, 'skill:buff_removed', { targetId: eid, isEnemy: true, buffName: 'lex_aeterna', reason: 'consumed' });
-                    }
-                }
+                    const sgTargetInfo = getEnemyTargetInfo(enemy);
+                    const sgResult = calculateMagicSkillDamage(sgStats, enemy.stats, enemy.hardMdef || enemy.magicDefense || 0, effect.matkPct || 100, 'water', sgTargetInfo);
 
-                enemy.health = Math.max(0, enemy.health - sgResult.damage);
-                enemy.lastDamageTime = now;
-                if (typeof setEnemyAggro === 'function') setEnemyAggro(enemy, effect.casterId, 'skill');
-                checkDamageBreakStatuses(enemy).forEach(bt => {
-                    broadcastToZone(effect.zone, 'status:removed', { targetId: eid, isEnemy: true, statusType: bt, reason: 'damage_break' });
-                });
-
-                broadcastToZone(effect.zone, 'skill:effect_damage', {
-                    attackerId: effect.casterId, attackerName: sgCaster.characterName,
-                    targetId: eid, targetName: enemy.name, isEnemy: true,
-                    skillId: effect.skillId, skillName: 'Storm Gust', skillLevel: effect.skillLevel, element: 'water',
-                    damage: sgResult.damage, isCritical: false, isMiss: false, hitType: 'skill',
-                    targetHealth: enemy.health, targetMaxHealth: enemy.maxHealth,
-                    targetX: enemy.x, targetY: enemy.y, targetZ: enemy.z,
-                    groundX: effect.x, groundY: effect.y, groundZ: effect.z,
-                    hits: effect.wavesTotal, hitNumber: effect.wavesSent, totalHits: effect.wavesTotal,
-                    timestamp: now
-                });
-                broadcastToZone(effect.zone, 'enemy:health_update', { enemyId: eid, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: true });
-
-                // Knockback 2 cells from center per tick (skip if frozen or boss)
-                if (!enemy.activeStatusEffects?.has('freeze') && !enemy.modeFlags?.bossProtocol) {
-                    knockbackTarget(enemy, effect.x, effect.y, 2, effect.zone, io);
-                }
-
-                // Freeze mechanic: every 3rd hit on same target
-                if (!effect.freezeHitCounters) effect.freezeHitCounters = {};
-                const fhKey = `enemy_${eid}`;
-                effect.freezeHitCounters[fhKey] = (effect.freezeHitCounters[fhKey] || 0) + 1;
-                if (effect.freezeHitCounters[fhKey] >= 3) {
-                    effect.freezeHitCounters[fhKey] = 0;
-                    if (!enemy.modeFlags?.statusImmune) {
-                        const freezeResult = applyStatusEffect(sgCaster, enemy, 'freeze', 150, 12000);
-                        if (freezeResult && freezeResult.applied) {
-                            broadcastToZone(effect.zone, 'status:applied', { targetId: eid, isEnemy: true, statusType: 'freeze', duration: freezeResult.duration });
+                    // Lex Aeterna: double first tick damage on this target
+                    if (enemy.activeBuffs) {
+                        const lexBuff = enemy.activeBuffs.find(b => b.name === 'lex_aeterna' && Date.now() < b.expiresAt);
+                        if (lexBuff) {
+                            sgResult.damage *= 2;
+                            removeBuff(enemy, 'lex_aeterna');
+                            broadcastToZone(effect.zone, 'skill:buff_removed', { targetId: eid, isEnemy: true, buffName: 'lex_aeterna', reason: 'consumed' });
                         }
                     }
-                }
 
-                if (enemy.health <= 0) await processEnemyDeathFromSkill(enemy, sgCaster, effect.casterId, io);
+                    enemy.health = Math.max(0, enemy.health - sgResult.damage);
+                    enemy.lastDamageTime = now;
+                    if (typeof setEnemyAggro === 'function') setEnemyAggro(enemy, effect.casterId, 'skill');
+                    checkDamageBreakStatuses(enemy).forEach(bt => {
+                        broadcastToZone(effect.zone, 'status:removed', { targetId: eid, isEnemy: true, statusType: bt, reason: 'damage_break' });
+                    });
+
+                    broadcastToZone(effect.zone, 'skill:effect_damage', {
+                        attackerId: effect.casterId, attackerName: sgCaster.characterName,
+                        targetId: eid, targetName: enemy.name, isEnemy: true,
+                        skillId: effect.skillId, skillName: 'Storm Gust', skillLevel: effect.skillLevel, element: 'water',
+                        damage: sgResult.damage, isCritical: false, isMiss: false, hitType: 'skill',
+                        targetHealth: enemy.health, targetMaxHealth: enemy.maxHealth,
+                        targetX: enemy.x, targetY: enemy.y, targetZ: enemy.z,
+                        groundX: effect.x, groundY: effect.y, groundZ: effect.z,
+                        hits: sgWavesTotal, hitNumber: effect.wavesSent, totalHits: sgWavesTotal,
+                        timestamp: now
+                    });
+                    broadcastToZone(effect.zone, 'enemy:health_update', { enemyId: eid, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: true });
+
+                    // Knockback 2 cells from center per tick (skip if frozen or boss)
+                    if (!enemy.activeStatusEffects?.has('freeze') && !enemy.modeFlags?.bossProtocol) {
+                        knockbackTarget(enemy, effect.x, effect.y, 2, effect.zone, io);
+                    }
+
+                    // Freeze mechanic: every 3rd hit on same target
+                    if (!effect.freezeHitCounters) effect.freezeHitCounters = {};
+                    const fhKey = `enemy_${eid}`;
+                    effect.freezeHitCounters[fhKey] = (effect.freezeHitCounters[fhKey] || 0) + 1;
+                    if (effect.freezeHitCounters[fhKey] >= 3) {
+                        effect.freezeHitCounters[fhKey] = 0;
+                        if (!enemy.modeFlags?.statusImmune) {
+                            const freezeResult = applyStatusEffect(sgCaster, enemy, 'freeze', 150, 12000);
+                            if (freezeResult && freezeResult.applied) {
+                                broadcastToZone(effect.zone, 'status:applied', { targetId: eid, isEnemy: true, statusType: 'freeze', duration: freezeResult.duration });
+                            }
+                        }
+                    }
+
+                    if (enemy.health <= 0) await processEnemyDeathFromSkill(enemy, sgCaster, effect.casterId, io);
+                }
             }
         }
 
         // --- LORD OF VERMILION wave tick ---
+        // rAthena: 4 waves at 1000ms intervals = 4000ms total.
+        // While-loop catch-up pattern for consistency (1000ms divides evenly
+        // into 500ms ticks, so this typically fires 1 wave per 2 ticks).
         if (effect.type === 'lord_of_vermilion') {
-            if (effect.wavesSent >= (effect.wavesTotal || 4)) {
+            const lovWavesTotal = effect.wavesTotal || 4;
+            if (effect.wavesSent >= lovWavesTotal) {
                 effectsToRemove.push(effectId); continue;
             }
-            if (now - effect.lastTickTime < (effect.waveInterval || 1000)) continue;
-            effect.lastTickTime = now;
-            effect.wavesSent++;
+            const lovInterval = effect.waveInterval || 1000;
+            if (now - effect.lastTickTime < lovInterval) continue;
 
             const lovCaster = connectedPlayers.get(effect.casterId);
             if (!lovCaster) continue;
             const lovStats = getEffectiveStats(lovCaster);
             const lovRadius = effect.radius || 225;
 
-            for (const [eid, enemy] of enemies.entries()) {
-                if (enemy.isDead || (enemy.zone || 'prontera_south') !== (effect.zone || 'prontera_south')) continue;
-                const dx = enemy.x - effect.x, dy = enemy.y - effect.y;
-                if (Math.sqrt(dx * dx + dy * dy) > lovRadius) continue;
+            // Fire all waves whose time has come (catch-up)
+            while (now - effect.lastTickTime >= lovInterval && effect.wavesSent < lovWavesTotal) {
+                effect.lastTickTime += lovInterval;
+                effect.wavesSent++;
 
-                const lovTargetInfo = getEnemyTargetInfo(enemy);
-                const lovResult = calculateMagicSkillDamage(lovStats, enemy.stats, enemy.hardMdef || enemy.magicDefense || 0, effect.matkPct || 100, 'wind', lovTargetInfo);
+                for (const [eid, enemy] of enemies.entries()) {
+                    if (enemy.isDead || (enemy.zone || 'prontera_south') !== (effect.zone || 'prontera_south')) continue;
+                    const dx = enemy.x - effect.x, dy = enemy.y - effect.y;
+                    if (Math.sqrt(dx * dx + dy * dy) > lovRadius) continue;
 
-                // Lex Aeterna: double first tick damage on this target
-                if (enemy.activeBuffs) {
-                    const lexBuff = enemy.activeBuffs.find(b => b.name === 'lex_aeterna' && Date.now() < b.expiresAt);
-                    if (lexBuff) {
-                        lovResult.damage *= 2;
-                        removeBuff(enemy, 'lex_aeterna');
-                        broadcastToZone(effect.zone, 'skill:buff_removed', { targetId: eid, isEnemy: true, buffName: 'lex_aeterna', reason: 'consumed' });
+                    const lovTargetInfo = getEnemyTargetInfo(enemy);
+                    const lovResult = calculateMagicSkillDamage(lovStats, enemy.stats, enemy.hardMdef || enemy.magicDefense || 0, effect.matkPct || 100, 'wind', lovTargetInfo);
+
+                    // Lex Aeterna: double first tick damage on this target
+                    if (enemy.activeBuffs) {
+                        const lexBuff = enemy.activeBuffs.find(b => b.name === 'lex_aeterna' && Date.now() < b.expiresAt);
+                        if (lexBuff) {
+                            lovResult.damage *= 2;
+                            removeBuff(enemy, 'lex_aeterna');
+                            broadcastToZone(effect.zone, 'skill:buff_removed', { targetId: eid, isEnemy: true, buffName: 'lex_aeterna', reason: 'consumed' });
+                        }
                     }
-                }
 
-                enemy.health = Math.max(0, enemy.health - lovResult.damage);
-                enemy.lastDamageTime = now;
-                if (typeof setEnemyAggro === 'function') setEnemyAggro(enemy, effect.casterId, 'skill');
-                checkDamageBreakStatuses(enemy).forEach(bt => {
-                    broadcastToZone(effect.zone, 'status:removed', { targetId: eid, isEnemy: true, statusType: bt, reason: 'damage_break' });
-                });
+                    enemy.health = Math.max(0, enemy.health - lovResult.damage);
+                    enemy.lastDamageTime = now;
+                    if (typeof setEnemyAggro === 'function') setEnemyAggro(enemy, effect.casterId, 'skill');
+                    checkDamageBreakStatuses(enemy).forEach(bt => {
+                        broadcastToZone(effect.zone, 'status:removed', { targetId: eid, isEnemy: true, statusType: bt, reason: 'damage_break' });
+                    });
 
-                broadcastToZone(effect.zone, 'skill:effect_damage', {
-                    attackerId: effect.casterId, attackerName: lovCaster.characterName,
-                    targetId: eid, targetName: enemy.name, isEnemy: true,
-                    skillId: effect.skillId, skillName: 'Lord of Vermilion', skillLevel: effect.skillLevel, element: 'wind',
-                    damage: lovResult.damage, isCritical: false, isMiss: false, hitType: 'skill',
-                    targetHealth: enemy.health, targetMaxHealth: enemy.maxHealth,
-                    targetX: enemy.x, targetY: enemy.y, targetZ: enemy.z,
-                    groundX: effect.x, groundY: effect.y,
-                    hits: effect.wavesTotal, hitNumber: effect.wavesSent, totalHits: effect.wavesTotal,
-                    timestamp: now
-                });
-                broadcastToZone(effect.zone, 'enemy:health_update', { enemyId: eid, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: true });
+                    broadcastToZone(effect.zone, 'skill:effect_damage', {
+                        attackerId: effect.casterId, attackerName: lovCaster.characterName,
+                        targetId: eid, targetName: enemy.name, isEnemy: true,
+                        skillId: effect.skillId, skillName: 'Lord of Vermilion', skillLevel: effect.skillLevel, element: 'wind',
+                        damage: lovResult.damage, isCritical: false, isMiss: false, hitType: 'skill',
+                        targetHealth: enemy.health, targetMaxHealth: enemy.maxHealth,
+                        targetX: enemy.x, targetY: enemy.y, targetZ: enemy.z,
+                        groundX: effect.x, groundY: effect.y,
+                        hits: lovWavesTotal, hitNumber: effect.wavesSent, totalHits: lovWavesTotal,
+                        timestamp: now
+                    });
+                    broadcastToZone(effect.zone, 'enemy:health_update', { enemyId: eid, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: true });
 
-                // Blind chance: 4*SkillLv % per wave
-                if (!enemy.modeFlags?.statusImmune && Math.random() * 100 < (effect.blindChance || 0)) {
-                    const blindResult = applyStatusEffect(lovCaster, enemy, 'blind', 100, 30000);
-                    if (blindResult && blindResult.applied) {
-                        broadcastToZone(effect.zone, 'status:applied', { targetId: eid, isEnemy: true, statusType: 'blind', duration: blindResult.duration });
+                    // Blind chance: 4*SkillLv % per wave
+                    if (!enemy.modeFlags?.statusImmune && Math.random() * 100 < (effect.blindChance || 0)) {
+                        const blindResult = applyStatusEffect(lovCaster, enemy, 'blind', 100, 30000);
+                        if (blindResult && blindResult.applied) {
+                            broadcastToZone(effect.zone, 'status:applied', { targetId: eid, isEnemy: true, statusType: 'blind', duration: blindResult.duration });
+                        }
                     }
-                }
 
-                if (enemy.health <= 0) await processEnemyDeathFromSkill(enemy, lovCaster, effect.casterId, io);
+                    if (enemy.health <= 0) await processEnemyDeathFromSkill(enemy, lovCaster, effect.casterId, io);
+                }
             }
         }
 
         // --- METEOR STORM tick ---
+        // rAthena: meteors land staggered ~300-400ms apart at random positions.
+        // While-loop catch-up for consistent timing with 250ms tick.
         if (effect.type === 'meteor_storm') {
-            if ((effect.meteorsSent || 0) >= (effect.numMeteors || 1)) {
+            const msMaxMeteors = effect.numMeteors || 1;
+            if ((effect.meteorsSent || 0) >= msMaxMeteors) {
                 effectsToRemove.push(effectId); continue;
             }
-            if (now - effect.lastTickTime < (effect.waveInterval || 400)) continue;
-            effect.lastTickTime = now;
+            const msInterval = effect.waveInterval || 400;
+            if (now - effect.lastTickTime < msInterval) continue;
+            effect.lastTickTime += msInterval;
             effect.meteorsSent = (effect.meteorsSent || 0) + 1;
 
             const msCaster = connectedPlayers.get(effect.casterId);
@@ -27698,7 +28333,7 @@ setInterval(async () => {
 
         // --- QUAGMIRE debuff tick ---
         if (effect.type === 'quagmire') {
-            if (now - effect.lastTickTime < (effect.waveInterval || 1000)) continue;
+            if (now - effect.lastTickTime < (effect.waveInterval || 500)) continue;
             effect.lastTickTime = now;
             const qmRadius = effect.radius || 125;
 
@@ -27754,33 +28389,48 @@ setInterval(async () => {
                 if (p.isDead || (p.zone || 'prontera_south') !== buffZone) continue;
                 const px = p.lastX || 0, py = p.lastY || 0;
                 const dx = px - effect.x, dy = py - effect.y;
-                if (Math.sqrt(dx * dx + dy * dy) > buffRadius) continue;
+                const inZone = Math.sqrt(dx * dx + dy * dy) <= buffRadius;
 
-                // Apply/refresh the zone buff (lasts 5s, refreshed while standing in zone)
-                if (effect.type === 'volcano') {
+                const zoneBuffName = effect.type === 'volcano' ? 'volcano_zone' :
+                                     effect.type === 'deluge' ? 'deluge_zone' : 'violent_gale_zone';
+                const hadBuff = hasBuff(p, zoneBuffName);
+
+                if (inZone) {
+                    // Apply/refresh the zone buff (lasts 5s, refreshed while standing in zone)
                     const pElem = p.armorElement || p.defElement || 'neutral';
-                    applyBuff(p, {
-                        skillId: effect.skillId, name: 'volcano_zone', casterId: effect.casterId, casterName: effect.casterName,
-                        atkBonus: pElem === 'fire' ? (effect.atkBonus || 0) : 0,
-                        fireDmgBoost: effect.fireDmgBoost || 0,
-                        duration: 5000
-                    });
-                } else if (effect.type === 'deluge') {
-                    const pElem = p.armorElement || p.defElement || 'neutral';
-                    applyBuff(p, {
-                        skillId: effect.skillId, name: 'deluge_zone', casterId: effect.casterId, casterName: effect.casterName,
-                        maxHpBoost: pElem === 'water' ? (effect.maxHpBoost || 0) : 0,
-                        waterDmgBoost: effect.waterDmgBoost || 0,
-                        duration: 5000
-                    });
-                } else if (effect.type === 'violent_gale') {
-                    const pElem = p.armorElement || p.defElement || 'neutral';
-                    applyBuff(p, {
-                        skillId: effect.skillId, name: 'violent_gale_zone', casterId: effect.casterId, casterName: effect.casterName,
-                        fleeBonus: pElem === 'wind' ? (effect.fleeBonus || 0) : 0,
-                        windDmgBoost: effect.windDmgBoost || 0,
-                        duration: 5000
-                    });
+                    if (effect.type === 'volcano') {
+                        applyBuff(p, {
+                            skillId: effect.skillId, name: 'volcano_zone', casterId: effect.casterId, casterName: effect.casterName,
+                            atkBonus: pElem === 'fire' ? (effect.atkBonus || 0) : 0,
+                            fireDmgBoost: effect.fireDmgBoost || 0,
+                            duration: 5000
+                        });
+                    } else if (effect.type === 'deluge') {
+                        applyBuff(p, {
+                            skillId: effect.skillId, name: 'deluge_zone', casterId: effect.casterId, casterName: effect.casterName,
+                            maxHpBoost: pElem === 'water' ? (effect.maxHpBoost || 0) : 0,
+                            waterDmgBoost: effect.waterDmgBoost || 0,
+                            duration: 5000
+                        });
+                    } else if (effect.type === 'violent_gale') {
+                        applyBuff(p, {
+                            skillId: effect.skillId, name: 'violent_gale_zone', casterId: effect.casterId, casterName: effect.casterName,
+                            fleeBonus: pElem === 'wind' ? (effect.fleeBonus || 0) : 0,
+                            windDmgBoost: effect.windDmgBoost || 0,
+                            duration: 5000
+                        });
+                    }
+                    // Broadcast buff_applied on first entry (not every refresh tick)
+                    if (!hadBuff) {
+                        const displayName = effect.type === 'volcano' ? 'Volcano' : effect.type === 'deluge' ? 'Deluge' : 'Violent Gale';
+                        const sock = io.sockets.sockets.get(p.socketId);
+                        if (sock) sock.emit('skill:buff_applied', {
+                            targetId: charId, targetName: p.characterName, isEnemy: false,
+                            casterId: effect.casterId, casterName: effect.casterName,
+                            skillId: effect.skillId, buffName: displayName + ' Zone', duration: 5000,
+                            effects: {}
+                        });
+                    }
                 }
             }
         }
@@ -27831,6 +28481,27 @@ setInterval(async () => {
                 if (enemy.health <= 0) await processEnemyDeathFromSkill(enemy, fpCaster, effect.casterId, io);
                 effectsToRemove.push(effectId);
                 break; // One trigger only
+            }
+        }
+
+        // --- ICE WALL HP decay tick ---
+        // rAthena: Ice Wall cells decay at 50 HP/sec. Duration = totalHP / 50.
+        // Ground effect tick runs every 250ms, so decay ~12.5 HP per tick.
+        // Use a time-based approach to avoid rounding issues.
+        if (effect.type === 'ice_wall') {
+            if (effect.wallHP !== undefined) {
+                if (!effect.lastDecayTime) effect.lastDecayTime = now;
+                const decayElapsed = now - effect.lastDecayTime;
+                const IW_DECAY_PER_TICK = Math.floor(50 * decayElapsed / 1000); // 50 HP/sec
+                if (IW_DECAY_PER_TICK <= 0) continue; // Not enough time for even 1 HP decay
+                effect.lastDecayTime = now;
+                effect.wallHP -= IW_DECAY_PER_TICK;
+                if (effect.wallHP <= 0) {
+                    effectsToRemove.push(effectId);
+                    broadcastToZone(effect.zone || 'prontera_south', 'skill:ground_effect_removed', {
+                        effectId, type: 'ice_wall', reason: 'decayed'
+                    });
+                }
             }
         }
 
@@ -28021,7 +28692,7 @@ setInterval(async () => {
             broadcastToZone(effectZone, 'skill:ground_effect_removed', { effectId: id, type: effect.type, reason: effect.hitsRemaining <= 0 ? 'hits_exhausted' : 'expired' });
         }
     }
-}, 500);
+}, 250);
 
 // ============================================================
 // Enemy AI Tick Loop (Ragnarok Online-style wandering)
@@ -28631,6 +29302,28 @@ async function executeMonsterPlayerSkill(enemy, skillEntry, targetCharId, zone, 
         isMiss = result.isMiss || false;
     }
 
+    // Auto Guard block check (physical skills only — not magic)
+    let hitType = 'skill';
+    if (!isMiss && !isMagic && damage > 0) {
+        const agBuff = target.activeBuffs?.find(b => b.name === 'auto_guard' && Date.now() < b.expiresAt);
+        if (agBuff && Math.random() * 100 < (agBuff.blockChance || 0)) {
+            damage = 0;
+            hitType = 'blocked';
+            const agTargetPos = getPlayerPosSync(targetCharId);
+            broadcastToZone(zone, 'combat:blocked', {
+                targetId: targetCharId, targetName: target.characterName,
+                attackerId: enemy.enemyId, attackerName: enemy.name,
+                isEnemy: false, skillName: 'Auto Guard',
+                targetX: agTargetPos ? agTargetPos.x : 0, targetY: agTargetPos ? agTargetPos.y : 0, targetZ: agTargetPos ? agTargetPos.z : 0
+            });
+            // Shrink: flat 50% knockback on block (pre-renewal)
+            const shrinkBuff = target.activeBuffs?.find(b => b.name === 'shrink' && Date.now() < b.expiresAt);
+            if (shrinkBuff && Math.random() < 0.5) {
+                if (agTargetPos) knockbackTarget(enemy, agTargetPos.x, agTargetPos.y, 2, zone, io);
+            }
+        }
+    }
+
     // Apply damage
     if (!isMiss && damage > 0) {
         target.health = Math.max(0, target.health - damage);
@@ -28642,7 +29335,7 @@ async function executeMonsterPlayerSkill(enemy, skillEntry, targetCharId, zone, 
         targetId: targetCharId, targetName: target.characterName, isEnemy: false,
         skillId: skillEntry.skillId, skillName: skillDef.displayName,
         skillLevel: skillEntry.level, element,
-        damage: isMiss ? 0 : damage, isMiss, isCritical: false, hitType: 'skill',
+        damage: isMiss ? 0 : damage, isMiss, isCritical: false, hitType,
         targetHealth: target.health, targetMaxHealth: target.maxHealth,
         targetX: target.lastX, targetY: target.lastY, targetZ: target.lastZ,
         timestamp: Date.now(),
@@ -28704,7 +29397,20 @@ async function executeNPCSkill(enemy, npcDef, skillEntry, targetCharId, zone, io
             if (!result) return;
             // Force element override
             const forcedElement = npcDef.element || enemy.element?.type || 'neutral';
-            const dmg = result.isMiss ? 0 : result.damage;
+            let dmg = result.isMiss ? 0 : result.damage;
+            // Auto Guard block check
+            let emHitType = result.isMiss ? 'miss' : 'normal';
+            if (!result.isMiss && dmg > 0) {
+                const agBuff = target.activeBuffs?.find(b => b.name === 'auto_guard' && Date.now() < b.expiresAt);
+                if (agBuff && Math.random() * 100 < (agBuff.blockChance || 0)) {
+                    dmg = 0;
+                    emHitType = 'blocked';
+                    const agPos = getPlayerPosSync(targetCharId);
+                    broadcastToZone(zone, 'combat:blocked', { targetId: targetCharId, targetName: target.characterName, attackerId: enemy.enemyId, attackerName: enemy.name, isEnemy: false, skillName: 'Auto Guard', targetX: agPos?.x||0, targetY: agPos?.y||0, targetZ: agPos?.z||0 });
+                    const shrinkB = target.activeBuffs?.find(b => b.name === 'shrink' && Date.now() < b.expiresAt);
+                    if (shrinkB && agPos && Math.random() < 0.5) knockbackTarget(enemy, agPos.x, agPos.y, 2, zone, io);
+                }
+            }
             if (dmg > 0) target.health = Math.max(0, target.health - dmg);
 
             broadcastToZone(zone, 'combat:damage', {
@@ -28728,7 +29434,20 @@ async function executeNPCSkill(enemy, npcDef, skillEntry, targetCharId, zone, io
             if (!target || target.isDead) return;
             const result = calculateEnemyDamage(enemy, targetCharId);
             if (!result) return;
-            const dmg = result.isMiss ? 0 : result.damage;
+            let dmg = result.isMiss ? 0 : result.damage;
+            // Auto Guard block check
+            let smHitType = result.isMiss ? 'miss' : 'normal';
+            if (!result.isMiss && dmg > 0) {
+                const agBuff = target.activeBuffs?.find(b => b.name === 'auto_guard' && Date.now() < b.expiresAt);
+                if (agBuff && Math.random() * 100 < (agBuff.blockChance || 0)) {
+                    dmg = 0;
+                    smHitType = 'blocked';
+                    const agPos = getPlayerPosSync(targetCharId);
+                    broadcastToZone(zone, 'combat:blocked', { targetId: targetCharId, targetName: target.characterName, attackerId: enemy.enemyId, attackerName: enemy.name, isEnemy: false, skillName: 'Auto Guard', targetX: agPos?.x||0, targetY: agPos?.y||0, targetZ: agPos?.z||0 });
+                    const shrinkB = target.activeBuffs?.find(b => b.name === 'shrink' && Date.now() < b.expiresAt);
+                    if (shrinkB && agPos && Math.random() < 0.5) knockbackTarget(enemy, agPos.x, agPos.y, 2, zone, io);
+                }
+            }
             if (dmg > 0) target.health = Math.max(0, target.health - dmg);
 
             broadcastToZone(zone, 'combat:damage', {
@@ -29349,8 +30068,8 @@ function enemyMoveToward(enemy, targetX, targetY, now, speed) {
 
     const stepSize = speed * (ENEMY_AI.TICK_MS / 1000);
     const moveRatio = Math.min(1, stepSize / distance);
-    const newX = enemy.x + dx * moveRatio;
-    const newY = enemy.y + dy * moveRatio;
+    let newX = enemy.x + dx * moveRatio;
+    let newY = enemy.y + dy * moveRatio;
 
     // Moonlit Water Mill: block enemy movement into barrier zone
     if (activeEnsembles.size > 0) {
@@ -29362,6 +30081,63 @@ function enemyMoveToward(enemy, targetX, targetY, now, speed) {
                     return; // Block movement into MWM zone
                 }
             }
+        }
+    }
+
+    // Ice Wall: block enemy movement through ice wall cells
+    // rAthena: map_setgatcell changes cell to non-walkable (GAT type 5).
+    // Normal mobs are blocked; boss mobs are also blocked (official: boss_icewall_walk_block=1).
+    // We check if the enemy's new position would be inside any active ice_wall ground effect.
+    if (activeGroundEffects.size > 0) {
+        const enemyZone = enemy.zone || 'prontera_south';
+        for (const [, eff] of activeGroundEffects.entries()) {
+            if (eff.type !== 'ice_wall' || eff.zone !== enemyZone) continue;
+            if (now >= eff.expiresAt) continue;
+            const iwdx = newX - eff.x, iwdy = newY - eff.y;
+            if (Math.sqrt(iwdx * iwdx + iwdy * iwdy) <= (eff.radius || 125)) {
+                return; // Block — enemy cannot walk through ice wall
+            }
+        }
+    }
+
+    // Quagmire: apply debuff when enemy is inside or entering zone.
+    // Check CURRENT position (enemy.x/y) — if already inside, they're in the zone.
+    // The buff sets moveSpeedBonus:-50 which the CALLER reads via getCombinedModifiers()
+    // to calculate the `speed` param. So on ticks after the first, the speed is already
+    // halved. We only apply the inline scale on the FIRST tick (when buff wasn't active
+    // yet and the caller's speed didn't include the reduction).
+    if (activeGroundEffects.size > 0) {
+        const enemyZone = enemy.zone || 'prontera_south';
+        const hadQuagmireBefore = hasBuff(enemy, 'quagmire');
+        let inQuagmire = false;
+        for (const [, eff] of activeGroundEffects.entries()) {
+            if (eff.type !== 'quagmire' || eff.zone !== enemyZone) continue;
+            if (now >= eff.expiresAt) continue;
+            // Check current position OR destination — if either is inside, enemy is in zone
+            const curDx = enemy.x - eff.x, curDy = enemy.y - eff.y;
+            const newDx = newX - eff.x, newDy = newY - eff.y;
+            const qmR = eff.radius || 125;
+            if (Math.sqrt(curDx * curDx + curDy * curDy) <= qmR ||
+                Math.sqrt(newDx * newDx + newDy * newDy) <= qmR) {
+                inQuagmire = true;
+                // Apply/refresh quagmire buff (stat reduction + future tick speed via getCombinedModifiers)
+                applyBuff(enemy, {
+                    skillId: eff.skillId, name: 'quagmire',
+                    casterId: eff.casterId, casterName: eff.casterName,
+                    agiReduction: eff.agiReduction || 5,
+                    dexReduction: eff.dexReduction || 5,
+                    moveSpeedReduction: eff.moveSpeedReduction || 50,
+                    duration: 5000
+                });
+                break;
+            }
+        }
+        // Only apply inline speed reduction on the FIRST tick entering quagmire.
+        // After that, the caller's `speed` already includes the -50% from the buff.
+        if (inQuagmire && !hadQuagmireBefore) {
+            const qmScale = 0.5;
+            newX = enemy.x + (newX - enemy.x) * qmScale;
+            newY = enemy.y + (newY - enemy.y) * qmScale;
         }
     }
 
@@ -29429,8 +30205,11 @@ function processWander(enemy, now) {
 // Get player position from connectedPlayers (synchronous, no Redis needed)
 function getPlayerPosSync(charId) {
     const p = connectedPlayers.get(charId);
-    if (!p || p.lastX === undefined) return null;
-    return { x: p.lastX, y: p.lastY, z: p.lastZ || 300 };
+    if (!p) return null;
+    const x = p.lastX ?? p.x ?? undefined;
+    const y = p.lastY ?? p.y ?? undefined;
+    if (x === undefined || y === undefined) return null;
+    return { x, y, z: p.lastZ || p.z || 300 };
 }
 
 // Check if targetPlayerId is a homunculus target (format: 'hom_<ownerId>')
@@ -29496,18 +30275,37 @@ setInterval(async () => {
             continue;
         }
 
-        // Charming Wink: charmed enemies stay idle until charm expires
+        // Charming Wink: charmed enemies follow the caster until charm expires
         if (enemy.charmedUntil) {
             if (now >= enemy.charmedUntil) {
-                // Charm expired — clear charm state
+                // Charm expired — clear charm state, return to idle
                 enemy.charmedUntil = null;
                 enemy.charmedBy = null;
+                enemy.targetPlayerId = null;
+                enemy.aiState = AI_STATE.IDLE;
+                enemy.isWandering = false;
+                enemy.nextWanderTime = now + 3000;
+                enemyStopMoving(enemy);
             } else {
-                // Still charmed — force idle, skip AI
-                if (enemy.aiState !== AI_STATE.IDLE) {
-                    enemy.aiState = AI_STATE.IDLE;
-                    enemy.targetPlayerId = null;
-                    enemy.isWandering = false;
+                // Still charmed — follow the charmer, no attacking
+                enemy.targetPlayerId = null;
+                enemy.aiState = AI_STATE.IDLE;
+                enemy.isWandering = false;
+                const charmer = connectedPlayers.get(enemy.charmedBy);
+                if (charmer && !charmer.isDead && (charmer.zone || 'prontera_south') === (enemy.zone || 'prontera_south')) {
+                    const cx = charmer.lastX || 0, cy = charmer.lastY || 0;
+                    const cdx = cx - enemy.x, cdy = cy - enemy.y;
+                    const dist = Math.sqrt(cdx * cdx + cdy * cdy);
+                    // Follow if further than 1 cell (50 UE), stop when close
+                    if (dist > 75) {
+                        enemyMoveToward(enemy, cx, cy, now, enemy.moveSpeed || 100);
+                    } else {
+                        enemyStopMoving(enemy);
+                    }
+                } else {
+                    // Charmer disconnected or left zone — end charm early
+                    enemy.charmedUntil = null;
+                    enemy.charmedBy = null;
                     enemyStopMoving(enemy);
                 }
                 continue;
@@ -30172,16 +30970,23 @@ setInterval(async () => {
                         damagePayload.damage = 0;
                         damagePayload.hitType = 'blocked';
                         const agZone = enemy.zone || 'prontera_south';
+                        const agTargetPos = getPlayerPosSync(enemy.targetPlayerId);
                         broadcastToZone(agZone, 'combat:blocked', {
                             targetId: enemy.targetPlayerId, targetName: atkTarget.characterName,
                             attackerId: enemy.enemyId, attackerName: enemy.name,
-                            isEnemy: false, skillName: 'Auto Guard'
+                            isEnemy: false, skillName: 'Auto Guard',
+                            targetX: agTargetPos ? agTargetPos.x : 0, targetY: agTargetPos ? agTargetPos.y : 0, targetZ: agTargetPos ? agTargetPos.z : 0
                         });
-                        // Shrink: knockback chance scales with Auto Guard level (5% per lv, 50% at Lv10)
+                        // Shrink: flat 50% knockback chance on Auto Guard block (pre-renewal)
                         const shrinkBuff = atkTarget.activeBuffs?.find(b => b.name === 'shrink' && Date.now() < b.expiresAt);
-                        if (shrinkBuff && Math.random() * 100 < 5 * (agBuff.skillLevel || 10)) {
-                            const targetPos = getPlayerPosSync(enemy.targetPlayerId);
-                            if (targetPos) knockbackTarget(enemy, targetPos.x, targetPos.y, 2, agZone, io);
+                        if (shrinkBuff) {
+                            const shrinkRoll = Math.random();
+                            if (shrinkRoll < 0.5) {
+                                const shrinkPos = getPlayerPosSync(enemy.targetPlayerId);
+                                logger.info(`[SHRINK] ${atkTarget.characterName} Shrink knockback on ${enemy.name} (roll=${(shrinkRoll*100).toFixed(1)}%, pos=${JSON.stringify(shrinkPos)})`);
+                                if (shrinkPos) knockbackTarget(enemy, shrinkPos.x, shrinkPos.y, 2, agZone, io);
+                                else logger.warn(`[SHRINK] getPlayerPosSync returned null for charId=${enemy.targetPlayerId}`);
+                            }
                         }
                     }
                 }
@@ -30574,7 +31379,7 @@ setInterval(() => {
                     // Stun: (5*lv+30)% for 5s (RateMyServer pre-re: 35/40/45/50/55%)
                     const stunChance = 30 + 5 * eff.skillLevel;
                     if (!target.modeFlags?.statusImmune && Math.random() * 100 < stunChance) {
-                        const stunRes = applyStatusEffect({ level: caster?.stats?.level || 1 }, target, 'stun', 100, { duration: 5000 });
+                        const stunRes = applyStatusEffect({ level: caster?.stats?.level || 1 }, target, 'stun', 100, 5000);
                         if (stunRes?.applied) broadcastToZone(eff.zone, 'status:applied', { targetId: tid, isEnemy: true, statusType: 'stun', duration: 5000 });
                     }
                     if (target.health <= 0 && caster) processEnemyDeathFromSkill(target, caster, eff.casterId, io);
@@ -30642,7 +31447,7 @@ setInterval(() => {
                         // Freeze: 100% base rate (rAthena: sc_start SC_FREEZE 100), MDEF resistance via applyStatusEffect
                         if (!se.modeFlags?.statusImmune) {
                             const freezeDur = 3000 * eff.skillLevel;
-                            const fRes = applyStatusEffect({ level: caster?.stats?.level || 1 }, se, 'freeze', 100, { duration: freezeDur });
+                            const fRes = applyStatusEffect({ level: caster?.stats?.level || 1 }, se, 'freeze', 100, freezeDur);
                             if (fRes?.applied) broadcastToZone(eff.zone, 'status:applied', { targetId: sid, isEnemy: true, statusType: 'freeze', duration: freezeDur });
                         }
                         if (se.health <= 0 && caster) processEnemyDeathFromSkill(se, caster, eff.casterId, io);
@@ -30661,7 +31466,7 @@ setInterval(() => {
                     const snareMinDur = 30 * (snareCasterLv + 100); // rAthena: 30 * (src_lv + 100) ms
                     snareDur = Math.max(snareMinDur, Math.floor(snareDur * (1 - snareTargetAGI / 200)));
                     // SC_ANKLE always applies (rAthena: SCSTART_NORATEDEF bypasses resistance)
-                    const snareRes = applyStatusEffect({ level: snareCasterLv }, target, 'ankle_snare', 100, { duration: snareDur });
+                    const snareRes = applyStatusEffect({ level: snareCasterLv }, target, 'ankle_snare', 100, snareDur);
                     if (snareRes?.applied) {
                         broadcastToZone(eff.zone, 'status:applied', { targetId: tid, isEnemy: true, statusType: 'ankle_snare', duration: snareDur });
                     }
@@ -30699,7 +31504,7 @@ setInterval(() => {
                         if (Math.sqrt(sdx * sdx + sdy * sdy) > 125) continue;
                         const sleepChance = 40 + 10 * eff.skillLevel;
                         if (Math.random() * 100 < sleepChance) {
-                            const sRes = applyStatusEffect({ level: caster?.stats?.level || 1 }, se, 'sleep', 100, { duration: 30000 });
+                            const sRes = applyStatusEffect({ level: caster?.stats?.level || 1 }, se, 'sleep', 100, 30000);
                             if (sRes?.applied) broadcastToZone(eff.zone, 'status:applied', { targetId: sid, isEnemy: true, statusType: 'sleep', duration: 30000 });
                         }
                     }
@@ -30708,7 +31513,7 @@ setInterval(() => {
                 case 'flasher': {
                     // Blind triggering target for 30s
                     if (!target.modeFlags?.statusImmune) {
-                        const bRes = applyStatusEffect({ level: caster?.stats?.level || 1 }, target, 'blind', 100, { duration: 30000 });
+                        const bRes = applyStatusEffect({ level: caster?.stats?.level || 1 }, target, 'blind', 100, 30000);
                         if (bRes?.applied) broadcastToZone(eff.zone, 'status:applied', { targetId: tid, isEnemy: true, statusType: 'blind', duration: 30000 });
                     }
                     break;
@@ -31341,6 +32146,18 @@ server.listen(PORT, async () => {
     logger.info('[DB] Stat columns verified/created on characters table');
   } catch (err) {
     logger.warn(`[DB] Could not add stat columns (may already exist): ${err.message}`);
+  }
+
+  // Drop FK constraint on character_skills.skill_id -> skills.skill_id if it exists
+  // Skill definitions live in JS (ro_skill_data.js), not in the DB skills table,
+  // so the FK prevents learning any skill ID not in that table
+  try {
+    await pool.query(`
+      ALTER TABLE character_skills DROP CONSTRAINT IF EXISTS character_skills_skill_id_fkey
+    `);
+    logger.info('[DB] character_skills FK constraint dropped (skills defined in JS)');
+  } catch (err) {
+    logger.warn(`[DB] Could not drop character_skills FK (may not exist): ${err.message}`);
   }
 
   // Ensure forging columns exist on character_inventory (Phase 5C: Blacksmith Forging)

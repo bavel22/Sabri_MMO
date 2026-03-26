@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "character": "weapon_1",
+  "cell_size": 1024,
+  "animations": [
+    { "folder": "Idle", "state": "idle", "group": "unarmed" },
+    { "folder": "2hand Idle", "state": "idle", "group": "twohand" },
+    { "folder": "Walking", "state": "walk", "group": "unarmed" },
+    { "folder": "Run With Sword", "state": "walk", "group": "onehand,twohand" },
+    { "folder": "Punching", "state": "attack", "group": "unarmed" },
+    { "folder": "Stable Sword Inward Slash", "state": "attack", "group": "onehand" },
+    { "folder": "Great Sword Slash", "state": "attack", "group": "twohand" },
+    { "folder": "Standing 1H Cast Spell 01", "state": "cast", "group": "shared" },
+    { "folder": "Standing Taunt Chest Thump", "state": "taunt", "group": "shared" },
+    { "folder": "Reaction", "state": "hit", "group": "shared" },
+    { "folder": "Dying", "state": "death", "group": "shared" },
+    { "folder": "Sitting Idle", "state": "sit", "group": "shared" },
+    { "folder": "Picking Up", "state": "pickup", "group": "shared" },
+    { "folder": "Sword And Shield Block", "state": "block", "group": "onehand" }
+  ]
+}
