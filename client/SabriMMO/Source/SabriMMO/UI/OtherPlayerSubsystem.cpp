@@ -161,7 +161,7 @@ void UOtherPlayerSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 			}
 		});
 
-	// Cast animation: when another player starts casting
+	// Cast animation: when another player starts casting — pick cast anim by targetType
 	Router->RegisterHandler(TEXT("skill:cast_start"), this,
 		[this, SafeSetAnim](const TSharedPtr<FJsonValue>& D) {
 			if (!D.IsValid()) return;
@@ -173,7 +173,15 @@ void UOtherPlayerSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 			if (E && E->SpriteActor.IsValid() && E->SpriteActor->IsBodyReady())
 			{
 				if (E->SpriteActor->GetAnimState() != ESpriteAnimState::Death)
-					E->SpriteActor->SetAnimState(ESpriteAnimState::Cast);
+				{
+					FString TargetType;
+					Obj->TryGetStringField(TEXT("targetType"), TargetType);
+					ESpriteAnimState CastState = ESpriteAnimState::CastSingle;
+					if (TargetType == TEXT("self"))        CastState = ESpriteAnimState::CastSelf;
+					else if (TargetType == TEXT("ground")) CastState = ESpriteAnimState::CastGround;
+					else if (TargetType == TEXT("aoe"))    CastState = ESpriteAnimState::CastAoe;
+					E->SpriteActor->SetAnimState(CastState);
+				}
 			}
 		});
 
@@ -325,6 +333,7 @@ void UOtherPlayerSubsystem::HandlePlayerMoved(const TSharedPtr<FJsonValue>& Data
 			ESpriteWeaponMode NewMode = ESpriteWeaponMode::None;
 			if (WM == 1) NewMode = ESpriteWeaponMode::OneHand;
 			else if (WM == 2) NewMode = ESpriteWeaponMode::TwoHand;
+			else if (WM == 3) NewMode = ESpriteWeaponMode::Bow;
 			if (NewMode != Existing->SpriteActor->GetWeaponMode())
 			{
 				Existing->SpriteActor->SetWeaponMode(NewMode);
@@ -357,6 +366,9 @@ void UOtherPlayerSubsystem::HandlePlayerMoved(const TSharedPtr<FJsonValue>& Data
 	Obj->TryGetStringField(TEXT("jobClass"), JobClass);
 	FString Gender;
 	Obj->TryGetStringField(TEXT("gender"), Gender);
+	double HairStyleD = 0, HairColorD = 0;
+	Obj->TryGetNumberField(TEXT("hairStyle"), HairStyleD);
+	Obj->TryGetNumberField(TEXT("hairColor"), HairColorD);
 
 	SetBPVector(NewPlayer, TEXT("TargetPosition"), Pos);
 
@@ -388,6 +400,8 @@ void UOtherPlayerSubsystem::HandlePlayerMoved(const TSharedPtr<FJsonValue>& Data
 	Entry.PlayerName = PlayerName;
 	Entry.JobClass = JobClass;
 	Entry.Gender = Gender;
+	Entry.HairStyle = (int32)HairStyleD;
+	Entry.HairColor = (int32)HairColorD;
 	Entry.EquipVisuals = CachedEquipVisuals;
 	Players.Add(CharId, Entry);
 	ActorToPlayerId.Add(NewPlayer, CharId);
@@ -405,6 +419,7 @@ void UOtherPlayerSubsystem::HandlePlayerMoved(const TSharedPtr<FJsonValue>& Data
 			CharId, WM, Sprite->IsBodyReady() ? 1 : 0);
 		if (WM == 1) Sprite->SetWeaponMode(ESpriteWeaponMode::OneHand);
 		else if (WM == 2) Sprite->SetWeaponMode(ESpriteWeaponMode::TwoHand);
+		else if (WM == 3) Sprite->SetWeaponMode(ESpriteWeaponMode::Bow);
 
 		// Load equipment visuals — try 3 sources in order:
 		// 1. equipVisuals in player:moved data (server must be restarted for this)
@@ -452,6 +467,12 @@ void UOtherPlayerSubsystem::HandlePlayerMoved(const TSharedPtr<FJsonValue>& Data
 		UE_LOG(LogOtherPlayerSubsystem, Log,
 			TEXT("Remote sprite %d: equipLoaded=%d cachedVisuals=%d"),
 			CharId, bEquipLoaded ? 1 : 0, CachedEquipVisuals.Num());
+
+		// Load hair style
+		if (Entry.HairStyle > 0)
+		{
+			Sprite->SetHairStyle(Entry.HairStyle, Entry.HairColor);
+		}
 	}
 
 	// Register name tag on the SPRITE actor (not the BP actor) so it tracks
@@ -686,6 +707,16 @@ void UOtherPlayerSubsystem::HandlePlayerAppearance(const TSharedPtr<FJsonValue>&
 		Entry = Players.Find(CharId);
 	}
 
+	// Parse hair data
+	double HairStyleD = 0, HairColorD = 0;
+	Obj->TryGetNumberField(TEXT("hairStyle"), HairStyleD);
+	Obj->TryGetNumberField(TEXT("hairColor"), HairColorD);
+	if (HairStyleD > 0)
+	{
+		Entry->HairStyle = (int32)HairStyleD;
+		Entry->HairColor = (int32)HairColorD;
+	}
+
 	// Parse and cache equipVisuals
 	const TSharedPtr<FJsonObject>* EquipObj;
 	if (Obj->TryGetObjectField(TEXT("equipVisuals"), EquipObj))
@@ -716,9 +747,12 @@ void UOtherPlayerSubsystem::HandlePlayerAppearance(const TSharedPtr<FJsonValue>&
 		ESpriteWeaponMode NewMode = ESpriteWeaponMode::None;
 		if (WM == 1) NewMode = ESpriteWeaponMode::OneHand;
 		else if (WM == 2) NewMode = ESpriteWeaponMode::TwoHand;
+		else if (WM == 3) NewMode = ESpriteWeaponMode::Bow;
 		Sprite->SetWeaponMode(NewMode);
 
-		// Load equipment layers
+		// Reset + load equipment + reconcile hair (same pattern as local player)
+		Sprite->ResetHairHiding();
+
 		for (const auto& Pair : Entry->EquipVisuals)
 		{
 			ESpriteLayer Layer = ASpriteCharacterActor::EquipSlotToSpriteLayer(Pair.Key);
@@ -727,5 +761,13 @@ void UOtherPlayerSubsystem::HandlePlayerAppearance(const TSharedPtr<FJsonValue>&
 				Sprite->LoadEquipmentLayer(Layer, Pair.Value);
 			}
 		}
+
+		// Apply hair style
+		if (Entry->HairStyle > 0)
+		{
+			Sprite->SetHairStyle(Entry->HairStyle, Entry->HairColor);
+		}
+
+		Sprite->ReconcileHairVisibility();
 	}
 }

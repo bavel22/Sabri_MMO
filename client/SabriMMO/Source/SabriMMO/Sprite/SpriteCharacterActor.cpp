@@ -4,6 +4,8 @@
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialExpressionTextureSampleParameter2D.h"
+#include "Materials/MaterialExpressionVectorParameter.h"
+#include "Materials/MaterialExpressionMultiply.h"
 #include "Engine/Texture2D.h"
 #include "Kismet/GameplayStatics.h"
 #include "Camera/PlayerCameraManager.h"
@@ -18,16 +20,18 @@
 
 // State name → enum mapping for JSON parsing
 static const TMap<FString, ESpriteAnimState> StateNameMap = {
-	{TEXT("idle"),   ESpriteAnimState::Idle},
-	{TEXT("walk"),   ESpriteAnimState::Walk},
-	{TEXT("attack"), ESpriteAnimState::Attack},
-	{TEXT("cast"),   ESpriteAnimState::Cast},
-	{TEXT("hit"),    ESpriteAnimState::Hit},
-	{TEXT("death"),  ESpriteAnimState::Death},
-	{TEXT("sit"),    ESpriteAnimState::Sit},
-	{TEXT("taunt"),  ESpriteAnimState::Taunt},
-	{TEXT("pickup"), ESpriteAnimState::Pickup},
-	{TEXT("block"),  ESpriteAnimState::Block},
+	{TEXT("idle"),         ESpriteAnimState::Idle},
+	{TEXT("walk"),         ESpriteAnimState::Walk},
+	{TEXT("attack"),       ESpriteAnimState::Attack},
+	{TEXT("cast_single"),  ESpriteAnimState::CastSingle},
+	{TEXT("cast_self"),    ESpriteAnimState::CastSelf},
+	{TEXT("cast_ground"),  ESpriteAnimState::CastGround},
+	{TEXT("cast_aoe"),     ESpriteAnimState::CastAoe},
+	{TEXT("hit"),          ESpriteAnimState::Hit},
+	{TEXT("death"),        ESpriteAnimState::Death},
+	{TEXT("sit"),          ESpriteAnimState::Sit},
+	{TEXT("pickup"),       ESpriteAnimState::Pickup},
+	{TEXT("block"),        ESpriteAnimState::Block},
 };
 
 ASpriteCharacterActor::ASpriteCharacterActor()
@@ -36,6 +40,31 @@ ASpriteCharacterActor::ASpriteCharacterActor()
 
 	RootComp = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 	SetRootComponent(RootComp);
+}
+
+void ASpriteCharacterActor::EnableClickCollision()
+{
+	// Enable visibility-trace collision on the body mesh so clicks register on the sprite
+	int32 BodyIdx = static_cast<int32>(ESpriteLayer::Body);
+	FSpriteLayerState& Body = Layers[BodyIdx];
+	if (Body.MeshComp)
+	{
+		Body.MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		Body.MeshComp->SetCollisionResponseToAllChannels(ECR_Ignore);
+		Body.MeshComp->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+		Body.MeshComp->SetGenerateOverlapEvents(false);
+		Body.MeshComp->SetCanEverAffectNavigation(false);
+	}
+}
+
+void ASpriteCharacterActor::DisableClickCollision()
+{
+	int32 BodyIdx = static_cast<int32>(ESpriteLayer::Body);
+	FSpriteLayerState& Body = Layers[BodyIdx];
+	if (Body.MeshComp)
+	{
+		Body.MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	}
 }
 
 void ASpriteCharacterActor::BeginPlay()
@@ -104,10 +133,14 @@ void ASpriteCharacterActor::CreateLayerQuad(int32 LayerIndex)
 	TArray<FProcMeshTangent> Tangents;
 	Tangents.Init(FProcMeshTangent(0, 1, 0), 4);
 
+	// bCreateCollision=true so EnableClickCollision() has geometry to trace against
+	Layer.MeshComp->bUseComplexAsSimpleCollision = true;
 	Layer.MeshComp->CreateMeshSection(0, Vertices, Triangles, Normals,
-	                                   UVs, Colors, Tangents, false);
+	                                   UVs, Colors, Tangents, true);
 
-	float LayerOffset = static_cast<float>(LayerIndex) * 0.3f;
+	// Tiny depth offset per layer — enough to prevent Z-fighting,
+	// small enough to avoid parallax drift at screen edges
+	float LayerOffset = static_cast<float>(LayerIndex) * 0.01f;
 	Layer.MeshComp->SetRelativeLocation(FVector(LayerOffset, 0.f, 0.f));
 }
 
@@ -124,6 +157,12 @@ void ASpriteCharacterActor::UpdateQuadUVs(FSpriteLayerState& Layer)
 		if (!Layer.ActiveLayerAtlas || !Layer.ActiveLayerAtlas->AtlasTexture)
 		{
 			// Current animation not available — hide layer (e.g., weapon during sit)
+			Layer.MeshComp->SetVisibility(false);
+			return;
+		}
+		// Don't re-show hair if headgear is hiding it
+		if (&Layer == &Layers[static_cast<int32>(ESpriteLayer::Hair)] && bHairHiddenByHeadgear)
+		{
 			Layer.MeshComp->SetVisibility(false);
 			return;
 		}
@@ -174,15 +213,14 @@ void ASpriteCharacterActor::UpdateQuadUVs(FSpriteLayerState& Layer)
 	}
 
 	// Per-frame depth ordering for equipment layers
-	// Sets mesh component relative X: +0.3 = in front of body, -0.3 = behind
-	// This overrides the static offset from CreateLayerQuad each frame
+	// Tiny offset prevents Z-fighting without parallax drift at screen edges
 	if (Layer.bUsingLayerV2 && Layer.MeshComp)
 	{
-		float DepthX = 0.3f; // default: in front
+		float DepthX = 0.05f; // default: in front of body
 		if (Layer.ActiveLayerAtlas && Layer.ActiveLayerAtlas->DepthFront.Num() > 0)
 		{
 			bool bFront = Layer.ActiveLayerAtlas->IsDepthFront(CurrentDirection, CurrentFrame);
-			DepthX = bFront ? 0.3f : -0.3f;
+			DepthX = bFront ? 0.05f : -0.05f;
 		}
 		Layer.MeshComp->SetRelativeLocation(FVector(DepthX, 0.f, 0.f));
 	}
@@ -317,7 +355,21 @@ UMaterialInstanceDynamic* ASpriteCharacterActor::CreateSpriteMaterial(UTexture2D
 	TexSample->SamplerType = SAMPLERTYPE_Color;
 	Mat->GetExpressionCollection().AddExpression(TexSample);
 
-	Mat->GetEditorOnlyData()->EmissiveColor.Connect(0, TexSample);
+	// TintColor parameter (default White = no tint, used by Hair layer for color)
+	UMaterialExpressionVectorParameter* TintParam =
+		NewObject<UMaterialExpressionVectorParameter>(Mat);
+	TintParam->ParameterName = TEXT("TintColor");
+	TintParam->DefaultValue = FLinearColor::White;
+	Mat->GetExpressionCollection().AddExpression(TintParam);
+
+	// Multiply texture RGB by TintColor
+	UMaterialExpressionMultiply* Multiply =
+		NewObject<UMaterialExpressionMultiply>(Mat);
+	Multiply->A.Connect(0, TexSample);
+	Multiply->B.Connect(0, TintParam);
+	Mat->GetExpressionCollection().AddExpression(Multiply);
+
+	Mat->GetEditorOnlyData()->EmissiveColor.Connect(0, Multiply);
 	Mat->GetEditorOnlyData()->OpacityMask.Connect(4, TexSample);
 
 	Mat->PreEditChange(nullptr);
@@ -408,11 +460,13 @@ bool ASpriteCharacterActor::IsLoopingState(ESpriteAnimState S)
 
 bool ASpriteCharacterActor::IsRevertState(ESpriteAnimState S)
 {
-	return S == ESpriteAnimState::Attack ||
-	       S == ESpriteAnimState::Cast   ||
-	       S == ESpriteAnimState::Hit    ||
-	       S == ESpriteAnimState::Taunt  ||
-	       S == ESpriteAnimState::Pickup ||
+	return S == ESpriteAnimState::Attack     ||
+	       S == ESpriteAnimState::CastSingle ||
+	       S == ESpriteAnimState::CastSelf   ||
+	       S == ESpriteAnimState::CastGround ||
+	       S == ESpriteAnimState::CastAoe    ||
+	       S == ESpriteAnimState::Hit        ||
+	       S == ESpriteAnimState::Pickup     ||
 	       S == ESpriteAnimState::Block;
 }
 
@@ -461,17 +515,19 @@ float ASpriteCharacterActor::GetFrameDuration() const
 {
 	switch (CurrentAnimState)
 	{
-	case ESpriteAnimState::Idle:   return 0.25f;
-	case ESpriteAnimState::Walk:   return 0.10f;
-	case ESpriteAnimState::Attack: return 0.08f;
-	case ESpriteAnimState::Cast:   return 0.15f;
-	case ESpriteAnimState::Hit:    return 0.10f;
-	case ESpriteAnimState::Death:  return 0.20f;
-	case ESpriteAnimState::Sit:    return 0.30f;
-	case ESpriteAnimState::Taunt:  return 0.15f;
-	case ESpriteAnimState::Pickup: return 0.12f;
-	case ESpriteAnimState::Block:  return 0.10f;
-	default:                       return 0.20f;
+	case ESpriteAnimState::Idle:       return 0.25f;
+	case ESpriteAnimState::Walk:       return 0.10f;
+	case ESpriteAnimState::Attack:     return 0.08f;
+	case ESpriteAnimState::CastSingle: return 0.15f;
+	case ESpriteAnimState::CastSelf:   return 0.15f;
+	case ESpriteAnimState::CastGround: return 0.15f;
+	case ESpriteAnimState::CastAoe:    return 0.15f;
+	case ESpriteAnimState::Hit:        return 0.10f;
+	case ESpriteAnimState::Death:      return 0.20f;
+	case ESpriteAnimState::Sit:        return 0.30f;
+	case ESpriteAnimState::Pickup:     return 0.12f;
+	case ESpriteAnimState::Block:      return 0.10f;
+	default:                           return 0.20f;
 	}
 }
 
@@ -495,17 +551,19 @@ int32 ASpriteCharacterActor::GetFrameCount() const
 	// Hardcoded fallback defaults
 	switch (CurrentAnimState)
 	{
-	case ESpriteAnimState::Idle:   return 4;
-	case ESpriteAnimState::Walk:   return 8;
-	case ESpriteAnimState::Attack: return 6;
-	case ESpriteAnimState::Death:  return 3;
-	case ESpriteAnimState::Cast:   return 4;
-	case ESpriteAnimState::Hit:    return 2;
-	case ESpriteAnimState::Sit:    return 2;
-	case ESpriteAnimState::Taunt:  return 4;
-	case ESpriteAnimState::Pickup: return 4;
-	case ESpriteAnimState::Block:  return 3;
-	default:                       return 4;
+	case ESpriteAnimState::Idle:       return 4;
+	case ESpriteAnimState::Walk:       return 8;
+	case ESpriteAnimState::Attack:     return 6;
+	case ESpriteAnimState::Death:      return 3;
+	case ESpriteAnimState::CastSingle: return 4;
+	case ESpriteAnimState::CastSelf:   return 4;
+	case ESpriteAnimState::CastGround: return 4;
+	case ESpriteAnimState::CastAoe:    return 4;
+	case ESpriteAnimState::Hit:        return 2;
+	case ESpriteAnimState::Sit:        return 2;
+	case ESpriteAnimState::Pickup:     return 4;
+	case ESpriteAnimState::Block:      return 3;
+	default:                           return 4;
 	}
 }
 
@@ -785,6 +843,73 @@ void ASpriteCharacterActor::SetLayerTint(ESpriteLayer Layer, FLinearColor Color)
 }
 
 // ============================================================
+// Hair Style + Color
+// ============================================================
+
+FLinearColor ASpriteCharacterActor::GetHairColor(int32 ColorIndex)
+{
+	// RO Classic 9-color palette (indices match character create widget)
+	static const FLinearColor Palette[] = {
+		FLinearColor(0.10f, 0.07f, 0.05f, 1.f),  // 0 - Black
+		FLinearColor(0.85f, 0.15f, 0.10f, 1.f),  // 1 - Scarlet
+		FLinearColor(0.80f, 0.60f, 0.20f, 1.f),  // 2 - Lemon/Blonde
+		FLinearColor(0.75f, 0.75f, 0.75f, 1.f),  // 3 - Silver/White
+		FLinearColor(0.55f, 0.25f, 0.10f, 1.f),  // 4 - Orange/Brown
+		FLinearColor(0.20f, 0.50f, 0.25f, 1.f),  // 5 - Green
+		FLinearColor(0.35f, 0.35f, 0.65f, 1.f),  // 6 - Cobalt Blue
+		FLinearColor(0.50f, 0.20f, 0.55f, 1.f),  // 7 - Violet/Purple
+		FLinearColor(0.90f, 0.40f, 0.55f, 1.f),  // 8 - Pink
+	};
+	int32 Idx = FMath::Clamp(ColorIndex, 0, 8);
+	return Palette[Idx];
+}
+
+void ASpriteCharacterActor::ResetHairHiding()
+{
+	bHairHiddenByHeadgear = false;
+}
+
+void ASpriteCharacterActor::ReconcileHairVisibility()
+{
+	if (CurrentHairStyle > 0)
+	{
+		int32 HairIdx = static_cast<int32>(ESpriteLayer::Hair);
+		if (bHairHiddenByHeadgear)
+		{
+			SetLayerVisible(ESpriteLayer::Hair, false);
+		}
+		else if (Layers[HairIdx].bUsingLayerV2 && Layers[HairIdx].LayerAtlasRegistry.Num() > 0)
+		{
+			SetLayerVisible(ESpriteLayer::Hair, true);
+			ResolveLayerAtlas(Layers[HairIdx]);
+		}
+	}
+}
+
+void ASpriteCharacterActor::SetHairStyle(int32 HairStyleId, int32 HairColorIndex)
+{
+	CurrentHairStyle = HairStyleId;
+	CurrentHairColor = HairColorIndex;
+
+	if (HairStyleId <= 0)
+	{
+		SetLayerVisible(ESpriteLayer::Hair, false);
+		return;
+	}
+
+	LoadEquipmentLayer(ESpriteLayer::Hair, HairStyleId);
+
+	// Apply tint color after material is created by LoadEquipmentLayer
+	SetLayerTint(ESpriteLayer::Hair, GetHairColor(HairColorIndex));
+
+	// Respect headgear hiding
+	if (bHairHiddenByHeadgear)
+	{
+		SetLayerVisible(ESpriteLayer::Hair, false);
+	}
+}
+
+// ============================================================
 // JSON Atlas Loading
 // ============================================================
 
@@ -915,6 +1040,9 @@ void ASpriteCharacterActor::SetBodyClass(int32 ClassId, int32 Gender)
 	FString ClassName = GetClassNameFromId(ClassId);
 	FString GenderSuffix = (Gender == 1) ? TEXT("f") : TEXT("m");
 	FString BaseName = FString::Printf(TEXT("%s_%s"), *ClassName, *GenderSuffix);
+
+	// Store gender for equipment layer subfolder search (male/ or female/)
+	GenderSubDir = (Gender == 1) ? TEXT("female") : TEXT("male");
 
 	FString BodyRoot = FPaths::ProjectContentDir() / TEXT("SabriMMO/Sprites/Atlases/Body");
 
@@ -1096,6 +1224,34 @@ void ASpriteCharacterActor::SetBodyClass(int32 ClassId, int32 Gender)
 	UE_LOG(LogTemp, Log, TEXT("SpriteCharacter: Body set to %s (legacy single atlas)"), *AtlasName);
 }
 
+void ASpriteCharacterActor::SetBodyClass(const FString& AtlasBaseName)
+{
+	FString BodyRoot = FPaths::ProjectContentDir() / TEXT("SabriMMO/Sprites/Atlases/Body");
+	FString ManifestFile = FString::Printf(TEXT("%s_manifest.json"), *AtlasBaseName);
+
+	// Search order: Body/{name}/, Body/enemies/{name}/, Body/
+	TArray<FString> SearchDirs;
+	SearchDirs.Add(BodyRoot / AtlasBaseName);
+	SearchDirs.Add(BodyRoot / TEXT("enemies") / AtlasBaseName);
+	SearchDirs.Add(BodyRoot);
+
+	for (const FString& Dir : SearchDirs)
+	{
+		FString ManifestPath = Dir / ManifestFile;
+		FString ManifestStr;
+		if (FFileHelper::LoadFileToString(ManifestStr, *ManifestPath))
+		{
+			bUsingV2Atlas = true;
+			LoadV2AtlasManifest(ManifestPath);
+			UE_LOG(LogTemp, Log, TEXT("SpriteCharacter: Body set by name '%s' (v2 manifest at %s)"),
+				*AtlasBaseName, *Dir);
+			return;
+		}
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("SpriteCharacter: No manifest found for '%s'"), *AtlasBaseName);
+}
+
 // ============================================================
 // Equipment Layer System
 // ============================================================
@@ -1104,6 +1260,7 @@ FString ASpriteCharacterActor::GetLayerSubDir(ESpriteLayer Layer)
 {
 	switch (Layer)
 	{
+	case ESpriteLayer::Hair:        return TEXT("Hair");
 	case ESpriteLayer::Weapon:      return TEXT("Weapon");
 	case ESpriteLayer::Shield:      return TEXT("Shield");
 	case ESpriteLayer::HeadgearTop: return TEXT("HeadgearTop");
@@ -1148,30 +1305,51 @@ void ASpriteCharacterActor::LoadEquipmentLayer(ESpriteLayer Layer, int32 ViewSpr
 	FString BaseName = FString::Printf(TEXT("%s_%d"), *SubDir.ToLower(), ViewSpriteId);
 	FString LayerRoot = FPaths::ProjectContentDir() / TEXT("SabriMMO/Sprites/Atlases") / SubDir;
 
-	// Search all subfolders for the manifest (e.g., Weapon/dagger/weapon_1_manifest.json)
+	// Search for manifest with gender-aware priority:
+	// 1. {LayerRoot}/{item_subdir}/{gender}/manifest  (e.g., Weapon/dagger/female/)
+	// 2. {LayerRoot}/{item_subdir}/manifest            (e.g., Weapon/dagger/)
+	// 3. {LayerRoot}/manifest                          (flat fallback)
 	FString JsonDir;
 	FString ManifestPath;
 	FString ManifestStr;
 	{
-		// Try each subfolder
+		FString ManifestFileName = FString::Printf(TEXT("%s_manifest.json"), *BaseName);
+
+		// Try each item subfolder (e.g., dagger/, bow/, egg_shell_hat/)
 		TArray<FString> SubDirs;
 		IFileManager::Get().FindFiles(SubDirs, *(LayerRoot / TEXT("*")), false, true);
 		for (const FString& SD : SubDirs)
 		{
-			FString CandidateDir = LayerRoot / SD;
-			FString CandidatePath = CandidateDir / FString::Printf(TEXT("%s_manifest.json"), *BaseName);
+			FString ItemDir = LayerRoot / SD;
+
+			// Priority 1: gender subfolder (e.g., Weapon/dagger/female/)
+			if (!GenderSubDir.IsEmpty())
+			{
+				FString GenderDir = ItemDir / GenderSubDir;
+				FString GenderPath = GenderDir / ManifestFileName;
+				if (FFileHelper::LoadFileToString(ManifestStr, *GenderPath))
+				{
+					JsonDir = GenderDir;
+					ManifestPath = GenderPath;
+					break;
+				}
+			}
+
+			// Priority 2: directly in item subfolder (e.g., Weapon/dagger/)
+			FString CandidatePath = ItemDir / ManifestFileName;
 			if (FFileHelper::LoadFileToString(ManifestStr, *CandidatePath))
 			{
-				JsonDir = CandidateDir;
+				JsonDir = ItemDir;
 				ManifestPath = CandidatePath;
 				break;
 			}
 		}
-		// Fallback: flat structure (Weapon/weapon_1_manifest.json)
+
+		// Priority 3: flat structure (e.g., Weapon/weapon_1_manifest.json)
 		if (ManifestStr.IsEmpty())
 		{
 			JsonDir = LayerRoot;
-			ManifestPath = LayerRoot / FString::Printf(TEXT("%s_manifest.json"), *BaseName);
+			ManifestPath = LayerRoot / ManifestFileName;
 			FFileHelper::LoadFileToString(ManifestStr, *ManifestPath);
 		}
 	}
@@ -1189,6 +1367,28 @@ void ASpriteCharacterActor::LoadEquipmentLayer(ESpriteLayer Layer, int32 ViewSpr
 	TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ManifestStr);
 	if (!FJsonSerializer::Deserialize(Reader, Root) || !Root.IsValid())
 		return;
+
+	// Check if this headgear hides hair
+	if (Layer == ESpriteLayer::HeadgearTop || Layer == ESpriteLayer::HeadgearMid || Layer == ESpriteLayer::HeadgearLow)
+	{
+		bool bHidesHair = false;
+		Root->TryGetBoolField(TEXT("hides_hair"), bHidesHair);
+		if (bHidesHair)
+		{
+			bHairHiddenByHeadgear = true;
+			SetLayerVisible(ESpriteLayer::Hair, false);
+		}
+		else if (bHairHiddenByHeadgear)
+		{
+			// Swapping to a non-hiding headgear — restore hair
+			bHairHiddenByHeadgear = false;
+			int32 HairIdx = static_cast<int32>(ESpriteLayer::Hair);
+			if (Layers[HairIdx].bUsingLayerV2 && Layers[HairIdx].LayerAtlasRegistry.Num() > 0)
+			{
+				SetLayerVisible(ESpriteLayer::Hair, true);
+			}
+		}
+	}
 
 	L.LayerAtlasRegistry.Empty();
 	L.ActiveLayerAtlas = nullptr;
@@ -1264,6 +1464,7 @@ void ASpriteCharacterActor::LoadEquipmentLayer(ESpriteLayer Layer, int32 ViewSpr
 			{TEXT("unarmed"), ESpriteWeaponMode::None},
 			{TEXT("onehand"), ESpriteWeaponMode::OneHand},
 			{TEXT("twohand"), ESpriteWeaponMode::TwoHand},
+			{TEXT("bow"),     ESpriteWeaponMode::Bow},
 		};
 
 		TArray<FString> Groups;
@@ -1306,8 +1507,11 @@ void ASpriteCharacterActor::LoadEquipmentLayer(ESpriteLayer Layer, int32 ViewSpr
 			{
 				L.MeshComp->SetMaterial(0, L.MaterialInst);
 			}
-			L.MeshComp->SetVisibility(true);
-			L.bActive = true;
+
+			// Don't show hair layer if headgear is hiding it
+			bool bShouldShow = !(Layer == ESpriteLayer::Hair && bHairHiddenByHeadgear);
+			L.MeshComp->SetVisibility(bShouldShow);
+			L.bActive = bShouldShow;
 			L.ActiveLayerTexture = L.ActiveLayerAtlas->AtlasTexture;
 		}
 
@@ -1442,6 +1646,7 @@ void ASpriteCharacterActor::LoadV2AtlasManifest(const FString& ManifestPath)
 		{TEXT("unarmed"), ESpriteWeaponMode::None},
 		{TEXT("onehand"), ESpriteWeaponMode::OneHand},
 		{TEXT("twohand"), ESpriteWeaponMode::TwoHand},
+		{TEXT("bow"),     ESpriteWeaponMode::Bow},
 	};
 
 	AtlasRegistry.Empty();
@@ -1726,13 +1931,17 @@ void ASpriteCharacterActor::AttachToOwnerActor(AActor* Actor, bool bIsLocalPlaye
 
 				if (!Weapon.Name.IsEmpty() && Weapon.EquipSlot == TEXT("weapon"))
 				{
-					if (Weapon.bTwoHanded)
+					if (Weapon.WeaponType == TEXT("bow"))
+						NewMode = ESpriteWeaponMode::Bow;
+					else if (Weapon.bTwoHanded)
 						NewMode = ESpriteWeaponMode::TwoHand;
 					else
 						NewMode = ESpriteWeaponMode::OneHand;
 				}
 
 				SetWeaponMode(NewMode);
+
+				ResetHairHiding();
 
 				// Update all equipment sprite layers
 				static const TArray<TPair<FString, ESpriteLayer>> EquipLayerMap = {
@@ -1753,6 +1962,8 @@ void ASpriteCharacterActor::AttachToOwnerActor(AActor* Actor, bool bIsLocalPlaye
 						LoadEquipmentLayer(Pair.Value, 0); // hide layer
 				}
 
+				ReconcileHairVisibility();
+
 				UE_LOG(LogTemp, Log, TEXT("SpriteCharacter: Equipment changed — weapon='%s' mode=%d"),
 					*Weapon.Name, static_cast<int32>(NewMode));
 			});
@@ -1761,7 +1972,8 @@ void ASpriteCharacterActor::AttachToOwnerActor(AActor* Actor, bool bIsLocalPlaye
 			FInventoryItem Weapon = EquipSub->GetEquippedItem(TEXT("weapon"));
 			if (!Weapon.Name.IsEmpty() && Weapon.EquipSlot == TEXT("weapon"))
 			{
-				ESpriteWeaponMode InitMode = Weapon.bTwoHanded ? ESpriteWeaponMode::TwoHand : ESpriteWeaponMode::OneHand;
+				ESpriteWeaponMode InitMode = Weapon.WeaponType == TEXT("bow") ? ESpriteWeaponMode::Bow
+				: Weapon.bTwoHanded ? ESpriteWeaponMode::TwoHand : ESpriteWeaponMode::OneHand;
 				SetWeaponMode(InitMode);
 			}
 
@@ -1784,24 +1996,73 @@ void ASpriteCharacterActor::AttachToOwnerActor(AActor* Actor, bool bIsLocalPlaye
 	}
 }
 
+void ASpriteCharacterActor::SetServerTargetPosition(const FVector& Pos, bool bMoving, float Speed)
+{
+	ServerTargetPos = Pos;
+	ServerMoveSpeed = Speed;
+	bUseServerMovement = true;
+}
+
 void ASpriteCharacterActor::UpdateOwnerTracking()
 {
+	// Standalone sprite enemies (no owner actor) — handle movement first
+	// C++ server-driven movement for standalone sprite enemies (no BP actor)
+	if (bUseServerMovement)
+	{
+		FVector Current = GetActorLocation();
+		FVector Dir = ServerTargetPos - Current;
+		Dir.Z = 0.f;
+		float Dist = Dir.Size();
+
+		if (Dist > 5.f)
+		{
+			float DT = GetWorld()->GetDeltaSeconds();
+			float Step = ServerMoveSpeed * DT;
+			FVector Move = Dir.GetSafeNormal() * FMath::Min(Step, Dist);
+			FVector NewPos(Current.X + Move.X, Current.Y + Move.Y, Current.Z);
+			SetActorLocation(NewPos);
+		}
+
+		// Ground snap via line trace (replaces CharacterMovementComponent gravity)
+		{
+			FVector Start = GetActorLocation() + FVector(0, 0, 50.f);
+			FVector End = Start - FVector(0, 0, 500.f);
+			FHitResult Hit;
+			FCollisionQueryParams Params;
+			Params.AddIgnoredActor(this);
+			if (GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_WorldStatic, Params))
+			{
+				FVector Snapped = GetActorLocation();
+				Snapped.Z = Hit.ImpactPoint.Z;
+				SetActorLocation(Snapped);
+			}
+		}
+
+		// Animation + facing driven by EnemySubsystem (HandleEnemyMove), not velocity
+		return;
+	}
+
+	// Player/remote player sprites: follow owner actor position
 	if (!OwnerActor.IsValid())
 		return;
 
-	SetActorLocation(OwnerActor->GetActorLocation());
+	FVector Loc = OwnerActor->GetActorLocation();
+	Loc.Z -= GroundZOffset;
+	SetActorLocation(Loc);
 
 	FVector Velocity = OwnerActor->GetVelocity();
 	float Speed = Velocity.Size();
 
 	// Don't override one-shot animations or sitting (sit ends via player:stand event)
-	if (CurrentAnimState == ESpriteAnimState::Attack ||
-	    CurrentAnimState == ESpriteAnimState::Death  ||
-	    CurrentAnimState == ESpriteAnimState::Hit    ||
-	    CurrentAnimState == ESpriteAnimState::Cast   ||
-	    CurrentAnimState == ESpriteAnimState::Taunt  ||
-	    CurrentAnimState == ESpriteAnimState::Pickup ||
-	    CurrentAnimState == ESpriteAnimState::Block  ||
+	if (CurrentAnimState == ESpriteAnimState::Attack     ||
+	    CurrentAnimState == ESpriteAnimState::Death      ||
+	    CurrentAnimState == ESpriteAnimState::Hit        ||
+	    CurrentAnimState == ESpriteAnimState::CastSingle ||
+	    CurrentAnimState == ESpriteAnimState::CastSelf   ||
+	    CurrentAnimState == ESpriteAnimState::CastGround ||
+	    CurrentAnimState == ESpriteAnimState::CastAoe    ||
+	    CurrentAnimState == ESpriteAnimState::Pickup     ||
+	    CurrentAnimState == ESpriteAnimState::Block      ||
 	    CurrentAnimState == ESpriteAnimState::Sit)
 	{
 		return;
@@ -1871,18 +2132,25 @@ void ASpriteCharacterActor::RegisterCombatEvents()
 			}
 		});
 
-	// Skill animations
-	static const TSet<int32> DebuffSkillIds = {
-		104,   // Provoke
-		410,   // Decrease AGI
-		1011,  // Lex Divina
-		1607,  // Finger Offensive
+	// Helper: map targetType string to cast animation state
+	auto GetCastStateFromTargetType = [](const FString& TargetType) -> ESpriteAnimState
+	{
+		if (TargetType == TEXT("self"))   return ESpriteAnimState::CastSelf;
+		if (TargetType == TEXT("ground")) return ESpriteAnimState::CastGround;
+		if (TargetType == TEXT("aoe"))    return ESpriteAnimState::CastAoe;
+		return ESpriteAnimState::CastSingle; // default for "single" and unknown
 	};
 
-	// skill:cast_start — broadcast to zone with casterId, works for ALL sprites
+	auto IsCastingState = [](ESpriteAnimState S) -> bool
+	{
+		return S == ESpriteAnimState::CastSingle || S == ESpriteAnimState::CastSelf ||
+		       S == ESpriteAnimState::CastGround || S == ESpriteAnimState::CastAoe;
+	};
+
+	// skill:cast_start — broadcast to zone with casterId
 	// Triggers for skills with cast time during the cast bar
 	Router->RegisterHandler(TEXT("skill:cast_start"), this,
-		[this](const TSharedPtr<FJsonValue>& D) {
+		[this, GetCastStateFromTargetType](const TSharedPtr<FJsonValue>& D) {
 			if (!D.IsValid()) return;
 			const TSharedPtr<FJsonObject>& Obj = D->AsObject();
 			if (!Obj.IsValid()) return;
@@ -1891,19 +2159,15 @@ void ASpriteCharacterActor::RegisterCombatEvents()
 			if ((int32)CId != LocalCharacterId) return;
 			if (CurrentAnimState == ESpriteAnimState::Death) return;
 
-			double SkillId = 0;
-			Obj->TryGetNumberField(TEXT("skillId"), SkillId);
-
-			if (DebuffSkillIds.Contains((int32)SkillId))
-				SetAnimState(ESpriteAnimState::Taunt);
-			else
-				SetAnimState(ESpriteAnimState::Cast);
+			FString TargetType;
+			Obj->TryGetStringField(TEXT("targetType"), TargetType);
+			SetAnimState(GetCastStateFromTargetType(TargetType));
 		});
 
-	// skill:cast_complete — broadcast to zone with casterId, works for ALL sprites
+	// skill:cast_complete — broadcast to zone with casterId
 	// Triggers for instant skills and when cast-time skills finish
 	Router->RegisterHandler(TEXT("skill:cast_complete"), this,
-		[this](const TSharedPtr<FJsonValue>& D) {
+		[this, GetCastStateFromTargetType, IsCastingState](const TSharedPtr<FJsonValue>& D) {
 			if (!D.IsValid()) return;
 			const TSharedPtr<FJsonObject>& Obj = D->AsObject();
 			if (!Obj.IsValid()) return;
@@ -1911,23 +2175,18 @@ void ASpriteCharacterActor::RegisterCombatEvents()
 			Obj->TryGetNumberField(TEXT("casterId"), CId);
 			if ((int32)CId != LocalCharacterId) return;
 			if (CurrentAnimState == ESpriteAnimState::Death) return;
-			// Don't override if already in cast/taunt from skill:cast_start
-			if (CurrentAnimState == ESpriteAnimState::Cast ||
-			    CurrentAnimState == ESpriteAnimState::Taunt) return;
+			// Don't override if already casting from skill:cast_start
+			if (IsCastingState(CurrentAnimState)) return;
 
-			double SkillId = 0;
-			Obj->TryGetNumberField(TEXT("skillId"), SkillId);
-
-			if (DebuffSkillIds.Contains((int32)SkillId))
-				SetAnimState(ESpriteAnimState::Taunt);
-			else
-				SetAnimState(ESpriteAnimState::Cast);
+			FString TargetType;
+			Obj->TryGetStringField(TEXT("targetType"), TargetType);
+			SetAnimState(GetCastStateFromTargetType(TargetType));
 		});
 
 	// skill:buff_applied — broadcast to zone with casterId, catches instant buff/debuff skills
 	// that don't emit skill:cast_start or skill:cast_complete
 	Router->RegisterHandler(TEXT("skill:buff_applied"), this,
-		[this](const TSharedPtr<FJsonValue>& D) {
+		[this, GetCastStateFromTargetType, IsCastingState](const TSharedPtr<FJsonValue>& D) {
 			if (!D.IsValid()) return;
 			const TSharedPtr<FJsonObject>& Obj = D->AsObject();
 			if (!Obj.IsValid()) return;
@@ -1936,17 +2195,17 @@ void ASpriteCharacterActor::RegisterCombatEvents()
 			if ((int32)CId != LocalCharacterId) return;
 			if (CurrentAnimState == ESpriteAnimState::Death) return;
 			if (CurrentAnimState == ESpriteAnimState::Sit) return; // sitting buff (skillId=0) must not override sit
-			if (CurrentAnimState == ESpriteAnimState::Cast ||
-			    CurrentAnimState == ESpriteAnimState::Taunt) return;
+			if (IsCastingState(CurrentAnimState)) return;
 
 			double SkillId = 0;
 			Obj->TryGetNumberField(TEXT("skillId"), SkillId);
 			if ((int32)SkillId == 0) return; // skillId 0 = sitting internal state, not a real skill
 
-			if (DebuffSkillIds.Contains((int32)SkillId))
-				SetAnimState(ESpriteAnimState::Taunt);
-			else
-				SetAnimState(ESpriteAnimState::Cast);
+			FString TargetType;
+			Obj->TryGetStringField(TEXT("targetType"), TargetType);
+			// Most buff_applied events don't include targetType — default to self-cast
+			if (TargetType.IsEmpty()) TargetType = TEXT("self");
+			SetAnimState(GetCastStateFromTargetType(TargetType));
 		});
 
 }

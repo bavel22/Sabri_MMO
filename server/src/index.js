@@ -36,6 +36,8 @@ const { MONSTER_AI_CODES } = require('./ro_monster_ai_codes');
 const { NPC_SKILLS, MONSTER_SKILL_DB, getMonsterSkills, isPlayerClassSkill } = require('./ro_monster_skills');
 // Import RO zone registry (map definitions, warps, spawns, Kafra NPCs)
 const { ZONE_REGISTRY, getZone, getAllEnemySpawns, getZoneNames } = require('./ro_zone_data');
+// Import NavMesh pathfinding module (loads OBJ files exported from UE5, builds Detour navmeshes)
+const { initNavMeshes, findNavMeshPath, findClosestNavMeshPoint } = require('./ro_navmesh');
 // Import RO pre-renewal damage formulas (element table, size penalty, HIT/FLEE, critical, DEF)
 const {
     ELEMENT_TABLE, SIZE_PENALTY,
@@ -223,13 +225,13 @@ async function broadcastEquipAppearance(characterId, player) {
     try {
         // Query ALL equipped items (not just those with view_sprite) to detect weapon mode
         const vizResult = await pool.query(
-            `SELECT ci.equipped_position, i.view_sprite, i.two_handed, i.equip_slot
+            `SELECT ci.equipped_position, i.view_sprite, i.two_handed, i.equip_slot, i.weapon_type
              FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
              WHERE ci.character_id = $1 AND ci.is_equipped = true`,
             [characterId]
         );
         const ev = { weapon: 0, shield: 0, head_top: 0, head_mid: 0, head_low: 0, garment: 0 };
-        let weaponMode = 0; // 0=unarmed, 1=onehand, 2=twohand
+        let weaponMode = 0; // 0=unarmed, 1=onehand, 2=twohand, 3=bow
         for (const row of vizResult.rows) {
             const pos = row.equipped_position;
             // Visual sprites (only items with view_sprite > 0 have sprite atlases)
@@ -238,13 +240,13 @@ async function broadcastEquipAppearance(characterId, player) {
             }
             // Weapon mode detection (works even if weapon has no sprite atlas yet)
             if ((pos === 'weapon' || row.equip_slot === 'weapon') && pos !== 'ammo') {
-                weaponMode = row.two_handed ? 2 : 1;
+                weaponMode = row.weapon_type === 'bow' ? 3 : row.two_handed ? 2 : 1;
             }
         }
         player.equipVisuals = ev;
         player.weaponMode = weaponMode;
         const zone = player.zone || 'prontera_south';
-        broadcastToZone(zone, 'player:appearance', { characterId, equipVisuals: ev, weaponMode });
+        broadcastToZone(zone, 'player:appearance', { characterId, equipVisuals: ev, weaponMode, hairStyle: player.hairStyle || 1, hairColor: player.hairColor || 0 });
     } catch (err) {
         logger.warn(`broadcastEquipAppearance error: ${err.message}`);
     }
@@ -2580,11 +2582,16 @@ async function processEnemyDeathFromSkill(enemy, attacker, attackerId, io) {
         enemy._slaves = null;
         enemy._slaveCount = 0;
         if (typeof initEnemyWanderState === 'function') initEnemyWanderState(enemy);
-        broadcastToZone(enemy.zone, 'enemy:spawn', {
+        const respawnPayload = {
             enemyId: enemy.enemyId, templateId: enemy.templateId, name: enemy.name,
             level: enemy.level, health: enemy.health, maxHealth: enemy.maxHealth,
             x: enemy.x, y: enemy.y, z: enemy.z
-        });
+        };
+        if (enemy.spriteClass) {
+            respawnPayload.spriteClass = enemy.spriteClass;
+            respawnPayload.weaponMode = enemy.spriteWeaponMode;
+        }
+        broadcastToZone(enemy.zone, 'enemy:spawn', respawnPayload);
     }, respawnDelay);
 }
 
@@ -3459,6 +3466,13 @@ function knockbackTarget(target, sourceX, sourceY, cells, zone, io) {
     target.x = finalX;
     target.y = finalY;
 
+    // Reset NavMesh path after forced movement (enemies only)
+    if (target._navPath) {
+        target._navPath = [];
+        target._navPathIdx = 0;
+        target._navPathTarget = null;
+    }
+
     // Close Confine breaks on knockback (RO Classic pre-renewal)
     if (target.activeBuffs && target.activeBuffs.some(b => b.name === 'close_confine')) {
         breakCloseConfine(target, zone, io, 'knockback');
@@ -3674,7 +3688,7 @@ function executeAutoSpellEffect(caster, target, targetIsEnemy, skillName, level,
         const buffName = skillName.toLowerCase().replace(/^[a-z]{2}_/, '');
         logger.info(`[AUTOCAST] Buff ${skillName} Lv${level} triggered on ${target.characterName || target.name || targetId}`);
         // For now, broadcast the visual — full buff application would need per-skill handlers
-        broadcastToZone(zone, 'skill:cast_complete', { casterId, skillId: skillDef.id });
+        broadcastToZone(zone, 'skill:cast_complete', { casterId, skillId: skillDef.id, targetType: skillDef.targetType });
     } else if (isMagical && targetIsEnemy) {
         // Magical damage auto-cast (bolts, Meteor Storm, etc.)
         const effectiveStats = caster.stats ? getEffectiveStats(caster) : caster;
@@ -4345,7 +4359,10 @@ for (const [key, ro] of Object.entries(RO_MONSTER_TEMPLATES)) {
             itemId: null,  // Resolved lazily from itemNameToId after DB load
             chance: d.rate / 100,
             rate: d.rate
-        }))
+        })),
+        // Sprite rendering (optional — client skips if absent)
+        spriteClass: ro.spriteClass || null,
+        weaponMode: ro.weaponMode != null ? ro.weaponMode : 0
     };
 }
 
@@ -4522,6 +4539,13 @@ function spawnEnemy(spawnConfig) {
         _lastSkillHitId: null,
         _rudeAttacked: false,
         _justSpawned: true,
+        // Sprite rendering fields (optional — client skips if absent)
+        spriteClass: template.spriteClass || null,
+        spriteWeaponMode: template.weaponMode != null ? template.weaponMode : 0,
+        // NavMesh pathfinding fields
+        _navPath: [],
+        _navPathIdx: 0,
+        _navPathTarget: null,
     };
     // Initialize wander state
     initEnemyWanderState(enemy);
@@ -4537,13 +4561,18 @@ function spawnEnemy(spawnConfig) {
     if (!modeFlags.canMove) flagSummary.push('IMMOB');
     if (!modeFlags.canAttack) flagSummary.push('NOATK');
     logger.info(`[ENEMY] Spawned ${enemy.name} (ID: ${enemyId}) Lv${enemy.level} [${enemy.monsterClass}] AI${aiCode} [${flagSummary.join(',')||'passive'}] speed=${moveSpeed.toFixed(0)}u/s at (${enemy.x}, ${enemy.y}, ${enemy.z}) zone=${enemy.zone}`);
-    broadcastToZone(enemy.zone, 'enemy:spawn', {
+    const spawnPayload = {
         enemyId, templateId: spawnConfig.template, name: enemy.name,
         level: enemy.level, health: enemy.health, maxHealth: enemy.maxHealth,
         monsterClass: enemy.monsterClass, size: enemy.size, race: enemy.race,
         element: enemy.element,
         x: enemy.x, y: enemy.y, z: enemy.z
-    });
+    };
+    if (enemy.spriteClass) {
+        spawnPayload.spriteClass = enemy.spriteClass;
+        spawnPayload.weaponMode = enemy.spriteWeaponMode;
+    }
+    broadcastToZone(enemy.zone, 'enemy:spawn', spawnPayload);
     return enemy;
 }
 
@@ -5365,7 +5394,7 @@ io.on('connection', (socket) => {
         let dbHasCart = false, dbCartType = 0;
         try {
             const charResult = await pool.query(
-                'SELECT x, y, z, health, max_health, mana, max_mana, zuzucoin, zone_name, gender, job_class, plagiarized_skill_id, plagiarized_skill_level, has_cart, cart_type FROM characters WHERE character_id = $1',
+                'SELECT x, y, z, health, max_health, mana, max_mana, zuzucoin, zone_name, gender, job_class, plagiarized_skill_id, plagiarized_skill_level, has_cart, cart_type, hair_style, hair_color FROM characters WHERE character_id = $1',
                 [characterId]
             );
             if (charResult.rows.length > 0) {
@@ -5385,6 +5414,8 @@ io.on('connection', (socket) => {
                 dbPlagiarizedSkillLevel = row.plagiarized_skill_level || 0;
                 dbHasCart = !!row.has_cart;
                 dbCartType = row.cart_type || 0;
+                var dbHairStyle = row.hair_style || 1;
+                var dbHairColor = row.hair_color || 0;
 
                 // Cache correct position in Redis
                 await setPlayerPosition(characterId, row.x, row.y, row.z);
@@ -5396,7 +5427,7 @@ io.on('connection', (socket) => {
                 const earlyEquipViz = { weapon: 0, shield: 0, head_top: 0, head_mid: 0, head_low: 0, garment: 0 };
                 try {
                     const earlyVizResult = await pool.query(
-                        `SELECT ci.equipped_position, i.view_sprite, i.two_handed, i.equip_slot
+                        `SELECT ci.equipped_position, i.view_sprite, i.two_handed, i.equip_slot, i.weapon_type
                          FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
                          WHERE ci.character_id = $1 AND ci.is_equipped = true`,
                         [characterId]
@@ -5407,7 +5438,7 @@ io.on('connection', (socket) => {
                             earlyEquipViz[vpos] = vr.view_sprite;
                         }
                         if ((vpos === 'weapon' || vr.equip_slot === 'weapon') && vpos !== 'ammo') {
-                            earlyWeaponMode = vr.two_handed ? 2 : 1;
+                            earlyWeaponMode = vr.weapon_type === 'bow' ? 3 : vr.two_handed ? 2 : 1;
                         }
                     }
                 } catch (vizErr) {
@@ -5421,6 +5452,8 @@ io.on('connection', (socket) => {
                     characterName,
                     jobClass: earlyJobClass || 'novice',
                     gender: playerGender || 'male',
+                    hairStyle: dbHairStyle,
+                    hairColor: dbHairColor,
                     weaponMode: earlyWeaponMode,
                     equipVisuals: earlyEquipViz,
                     x: row.x,
@@ -5434,7 +5467,8 @@ io.on('connection', (socket) => {
 
                 // Broadcast equipment visuals to other players
                 broadcastToZoneExcept(socket, playerZone, 'player:appearance', {
-                    characterId, equipVisuals: earlyEquipViz, weaponMode: earlyWeaponMode
+                    characterId, equipVisuals: earlyEquipViz, weaponMode: earlyWeaponMode,
+                    hairStyle: dbHairStyle, hairColor: dbHairColor
                 });
             }
         } catch (err) {
@@ -5619,7 +5653,7 @@ io.on('connection', (socket) => {
         try {
             // Query ALL equipped items (not just view_sprite > 0) to detect weapon mode
             const vizResult = await pool.query(
-                `SELECT ci.equipped_position, i.view_sprite, i.two_handed, i.equip_slot
+                `SELECT ci.equipped_position, i.view_sprite, i.two_handed, i.equip_slot, i.weapon_type
                  FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
                  WHERE ci.character_id = $1 AND ci.is_equipped = true`,
                 [characterId]
@@ -5630,7 +5664,7 @@ io.on('connection', (socket) => {
                     equipVisuals[pos] = row.view_sprite;
                 }
                 if ((pos === 'weapon' || row.equip_slot === 'weapon') && pos !== 'ammo') {
-                    initialWeaponMode = row.two_handed ? 2 : 1;
+                    initialWeaponMode = row.weapon_type === 'bow' ? 3 : row.two_handed ? 2 : 1;
                 }
             }
             // NOTE: player object doesn't exist yet — weaponMode is set via connectedPlayers.set() later
@@ -5807,6 +5841,9 @@ io.on('connection', (socket) => {
             cartWeight: 0,          // Calculated from character_cart on load
             cartMaxWeight: 8000,    // rAthena MAX_CART_WEIGHT
             cartItems: [],          // Loaded from character_cart
+            // Appearance
+            hairStyle: dbHairStyle,
+            hairColor: dbHairColor,
             // Vending System
             isVending: false,
             vendingShop: null,      // { shopId, title, items }
@@ -5993,7 +6030,9 @@ io.on('connection', (socket) => {
                     socket.emit('player:appearance', {
                         characterId: existingCharId,
                         equipVisuals: existingPlayer.equipVisuals,
-                        weaponMode: existingPlayer.weaponMode || 0
+                        weaponMode: existingPlayer.weaponMode || 0,
+                        hairStyle: existingPlayer.hairStyle || 1,
+                        hairColor: existingPlayer.hairColor || 0
                     });
                 }
             }
@@ -6046,11 +6085,16 @@ io.on('connection', (socket) => {
         // Send existing enemies to the joining player (only same zone)
         for (const [eid, enemy] of enemies.entries()) {
             if (!enemy.isDead && enemy.zone === playerZone) {
-                socket.emit('enemy:spawn', {
+                const joinPayload = {
                     enemyId: eid, templateId: enemy.templateId, name: enemy.name,
                     level: enemy.level, health: enemy.health, maxHealth: enemy.maxHealth,
                     x: enemy.x, y: enemy.y, z: enemy.z
-                });
+                };
+                if (enemy.spriteClass) {
+                    joinPayload.spriteClass = enemy.spriteClass;
+                    joinPayload.weaponMode = enemy.spriteWeaponMode;
+                }
+                socket.emit('enemy:spawn', joinPayload);
             }
         }
 
@@ -6354,7 +6398,10 @@ io.on('connection', (socket) => {
                         characterId, characterName,
                         jobClass: player.jobClass || 'novice',
                         gender: player.gender || 'male',
+                        hairStyle: player.hairStyle || 1,
+                        hairColor: player.hairColor || 0,
                         weaponMode: player.weaponMode || 0,
+                        equipVisuals: player.equipVisuals || {},
                         x: player.lastX, y: player.lastY, z: player.lastZ,
                         health: player.health, maxHealth: player.maxHealth,
                         isMounted: player.isMounted || false,
@@ -6380,7 +6427,10 @@ io.on('connection', (socket) => {
             characterName,
             jobClass: player ? (player.jobClass || 'novice') : 'novice',
             gender: player ? (player.gender || 'male') : 'male',
+            hairStyle: player ? (player.hairStyle || 1) : 1,
+            hairColor: player ? (player.hairColor || 0) : 0,
             weaponMode: player ? (player.weaponMode || 0) : 0,
+            equipVisuals: player ? (player.equipVisuals || {}) : {},
             x, y, z,
             health: player ? player.health : 100,
             maxHealth: player ? player.maxHealth : 100,
@@ -6534,6 +6584,8 @@ io.on('connection', (socket) => {
             characterName: player.characterName,
             jobClass: player.jobClass || 'novice',
             gender: player.gender || 'male',
+            hairStyle: player.hairStyle || 1,
+            hairColor: player.hairColor || 0,
             weaponMode: player.weaponMode || 0,
             equipVisuals: player.equipVisuals || {},
             x: player.lastX || 0,
@@ -6549,7 +6601,9 @@ io.on('connection', (socket) => {
             broadcastToZoneExcept(socket, zone, 'player:appearance', {
                 characterId,
                 equipVisuals: player.equipVisuals,
-                weaponMode: player.weaponMode || 0
+                weaponMode: player.weaponMode || 0,
+                hairStyle: player.hairStyle || 1,
+                hairColor: player.hairColor || 0
             });
         }
 
@@ -6581,7 +6635,9 @@ io.on('connection', (socket) => {
                     socket.emit('player:appearance', {
                         characterId: existingCharId,
                         equipVisuals: existingPlayer.equipVisuals,
-                        weaponMode: existingPlayer.weaponMode || 0
+                        weaponMode: existingPlayer.weaponMode || 0,
+                        hairStyle: existingPlayer.hairStyle || 1,
+                        hairColor: existingPlayer.hairColor || 0
                     });
                 }
             }
@@ -6590,11 +6646,16 @@ io.on('connection', (socket) => {
         // Send all zone enemies to this client
         for (const [eid, enemy] of enemies.entries()) {
             if (!enemy.isDead && enemy.zone === zone) {
-                socket.emit('enemy:spawn', {
+                const zoneReadyPayload = {
                     enemyId: eid, templateId: enemy.templateId, name: enemy.name,
                     level: enemy.level, health: enemy.health, maxHealth: enemy.maxHealth,
                     x: enemy.x, y: enemy.y, z: enemy.z
-                });
+                };
+                if (enemy.spriteClass) {
+                    zoneReadyPayload.spriteClass = enemy.spriteClass;
+                    zoneReadyPayload.weaponMode = enemy.spriteWeaponMode;
+                }
+                socket.emit('enemy:spawn', zoneReadyPayload);
             }
         }
 
@@ -6604,6 +6665,12 @@ io.on('connection', (socket) => {
                 socket.emit('player:moved', {
                     characterId: existingCharId,
                     characterName: existingPlayer.characterName,
+                    jobClass: existingPlayer.jobClass || 'novice',
+                    gender: existingPlayer.gender || 'male',
+                    hairStyle: existingPlayer.hairStyle || 1,
+                    hairColor: existingPlayer.hairColor || 0,
+                    weaponMode: existingPlayer.weaponMode || 0,
+                    equipVisuals: existingPlayer.equipVisuals || {},
                     x: existingPlayer.lastX || 0,
                     y: existingPlayer.lastY || 0,
                     z: existingPlayer.lastZ || 300,
@@ -9660,6 +9727,7 @@ io.on('connection', (socket) => {
                 broadcastToZone(castStartZone, 'skill:cast_start', {
                     casterId: characterId, casterName: player.characterName,
                     skillId, skillName: skill.displayName,
+                    targetType: skill.targetType,
                     actualCastTime, targetId, isEnemy,
                     freeCastSpeedPct,
                     casterX: castAttackerPos?.x || 0, casterY: castAttackerPos?.y || 0, casterZ: castAttackerPos?.z || 0
@@ -11971,7 +12039,10 @@ io.on('connection', (socket) => {
                     characterId, characterName: player.characterName,
                     jobClass: player.jobClass || 'novice',
                     gender: player.gender || 'male',
+                    hairStyle: player.hairStyle || 1,
+                    hairColor: player.hairColor || 0,
                     weaponMode: player.weaponMode || 0,
+                    equipVisuals: player.equipVisuals || {},
                     x: newX, y: newY, z: newZ,
                     health: player.health, maxHealth: player.maxHealth,
                     timestamp: Date.now()
@@ -12921,7 +12992,10 @@ io.on('connection', (socket) => {
                     characterId, characterName: player.characterName,
                     jobClass: player.jobClass || 'novice',
                     gender: player.gender || 'male',
+                    hairStyle: player.hairStyle || 1,
+                    hairColor: player.hairColor || 0,
                     weaponMode: player.weaponMode || 0,
+                    equipVisuals: player.equipVisuals || {},
                     x: newX, y: newY, z: newZ,
                     health: player.health, maxHealth: player.maxHealth,
                     isMounted: player.isMounted || false,
@@ -13827,7 +13901,7 @@ io.on('connection', (socket) => {
                 player.lastZ = caEnemyPost.z || player.lastZ || 0;
                 await pool.query('UPDATE characters SET x = $1, y = $2 WHERE character_id = $3', [newPosX, newPosY, characterId]);
                 const caZone = player.zone || 'prontera_south';
-                broadcastToZone(caZone, 'player:moved', { characterId, x: newPosX, y: newPosY, z: player.lastZ, isTeleport: true });
+                broadcastToZone(caZone, 'player:moved', { characterId, characterName: player.characterName, jobClass: player.jobClass || 'novice', gender: player.gender || 'male', hairStyle: player.hairStyle || 1, hairColor: player.hairColor || 0, weaponMode: player.weaponMode || 0, equipVisuals: player.equipVisuals || {}, x: newPosX, y: newPosY, z: player.lastZ, isTeleport: true });
 
                 // Knockback 1 cell in random direction (pre-renewal)
                 if (caResult && !caResult.result.isMiss && caEnemyPost && !caEnemyPost.isDead) {
@@ -19659,7 +19733,7 @@ io.on('connection', (socket) => {
             if (attackerSocket) {
                 attackerSocket.emit('player:teleport', { characterId, x: behindX, y: behindY, z: player.lastZ, teleportType: 'backstab' });
             }
-            broadcastToZone(zone, 'player:moved', { characterId, playerName: player.characterName, x: behindX, y: behindY, z: player.lastZ });
+            broadcastToZone(zone, 'player:moved', { characterId, characterName: player.characterName, jobClass: player.jobClass || 'novice', gender: player.gender || 'male', hairStyle: player.hairStyle || 1, hairColor: player.hairColor || 0, weaponMode: player.weaponMode || 0, equipVisuals: player.equipVisuals || {}, x: behindX, y: behindY, z: player.lastZ });
 
             const wType = player.weaponType || 'bare_hand';
             const isDagger = (wType === 'dagger');
@@ -19832,7 +19906,7 @@ io.on('connection', (socket) => {
                     enemy.x = randX; enemy.y = randY; enemy.z = newZ;
                     const pSocket = io.sockets.sockets.get(player.socketId);
                     if (pSocket) pSocket.emit('player:teleport', { characterId, x: randX, y: randY, z: newZ, teleportType: 'intimidate' });
-                    broadcastToZone(zone, 'player:moved', { characterId, playerName: player.characterName, x: randX, y: randY, z: newZ });
+                    broadcastToZone(zone, 'player:moved', { characterId, characterName: player.characterName, jobClass: player.jobClass || 'novice', gender: player.gender || 'male', hairStyle: player.hairStyle || 1, hairColor: player.hairColor || 0, weaponMode: player.weaponMode || 0, equipVisuals: player.equipVisuals || {}, x: randX, y: randY, z: newZ });
                     broadcastToZone(zone, 'enemy:move', { enemyId: enemy.enemyId, x: randX, y: randY, z: newZ });
                 }
             }
@@ -22886,7 +22960,7 @@ io.on('connection', (socket) => {
                         i.element, i.item_type, i.ammo_type, i.script,
                         i.required_level, i.weapon_type, i.aspd_modifier, i.weapon_range, i.weapon_level,
                         i.jobs_allowed, i.gender_allowed, i.equip_level_min, i.equip_level_max, i.sub_type,
-                        i.two_handed
+                        i.two_handed, i.equip_locations
                  FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
                  WHERE ci.inventory_id = $1 AND ci.character_id = $2`,
                 [inventoryId, characterId]
@@ -23118,6 +23192,68 @@ io.on('connection', (socket) => {
                     // Assassin: unequip left-hand weapon when equipping shield
                     if (canDualWield(player.jobClass) && player.equippedWeaponLeft) {
                         await unequipLeftHandWeapon();
+                    }
+                }
+
+                // ── Multi-Slot Headgear Blocking (RO Classic) ──
+                // Some headgear occupies multiple slots (e.g., full helm = head_top + head_mid).
+                // When equipping such an item, auto-unequip items in ALL slots it occupies.
+                // When equipping into a slot blocked by an existing multi-slot headgear, reject.
+                const HEAD_SLOTS = ['head_top', 'head_mid', 'head_low'];
+                if (HEAD_SLOTS.includes(equippedPosition)) {
+                    const locations = item.equip_locations || '';
+
+                    // Parse which head slots this item occupies
+                    const occupiedHeadSlots = [];
+                    if (locations.includes('Head_Top')) occupiedHeadSlots.push('head_top');
+                    if (locations.includes('Head_Mid')) occupiedHeadSlots.push('head_mid');
+                    if (locations.includes('Head_Low')) occupiedHeadSlots.push('head_low');
+                    // Fallback: if equip_locations is empty, use the primary equip_slot
+                    if (occupiedHeadSlots.length === 0) occupiedHeadSlots.push(equippedPosition);
+
+                    // Auto-unequip items in secondary slots this headgear blocks
+                    for (const blockedSlot of occupiedHeadSlots) {
+                        if (blockedSlot === equippedPosition) continue; // primary slot handled by generic unequip below
+                        const blockedItems = await pool.query(
+                            `SELECT ci.inventory_id, i.def, i.mdef, i.str_bonus, i.agi_bonus, i.vit_bonus, i.int_bonus, i.dex_bonus, i.luk_bonus,
+                                    i.max_hp_bonus, i.max_sp_bonus, i.hit_bonus, i.flee_bonus, i.critical_bonus,
+                                    i.perfect_dodge_bonus, i.max_hp_rate, i.max_sp_rate, i.aspd_rate,
+                                    i.hp_regen_rate, i.sp_regen_rate, i.crit_atk_rate, i.cast_rate, i.use_sp_rate, i.heal_power
+                             FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
+                             WHERE ci.character_id = $1 AND ci.is_equipped = true AND ci.equipped_position = $2`,
+                            [characterId, blockedSlot]
+                        );
+                        for (const old of blockedItems.rows) {
+                            removeOldBonuses(old);
+                            await pool.query(
+                                'UPDATE character_inventory SET is_equipped = false, equipped_position = NULL WHERE inventory_id = $1',
+                                [old.inventory_id]
+                            );
+                            logger.info(`[HEADGEAR] Auto-unequipped ${blockedSlot} item (inv ${old.inventory_id}) — blocked by multi-slot headgear ${item.name}`);
+                        }
+                    }
+
+                    // Block equipping if an existing multi-slot headgear occupies this slot
+                    // e.g., can't equip head_mid glasses if a head_top+head_mid helm is worn
+                    const otherHeadSlots = HEAD_SLOTS.filter(s => s !== equippedPosition);
+                    for (const otherSlot of otherHeadSlots) {
+                        const existingItem = await pool.query(
+                            `SELECT ci.inventory_id, i.name, i.equip_locations
+                             FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
+                             WHERE ci.character_id = $1 AND ci.is_equipped = true AND ci.equipped_position = $2`,
+                            [characterId, otherSlot]
+                        );
+                        if (existingItem.rows.length > 0) {
+                            const existingLoc = existingItem.rows[0].equip_locations || '';
+                            const slotRAthena = equippedPosition === 'head_top' ? 'Head_Top'
+                                : equippedPosition === 'head_mid' ? 'Head_Mid' : 'Head_Low';
+                            if (existingLoc.includes(slotRAthena)) {
+                                socket.emit('inventory:error', {
+                                    message: `Cannot equip: ${existingItem.rows[0].name} is blocking this slot`
+                                });
+                                return;
+                            }
+                        }
                     }
                 }
 
@@ -24896,7 +25032,7 @@ async function executeCastComplete(characterId, cast) {
     // Broadcast cast complete to zone clients (removes cast bar)
     const castCompletePlayer = connectedPlayers.get(characterId);
     const castCompleteZone = (castCompletePlayer && castCompletePlayer.zone) || 'prontera_south';
-    broadcastToZone(castCompleteZone, 'skill:cast_complete', { casterId: characterId, skillId: cast.skillId });
+    broadcastToZone(castCompleteZone, 'skill:cast_complete', { casterId: characterId, skillId: cast.skillId, targetType: cast.skill ? cast.skill.targetType : 'single' });
 
     // Re-trigger the skill:use handler with _castComplete flag to skip cast time
     // Socket.io: socket.listeners() returns registered handler functions
@@ -28708,6 +28844,7 @@ const ENEMY_AI = {
     AGGRO_SCAN_MS: 500,         // How often aggressive mobs scan for players (ms)
     ASSIST_RANGE: 550,          // Assist detection range (11 RO cells × 50 UE units)
     CHASE_GIVE_UP_EXTRA: 200,   // Extra UE units beyond chaseRange before giving up
+    DEAGGRO_DISTANCE: 1200,     // Distance to target (UE units) before enemy gives up (24 RO cells)
     IDLE_AFTER_CHASE_MS: 2000,  // ms before returning to wander after losing target (mob_unlock_time)
 };
 
@@ -28727,6 +28864,10 @@ function initEnemyWanderState(enemy) {
     enemy.lastDamageTime = 0;
     enemy.lastAggroScan = 0;
     enemy.pendingTargetSwitch = null;  // { charId, hitType } — set by damage hooks, consumed by AI tick
+    // Reset NavMesh path on respawn/state reset
+    enemy._navPath = [];
+    enemy._navPathIdx = 0;
+    enemy._navPathTarget = null;
 }
 
 function pickRandomWanderPoint(enemy) {
@@ -28749,7 +28890,14 @@ function pickRandomWanderPoint(enemy) {
         newX = enemy.spawnX + dxFromSpawn * ratio;
         newY = enemy.spawnY + dyFromSpawn * ratio;
     }
-    
+
+    // Snap wander target to NavMesh if available
+    const navPoint = findClosestNavMeshPoint(enemy.zone, newX, newY, enemy.z || 300);
+    if (navPoint) {
+        newX = navPoint.x;
+        newY = navPoint.y;
+    }
+
     return { x: newX, y: newY };
 }
 
@@ -29195,6 +29343,9 @@ async function executeMonsterPlayerSkill(enemy, skillEntry, targetCharId, zone, 
             enemy.aiState = AI_STATE.IDLE;
             enemy.inCombatWith.clear();
             enemy._rudeAttacked = false;
+            enemy._navPath = [];
+            enemy._navPathIdx = 0;
+            enemy._navPathTarget = null;
             broadcastToZone(zone, 'enemy:move', {
                 enemyId: enemy.enemyId, x: enemy.x, y: enemy.y, z: enemy.z || 300,
                 teleport: true,
@@ -30058,11 +30209,47 @@ function calculateEnemyDamage(enemy, targetCharId) {
 }
 
 // Process an enemy AI tick — move toward target and broadcast position
+// Uses NavMesh pathfinding when available, falls back to straight-line.
 function enemyMoveToward(enemy, targetX, targetY, now, speed) {
     if (!enemy.modeFlags.canMove) return;
 
-    const dx = targetX - enemy.x;
-    const dy = targetY - enemy.y;
+    // ── NavMesh path management ──────────────────────────────
+    // Recalculate path when target moves significantly (>50 units)
+    const targetChanged = !enemy._navPathTarget ||
+        Math.abs(enemy._navPathTarget.x - targetX) > 50 ||
+        Math.abs(enemy._navPathTarget.y - targetY) > 50;
+
+    if (targetChanged || enemy._navPath.length === 0) {
+        const navPath = findNavMeshPath(
+            enemy.zone, enemy.x, enemy.y, enemy.z || 300,
+            targetX, targetY, enemy.z || 300
+        );
+
+        if (navPath && navPath.length > 1) {
+            enemy._navPath = navPath.slice(1); // Skip start point (current position)
+            enemy._navPathIdx = 0;
+        } else {
+            // Fallback: straight line toward target (no navmesh or short distance)
+            enemy._navPath = [{ x: targetX, y: targetY, z: enemy.z || 300 }];
+            enemy._navPathIdx = 0;
+        }
+        enemy._navPathTarget = { x: targetX, y: targetY };
+    }
+
+    // Advance past any reached waypoints (within 20 units)
+    while (enemy._navPathIdx < enemy._navPath.length) {
+        const wp = enemy._navPath[enemy._navPathIdx];
+        const wpDx = wp.x - enemy.x;
+        const wpDy = wp.y - enemy.y;
+        if (Math.sqrt(wpDx * wpDx + wpDy * wpDy) >= 20) break;
+        enemy._navPathIdx++;
+    }
+    if (enemy._navPathIdx >= enemy._navPath.length) return;
+
+    // ── Step toward current waypoint ─────────────────────────
+    const wp = enemy._navPath[enemy._navPathIdx];
+    const dx = wp.x - enemy.x;
+    const dy = wp.y - enemy.y;
     const distance = Math.sqrt(dx * dx + dy * dy);
     if (distance < 5) return;
 
@@ -30070,6 +30257,8 @@ function enemyMoveToward(enemy, targetX, targetY, now, speed) {
     const moveRatio = Math.min(1, stepSize / distance);
     let newX = enemy.x + dx * moveRatio;
     let newY = enemy.y + dy * moveRatio;
+
+    // ── Collision checks (PRESERVED from original) ───────────
 
     // Moonlit Water Mill: block enemy movement into barrier zone
     if (activeEnsembles.size > 0) {
@@ -30439,12 +30628,13 @@ setInterval(async () => {
                 break;
             }
 
-            // Chase range check — give up if too far from aggro origin
-            const dxFromOrigin = enemy.x - (enemy.aggroOriginX || enemy.spawnX);
-            const dyFromOrigin = enemy.y - (enemy.aggroOriginY || enemy.spawnY);
-            const distFromOrigin = Math.sqrt(dxFromOrigin * dxFromOrigin + dyFromOrigin * dyFromOrigin);
-            if (distFromOrigin > (enemy.chaseRange || 600) + ENEMY_AI.CHASE_GIVE_UP_EXTRA) {
-                // Too far — give up chase
+            // Distance to target
+            const dxToTarget = targetPos.x - enemy.x;
+            const dyToTarget = targetPos.y - enemy.y;
+            const distToTarget = Math.sqrt(dxToTarget * dxToTarget + dyToTarget * dyToTarget);
+
+            // De-aggro: target is too far away — give up (bosses/MVPs exempt)
+            if (distToTarget > ENEMY_AI.DEAGGRO_DISTANCE && !enemy.modeFlags.mvp) {
                 enemy.targetPlayerId = null;
                 enemy.aiState = AI_STATE.IDLE;
                 enemy.inCombatWith.clear();
@@ -30452,14 +30642,12 @@ setInterval(async () => {
                 enemy.nextWanderTime = now + ENEMY_AI.IDLE_AFTER_CHASE_MS;
                 enemyStopMoving(enemy);
                 enemy._rudeAttacked = true;
-                logger.info(`[ENEMY AI] ${enemy.name}(${enemyId}) gave up chase (dist from origin: ${distFromOrigin.toFixed(0)})`);
+                enemy._navPath = [];
+                enemy._navPathIdx = 0;
+                enemy._navPathTarget = null;
+                logger.info(`[ENEMY AI] ${enemy.name}(${enemyId}) de-aggro — target too far (${distToTarget.toFixed(0)} > ${ENEMY_AI.DEAGGRO_DISTANCE})`);
                 break;
             }
-
-            // Distance to target
-            const dxToTarget = targetPos.x - enemy.x;
-            const dyToTarget = targetPos.y - enemy.y;
-            const distToTarget = Math.sqrt(dxToTarget * dxToTarget + dyToTarget * dyToTarget);
 
             // In attack range? → transition to ATTACK
             const attackRange = enemy.attackRange || COMBAT.MELEE_RANGE;
@@ -30715,10 +30903,26 @@ setInterval(async () => {
                 break;
             }
 
-            // Range check — if target moved out of range, chase
+            // De-aggro: target is too far away — give up (bosses/MVPs exempt)
             const dxAtk = targetPos.x - enemy.x;
             const dyAtk = targetPos.y - enemy.y;
             const distAtk = Math.sqrt(dxAtk * dxAtk + dyAtk * dyAtk);
+            if (distAtk > ENEMY_AI.DEAGGRO_DISTANCE && !enemy.modeFlags.mvp) {
+                enemy.targetPlayerId = null;
+                enemy.aiState = AI_STATE.IDLE;
+                enemy.inCombatWith.clear();
+                enemy.isWandering = false;
+                enemy.nextWanderTime = now + ENEMY_AI.IDLE_AFTER_CHASE_MS;
+                enemyStopMoving(enemy);
+                enemy._rudeAttacked = true;
+                enemy._navPath = [];
+                enemy._navPathIdx = 0;
+                enemy._navPathTarget = null;
+                logger.info(`[ENEMY AI] ${enemy.name}(${enemyId}) de-aggro in ATTACK — target too far (${distAtk.toFixed(0)})`);
+                break;
+            }
+
+            // Range check — if target moved out of range, chase
             const atkRange = enemy.attackRange || COMBAT.MELEE_RANGE;
             if (distAtk > atkRange + COMBAT.RANGE_TOLERANCE + 30) {
                 enemy.aiState = AI_STATE.CHASE;
@@ -32684,6 +32888,13 @@ server.listen(PORT, async () => {
   resolveDropItemIds();
   // Parse card scripts into combat/defense modifiers
   buildCardEffects(itemDefinitions);
+
+  // Initialize NavMesh pathfinding (loads OBJ files from server/navmesh/)
+  try {
+    await initNavMeshes(ZONE_REGISTRY, logger);
+  } catch (err) {
+    logger.warn(`[NAVMESH] Initialization failed: ${err.message} — using straight-line movement`);
+  }
 
   // Zone-based lazy enemy spawning: enemies spawn when first player enters a zone
   // No enemies spawned at startup — they spawn on demand in player:join handler

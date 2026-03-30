@@ -1,6 +1,7 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "SabriMMOCharacter.h"
+#include "Sprite/SpriteCharacterActor.h"
 #include "Engine/LocalPlayer.h"
 #include "Camera/CameraComponent.h"
 #include "Components/CapsuleComponent.h"
@@ -20,12 +21,17 @@
 #include "UI/EquipmentSubsystem.h"
 #include "UI/HotbarSubsystem.h"
 #include "UI/ShopSubsystem.h"
+#include "UI/CartSubsystem.h"
+#include "UI/PartySubsystem.h"
+#include "UI/BuffBarSubsystem.h"
+#include "UI/ChatSubsystem.h"
 #include "ShopNPC.h"
 #include "KafraNPC.h"
 #include "UI/ZoneTransitionSubsystem.h"
 #include "UI/PlayerInputSubsystem.h"
 #include "UI/CameraSubsystem.h"
 #include "UI/CombatActionSubsystem.h"
+#include "UI/BuffBarSubsystem.h"
 #include "UI/NameTagSubsystem.h"
 #include "InputModifiers.h"
 #include "Framework/Application/SlateApplication.h"
@@ -97,13 +103,35 @@ void ASabriMMOCharacter::BeginPlay()
 			SetActorLocation(Snapped);
 		}
 
+		// Spawn sprite character and attach to this player
+		{
+			FCharacterData SelChar = GI->GetSelectedCharacter();
+			int32 SpriteClassId = ASpriteCharacterActor::JobClassToId(SelChar.JobClass);
+			int32 SpriteGender = SelChar.Gender.ToLower() == TEXT("female") ? 1 : 0;
+
+			ASpriteCharacterActor* Sprite = ASpriteCharacterActor::SpawnSpriteForClass(
+				GetWorld(), GetActorLocation(), SpriteClassId, SpriteGender);
+			if (Sprite)
+			{
+				Sprite->AttachToOwnerActor(this, true);
+				// Hide 3D skeletal mesh — sprite replaces it
+				GetMesh()->SetVisibility(false);
+
+				// Load hair style from character data
+				if (SelChar.HairStyle > 0)
+				{
+					Sprite->SetHairStyle(SelChar.HairStyle, SelChar.HairColor);
+				}
+			}
+		}
+
 		// Register local player name tag (RO Classic: always visible, white)
 		if (UNameTagSubsystem* NTS = GetWorld()->GetSubsystem<UNameTagSubsystem>())
 		{
 			FCharacterData SelChar = GI->GetSelectedCharacter();
 			if (!SelChar.Name.IsEmpty())
 			{
-				NTS->RegisterEntity(this, SelChar.Name, ENameTagEntityType::LocalPlayer);
+				NTS->RegisterEntity(this, SelChar.Name, ENameTagEntityType::LocalPlayer, 0, 120.f, 150.f);
 			}
 		}
 	}
@@ -175,6 +203,14 @@ void ASabriMMOCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 		}
 
 		// Bind UI toggle actions
+		if (FocusChatAction)
+		{
+			EnhancedInputComponent->BindAction(FocusChatAction, ETriggerEvent::Started, this, &ASabriMMOCharacter::HandleFocusChat);
+		}
+		if (ToggleSitAction)
+		{
+			EnhancedInputComponent->BindAction(ToggleSitAction, ETriggerEvent::Started, this, &ASabriMMOCharacter::HandleToggleSit);
+		}
 		if (ToggleCombatStatsAction)
 		{
 			EnhancedInputComponent->BindAction(ToggleCombatStatsAction, ETriggerEvent::Started, this, &ASabriMMOCharacter::HandleToggleCombatStats);
@@ -190,6 +226,14 @@ void ASabriMMOCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 		if (ToggleShopAction)
 		{
 			EnhancedInputComponent->BindAction(ToggleShopAction, ETriggerEvent::Started, this, &ASabriMMOCharacter::HandleToggleShop);
+		}
+		if (ToggleCartAction)
+		{
+			EnhancedInputComponent->BindAction(ToggleCartAction, ETriggerEvent::Started, this, &ASabriMMOCharacter::HandleToggleCart);
+		}
+		if (TogglePartyAction)
+		{
+			EnhancedInputComponent->BindAction(TogglePartyAction, ETriggerEvent::Started, this, &ASabriMMOCharacter::HandleToggleParty);
 		}
 		if (CycleHotbarAction)
 		{
@@ -336,6 +380,26 @@ void ASabriMMOCharacter::CreateUIToggleActions()
 	ToggleShopAction->ValueType = EInputActionValueType::Boolean;
 	UIToggleIMC->MapKey(ToggleShopAction, EKeys::F9);
 
+	// F10: Toggle Cart inventory
+	ToggleCartAction = NewObject<UInputAction>(this, TEXT("IA_ToggleCart"));
+	ToggleCartAction->ValueType = EInputActionValueType::Boolean;
+	UIToggleIMC->MapKey(ToggleCartAction, EKeys::F10);
+
+	// P: Toggle Party window
+	TogglePartyAction = NewObject<UInputAction>(this, TEXT("IA_ToggleParty"));
+	TogglePartyAction->ValueType = EInputActionValueType::Boolean;
+	UIToggleIMC->MapKey(TogglePartyAction, EKeys::P);
+
+	// Enter: Focus chat input (RO Classic keybind)
+	FocusChatAction = NewObject<UInputAction>(this, TEXT("IA_FocusChat"));
+	FocusChatAction->ValueType = EInputActionValueType::Boolean;
+	UIToggleIMC->MapKey(FocusChatAction, EKeys::Enter);
+
+	// Insert: Toggle sit/stand (RO Classic keybind)
+	ToggleSitAction = NewObject<UInputAction>(this, TEXT("IA_ToggleSit"));
+	ToggleSitAction->ValueType = EInputActionValueType::Boolean;
+	UIToggleIMC->MapKey(ToggleSitAction, EKeys::Insert);
+
 	// H: Cycle Hotbar visibility
 	CycleHotbarAction = NewObject<UInputAction>(this, TEXT("IA_CycleHotbar"));
 	CycleHotbarAction->ValueType = EInputActionValueType::Boolean;
@@ -353,6 +417,35 @@ void ASabriMMOCharacter::CreateUIToggleActions()
 		HotbarSlotActions[i]->ValueType = EInputActionValueType::Boolean;
 		UIToggleIMC->MapKey(HotbarSlotActions[i], NumberKeys[i]);
 	}
+}
+
+void ASabriMMOCharacter::HandleFocusChat()
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (UChatSubsystem* Sub = World->GetSubsystem<UChatSubsystem>())
+		{
+			Sub->FocusChatInput();
+		}
+	}
+}
+
+void ASabriMMOCharacter::HandleToggleSit()
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance());
+	if (!GI || !GI->IsSocketConnected()) return;
+
+	bool bSitting = false;
+	if (UBuffBarSubsystem* BBS = World->GetSubsystem<UBuffBarSubsystem>())
+		bSitting = BBS->HasBuff(TEXT("sitting"));
+
+	if (bSitting)
+		GI->EmitSocketEvent(TEXT("player:stand"), MakeShared<FJsonObject>());
+	else
+		GI->EmitSocketEvent(TEXT("player:sit"), MakeShared<FJsonObject>());
 }
 
 void ASabriMMOCharacter::HandleToggleCombatStats()
@@ -382,6 +475,28 @@ void ASabriMMOCharacter::HandleToggleEquipment()
 	if (UWorld* World = GetWorld())
 	{
 		if (UEquipmentSubsystem* Sub = World->GetSubsystem<UEquipmentSubsystem>())
+		{
+			Sub->ToggleWidget();
+		}
+	}
+}
+
+void ASabriMMOCharacter::HandleToggleCart()
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (UCartSubsystem* Sub = World->GetSubsystem<UCartSubsystem>())
+		{
+			Sub->ToggleWidget();
+		}
+	}
+}
+
+void ASabriMMOCharacter::HandleToggleParty()
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (UPartySubsystem* Sub = World->GetSubsystem<UPartySubsystem>())
 		{
 			Sub->ToggleWidget();
 		}
@@ -482,12 +597,16 @@ void ASabriMMOCharacter::DoMove(float Right, float Forward)
 {
 	if (GetController() != nullptr)
 	{
-		// Block WASD movement while dead
+		// Block WASD movement while dead, playing dead, or hiding
 		if (UWorld* W = GetWorld())
 		{
 			if (UCombatActionSubsystem* CAS = W->GetSubsystem<UCombatActionSubsystem>())
 			{
 				if (CAS->IsDead()) return;
+			}
+			if (UBuffBarSubsystem* BBS = W->GetSubsystem<UBuffBarSubsystem>())
+			{
+				if (BBS->HasBuff(TEXT("play_dead")) || BBS->HasBuff(TEXT("hiding")) || BBS->HasBuff(TEXT("sitting"))) return;
 			}
 		}
 

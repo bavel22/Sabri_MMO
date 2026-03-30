@@ -83,7 +83,7 @@ Run this inspection script (or check in Blender's Outliner):
 12. **Freezes** camera position, ortho_scale, centering — never recomputed
 13. For each (direction, animation, frame), renders **TWO passes**:
     - **Pass 1**: Body visible, equipment `hide_render=True` → body output directory
-    - **Pass 2**: Body `hide_render=True`, equipment visible → weapon output directory
+    - **Pass 2**: Body uses **Holdout shader** (transparent occluder), equipment visible → weapon output directory. Only equipment pixels visible from the camera are rendered; equipment behind the body is occluded by the holdout body.
 14. Both passes share the IDENTICAL frozen camera state → pixel-perfect alignment guaranteed
 
 ### Body vs Equipment detection
@@ -117,7 +117,7 @@ Without this, the armature stays frozen in the .blend file's saved pose.
 | `--render-size` | 1024 | Render resolution per cell |
 | `--camera-angle` | 10.0 | Camera elevation degrees |
 | `--camera-target-z` | 0.7 | Camera look-at Z height |
-| `--cel-shadow` | 0.45 | Cel-shade shadow brightness |
+| `--cel-shadow` | 0.92 | Cel-shade shadow brightness (standard 2026-03-29) |
 | `--cel-mid` | 0.78 | Cel-shade midtone brightness |
 | `--no-cel-shade` | false | Disable cel-shading |
 | `--no-outline` | false | Disable body outline |
@@ -218,13 +218,13 @@ UE5 caches textures in `.uasset` files. If you replace the source PNGs on disk, 
 The equipment layer system is fully implemented in `SpriteCharacterActor.cpp`. No code changes needed for new weapons — just add atlas files.
 
 ### How it works
-1. Server sends `player:appearance` with `view_sprite` ID per equipment slot
+1. Server sends `player:appearance` with `view_sprite` ID per equipment slot and `weaponMode` (0=unarmed, 1=onehand, 2=twohand, 3=bow)
 2. `LoadEquipmentLayer(ESpriteLayer::Weapon, viewSpriteId)` loads `weapon_{id}_manifest.json`
-3. Equipment atlas entries are registered with **group-aware** weapon mode mapping (shared/unarmed/onehand/twohand)
+3. Equipment atlas entries are registered with **group-aware** weapon mode mapping (shared/unarmed/onehand/twohand/bow)
 4. `ResolveLayerAtlas` picks the same variant index as the body (`ActiveVariantIndex`)
 5. `UpdateQuadUVs` renders the weapon quad with UV flip compensation at the same position as the body quad
-6. Per-frame **depth ordering**: the weapon mesh component's relative X is set to `+0.3` (in front of body) or `-0.3` (behind body) based on `depth_front` data from the atlas JSON
-7. Depth data is computed during Blender render by projecting the equipment bone position through the camera and comparing with body center depth
+6. Equipment is always composited at `+5` (in front of body). **Holdout occlusion** (2026-03-27) bakes correct visibility into the sprite at render time — the body uses a Holdout shader during Pass 2, so equipment behind the body is already occluded in the sprite. No per-direction depth toggling needed.
+7. Legacy `depth_front` arrays and global majority vote system are deprecated. `depth_mode: "always_front"` is the standard for all equipment.
 
 ### Four critical C++ fixes (all in SpriteCharacterActor.cpp)
 
@@ -285,59 +285,22 @@ float Angle = FMath::Atan2(Cross, -Dot);
 float Angle = FMath::Atan2(-Cross, -Dot);
 ```
 
-#### Fix 5: Per-frame depth ordering (front/behind body)
+#### Fix 5: Holdout Occlusion (replaces per-frame depth ordering)
 
-The weapon must render in front of the body when visible (e.g., facing East — right hand towards camera) and behind the body when occluded (e.g., facing West — right hand away from camera). This changes dynamically per frame during attack animations as the weapon crosses the body.
+**Current method (2026-03-27)**: The render script uses a **Blender Holdout shader** on the body during Pass 2. The body is transparent but still occludes equipment behind it. Only equipment pixels visible from the render camera appear in the output sprite. At runtime, equipment is always composited at +5 (in front of body) — no per-direction depth toggling needed.
 
-**Blender render script** (`render_blend_all_visible.py`): For each frame+direction, `compute_equip_depth_front()` projects the equipment bone (`mixamorig:RightHand`) and body center into camera space. If the bone's camera-space Z > body center Z, the weapon is closer to camera = in front. Results are written to `depth_map.json` in the weapon output directory.
-
-```python
-cam_inv = cam_obj.matrix_world.inverted()
-equip_cam = cam_inv @ bone_world_pos   # equipment in camera space
-body_cam = cam_inv @ body_center       # body center in camera space
-is_front = equip_cam.z > body_cam.z    # higher Z = closer to camera
-```
-
-**Atlas packer** (`pack_atlas.py`): Reads `depth_map.json` and includes a `depth_front` flat array in each per-atlas JSON. Indexed as `[frame * 8 + direction]` where directions follow the ESpriteDirection enum order (S=0, SW=1, W=2, NW=3, N=4, NE=5, E=6, SE=7). Values: 1=front, 0=behind.
-
-**C++ struct** (`SpriteAtlasData.h`): `FSingleAnimAtlasInfo` has:
 ```cpp
-TArray<bool> DepthFront;  // indexed [Frame * 8 + Direction]
-
-bool IsDepthFront(ESpriteDirection Dir, int32 Frame) const
-{
-    if (DepthFront.Num() == 0) return true; // no data = default front
-    int32 Idx = Frame * 8 + static_cast<int32>(Dir);
-    return (Idx >= 0 && Idx < DepthFront.Num()) ? DepthFront[Idx] : true;
-}
+// CURRENT — always in front, holdout occlusion baked into sprite
+Layer.MeshComp->SetRelativeLocation(FVector(5.f, 0.f, 0.f));
 ```
 
-**C++ runtime** (`UpdateQuadUVs` in `SpriteCharacterActor.cpp`): Sets the weapon mesh component's **relative location X** per frame:
-```cpp
-// CORRECT — uses SetRelativeLocation on the mesh component
-if (Layer.bUsingLayerV2 && Layer.MeshComp)
-{
-    float DepthX = 0.3f; // default: in front
-    if (Layer.ActiveLayerAtlas && Layer.ActiveLayerAtlas->DepthFront.Num() > 0)
-    {
-        bool bFront = Layer.ActiveLayerAtlas->IsDepthFront(CurrentDirection, CurrentFrame);
-        DepthX = bFront ? 0.3f : -0.3f;
-    }
-    Layer.MeshComp->SetRelativeLocation(FVector(DepthX, 0.f, 0.f));
-}
+The C++ runtime still supports `depth_front` arrays for backwards compatibility. If `DepthFront.Num() == 0` (which is the case with `depth_mode: "always_front"`), it defaults to +5.
 
-// WRONG — setting vertex X position (stacks with CreateLayerQuad offset,
-// -0.3 vertex + 0.3 component = 0.0, which is same plane as body, not behind)
-Vertices.Add(FVector(DepthX, -HalfW, ZOffset));
-```
+**Deprecated method**: The old system hid the body during Pass 2 (body fully invisible), rendering equipment completely including parts behind the body. It then used `depth_front` arrays with a global majority vote to toggle equipment between +5 (front) and -5 (behind) per direction at runtime. This caused edge cases with partially-visible equipment and depth popping during animations.
 
-**Typical depth results for `mixamorig:RightHand`**:
-- **E, SE, NE**: front (right hand faces camera)
-- **W, SW, NW, N**: behind (right hand faces away)
-- **S**: mostly behind with occasional front (hand near body center)
-- **Attack anims**: dynamic switching per frame as weapon crosses body silhouette
+The `depth_map.json` is still generated by the render script for legacy compatibility but is ignored by the packer when `depth_mode` is `"always_front"`.
 
-**These five fixes are interdependent.** Fix 3 (UV flip) requires Fix 4 (direction). Fix 1 (groups) and Fix 2 (variant) are independent but both required for correct animation matching. Fix 5 (depth) requires the depth_map.json from the render script and depth_front in the atlas JSON.
+**These four fixes are interdependent.** Fix 3 (UV flip) requires Fix 4 (direction). Fix 1 (groups) and Fix 2 (variant) are independent but both required for correct animation matching. Fix 5 (holdout) is handled entirely by the render script — no C++ changes needed beyond the default +5 offset.
 
 ---
 
@@ -346,13 +309,31 @@ Vertices.Add(FVector(DepthX, -HalfW, ZOffset));
 To add a new weapon (e.g., sword, axe, mace):
 
 1. **Get the weapon GLB** from Tripo3D (or any 3D model source)
-2. **Create a .blend template**: Import Mixamo FBX + weapon GLB, parent weapon to `mixamorig:RightHand`, position it, save
-3. **Determine the view_sprite ID**: Check/assign in the server's `items` table `view_sprite` column. All items sharing the same visual use the same ID (e.g., all daggers = 1, all swords = 2)
-4. **Create weapon atlas config**: Copy `weapon_dagger_v2.json`, change `character` to `weapon_{id}` (e.g., `weapon_2` for swords)
+2. **Create a .blend template**: Import Mixamo FBX + weapon GLB, parent weapon to the correct hand bone (`mixamorig:RightHand` for melee, `mixamorig:LeftHand` for bows), position it, save
+3. **Determine the view_sprite ID**: Check/assign in the server's `items` table `view_sprite` column. All items sharing the same visual use the same ID (e.g., all daggers = 1, all swords = 2, all bows = 11)
+4. **Create weapon atlas config**: Copy `weapon_dagger_v2.json`, change `character` to `weapon_{id}` (e.g., `weapon_11` for bows)
 5. **Run dual-pass render**: Use the production command with the new .blend and output dirs
-6. **Pack weapon atlases**: Use pack_atlas.py with the new config
-7. **Import into UE5**: Delete old .uasset, open editor, set texture properties
+6. **Pack weapon atlases**: Use pack_atlas.py with the new config (`depth_mode: "always_front"` — holdout occlusion baked from render)
+7. **Import into UE5**: Import PNGs in correct subfolder (`Weapon/bow/`), set texture properties
 8. **No C++ changes needed** — the equipment layer system auto-loads from manifest
+
+### Existing weapon types
+
+| Weapon | view_sprite | Hand bone | Config | Atlas dir |
+|--------|-------------|-----------|--------|-----------|
+| Dagger | 1 | RightHand | `weapon_dagger_v2.json` | `Weapon/dagger/` |
+| Bow | 11 | LeftHand | `weapon_bow_v2.json` | `Weapon/bow/` |
+
+### Weapon mode mapping (server → client)
+
+| Server weaponMode | C++ ESpriteWeaponMode | Trigger |
+|-------------------|----------------------|---------|
+| 0 | None (unarmed) | No weapon equipped |
+| 1 | OneHand | Non-bow, non-two-handed weapon |
+| 2 | TwoHand | `two_handed=true` and NOT bow |
+| 3 | Bow | `weapon_type='bow'` |
+
+Server computes: `weapon_type === 'bow' ? 3 : two_handed ? 2 : 1` (3 locations in index.js: `broadcastEquipAppearance`, `zone:ready` early broadcast, `player:join` equip query)
 
 ---
 
@@ -396,9 +377,9 @@ This pattern applies to: weapon sprites, shield sprites, headgear sprites, costu
 | Weapon misaligned with body | Body .uasset is from old render | Delete .uasset files, reimport new PNGs |
 | Animation frozen in .blend pose | Missing action_slot assignment | Add `ad.action_slot = action.slots[0]` |
 | Test frame looks correct but full render doesn't | Stale .uasset cache | Delete ALL .uasset for both Body and Weapon |
-| Weapon always in front (never behind body) | depth_front missing from atlas JSON | Re-render to generate depth_map.json, then re-pack |
-| Weapon always in front (depth data exists) | Vertex X offset stacking with component offset | Use `SetRelativeLocation` on mesh component, NOT vertex X |
-| Weapon depth not changing per frame | DepthFront array empty in C++ | Check LoadEquipmentLayer parses `depth_front` from JSON |
+| Weapon always in front (expected behavior) | Holdout occlusion bakes visibility into sprite | This is correct — equipment behind body is occluded at render time, runtime always uses +5 |
+| Equipment visible where it should be hidden | Holdout shader not applied during Pass 2 | Check render_blend_all_visible.py creates Holdout material and swaps body meshes in Pass 2 |
+| Legacy: Weapon depth not changing per frame | DepthFront array empty in C++ | Expected with depth_mode "always_front" — holdout handles occlusion |
 | Sit animation shows Cast instead | Server `buff:applied` with skillId=0 (sitting) triggers Cast | Guard `skill:buff_applied`: skip if `CurrentAnimState==Sit` or `skillId==0` |
 | Remote weapon not shown on initial login (either direction) | Server `player:join` broadcast crashes silently | Check server log for `Cannot access 'X' before initialization` — use `var`/early query vars |
 | Remote weapon not shown (joining player doesn't see existing) | `player:appearance` sent in `player:join` before zone transition | Move appearance broadcast to `zone:ready` handler |
@@ -429,7 +410,7 @@ This pattern applies to: weapon sprites, shield sprites, headgear sprites, costu
 | Render size | 1024x1024 |
 | Camera angle | 10° elevation |
 | Camera target Z | 0.7 |
-| Cel-shade shadow | 0.45 |
+| Cel-shade shadow | 0.92 |
 | Cel-shade mid | 0.78 |
 | Outline width | 0.002 (body only) |
 | Directions | 8 (S, SW, W, NW, N, NE, E, SE) |

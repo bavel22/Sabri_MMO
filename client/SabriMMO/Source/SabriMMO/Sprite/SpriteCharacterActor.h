@@ -89,8 +89,23 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Sprite")
 	void SetBodyClass(int32 ClassId, int32 Gender);
 
+	/** Set body class by atlas name directly (e.g. "skeleton" for enemies) */
+	void SetBodyClass(const FString& AtlasBaseName);
+
 	/** Load equipment sprite layer from manifest (public for OtherPlayerSubsystem) */
 	void LoadEquipmentLayer(ESpriteLayer Layer, int32 ViewSpriteId);
+
+	/** Set hair style and color — loads hair atlas and applies tint */
+	void SetHairStyle(int32 HairStyleId, int32 HairColorIndex);
+
+	/** Reset hair hiding flag before equipment refresh (call before LoadEquipmentLayer loop) */
+	void ResetHairHiding();
+
+	/** Reconcile hair visibility after equipment refresh (call after LoadEquipmentLayer loop) */
+	void ReconcileHairVisibility();
+
+	/** Get hair color as FLinearColor from RO Classic 9-color palette (index 0-8) */
+	static FLinearColor GetHairColor(int32 ColorIndex);
 
 	/** Map equip slot name to sprite layer */
 	static ESpriteLayer EquipSlotToSpriteLayer(const FString& Slot);
@@ -112,6 +127,12 @@ public:
 
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
+	/** Enable click targeting on the body sprite mesh (visibility trace only) */
+	void EnableClickCollision();
+
+	/** Disable click targeting (corpse stays visible but not clickable) */
+	void DisableClickCollision();
+
 protected:
 	UPROPERTY(VisibleAnywhere)
 	USceneComponent* RootComp;
@@ -130,6 +151,14 @@ private:
 	// --- Atlas system version flag ---
 	bool bUsingV2Atlas = false;
 	ESpriteWeaponMode CurrentWeaponMode = ESpriteWeaponMode::None;
+
+	/** Gender for equipment atlas subfolder search: "male" or "female" */
+	FString GenderSubDir = TEXT("male");
+
+	// --- Hair layer state ---
+	int32 CurrentHairStyle = 0;
+	int32 CurrentHairColor = 0;
+	bool bHairHiddenByHeadgear = false;
 
 	// --- V2: Per-animation atlas registry ---
 	TMap<FSpriteAtlasKey, TArray<FSingleAnimAtlasInfo>> AtlasRegistry;
@@ -152,6 +181,16 @@ private:
 	// --- Owner tracking ---
 	UPROPERTY()
 	TWeakObjectPtr<AActor> OwnerActor;
+
+public:
+	/** Z offset to lower sprite from owner actor's location (set by EnemySubsystem for ground-snap) */
+	float GroundZOffset = 0.f;
+
+	/** C++ server-driven movement (replaces BP Tick interpolation for sprite enemies) */
+	void SetServerTargetPosition(const FVector& Pos, bool bMoving, float Speed);
+	FVector ServerTargetPos = FVector::ZeroVector;
+	float ServerMoveSpeed = 200.f;
+	bool bUseServerMovement = false;  // true for enemies, false for players
 	int32 LocalCharacterId = 0;
 
 	// --- Internal methods ---
