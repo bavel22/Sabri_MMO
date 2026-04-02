@@ -72,7 +72,7 @@ Single monolithic file (~30000 lines). Key sections:
 - **Consumable effects** — `sc_start` handler (ASPD potions, stat foods, cure items), `itemskill` scrolls (Fly Wing, Butterfly Wing, identification), elemental converters (fire/water/wind/earth endow)
 - **Abracadabra** — 145 regular + 6 special random skill cast system, weighted selection, Sage skill 1420
 - **Monster summoning** — `NPC_SUMMONSLAVE` slave spawning with master/slave lifecycle (slaves die when master dies, slaves leash to master), `NPC_METAMORPHOSIS` transformation (monster replaces itself with a different template)
-- **Data modules**: `ro_monster_templates`, `ro_exp_tables`, `ro_skill_data` (includes `ro_skill_data_2nd` internally), `ro_monster_ai_codes`, `ro_zone_data`, `ro_card_effects`, `ro_item_groups`, `ro_ground_effects`, `ro_arrow_crafting`, `ro_monster_skills`, `ro_homunculus_data`, `ro_status_effects`, `ro_buff_system`, `ro_item_effects`, `ro_damage_formulas`
+- **Data modules**: `ro_monster_templates`, `ro_exp_tables`, `ro_skill_data` (includes `ro_skill_data_2nd` internally), `ro_monster_ai_codes`, `ro_zone_data`, `ro_card_effects`, `ro_item_groups`, `ro_ground_effects`, `ro_arrow_crafting`, `ro_monster_skills`, `ro_homunculus_data`, `ro_status_effects`, `ro_buff_system`, `ro_item_effects`, `ro_damage_formulas`, `ro_navmesh`
 - **Card effect hooks** — `processCardKillHooks`, `processCardDrainEffects`, `processCardStatusProcsOnAttack/WhenHit`, `processCardAutoSpellOnAttack/WhenHit`, `processAutobonusOnAttack/WhenHit`, `processCardDropBonuses`, `knockbackTarget`, `executeAutoSpellEffect`
 - **JWT validation** on `player:join` socket event (character ownership check)
 
@@ -90,7 +90,7 @@ Single monolithic file (~30000 lines). Key sections:
 | `SocketEventRouter.*` | Multi-handler Socket.io event dispatch for subsystems |
 | `OtherCharacterMovementComponent.*` | Remote player interpolation + per-tick floor-snap |
 
-**30+ UWorldSubsystem files in `UI/`** — each manages one domain (inventory, equipment, buffs, skills, chat, party, etc.) with a paired Slate widget. Key subsystems: `EnemySubsystem` (enemy registry, 5 events), `OtherPlayerSubsystem` (player registry), `CombatActionSubsystem` (10 combat events), `PlayerInputSubsystem` (click-to-move/attack), `LoginFlowSubsystem` (auth flow state machine), `PositionBroadcastSubsystem` (30Hz updates).
+**30+ UWorldSubsystem files in `UI/`** — each manages one domain (inventory, equipment, buffs, skills, chat, party, etc.) with a paired Slate widget. Key subsystems: `EnemySubsystem` (enemy registry, 5 events, enemy sprite actors via SpriteCharacterActor), `OtherPlayerSubsystem` (player registry), `CombatActionSubsystem` (10 combat events), `PlayerInputSubsystem` (click-to-move/attack), `LoginFlowSubsystem` (auth flow state machine), `PositionBroadcastSubsystem` (30Hz updates).
 
 **3 VFX files in `VFX/`** — `SkillVFXSubsystem` (97+ configs), `SkillVFXData` (config structs), `CastingCircleActor`.
 
@@ -144,6 +144,8 @@ Widget prefix: `WBP_`. Blueprint prefix: `BP_`. Interface prefix: `BPI_`.
 
 **Remote visual sync via zone:ready, NOT player:join** — Any multiplayer visual data (weapon sprites, equipment appearance, buff visuals, costumes, mount state) that needs to be received by a client's subsystem handlers MUST be sent in the `zone:ready` handler, NOT during `player:join`. During `player:join`, the client is doing a zone transition (OpenLevel) — subsystems are destroyed and recreated, so socket events are silently dropped. By `zone:ready`, all handlers are registered. The `player:join` early broadcast block also has a JavaScript temporal dead zone issue: variables declared with `let` later in the function (e.g., `jobClass`) cannot be referenced in the early block — use `var` or query the DB row directly.
 
+**Shared armature + gender-aware equipment** — Two base bodies (`base_m`, `base_f`) rigged once in Mixamo. All class models rigged to the shared armature via Blender Automatic Weights. Equipment renders per gender (2 sets), not per class. `SpriteCharacterActor` stores `GenderSubDir` ("male"/"female") set by `SetBodyClass()`. `LoadEquipmentLayer` searches: `{LayerRoot}/{item_subdir}/{GenderSubDir}/{manifest}` → `{LayerRoot}/{item_subdir}/{manifest}` → `{LayerRoot}/{manifest}`. Animation FBX dirs: `animations/characters/base_m/` and `base_f/`. Full doc: `docsNew/05_Development/Shared_Armature_Sprite_Architecture.md`.
+
 ---
 
 ## Persistent Socket Architecture (Phase 4)
@@ -189,13 +191,22 @@ Only Assassin/Assassin Cross can dual wield (daggers, 1H swords, 1H axes in left
 | Socket.io events, multiplayer sync | `/realtime` | — |
 | Persistent socket, EventRouter, BP bridge | `/sabrimmo-persistent-socket` | `memory/persistent-socket.md` |
 | Blueprint / Widget work | `/ui-architect` | unrealMCP first |
+| NavMesh pathfinding, enemy movement | `/sabrimmo-navmesh` | `docsNew/05_Development/NavMesh_Pathfinding_Implementation_Plan.md` |
 | Enemy AI, monster behavior | `/enemy-ai` | `server/src/ro_monster_ai_codes.js` |
+| Enemy sprites, spawn, targeting, death | `/sabrimmo-enemy` | `docsNew/03_Server_Side/Enemy_System.md` |
+| Enemy sprite rendering pipeline | `/sabrimmo-3d-to-2d` | `docsNew/03_Server_Side/Enemy_System.md` |
+| Sprite system (atlas, layers, animation states) | `/sabrimmo-sprites` | `docsNew/05_Development/Enemy_Sprite_Implementation.md` |
+| Sprite weapon overlays, depth ordering | `/sabrimmo-sprites` | `docsNew/05_Development/Weapon_Sprite_Overlay_Pipeline.md` |
 | Monster skill casting, NPC_ skills | `/sabrimmo-monster-skills` | `docsNew/03_Server_Side/Monster_Skill_System.md` |
 | Slate UI panels | `/sabrimmo-ui` | — |
 | Skill targeting (click-to-cast) | `/sabrimmo-target-skill` | — |
 | Chat messages, chat UI, channels | `/sabrimmo-chat` | — |
 | Combat log, damage/buff/death messages | `/sabrimmo-combat-log` | — |
 | Clickable NPCs, interactables | `/sabrimmo-click-interact` | — |
+| 3D world, post-process, lighting, exposure | `/sabrimmo-3d-world` | `docsNew/05_Development/3D_World_Implementation_Plan.md` |
+| Ground textures, materials, biome variants, landscape | `/sabrimmo-ground-textures` | `docsNew/05_Development/Ground_Texture_System_Research.md`, `docsNew/05_Development/Material_Variant_Tracker.md` |
+| Terrain decals, ground detail, dirt/moss/crack overlays | `/sabrimmo-material-decals` | — |
+| Landscape grass, flowers, pebbles, detail mesh scatter | `/sabrimmo-environment-grass` | — |
 | Zones, maps, warp portals | `/sabrimmo-zone` | `docsNew/05_Development/Zone_System_UE5_Setup_Guide.md` |
 | VFX, particles, Niagara | `/sabrimmo-skills-vfx` | `docsNew/05_Development/VFX_Asset_Reference.md` |
 | Skill icon art generation | `/sabrimmo-generate-icons` | — |
@@ -264,12 +275,30 @@ Many tasks touch multiple systems. **Load ALL relevant skills.** Examples:
 - "Fix Archer Double Strafe or Arrow Shower" -> `/sabrimmo-skill-archer` + `/sabrimmo-skills` + `/sabrimmo-combat`
 - "Fix Thief Envenom or Hiding SP drain" -> `/sabrimmo-skill-thief` + `/sabrimmo-skills` + `/sabrimmo-debuff`
 - "Fix Merchant Mammonite or Cart Revolution" -> `/sabrimmo-skill-merchant` + `/sabrimmo-skills` + `/sabrimmo-combat`
-- "Add a new zone with NPCs and warps" -> `/sabrimmo-zone` + `/sabrimmo-npcs` + `/sabrimmo-click-interact`
+- "Add a new zone with NPCs and warps" -> `/sabrimmo-zone` + `/sabrimmo-npcs` + `/sabrimmo-click-interact` + `/sabrimmo-3d-world`
+- "Scene too dark or washed out" -> `/sabrimmo-3d-world` + `/debugger`
+- "Sprites dark after zone transition" -> `/sabrimmo-3d-world` + `/sabrimmo-persistent-socket`
+- "Add post-process preset for new zone" -> `/sabrimmo-3d-world` + `/sabrimmo-zone`
+- "Generate ground textures" -> `/sabrimmo-ground-textures`
+- "Texture tiling badly" -> `/sabrimmo-ground-textures`
+- "Build 3D environment for a zone" -> `/sabrimmo-3d-world` + `/sabrimmo-ground-textures` + `/sabrimmo-zone` + `/sabrimmo-navmesh`
+- "Camera blocked by building" -> `/sabrimmo-3d-world` + `/debugger`
 - "Fix a crash when casting spells" -> `/debugger` + `/sabrimmo-skills` + `/realtime`
 - "Build a new HUD panel showing buffs" -> `/sabrimmo-buff` + `/sabrimmo-debuff` + `/sabrimmo-ui`
 - "Add a skill that applies poison" -> `/sabrimmo-debuff` + `/sabrimmo-skills` + `/full-stack`
 - "Add a buff skill like Blessing" -> `/sabrimmo-buff` + `/sabrimmo-skills` + `/full-stack`
 - "Add a new monster with special attacks" -> `/enemy-ai` + `/sabrimmo-monster-skills` + `/sabrimmo-combat` + `/full-stack`
+- "Add sprite to a monster" -> `/sabrimmo-sprites` + `/sabrimmo-3d-to-2d` + `/sabrimmo-enemy`
+- "Enemy sprite not showing" -> `/sabrimmo-sprites` + `/sabrimmo-enemy` + `/debugger`
+- "Can't click/target enemy" -> `/sabrimmo-enemy` + `/debugger`
+- "Enemy not respawning" -> `/sabrimmo-enemy` + `/debugger`
+- "Enemy sprite floating" -> `/sabrimmo-sprites` + `/sabrimmo-enemy` + `/debugger`
+- "Weapon sprite not showing" -> `/sabrimmo-sprites` + `/debugger`
+- "Weapon sprite Z-fighting/popping" -> `/sabrimmo-sprites` + `/sabrimmo-3d-to-2d` + `/debugger`
+- "Add new weapon type sprites" -> `/sabrimmo-sprites` + `/sabrimmo-3d-to-2d`
+- "Wrong animation playing" -> `/sabrimmo-sprites` + `/debugger`
+- "Remote player wrong weapon mode" -> `/sabrimmo-sprites` + `/sabrimmo-persistent-socket` + `/debugger`
+- "Add new character class sprites" -> `/sabrimmo-sprites` + `/sabrimmo-3d-to-2d`
 - "Implement the inventory system" -> `/sabrimmo-items` + `/sabrimmo-economy` + `/full-stack` + `/sabrimmo-ui`
 - "Regen not working / can't attack" -> `/debugger` + `/sabrimmo-weight` + `/sabrimmo-buff`
 - "Add party EXP sharing" -> `/sabrimmo-party` + `/sabrimmo-stats` + `/full-stack`
@@ -330,6 +359,13 @@ Many tasks touch multiple systems. **Load ALL relevant skills.** Examples:
 - "Slave monsters not spawning" -> `/sabrimmo-mvp` + `/enemy-ai` + `/debugger`
 - "Whisper not working" -> `/sabrimmo-chat` + `/debugger`
 - "Block list not working" -> `/sabrimmo-chat` + `/debugger`
+- "Enemy walking through walls" -> `/sabrimmo-navmesh` + `/enemy-ai` + `/debugger`
+- "Add navmesh to new zone" -> `/sabrimmo-navmesh` + `/sabrimmo-zone`
+- "Enemy not pathfinding" -> `/sabrimmo-navmesh` + `/enemy-ai` + `/debugger`
+- "Export NavMesh from UE5" -> `/sabrimmo-navmesh` + `/sabrimmo-build-compile`
+- "Add new monster sprite" -> `/sabrimmo-sprites` + `/sabrimmo-3d-to-2d` + `/sabrimmo-enemy` + `/sabrimmo-art`
+- "Monster sprite floating/sinking" -> `/sabrimmo-sprites` + `/sabrimmo-enemy` + `/debugger`
+- "Ground effect not ticking" -> `/sabrimmo-skills` + `/sabrimmo-combat` + class-specific skill + `/debugger`
 
 **Do NOT skip loading skills to save time.** The cost of reloading context is far less than the cost of implementing something wrong and having to redo it.
 
@@ -337,7 +373,7 @@ Many tasks touch multiple systems. **Load ALL relevant skills.** Examples:
 
 ## Personal Skills Available
 
-51 sabrimmo-* skills + 10 utility skills. Invoke with `/skill-name`. Located at `C:/Users/pladr/.claude/skills/`.
+58 sabrimmo-* skills (20 class + 38 system) + 10 utility skills. Invoke with `/skill-name`. Located at `C:/Users/pladr/.claude/skills/`.
 See `docsNew/00_Global_Rules/Global_Rules.md` → **SKILL INVOCATION** for comprehensive keyword-to-skill mapping, co-load rules, and overlapping skill pairs.
 
 ---
