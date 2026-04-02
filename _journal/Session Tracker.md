@@ -10,11 +10,18 @@ All Claude Code sessions with their resume IDs, organized by topic. Use `claude 
 
 | Date | Resume ID | Topic | Notes |
 |------|-----------|-------|-------|
-| 2026-03-29 | — | Hair sprite layer + render pipeline overhaul | Hair layer (9-color tinting, hides_hair, 5 visibility bugs fixed, parallax fix 0.3→0.01). New render standard: render_blend_all_visible.py + .blend scenes + --cel-shadow 0.92 --cel-mid 0.98. Re-rendered merchant_f/swordsman_f/knight_f/archer_f/novice_f + female bow + hair atlases. Fixed 8 missing server broadcast locations for hair data. |
+| 2026-03-30 to 2026-04-01 | `"ground-texture-and-materials-system"` | Ground textures, materials, decals, grass | Commit `093056d`. 1000+ AI textures, 608 RO originals, 17 material versions, 2700+ variants, DBuffer decals (91 instances), Landscape Grass V3 (60 sprites, 13 zones), paintable grass layers. 3 new skills, 4 new docs, 80 new scripts. |
+| 2026-03-29 | — | Hair sprite layer + render pipeline overhaul | Commit `447edea`. Hair layer (9-color tinting, hides_hair, 5 visibility bugs fixed, parallax fix 0.3→0.01). New render standard: render_blend_all_visible.py + .blend scenes + --cel-shadow 0.92 --cel-mid 0.98. Re-rendered merchant_f/swordsman_f/knight_f/archer_f/novice_f + female bow + hair atlases. Fixed 8 missing server broadcast locations for hair data. |
+| 2026-03-27 | `"enemy server and client navmesh pathfinding"` | NavMesh pathfinding | Server-side recast-navigation v0.42.1, OBJ export from UE5, coordinate conversion, de-aggro system, all enemy movement patched |
+| 2026-03-27 | `"Headgear Sprite System"` | Headgear sprite layer | HeadgearTop layer, holdout occlusion (replaces depth_front), always_front depth mode, multi-slot blocking, Egg Shell Hat first headgear |
+| 2026-03-27 | `"hair-sprite-layer-system"` | Hair sprite layer | ESpriteLayer::Hair, 9-color tinting, hides_hair flag, reset-derive-reconcile pattern, female hair style 1 atlas |
 | 2026-03-26 | `"state dependent sprite atlases standardization"` | Animation standardization | Unified ALL classes to 17-anim standard, targetType-driven cast, Bow weapon mode, file reorg |
 | 2026-03-26 | `"female archer animations"` | Archer + bow sprites | Archer_f body 1136 sprites + bow weapon overlay 1136 sprites, global depth ordering fix |
 | 2026-03-26 | `"Skeleton Sprite Animations"` | Skeleton enemy sprite | First humanoid monster sprite, Mixamo-rigged, pure C++ actor (no BP_EnemyCharacter) |
 | 2026-03-26 | `"poring sprite animations"` | Poring enemy sprite | First blob monster, shape key anims via render_monster.py, --model-rotation -90 |
+| `"enemy server and client navmesh pathfinding"` | NavMesh pathfinding | Server-side recast-navigation, OBJ export, coordinate conversion, de-aggro |
+| `"Headgear Sprite System"` | Headgear sprite layer | HeadgearTop, holdout occlusion, always_front, multi-slot blocking, Egg Shell Hat |
+| `"hair-sprite-layer-system"` | Hair sprite layer | ESpriteLayer::Hair, 9-color tinting, hides_hair, parallax fix, render pipeline overhaul |
 | 2026-03-26 | — | NavMesh pathfinding plan | Full plan + implementation prompt. Server-side recast-navigation, client unchanged |
 | 2026-03-25 | `"sprite weapon layering system"` | Weapon sprite overlay | SOLVED: dual-pass render + 5 C++ fixes + depth ordering + remote sync. 11 files, +6167 lines |
 | 2026-03-25 | `"swordsman and state dependent sprite atlases"` | Swordsman cleanup + mage pack | Simplified 19→14 anims, packed mage_f atlases, validated in UE5 |
