@@ -6,6 +6,7 @@
 #include "NameTagSubsystem.h"
 #include "TargetingSubsystem.h"
 #include "MMOGameInstance.h"
+#include "Sprite/SpriteAtlasData.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "GameFramework/PlayerController.h"
@@ -110,13 +111,32 @@ public:
 				if (Entry.Actor.Get() != HoveredActor) continue;
 			}
 
-			// Project world position to screen
-			FVector WorldPos = Entry.Actor->GetActorLocation();
-			WorldPos.Z += Entry.VerticalOffset;
-
+			// Project to screen — use sprite height if available for zoom-proportional positioning
+			FVector ActorPos = Entry.Actor->GetActorLocation();
 			FVector2D ScreenPos;
-			if (!PC->ProjectWorldLocationToScreen(WorldPos, ScreenPos, true))
-				continue;
+
+			if (Entry.SpriteHeight > 0.f)
+			{
+				// Sprite mode: use billboard up vector for accurate screen bounds
+				FVector2D TopScreen, BottomScreen;
+				if (!GetSpriteScreenBounds(PC, ActorPos, Entry.SpriteHeight,
+				                           TopScreen, BottomScreen))
+					continue;
+
+				float SpriteScreenH = BottomScreen.Y - TopScreen.Y;
+				// Name position: proportional margin above sprite top (5% of sprite height)
+				float Margin = FMath::Max(SpriteScreenH * 0.05f, 4.f);
+				ScreenPos.X = TopScreen.X;
+				ScreenPos.Y = TopScreen.Y - Margin;
+			}
+			else
+			{
+				// Classic mode: world Z offset
+				FVector WorldPos = ActorPos;
+				WorldPos.Z += Entry.VerticalOffset;
+				if (!PC->ProjectWorldLocationToScreen(WorldPos, ScreenPos, true))
+					continue;
+			}
 
 			// Convert screen pixels to Slate units
 			FVector2D SlatePos = ScreenPos / DPIScale;
@@ -147,6 +167,41 @@ public:
 			// Measure text for centering
 			FVector2D TextSize = FontMeasure->Measure(DisplayText, NameFont);
 			FVector2D DrawPos(SlatePos.X - TextSize.X * 0.5f, SlatePos.Y);
+
+			// RO Classic vending sign: chat-bubble style board above the name tag
+			// White text on dark brown/maroon background with gold border, like RO's vendor sign
+			if (!Entry.VendingTitle.IsEmpty())
+			{
+				const FSlateFontInfo ShopFont = FCoreStyle::GetDefaultFontStyle("Bold", 9);
+				FVector2D ShopSize = FontMeasure->Measure(Entry.VendingTitle, ShopFont);
+				const float PadX = 8.f, PadY = 4.f;
+				float SignW = ShopSize.X + PadX * 2.f;
+				float SignH = ShopSize.Y + PadY * 2.f;
+				float SignX = SlatePos.X - SignW * 0.5f;
+				float SignY = DrawPos.Y - SignH - 4.f; // 4px gap above name
+
+				// Gold border (1px)
+				FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(
+					FVector2f((float)(SignX - 1.f), (float)(SignY - 1.f)),
+					FVector2f((float)(SignW + 2.f), (float)(SignH + 2.f))),
+					FCoreStyle::Get().GetBrush("GenericWhiteBox"),
+					ESlateDrawEffect::None,
+					FLinearColor(0.72f, 0.58f, 0.28f, 1.f)); // Gold trim
+
+				// Dark background
+				FSlateDrawElement::MakeBox(OutDrawElements, LayerId, AllottedGeometry.ToPaintGeometry(
+					FVector2f((float)SignX, (float)SignY),
+					FVector2f((float)SignW, (float)SignH)),
+					FCoreStyle::Get().GetBrush("GenericWhiteBox"),
+					ESlateDrawEffect::None,
+					FLinearColor(0.15f, 0.08f, 0.04f, 0.92f)); // Dark brown
+
+				// Shop title text (white/cream, centered)
+				FVector2D TitlePos(SlatePos.X - ShopSize.X * 0.5f, SignY + PadY);
+				DrawTextAt(OutDrawElements, LayerId, AllottedGeometry, TitlePos,
+					Entry.VendingTitle, ShopFont,
+					FLinearColor(1.f, 0.96f, 0.85f, 1.f)); // Cream white
+			}
 
 			// Draw 4-pass black outline (RO Classic style: ±1px cardinal offsets)
 			DrawOutlinedText(OutDrawElements, LayerId, AllottedGeometry,
@@ -243,7 +298,7 @@ void UNameTagSubsystem::Deinitialize()
 // ============================================================
 
 void UNameTagSubsystem::RegisterEntity(AActor* Actor, const FString& Name,
-	ENameTagEntityType Type, int32 Level, float VertOffset)
+	ENameTagEntityType Type, int32 Level, float VertOffset, float InSpriteHeight)
 {
 	if (!Actor) return;
 
@@ -256,6 +311,7 @@ void UNameTagSubsystem::RegisterEntity(AActor* Actor, const FString& Name,
 	Entry.Type = Type;
 	Entry.Level = Level;
 	Entry.VerticalOffset = VertOffset;
+	Entry.SpriteHeight = InSpriteHeight;
 	Entry.bVisible = true;
 	Entries.Add(Entry);
 }
@@ -279,6 +335,14 @@ void UNameTagSubsystem::UpdateName(AActor* Actor, const FString& NewName)
 	if (FNameTagEntry* Entry = FindEntry(Actor))
 	{
 		Entry->DisplayName = NewName;
+	}
+}
+
+void UNameTagSubsystem::SetVendingTitle(AActor* Actor, const FString& Title)
+{
+	if (FNameTagEntry* Entry = FindEntry(Actor))
+	{
+		Entry->VendingTitle = Title;
 	}
 }
 

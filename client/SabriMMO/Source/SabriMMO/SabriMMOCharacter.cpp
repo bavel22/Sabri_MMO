@@ -17,6 +17,7 @@
 #include "MMOGameInstance.h"
 #include "GameFramework/PlayerController.h"
 #include "UI/CombatStatsSubsystem.h"
+#include "UI/MinimapSubsystem.h"
 #include "UI/InventorySubsystem.h"
 #include "UI/EquipmentSubsystem.h"
 #include "UI/HotbarSubsystem.h"
@@ -33,6 +34,7 @@
 #include "UI/CombatActionSubsystem.h"
 #include "UI/BuffBarSubsystem.h"
 #include "UI/NameTagSubsystem.h"
+#include "UI/EscapeMenuSubsystem.h"
 #include "InputModifiers.h"
 #include "Framework/Application/SlateApplication.h"
 
@@ -69,6 +71,8 @@ ASabriMMOCharacter::ASabriMMOCharacter()
 	FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
 	FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
 	FollowCamera->bUsePawnControlRotation = false;
+	FollowCamera->bConstrainAspectRatio = true;
+	FollowCamera->AspectRatio = 16.f / 9.f;
 
 	// Note: The skeletal mesh and anim blueprint references on the Mesh component (inherited from Character) 
 	// are set in the derived blueprint asset named ThirdPersonCharacter (to avoid direct content references in C++)
@@ -239,6 +243,22 @@ void ASabriMMOCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputC
 		{
 			EnhancedInputComponent->BindAction(CycleHotbarAction, ETriggerEvent::Started, this, &ASabriMMOCharacter::HandleCycleHotbar);
 		}
+		if (CycleMinimapAction)
+		{
+			EnhancedInputComponent->BindAction(CycleMinimapAction, ETriggerEvent::Started, this, &ASabriMMOCharacter::HandleCycleMinimap);
+		}
+		if (ToggleWorldMapAction)
+		{
+			EnhancedInputComponent->BindAction(ToggleWorldMapAction, ETriggerEvent::Started, this, &ASabriMMOCharacter::HandleToggleWorldMap);
+		}
+		if (ToggleZoneNamesAction)
+		{
+			EnhancedInputComponent->BindAction(ToggleZoneNamesAction, ETriggerEvent::Started, this, &ASabriMMOCharacter::HandleToggleZoneNames);
+		}
+		if (ToggleEscapeMenuAction)
+		{
+			EnhancedInputComponent->BindAction(ToggleEscapeMenuAction, ETriggerEvent::Started, this, &ASabriMMOCharacter::HandleToggleEscapeMenu);
+		}
 
 		// Bind hotbar slot keys 1-9
 		// Each must be a separate named function for Enhanced Input binding
@@ -327,9 +347,19 @@ void ASabriMMOCharacter::HandleRightClickCompleted()
 {
 	if (UWorld* World = GetWorld())
 	{
-		if (UCameraSubsystem* Sub = World->GetSubsystem<UCameraSubsystem>())
+		if (UCameraSubsystem* CamSub = World->GetSubsystem<UCameraSubsystem>())
 		{
-			Sub->OnRightClickCompleted();
+			// If no camera drag happened, treat as a context-menu click
+			bool bWasQuickClick = !CamSub->DidRotateThisClick();
+			CamSub->OnRightClickCompleted();
+
+			if (bWasQuickClick)
+			{
+				if (UPlayerInputSubsystem* InputSub = World->GetSubsystem<UPlayerInputSubsystem>())
+				{
+					InputSub->OnRightClickFromCharacter(this);
+				}
+			}
 		}
 	}
 }
@@ -404,6 +434,26 @@ void ASabriMMOCharacter::CreateUIToggleActions()
 	CycleHotbarAction = NewObject<UInputAction>(this, TEXT("IA_CycleHotbar"));
 	CycleHotbarAction->ValueType = EInputActionValueType::Boolean;
 	UIToggleIMC->MapKey(CycleHotbarAction, EKeys::H);
+
+	// Tab: Cycle Minimap opacity (RO Classic: Ctrl+Tab, but we use Tab for simplicity)
+	CycleMinimapAction = NewObject<UInputAction>(this, TEXT("IA_CycleMinimap"));
+	CycleMinimapAction->ValueType = EInputActionValueType::Boolean;
+	UIToggleIMC->MapKey(CycleMinimapAction, EKeys::Tab);
+
+	// M: Toggle World Map
+	ToggleWorldMapAction = NewObject<UInputAction>(this, TEXT("IA_ToggleWorldMap"));
+	ToggleWorldMapAction->ValueType = EInputActionValueType::Boolean;
+	UIToggleIMC->MapKey(ToggleWorldMapAction, EKeys::M);
+
+	// N: Toggle Zone Names on World Map
+	ToggleZoneNamesAction = NewObject<UInputAction>(this, TEXT("IA_ToggleZoneNames"));
+	ToggleZoneNamesAction->ValueType = EInputActionValueType::Boolean;
+	UIToggleIMC->MapKey(ToggleZoneNamesAction, EKeys::N);
+
+	// Escape: Toggle ESC menu (RO Classic "Select Option")
+	ToggleEscapeMenuAction = NewObject<UInputAction>(this, TEXT("IA_ToggleEscapeMenu"));
+	ToggleEscapeMenuAction->ValueType = EInputActionValueType::Boolean;
+	UIToggleIMC->MapKey(ToggleEscapeMenuAction, EKeys::Escape);
 
 	// Keys 1-9: Hotbar slot activation
 	static const FKey NumberKeys[] = {
@@ -526,6 +576,62 @@ void ASabriMMOCharacter::HandleCycleHotbar()
 		if (UHotbarSubsystem* Sub = World->GetSubsystem<UHotbarSubsystem>())
 		{
 			Sub->CycleVisibility();
+		}
+	}
+}
+
+void ASabriMMOCharacter::HandleCycleMinimap()
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (UMinimapSubsystem* Sub = World->GetSubsystem<UMinimapSubsystem>())
+		{
+			// If world map is open, Tab toggles monster info instead
+			if (Sub->bWorldMapOpen)
+			{
+				Sub->ToggleMonsterInfo();
+			}
+			else
+			{
+				Sub->CycleMinimapOpacity();
+			}
+		}
+	}
+}
+
+void ASabriMMOCharacter::HandleToggleWorldMap()
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (UMinimapSubsystem* Sub = World->GetSubsystem<UMinimapSubsystem>())
+		{
+			Sub->ToggleWorldMap();
+		}
+	}
+}
+
+void ASabriMMOCharacter::HandleToggleZoneNames()
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (UMinimapSubsystem* Sub = World->GetSubsystem<UMinimapSubsystem>())
+		{
+			// Only works when world map is open
+			if (Sub->bWorldMapOpen)
+			{
+				Sub->ToggleZoneNames();
+			}
+		}
+	}
+}
+
+void ASabriMMOCharacter::HandleToggleEscapeMenu()
+{
+	if (UWorld* World = GetWorld())
+	{
+		if (UEscapeMenuSubsystem* Sub = World->GetSubsystem<UEscapeMenuSubsystem>())
+		{
+			Sub->ToggleMenu();
 		}
 	}
 }

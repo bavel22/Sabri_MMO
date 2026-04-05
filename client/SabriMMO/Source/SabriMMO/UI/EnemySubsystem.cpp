@@ -2,11 +2,19 @@
 // Phase 3 of Blueprint-to-C++ migration. Replaces BP_EnemyManager.
 
 #include "EnemySubsystem.h"
+#include "SSenseResultPopup.h"
 #include "NameTagSubsystem.h"
 #include "MMOGameInstance.h"
 #include "SocketEventRouter.h"
+#include "Sprite/SpriteCharacterActor.h"
+#include "Components/CapsuleComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/World.h"
+#include "Engine/Engine.h"
 #include "TimerManager.h"
+#include "Widgets/SWeakWidget.h"
+#include "Widgets/Layout/SBox.h"
+#include "Framework/Application/SlateApplication.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogEnemySubsystem, Log, All);
 
@@ -151,6 +159,10 @@ void UEnemySubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		[this](const TSharedPtr<FJsonValue>& D) { HandleEnemyHealthUpdate(D); });
 	Router->RegisterHandler(TEXT("enemy:attack"), this,
 		[this](const TSharedPtr<FJsonValue>& D) { HandleEnemyAttack(D); });
+	Router->RegisterHandler(TEXT("combat:knockback"), this,
+		[this](const TSharedPtr<FJsonValue>& D) { HandleCombatKnockback(D); });
+	Router->RegisterHandler(TEXT("skill:sense_result"), this,
+		[this](const TSharedPtr<FJsonValue>& D) { HandleSenseResult(D); });
 
 	// Defer readiness by one frame (prevents ProcessEvent during PostLoad)
 	bReadyToProcess = false;
@@ -159,7 +171,7 @@ void UEnemySubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		bReadyToProcess = true;
 	});
 
-	UE_LOG(LogEnemySubsystem, Log, TEXT("EnemySubsystem — 5 enemy events registered."));
+	UE_LOG(LogEnemySubsystem, Log, TEXT("EnemySubsystem — 7 enemy events registered (incl. sense)."));
 }
 
 void UEnemySubsystem::Deinitialize()
@@ -175,15 +187,19 @@ void UEnemySubsystem::Deinitialize()
 		}
 	}
 
-	// Destroy all spawned enemy actors
+	HideSensePopup();
+
+	// Destroy all spawned enemy + sprite actors
 	for (auto& Pair : Enemies)
 	{
-		if (Pair.Value.IsValid())
-		{
-			Pair.Value->Destroy();
-		}
+		// For sprite-only enemies, Actor == SpriteActor — only destroy once
+		if (Pair.Value.SpriteActor.IsValid() && Pair.Value.SpriteActor != Pair.Value.Actor)
+			Pair.Value.SpriteActor->Destroy();
+		if (Pair.Value.Actor.IsValid())
+			Pair.Value.Actor->Destroy();
 	}
 	Enemies.Empty();
+	ActorToEnemyId.Empty();
 
 	bReadyToProcess = false;
 	EnemyBPClass = nullptr;
@@ -197,10 +213,22 @@ void UEnemySubsystem::Deinitialize()
 
 AActor* UEnemySubsystem::GetEnemy(int32 EnemyId) const
 {
-	const TWeakObjectPtr<AActor>* Found = Enemies.Find(EnemyId);
-	if (Found && Found->IsValid())
-		return Found->Get();
+	const FEnemyEntry* Found = Enemies.Find(EnemyId);
+	if (Found && Found->Actor.IsValid())
+		return Found->Actor.Get();
 	return nullptr;
+}
+
+const FEnemyEntry* UEnemySubsystem::GetEnemyData(int32 EnemyId) const
+{
+	return Enemies.Find(EnemyId);
+}
+
+int32 UEnemySubsystem::GetEnemyIdFromActor(AActor* Actor) const
+{
+	if (!Actor) return 0;
+	const int32* Found = ActorToEnemyId.Find(Actor);
+	return Found ? *Found : 0;
 }
 
 // ============================================================
@@ -254,26 +282,54 @@ void UEnemySubsystem::HandleEnemySpawn(const TSharedPtr<FJsonValue>& Data)
 	};
 
 	// ---- Existing enemy? ----
-	TWeakObjectPtr<AActor>* Existing = Enemies.Find(EnemyId);
-	if (Existing && Existing->IsValid())
+	FEnemyEntry* Existing = Enemies.Find(EnemyId);
+	if (Existing && Existing->Actor.IsValid())
 	{
-		AActor* Enemy = Existing->Get();
+		AActor* Enemy = Existing->Actor.Get();
 
-		if (GetBPBool(Enemy, TEXT("bIsDead")))
+		if (Existing->bIsDead || Enemy->IsHidden())
 		{
-			// Dead respawn: re-show, re-enable collision, re-initialize
-			Enemy->SetActorHiddenInGame(false);
-			Enemy->SetActorEnableCollision(true);
-			SetBPBool(Enemy, TEXT("bIsDead"), false);
-			Enemy->SetActorLocation(Pos);
-			InitEnemy(Enemy);
-			SetBPVector(Enemy, TEXT("TargetPosition"), Pos);
+			// Dead respawn: re-show, re-enable, re-initialize
+			if (Existing->SpriteActor.IsValid())
+			{
+				// Sprite enemy: sprite IS the actor
+				Existing->SpriteActor->ServerTargetPos = Pos;
+				Existing->SpriteActor->SetActorLocation(Pos);
+				Existing->SpriteActor->SetActorHiddenInGame(false);
+				Existing->SpriteActor->EnableClickCollision();
+				if (Existing->SpriteActor->IsBodyReady())
+					Existing->SpriteActor->SetAnimState(ESpriteAnimState::Idle);
+			}
+
+			if (!Existing->SpriteClass.IsEmpty())
+			{
+				// Sprite-only enemy: no BP actor to re-init
+			}
+			else
+			{
+				// BP enemy: re-show and re-init
+				Enemy->SetActorHiddenInGame(false);
+				Enemy->SetActorEnableCollision(true);
+				SetBPBool(Enemy, TEXT("bIsDead"), false);
+				Enemy->SetActorLocation(Pos);
+				InitEnemy(Enemy);
+				SetBPVector(Enemy, TEXT("TargetPosition"), Pos);
+			}
+
+			// Update struct data
+			Existing->EnemyName = Name;
+			Existing->EnemyLevel = Level;
+			Existing->Health = HealthD;
+			Existing->MaxHealth = MaxHealthD;
+			Existing->bIsDead = false;
 
 			// Re-show name tag on respawn
+			AActor* TagTarget = Existing->SpriteActor.IsValid()
+				? (AActor*)Existing->SpriteActor.Get() : Enemy;
 			if (UNameTagSubsystem* NTS = GetWorld()->GetSubsystem<UNameTagSubsystem>())
-				NTS->SetVisible(Enemy, true);
+				NTS->SetVisible(TagTarget, true);
 
-			UE_LOG(LogEnemySubsystem, Verbose, TEXT("Respawned enemy %d (%s)"), EnemyId, *Name);
+			UE_LOG(LogEnemySubsystem, Log, TEXT("Respawned enemy %d (%s)"), EnemyId, *Name);
 		}
 		else
 		{
@@ -285,28 +341,89 @@ void UEnemySubsystem::HandleEnemySpawn(const TSharedPtr<FJsonValue>& Data)
 
 	// ---- New enemy: spawn ----
 	UWorld* World = GetWorld();
-	if (!World || !EnemyBPClass) return;
-
-	FTransform SpawnTransform;
-	SpawnTransform.SetLocation(Pos);
+	if (!World) return;
 
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
-	AActor* NewEnemy = World->SpawnActor(EnemyBPClass, &SpawnTransform, SpawnParams);
-	if (!NewEnemy)
+	FString SpriteClass;
+	Obj->TryGetStringField(TEXT("spriteClass"), SpriteClass);
+	double WeaponModeD = 0;
+	Obj->TryGetNumberField(TEXT("weaponMode"), WeaponModeD);
+	int32 WeaponMode = (int32)WeaponModeD;
+
+	UE_LOG(LogEnemySubsystem, Warning, TEXT("Enemy %d (%s) spriteClass='%s' weaponMode=%d"),
+		EnemyId, *Name, *SpriteClass, WeaponMode);
+
+	AActor* PrimaryActor = nullptr;
+	ASpriteCharacterActor* Sprite = nullptr;
+
+	if (!SpriteClass.IsEmpty())
 	{
-		UE_LOG(LogEnemySubsystem, Warning, TEXT("Failed to spawn enemy %d (%s)"), EnemyId, *Name);
-		return;
+		// ---- Sprite enemy: C++ only, no BP actor ----
+		Sprite = World->SpawnActor<ASpriteCharacterActor>(
+			Pos, FRotator::ZeroRotator, SpawnParams);
+		if (!Sprite)
+		{
+			UE_LOG(LogEnemySubsystem, Warning, TEXT("Failed to spawn sprite enemy %d (%s)"), EnemyId, *Name);
+			return;
+		}
+
+		Sprite->SetBodyClass(SpriteClass);
+		Sprite->EnableClickCollision();
+		Sprite->ServerTargetPos = Pos;
+		Sprite->bUseServerMovement = true;
+
+		ESpriteWeaponMode Mode = ESpriteWeaponMode::None;
+		if (WeaponMode == 1) Mode = ESpriteWeaponMode::OneHand;
+		else if (WeaponMode == 2) Mode = ESpriteWeaponMode::TwoHand;
+		else if (WeaponMode == 3) Mode = ESpriteWeaponMode::Bow;
+		Sprite->SetWeaponMode(Mode);
+
+		PrimaryActor = Sprite;
+
+		UE_LOG(LogEnemySubsystem, Log, TEXT("Enemy %d sprite-only: class=%s weaponMode=%d"),
+			EnemyId, *SpriteClass, WeaponMode);
+	}
+	else
+	{
+		// ---- Non-sprite enemy: BP actor (existing path) ----
+		if (!EnemyBPClass) return;
+
+		FTransform SpawnTransform;
+		SpawnTransform.SetLocation(Pos);
+
+		AActor* NewEnemy = World->SpawnActor(EnemyBPClass, &SpawnTransform, SpawnParams);
+		if (!NewEnemy)
+		{
+			UE_LOG(LogEnemySubsystem, Warning, TEXT("Failed to spawn enemy %d (%s)"), EnemyId, *Name);
+			return;
+		}
+
+		InitEnemy(NewEnemy);
+		SetBPVector(NewEnemy, TEXT("TargetPosition"), Pos);
+		PrimaryActor = NewEnemy;
 	}
 
-	InitEnemy(NewEnemy);
-	SetBPVector(NewEnemy, TEXT("TargetPosition"), Pos);
-	Enemies.Add(EnemyId, NewEnemy);
+	// Store in struct registry
+	FEnemyEntry Entry;
+	Entry.Actor = PrimaryActor;
+	Entry.SpriteActor = Sprite;
+	Entry.EnemyId = EnemyId;
+	Entry.EnemyName = Name;
+	Entry.SpriteClass = SpriteClass;
+	Entry.WeaponMode = WeaponMode;
+	Entry.EnemyLevel = Level;
+	Entry.Health = HealthD;
+	Entry.MaxHealth = MaxHealthD;
+	Entry.bIsDead = false;
+	Enemies.Add(EnemyId, Entry);
+	ActorToEnemyId.Add(PrimaryActor, EnemyId);
 
-	// Register name tag (RO Classic: hover-only for monsters)
+	// Register name tag
+	float SpriteHeight = Sprite ? 150.f : 0.f;
 	if (UNameTagSubsystem* NTS = GetWorld()->GetSubsystem<UNameTagSubsystem>())
-		NTS->RegisterEntity(NewEnemy, Name, ENameTagEntityType::Monster, Level);
+		NTS->RegisterEntity(PrimaryActor, Name, ENameTagEntityType::Monster, Level, 120.f, SpriteHeight);
 
 	UE_LOG(LogEnemySubsystem, Verbose, TEXT("Spawned enemy %d (%s) at (%.0f, %.0f, %.0f)"),
 		EnemyId, *Name, X, Y, Z);
@@ -328,19 +445,55 @@ void UEnemySubsystem::HandleEnemyMove(const TSharedPtr<FJsonValue>& Data)
 	if (!Obj->TryGetNumberField(TEXT("enemyId"), EnemyIdD)) return;
 	int32 EnemyId = (int32)EnemyIdD;
 
-	AActor* Enemy = GetEnemy(EnemyId);
-	if (!Enemy) return;
+	FEnemyEntry* Entry = Enemies.Find(EnemyId);
+	if (!Entry || !Entry->Actor.IsValid()) return;
+	AActor* Enemy = Entry->Actor.Get();
 
 	double X = 0, Y = 0, Z = 0;
 	Obj->TryGetNumberField(TEXT("x"), X);
 	Obj->TryGetNumberField(TEXT("y"), Y);
 	Obj->TryGetNumberField(TEXT("z"), Z);
 
-	SetBPVector(Enemy, TEXT("TargetPosition"), FVector((float)X, (float)Y, (float)Z));
+	FVector NewPos((float)X, (float)Y, (float)Z);
 
 	bool bIsMoving = false;
 	Obj->TryGetBoolField(TEXT("isMoving"), bIsMoving);
-	SetBPBool(Enemy, TEXT("bIsMoving"), bIsMoving);
+
+	// Sprite enemies: C++ handles movement interpolation directly (bypasses BP Tick + CMC)
+	if (Entry->SpriteActor.IsValid())
+	{
+		// Read walk speed from CharacterMovementComponent (once-ish, cached on sprite)
+		float WalkSpeed = Entry->SpriteActor->ServerMoveSpeed;
+		if (UCharacterMovementComponent* CMC = Enemy->FindComponentByClass<UCharacterMovementComponent>())
+			WalkSpeed = CMC->MaxWalkSpeed;
+
+		Entry->SpriteActor->SetServerTargetPosition(NewPos, bIsMoving, WalkSpeed);
+
+		// Drive sprite animation + facing
+		if (Entry->SpriteActor->IsBodyReady())
+		{
+			auto State = Entry->SpriteActor->GetAnimState();
+			if (State != ESpriteAnimState::Death)
+			{
+				Entry->SpriteActor->SetAnimState(
+					bIsMoving ? ESpriteAnimState::Walk : ESpriteAnimState::Idle);
+
+				if (bIsMoving)
+				{
+					FVector Dir = NewPos - Enemy->GetActorLocation();
+					Dir.Z = 0.f;
+					if (Dir.SizeSquared() > 1.f)
+						Entry->SpriteActor->SetFacingDirection(Dir);
+				}
+			}
+		}
+	}
+	else
+	{
+		// Non-sprite enemies: use BP Tick interpolation (existing path)
+		SetBPVector(Enemy, TEXT("TargetPosition"), NewPos);
+		SetBPBool(Enemy, TEXT("bIsMoving"), bIsMoving);
+	}
 }
 
 // ============================================================
@@ -359,22 +512,54 @@ void UEnemySubsystem::HandleEnemyDeath(const TSharedPtr<FJsonValue>& Data)
 	if (!Obj->TryGetNumberField(TEXT("enemyId"), EnemyIdD)) return;
 	int32 EnemyId = (int32)EnemyIdD;
 
-	AActor* Enemy = GetEnemy(EnemyId);
-	if (!Enemy) return;
+	FEnemyEntry* Entry = Enemies.Find(EnemyId);
+	if (!Entry || !Entry->Actor.IsValid()) return;
+	AActor* Enemy = Entry->Actor.Get();
 
-	SetBPBool(Enemy, TEXT("bIsDead"), true);
+	Entry->bIsDead = true;
 
-	// Hide name tag on death (RO Classic: monster names disappear with sprite)
-	if (UNameTagSubsystem* NTS = GetWorld()->GetSubsystem<UNameTagSubsystem>())
-		NTS->SetVisible(Enemy, false);
+	// Sprite enemy: sprite IS the primary actor
+	if (Entry->SpriteActor.IsValid() && Entry->SpriteActor->IsBodyReady())
+	{
+		Entry->SpriteActor->SetAnimState(ESpriteAnimState::Death);
+		Entry->SpriteActor->DisableClickCollision();
 
-	// Call OnEnemyDeath(InDeadEnemy) — BP plays death animation, hides mesh, etc.
-	CallBPFunction(Enemy, TEXT("OnEnemyDeath"),
-		[Enemy](UFunction* Func, uint8* Params)
+		// Hide after corpse linger (4s)
+		TWeakObjectPtr<AActor> WeakActor = Enemy;
+		TWeakObjectPtr<UEnemySubsystem> WeakThis(this);
+		FTimerHandle TimerHandle;
+		GetWorld()->GetTimerManager().SetTimer(TimerHandle, [WeakThis, WeakActor, EnemyId]()
 		{
-			if (auto* P = CastField<FObjectProperty>(Func->FindPropertyByName(TEXT("InDeadEnemy"))))
-				*P->ContainerPtrToValuePtr<UObject*>(Params) = Enemy;
-		});
+			if (!WeakThis.IsValid()) return;
+
+			FEnemyEntry* E = WeakThis->Enemies.Find(EnemyId);
+			if (E && !E->bIsDead) return;  // Already respawned
+
+			if (WeakActor.IsValid())
+				WeakActor->SetActorHiddenInGame(true);
+
+			if (UNameTagSubsystem* NTS = WeakThis->GetWorld()->GetSubsystem<UNameTagSubsystem>())
+			{
+				if (WeakActor.IsValid()) NTS->SetVisible(WeakActor.Get(), false);
+			}
+		}, 4.0f, false);
+	}
+	else
+	{
+		// Non-sprite BP enemy: hide immediately, call BP death function
+		SetBPBool(Enemy, TEXT("bIsDead"), true);
+		Enemy->SetActorHiddenInGame(true);
+		Enemy->SetActorEnableCollision(false);
+		if (UNameTagSubsystem* NTS = GetWorld()->GetSubsystem<UNameTagSubsystem>())
+			NTS->SetVisible(Enemy, false);
+
+		CallBPFunction(Enemy, TEXT("OnEnemyDeath"),
+			[Enemy](UFunction* Func, uint8* Params)
+			{
+				if (auto* P = CastField<FObjectProperty>(Func->FindPropertyByName(TEXT("InDeadEnemy"))))
+					*P->ContainerPtrToValuePtr<UObject*>(Params) = Enemy;
+			});
+	}
 
 	UE_LOG(LogEnemySubsystem, Verbose, TEXT("Enemy %d died."), EnemyId);
 }
@@ -395,14 +580,27 @@ void UEnemySubsystem::HandleEnemyHealthUpdate(const TSharedPtr<FJsonValue>& Data
 	if (!Obj->TryGetNumberField(TEXT("enemyId"), EnemyIdD)) return;
 	int32 EnemyId = (int32)EnemyIdD;
 
-	AActor* Enemy = GetEnemy(EnemyId);
-	if (!Enemy) return;
+	FEnemyEntry* Entry = Enemies.Find(EnemyId);
+	if (!Entry || !Entry->Actor.IsValid()) return;
+	AActor* Enemy = Entry->Actor.Get();
 
 	double Health = 0, MaxHealth = 0;
 	Obj->TryGetNumberField(TEXT("health"), Health);
 	Obj->TryGetNumberField(TEXT("maxHealth"), MaxHealth);
 	bool bInCombat = false;
 	Obj->TryGetBoolField(TEXT("inCombat"), bInCombat);
+
+	// Hit animation when health decreases
+	if (Health < Entry->Health && Entry->SpriteActor.IsValid() && Entry->SpriteActor->IsBodyReady())
+	{
+		auto State = Entry->SpriteActor->GetAnimState();
+		if (State != ESpriteAnimState::Death && State != ESpriteAnimState::Attack)
+			Entry->SpriteActor->SetAnimState(ESpriteAnimState::Hit);
+	}
+
+	// Update struct
+	Entry->Health = Health;
+	Entry->MaxHealth = MaxHealth;
 
 	CallBPFunction(Enemy, TEXT("UpdateEnemyHealth"),
 		[&](UFunction* Func, uint8* Params)
@@ -432,8 +630,164 @@ void UEnemySubsystem::HandleEnemyAttack(const TSharedPtr<FJsonValue>& Data)
 	if (!Obj->TryGetNumberField(TEXT("enemyId"), EnemyIdD)) return;
 	int32 EnemyId = (int32)EnemyIdD;
 
+	FEnemyEntry* Entry = Enemies.Find(EnemyId);
+	if (!Entry || !Entry->Actor.IsValid()) return;
+	AActor* Enemy = Entry->Actor.Get();
+
+	// Sprite attack animation
+	if (Entry->SpriteActor.IsValid() && Entry->SpriteActor->IsBodyReady())
+	{
+		// Check if this is a skill cast (monster skill events include skillId)
+		double SkillIdD = 0;
+		Obj->TryGetNumberField(TEXT("skillId"), SkillIdD);
+		int32 SkillId = (int32)SkillIdD;
+
+		if (SkillId > 0)
+		{
+			// Monster skill cast — pick cast state based on targetType if available
+			FString TargetType;
+			Obj->TryGetStringField(TEXT("targetType"), TargetType);
+			ESpriteAnimState CastState = ESpriteAnimState::CastSingle;
+			if (TargetType == TEXT("self"))        CastState = ESpriteAnimState::CastSelf;
+			else if (TargetType == TEXT("ground")) CastState = ESpriteAnimState::CastGround;
+			else if (TargetType == TEXT("aoe"))    CastState = ESpriteAnimState::CastAoe;
+			Entry->SpriteActor->SetAnimState(CastState);
+		}
+		else
+		{
+			Entry->SpriteActor->SetAnimState(ESpriteAnimState::Attack);
+		}
+	}
+
+	CallBPFunction(Enemy, TEXT("PlayAttackAnimation"));
+}
+
+// ============================================================
+// HandleCombatKnockback — move enemy to new position after knockback
+// ============================================================
+
+void UEnemySubsystem::HandleCombatKnockback(const TSharedPtr<FJsonValue>& Data)
+{
+	if (!bReadyToProcess || !Data.IsValid()) return;
+
+	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
+	const TSharedPtr<FJsonObject>& Obj = *ObjPtr;
+
+	// Only handle enemy knockbacks
+	bool bIsEnemy = false;
+	Obj->TryGetBoolField(TEXT("isEnemy"), bIsEnemy);
+	if (!bIsEnemy) return;
+
+	double TargetIdD = 0;
+	if (!Obj->TryGetNumberField(TEXT("targetId"), TargetIdD)) return;
+	int32 EnemyId = (int32)TargetIdD;
+
 	AActor* Enemy = GetEnemy(EnemyId);
 	if (!Enemy) return;
 
-	CallBPFunction(Enemy, TEXT("PlayAttackAnimation"));
+	double NewX = 0, NewY = 0, NewZ = 0;
+	Obj->TryGetNumberField(TEXT("newX"), NewX);
+	Obj->TryGetNumberField(TEXT("newY"), NewY);
+	Obj->TryGetNumberField(TEXT("newZ"), NewZ);
+
+	// Set TargetPosition for BP_EnemyCharacter Tick interpolation
+	SetBPVector(Enemy, TEXT("TargetPosition"), FVector((float)NewX, (float)NewY, (float)NewZ));
+	SetBPBool(Enemy, TEXT("bIsMoving"), true);
+
+	UE_LOG(LogEnemySubsystem, Verbose, TEXT("Knockback enemy %d to (%.0f, %.0f, %.0f)"),
+		EnemyId, NewX, NewY, NewZ);
+}
+
+// ============================================================
+// HandleSenseResult — show monster info popup (Wizard Sense / Sage Sense)
+// ============================================================
+
+void UEnemySubsystem::HandleSenseResult(const TSharedPtr<FJsonValue>& Data)
+{
+	if (!Data.IsValid()) return;
+	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
+	const TSharedPtr<FJsonObject>& Obj = *ObjPtr;
+
+	ShowSensePopup(Data);
+}
+
+void UEnemySubsystem::ShowSensePopup(const TSharedPtr<FJsonValue>& Data)
+{
+	HideSensePopup();
+
+	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
+	const TSharedPtr<FJsonObject>& Obj = *ObjPtr;
+
+	FSenseResultData SenseData;
+	double D = 0;
+	if (Obj->TryGetNumberField(TEXT("targetId"), D)) SenseData.TargetId = (int32)D;
+	Obj->TryGetStringField(TEXT("targetName"), SenseData.TargetName);
+	if (Obj->TryGetNumberField(TEXT("level"), D)) SenseData.Level = (int32)D;
+	Obj->TryGetNumberField(TEXT("health"), SenseData.Health);
+	Obj->TryGetNumberField(TEXT("maxHealth"), SenseData.MaxHealth);
+	Obj->TryGetStringField(TEXT("element"), SenseData.Element);
+	if (Obj->TryGetNumberField(TEXT("elementLevel"), D)) SenseData.ElementLevel = (int32)D;
+	Obj->TryGetStringField(TEXT("race"), SenseData.Race);
+	Obj->TryGetStringField(TEXT("size"), SenseData.Size);
+	if (Obj->TryGetNumberField(TEXT("hardDef"), D)) SenseData.HardDef = (int32)D;
+	if (Obj->TryGetNumberField(TEXT("hardMdef"), D)) SenseData.HardMdef = (int32)D;
+	if (Obj->TryGetNumberField(TEXT("str"), D)) SenseData.STR = (int32)D;
+	if (Obj->TryGetNumberField(TEXT("agi"), D)) SenseData.AGI = (int32)D;
+	if (Obj->TryGetNumberField(TEXT("vit"), D)) SenseData.VIT = (int32)D;
+	if (Obj->TryGetNumberField(TEXT("int"), D)) SenseData.INT = (int32)D;
+	if (Obj->TryGetNumberField(TEXT("dex"), D)) SenseData.DEX = (int32)D;
+	if (Obj->TryGetNumberField(TEXT("luk"), D)) SenseData.LUK = (int32)D;
+	if (Obj->TryGetNumberField(TEXT("baseExp"), D)) SenseData.BaseExp = (int32)D;
+	if (Obj->TryGetNumberField(TEXT("jobExp"), D)) SenseData.JobExp = (int32)D;
+
+	UWorld* World = GetWorld();
+	if (!World) return;
+	UGameViewportClient* VC = World->GetGameViewport();
+	if (!VC) return;
+
+	SensePopup = SNew(SSenseResultPopup)
+		.Subsystem(this)
+		.SenseData(SenseData);
+
+	// AlignmentWrapper with SelfHitTestInvisible — clicks pass through empty area to the game
+	SenseAlignWrapper =
+		SNew(SBox)
+		.HAlign(HAlign_Left)
+		.VAlign(VAlign_Top)
+		.Visibility(EVisibility::SelfHitTestInvisible)
+		[
+			SensePopup.ToSharedRef()
+		];
+
+	SenseOverlay = SNew(SWeakWidget).PossiblyNullContent(SenseAlignWrapper);
+	VC->AddViewportWidgetContent(SenseOverlay.ToSharedRef(), 24);
+	bSensePopupVisible = true;
+
+	UE_LOG(LogEnemySubsystem, Log, TEXT("Sense popup shown for %s (ID %d)"),
+		*SenseData.TargetName, SenseData.TargetId);
+}
+
+void UEnemySubsystem::HideSensePopup()
+{
+	if (!bSensePopupVisible) return;
+
+	if (SenseOverlay.IsValid())
+	{
+		if (UWorld* World = GetWorld())
+		{
+			if (UGameViewportClient* VC = World->GetGameViewport())
+			{
+				VC->RemoveViewportWidgetContent(SenseOverlay.ToSharedRef());
+			}
+		}
+	}
+	SensePopup.Reset();
+	SenseAlignWrapper.Reset();
+	SenseOverlay.Reset();
+	bSensePopupVisible = false;
+
+	UE_LOG(LogEnemySubsystem, Log, TEXT("Sense popup hidden."));
 }

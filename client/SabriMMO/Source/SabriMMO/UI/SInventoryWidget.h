@@ -11,6 +11,7 @@ class UInventorySubsystem;
 class SBox;
 class SVerticalBox;
 class SScrollBox;
+class SEditableTextBox;
 
 class SInventoryWidget : public SCompoundWidget
 {
@@ -29,6 +30,7 @@ private:
 	// ---- layout builders ----
 	TSharedRef<SWidget> BuildTitleBar();
 	TSharedRef<SWidget> BuildTabBar();
+	TSharedRef<SWidget> BuildToolbar();
 	TSharedRef<SWidget> BuildGridArea();
 	TSharedRef<SWidget> BuildBottomBar();
 	TSharedRef<SWidget> BuildItemSlot(int32 SlotIndex);
@@ -48,6 +50,16 @@ private:
 	int32 TooltipItemId = -1;
 	void ShowTooltip(const FInventoryItem& Item, const FGeometry& Geometry, const FVector2D& ScreenPos);
 	void HideTooltip();
+
+	// ---- split quantity popup (floating at icon position) ----
+	bool bSplitPopupActive = false;
+	int32 SplitSourceInventoryId = 0;
+	int32 SplitMaxQuantity = 0;
+	TSharedPtr<SEditableTextBox> SplitInputBox;
+	TSharedPtr<SBox> SplitPopupBox;
+	void ShowSplitPopup(int32 InventoryId, int32 MaxQty, const FVector2D& LocalPos);
+	void HideSplitPopup();
+	void ConfirmSplit();
 
 	// ---- item drag state ----
 	bool bDragInitiated = false;
@@ -75,6 +87,8 @@ private:
 	FVector2D GetContentSize() const;
 
 	// ---- input handling ----
+	virtual bool SupportsKeyboardFocus() const override { return true; }
+	virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
 	virtual FReply OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 	virtual FReply OnMouseButtonUp(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;
 	virtual FReply OnMouseMove(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent) override;

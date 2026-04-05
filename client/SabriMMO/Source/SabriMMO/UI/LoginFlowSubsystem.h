@@ -46,6 +46,7 @@ public:
 
 	// ---- Called by SLoginWidget ----
 	void OnLoginSubmitted(const FString& Username, const FString& Password, bool bRememberUsername);
+	void OnRegisterSubmitted(const FString& Username, const FString& Email, const FString& Password);
 	void OnExitRequested();
 
 	// ---- Called by SServerSelectWidget ----
@@ -96,6 +97,7 @@ private:
 	bool bWidgetsCreated = false;
 
 	// ---- Widgets (all owned by the subsystem via TSharedPtr) ----
+	TSharedPtr<SWidget> BackgroundWidget;
 	TSharedPtr<SLoginWidget> LoginWidget;
 	TSharedPtr<SServerSelectWidget> ServerSelectWidget;
 	TSharedPtr<SCharacterSelectWidget> CharacterSelectWidget;
@@ -103,16 +105,28 @@ private:
 	TSharedPtr<SLoadingOverlayWidget> LoadingOverlayWidget;
 
 	// Viewport wrappers (prevents GC, required for AddViewportWidgetContent)
+	TSharedPtr<SWidget> BackgroundViewportWidget;
 	TSharedPtr<SWidget> LoginViewportWidget;
 	TSharedPtr<SWidget> ServerSelectViewportWidget;
 	TSharedPtr<SWidget> CharacterSelectViewportWidget;
 	TSharedPtr<SWidget> CharacterCreateViewportWidget;
 	TSharedPtr<SWidget> LoadingOverlayViewportWidget;
 
+	// Background image brush (plain FSlateBrush — avoids deprecated FSlateDynamicImageBrush)
+	FSlateBrush BackgroundBrush;
+
+	UPROPERTY()
+	TObjectPtr<UTexture2D> BackgroundTexture;
+
+	void CreateBackgroundWidget(UGameViewportClient* VC);
+	void TryLoadBackgroundTexture(UGameViewportClient* VC, int32 RetriesLeft);
+	FTimerHandle BackgroundRetryTimer;
+
 	// Timer for entering world
 	FTimerHandle EnterWorldTimer;
 
-	// Track which level is the login level
-	static constexpr int32 LoginWidgetZOrder = 5;
-	static constexpr int32 OverlayWidgetZOrder = 50;
+	// Z-orders: Background covers all game widgets (Z 5-50), login widgets sit above it.
+	static constexpr int32 BackgroundZOrder = 200;
+	static constexpr int32 LoginWidgetZOrder = 201;
+	static constexpr int32 OverlayWidgetZOrder = 250;
 };

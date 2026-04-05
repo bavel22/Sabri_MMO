@@ -4,6 +4,7 @@
 
 #include "CombatStatsSubsystem.h"
 #include "SCombatStatsWidget.h"
+#include "SAdvancedStatsWidget.h"
 #include "MMOGameInstance.h"
 #include "SocketEventRouter.h"
 #include "Engine/World.h"
@@ -53,9 +54,13 @@ void UCombatStatsSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 
 void UCombatStatsSubsystem::Deinitialize()
 {
+	if (bAdvancedWidgetVisible)
+	{
+		ToggleAdvancedWidget();
+	}
 	if (bWidgetVisible)
 	{
-		ToggleWidget(); // Remove widget
+		ToggleWidget();
 	}
 
 	if (UWorld* World = GetWorld())
@@ -103,6 +108,7 @@ void UCombatStatsSubsystem::HandlePlayerStats(const TSharedPtr<FJsonValue>& Data
 		if ((*StatsObj)->TryGetNumberField(TEXT("level"), Val)) BaseLevel = (int32)Val;
 		if ((*StatsObj)->TryGetNumberField(TEXT("weaponATK"), Val)) WeaponATK = (int32)Val;
 		if ((*StatsObj)->TryGetNumberField(TEXT("passiveATK"), Val)) PassiveATK = (int32)Val;
+		if ((*StatsObj)->TryGetNumberField(TEXT("arrowATK"), Val)) ArrowATK = (int32)Val;
 		if ((*StatsObj)->TryGetNumberField(TEXT("hardDef"), Val)) HardDEF = (int32)Val;
 		if ((*StatsObj)->TryGetNumberField(TEXT("hardMdef"), Val)) HardMDEF = (int32)Val;
 		if ((*StatsObj)->TryGetNumberField(TEXT("weaponMATK"), Val)) WeaponMATK = (int32)Val;
@@ -151,6 +157,56 @@ void UCombatStatsSubsystem::HandlePlayerStats(const TSharedPtr<FJsonValue>& Data
 		if ((*DerivedObj)->TryGetNumberField(TEXT("matkMin"), Val)) MATKMin = (int32)Val;
 		if ((*DerivedObj)->TryGetNumberField(TEXT("matkMax"), Val)) MATKMax = (int32)Val;
 		if ((*DerivedObj)->TryGetNumberField(TEXT("aspd"), Val)) ASPD = (int32)Val;
+	}
+
+	// ── Parse elemental resistances ──
+	const TSharedPtr<FJsonObject>* ResistObj = nullptr;
+	if (Obj->TryGetObjectField(TEXT("elementResist"), ResistObj) && ResistObj)
+	{
+		double Val = 0;
+		if ((*ResistObj)->TryGetNumberField(TEXT("neutral"), Val)) ResistNeutral = (int32)Val;
+		if ((*ResistObj)->TryGetNumberField(TEXT("fire"), Val)) ResistFire = (int32)Val;
+		if ((*ResistObj)->TryGetNumberField(TEXT("water"), Val)) ResistWater = (int32)Val;
+		if ((*ResistObj)->TryGetNumberField(TEXT("earth"), Val)) ResistEarth = (int32)Val;
+		if ((*ResistObj)->TryGetNumberField(TEXT("wind"), Val)) ResistWind = (int32)Val;
+		if ((*ResistObj)->TryGetNumberField(TEXT("poison"), Val)) ResistPoison = (int32)Val;
+		if ((*ResistObj)->TryGetNumberField(TEXT("holy"), Val)) ResistHoly = (int32)Val;
+		if ((*ResistObj)->TryGetNumberField(TEXT("dark"), Val)) ResistDark = (int32)Val;
+		if ((*ResistObj)->TryGetNumberField(TEXT("ghost"), Val)) ResistGhost = (int32)Val;
+		if ((*ResistObj)->TryGetNumberField(TEXT("undead"), Val)) ResistUndead = (int32)Val;
+	}
+
+	// ── Parse block chance (Auto Guard) ──
+	{
+		double Val = 0;
+		if (Obj->TryGetNumberField(TEXT("blockChance"), Val)) BlockChance = (int32)Val;
+	}
+
+	// ── Parse advanced combat (race/size/element ATK/DEF) ──
+	const TSharedPtr<FJsonObject>* AdvObj = nullptr;
+	if (Obj->TryGetObjectField(TEXT("advancedCombat"), AdvObj) && AdvObj)
+	{
+		auto ParseMap = [](const TSharedPtr<FJsonObject>& Parent, const FString& Key, TMap<FString, int32>& OutMap)
+		{
+			OutMap.Empty();
+			const TSharedPtr<FJsonObject>* Sub = nullptr;
+			if (Parent->TryGetObjectField(Key, Sub) && Sub)
+			{
+				for (const auto& Pair : (*Sub)->Values)
+				{
+					double V = 0;
+					if (Pair.Value->TryGetNumber(V) && (int32)V != 0)
+					{
+						OutMap.Add(Pair.Key, (int32)V);
+					}
+				}
+			}
+		};
+		ParseMap(*AdvObj, TEXT("raceAtk"), RaceAtk);
+		ParseMap(*AdvObj, TEXT("raceDef"), RaceDef);
+		ParseMap(*AdvObj, TEXT("sizeAtk"), SizeAtk);
+		ParseMap(*AdvObj, TEXT("sizeDef"), SizeDef);
+		ParseMap(*AdvObj, TEXT("eleAtk"), EleAtk);
 	}
 
 	// ── Parse dual wield info ──
@@ -222,6 +278,48 @@ void UCombatStatsSubsystem::ToggleWidget()
 bool UCombatStatsSubsystem::IsWidgetVisible() const
 {
 	return bWidgetVisible;
+}
+
+// ============================================================
+// Advanced Stats Widget toggle
+// ============================================================
+
+void UCombatStatsSubsystem::ToggleAdvancedWidget()
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+	UGameViewportClient* ViewportClient = World->GetGameViewport();
+	if (!ViewportClient) return;
+
+	if (bAdvancedWidgetVisible)
+	{
+		if (AdvancedOverlay.IsValid())
+		{
+			ViewportClient->RemoveViewportWidgetContent(AdvancedOverlay.ToSharedRef());
+		}
+		AdvancedWidget.Reset();
+		AdvancedOverlay.Reset();
+		bAdvancedWidgetVisible = false;
+		UE_LOG(LogCombatStats, Log, TEXT("Advanced stats widget hidden."));
+	}
+	else
+	{
+		AdvancedWidget = SNew(SAdvancedStatsWidget).Subsystem(this);
+
+		AdvancedOverlay =
+			SNew(SWeakWidget)
+			.PossiblyNullContent(AdvancedWidget);
+
+		// Z-order 13 = just above combat stats (12)
+		ViewportClient->AddViewportWidgetContent(AdvancedOverlay.ToSharedRef(), 13);
+		bAdvancedWidgetVisible = true;
+		UE_LOG(LogCombatStats, Log, TEXT("Advanced stats widget shown (Z=13)."));
+	}
+}
+
+bool UCombatStatsSubsystem::IsAdvancedWidgetVisible() const
+{
+	return bAdvancedWidgetVisible;
 }
 
 // ============================================================

@@ -1,6 +1,6 @@
-// CameraSubsystem.h — RO-style camera control.
-// Right-click hold rotates camera yaw, mouse wheel zooms.
-// Fixed pitch angle (-55°). No Tick needed — rotation applied directly in handlers.
+// CameraSubsystem.h — RO Classic camera control (fully C++ owned).
+// Creates its own SpringArm + Camera on the pawn. No BP dependency.
+// Right-click hold rotates yaw, mouse wheel zooms, fixed -55° pitch.
 
 #pragma once
 
@@ -9,6 +9,8 @@
 #include "CameraSubsystem.generated.h"
 
 class USpringArmComponent;
+class UCameraComponent;
+class UPrimitiveComponent;
 
 UCLASS()
 class SABRIMMO_API UCameraSubsystem : public UWorldSubsystem
@@ -22,6 +24,7 @@ public:
 
 	// --- Public API (called by ASabriMMOCharacter input handlers) ---
 	bool IsRotatingCamera() const { return bIsRotatingCamera; }
+	bool DidRotateThisClick() const { return bDidRotateThisClick; }
 	void OnRightClickStarted();
 	void OnRightClickCompleted();
 	void OnMouseDelta(const FVector2D& Delta);
@@ -29,15 +32,24 @@ public:
 
 private:
 	bool bIsRotatingCamera = false;
+	bool bDidRotateThisClick = false;
 	float CurrentYaw = 0.f;
-	float ZoomSpeed = 80.f;
-	float MinArmLength = 200.f;
-	float MaxArmLength = 1500.f;
-	float FixedPitch = -55.f;
-	float RotationSensitivity = 0.6f;
+
+	// RO Classic camera defaults
+	static constexpr float DefaultArmLength = 1200.f;
+	static constexpr float MinArmLength = 200.f;
+	static constexpr float MaxArmLength = 1500.f;
+	static constexpr float FixedPitch = -55.f;
+	static constexpr float ZoomSpeed = 80.f;
+	static constexpr float RotationSensitivity = 0.6f;
 
 	TWeakObjectPtr<USpringArmComponent> CachedSpringArm;
 
-	USpringArmComponent* FindSpringArm() const;
-	void EnsureSpringArm();
+	void SetupCamera();
+	FTimerHandle SetupRetryTimer;
+	FTimerHandle OcclusionTickTimer;
+
+	// --- Occlusion transparency: hide actors between camera and player ---
+	void UpdateOcclusionTransparency();
+	TSet<TWeakObjectPtr<AActor>> OccludedActors;
 };

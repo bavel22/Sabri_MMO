@@ -77,6 +77,8 @@ void UHotbarSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	{
 		Router->RegisterHandler(TEXT("hotbar:alldata"), this,
 			[this](const TSharedPtr<FJsonValue>& D) { HandleHotbarAllData(D); });
+		Router->RegisterHandler(TEXT("hotbar:data"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleHotbarData(D); });
 	}
 
 	// Only show hotbar and request data if socket is connected (game level, not login)
@@ -200,9 +202,11 @@ void UHotbarSubsystem::HandleHotbarAllData(const TSharedPtr<FJsonValue>& Data)
 
 		if (SlotType == TEXT("skill"))
 		{
-			double SkillId = 0;
+			double SkillId = 0, SkillLevelD = 0;
 			Slot->TryGetNumberField(TEXT("skill_id"), SkillId);
+			Slot->TryGetNumberField(TEXT("skill_level"), SkillLevelD);
 			S.SkillId = (int32)SkillId;
+			S.SkillLevel = (int32)SkillLevelD;
 			Slot->TryGetStringField(TEXT("skill_name"), S.SkillName);
 
 			// Look up icon from SkillTreeSubsystem
@@ -254,6 +258,89 @@ void UHotbarSubsystem::HandleHotbarAllData(const TSharedPtr<FJsonValue>& Data)
 }
 
 // ============================================================
+// HandleHotbarData — single slot update from server
+// ============================================================
+
+void UHotbarSubsystem::HandleHotbarData(const TSharedPtr<FJsonValue>& Data)
+{
+	if (!Data.IsValid()) return;
+
+	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
+	const TSharedPtr<FJsonObject>& Obj = *ObjPtr;
+
+	double RowD = 0, SlotD = 0;
+	Obj->TryGetNumberField(TEXT("row_index"), RowD);
+	Obj->TryGetNumberField(TEXT("slot_index"), SlotD);
+
+	int32 Row = (int32)RowD;
+	int32 Col = (int32)SlotD;
+	if (Row < 0 || Row >= NUM_ROWS || Col < 0 || Col >= SLOTS_PER_ROW) return;
+
+	FHotbarSlot& S = Slots[Row][Col];
+	S.Clear();
+	S.RowIndex = Row;
+	S.SlotIndex = Col;
+
+	FString SlotType;
+	Obj->TryGetStringField(TEXT("slot_type"), SlotType);
+	S.SlotType = SlotType;
+
+	if (SlotType == TEXT("skill"))
+	{
+		double SkillIdD = 0, SkillLvD = 0;
+		Obj->TryGetNumberField(TEXT("skill_id"), SkillIdD);
+		Obj->TryGetNumberField(TEXT("skill_level"), SkillLvD);
+		S.SkillId = (int32)SkillIdD;
+		S.SkillLevel = (int32)SkillLvD;
+		Obj->TryGetStringField(TEXT("skill_name"), S.SkillName);
+
+		if (USkillTreeSubsystem* SkillSub = GetWorld()->GetSubsystem<USkillTreeSubsystem>())
+		{
+			const FSkillEntry* Entry = SkillSub->FindSkillEntry(S.SkillId);
+			if (Entry)
+			{
+				S.SkillIcon = Entry->Icon;
+				if (S.SkillName.IsEmpty()) S.SkillName = Entry->DisplayName;
+			}
+		}
+
+		UE_LOG(LogHotbar, Log, TEXT("HandleHotbarData: Row %d Slot %d = skill %s (id=%d)"), Row, Col, *S.SkillName, S.SkillId);
+	}
+	else if (SlotType == TEXT("item"))
+	{
+		double InvId = 0, ItemIdD = 0, Qty = 0;
+		Obj->TryGetNumberField(TEXT("inventory_id"), InvId);
+		Obj->TryGetNumberField(TEXT("item_id"), ItemIdD);
+		Obj->TryGetNumberField(TEXT("quantity"), Qty);
+		S.InventoryId = (int32)InvId;
+		S.ItemId = (int32)ItemIdD;
+		S.Quantity = (int32)Qty;
+		Obj->TryGetStringField(TEXT("item_name"), S.ItemName);
+
+		if (UInventorySubsystem* InvSub = GetWorld()->GetSubsystem<UInventorySubsystem>())
+		{
+			FInventoryItem* FoundItem = InvSub->FindItemByInventoryId(S.InventoryId);
+			if (FoundItem)
+			{
+				S.ItemIcon = FoundItem->Icon;
+				S.Quantity = FoundItem->Quantity;
+			}
+		}
+
+		UE_LOG(LogHotbar, Log, TEXT("HandleHotbarData: Row %d Slot %d = item %s (qty=%d)"), Row, Col, *S.ItemName, S.Quantity);
+	}
+	else
+	{
+		// empty or unknown — slot already cleared above
+		UE_LOG(LogHotbar, Log, TEXT("HandleHotbarData: Row %d Slot %d = cleared"), Row, Col);
+	}
+
+	DataVersion++;
+	OnHotbarDataUpdated.Broadcast();
+}
+
+// ============================================================
 // Slot operations
 // ============================================================
 
@@ -286,7 +373,7 @@ void UHotbarSubsystem::AssignItem(int32 RowIndex, int32 SlotIndex, const FInvent
 	UE_LOG(LogHotbar, Log, TEXT("AssignItem: row %d slot %d = %s (qty=%d)"), RowIndex, SlotIndex, *Item.Name, Item.Quantity);
 }
 
-void UHotbarSubsystem::AssignSkill(int32 RowIndex, int32 SlotIndex, int32 SkillId, const FString& SkillName, const FString& SkillIcon)
+void UHotbarSubsystem::AssignSkill(int32 RowIndex, int32 SlotIndex, int32 SkillId, const FString& SkillName, const FString& SkillIcon, int32 SkillLevel)
 {
 	if (RowIndex < 0 || RowIndex >= NUM_ROWS || SlotIndex < 0 || SlotIndex >= SLOTS_PER_ROW) return;
 
@@ -312,11 +399,12 @@ void UHotbarSubsystem::AssignSkill(int32 RowIndex, int32 SlotIndex, int32 SkillI
 		}
 	}
 
-	EmitSaveSkill(RowIndex, SlotIndex, SkillId, SkillName);
+	S.SkillLevel = SkillLevel;
+	EmitSaveSkill(RowIndex, SlotIndex, SkillId, SkillName, SkillLevel);
 	DataVersion++;
 	OnHotbarDataUpdated.Broadcast();
 
-	UE_LOG(LogHotbar, Log, TEXT("AssignSkill: row %d slot %d = %s (id=%d)"), RowIndex, SlotIndex, *SkillName, SkillId);
+	UE_LOG(LogHotbar, Log, TEXT("AssignSkill: row %d slot %d = %s Lv%d (id=%d)"), RowIndex, SlotIndex, *SkillName, SkillLevel, SkillId);
 }
 
 void UHotbarSubsystem::ClearSlot(int32 RowIndex, int32 SlotIndex)
@@ -345,8 +433,8 @@ void UHotbarSubsystem::ActivateSlot(int32 RowIndex, int32 SlotIndex)
 	{
 		if (USkillTreeSubsystem* SkillSub = GetWorld()->GetSubsystem<USkillTreeSubsystem>())
 		{
-			UE_LOG(LogHotbar, Log, TEXT("ActivateSlot: row %d slot %d → UseSkill(%d) %s"), RowIndex, SlotIndex, S.SkillId, *S.SkillName);
-			SkillSub->UseSkill(S.SkillId);
+			UE_LOG(LogHotbar, Log, TEXT("ActivateSlot: row %d slot %d → UseSkill(%d) Lv%d %s"), RowIndex, SlotIndex, S.SkillId, S.SkillLevel, *S.SkillName);
+			SkillSub->UseSkill(S.SkillId, S.SkillLevel);
 		}
 	}
 	else if (S.IsItem())
@@ -378,7 +466,7 @@ void UHotbarSubsystem::EmitSaveItem(int32 RowIndex, int32 SlotIndex, int32 Inven
 	GI->EmitSocketEvent(TEXT("hotbar:save"), Payload);
 }
 
-void UHotbarSubsystem::EmitSaveSkill(int32 RowIndex, int32 SlotIndex, int32 SkillId, const FString& SkillName)
+void UHotbarSubsystem::EmitSaveSkill(int32 RowIndex, int32 SlotIndex, int32 SkillId, const FString& SkillName, int32 SkillLevel)
 {
 	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
 	if (!GI) return;
@@ -388,6 +476,7 @@ void UHotbarSubsystem::EmitSaveSkill(int32 RowIndex, int32 SlotIndex, int32 Skil
 	Payload->SetNumberField(TEXT("slotIndex"), SlotIndex);
 	Payload->SetNumberField(TEXT("skillId"), SkillId);
 	Payload->SetStringField(TEXT("skillName"), SkillName);
+	Payload->SetNumberField(TEXT("skillLevel"), SkillLevel);
 	Payload->SetBoolField(TEXT("zeroBased"), true); // Tell server slotIndex is 0-based
 
 	GI->EmitSocketEvent(TEXT("hotbar:save_skill"), Payload);

@@ -1,12 +1,17 @@
-// CameraSubsystem.cpp — Camera rotation and zoom applied directly in input handlers.
-// No Tick/FTickableGameObject — rotation happens immediately when mouse moves.
+// CameraSubsystem.cpp — RO Classic camera. Fully C++ owned — finds or creates
+// SpringArm on the pawn, forces all settings. No dependency on BP components.
 
 #include "CameraSubsystem.h"
 #include "MMOGameInstance.h"
-#include "SabriMMOCharacter.h"
 #include "GameFramework/SpringArmComponent.h"
+#include "Camera/CameraComponent.h"
+#include "Camera/PlayerCameraManager.h"
 #include "GameFramework/PlayerController.h"
 #include "Engine/World.h"
+#include "TimerManager.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Components/PrimitiveComponent.h"
+#include "CollisionQueryParams.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogCamera, Log, All);
 
@@ -21,12 +26,127 @@ void UCameraSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	Super::OnWorldBeginPlay(InWorld);
 	UMMOGameInstance* GI = Cast<UMMOGameInstance>(InWorld.GetGameInstance());
 	if (!GI || !GI->IsSocketConnected()) return;
-	UE_LOG(LogCamera, Log, TEXT("CameraSubsystem started"));
+
+	// Pawn may not exist yet on BeginPlay — retry until found
+	InWorld.GetTimerManager().SetTimer(SetupRetryTimer,
+		FTimerDelegate::CreateLambda([this]()
+		{
+			SetupCamera();
+		}),
+		0.1f, true);
+
+	UE_LOG(LogCamera, Log, TEXT("CameraSubsystem started — waiting for pawn"));
 }
 
 void UCameraSubsystem::Deinitialize()
 {
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(SetupRetryTimer);
+		World->GetTimerManager().ClearTimer(OcclusionTickTimer);
+	}
+
+	// Restore any still-hidden actors
+	for (auto& WeakActor : OccludedActors)
+	{
+		if (AActor* Actor = WeakActor.Get())
+		{
+			Actor->SetActorHiddenInGame(false);
+		}
+	}
+	OccludedActors.Empty();
+
+	CachedSpringArm = nullptr;
 	Super::Deinitialize();
+}
+
+// ============================================================
+// SetupCamera — find or configure the SpringArm on the pawn
+// ============================================================
+
+void UCameraSubsystem::SetupCamera()
+{
+	if (CachedSpringArm.IsValid()) return; // Already set up
+
+	UWorld* World = GetWorld();
+	if (!World) return;
+	APlayerController* PC = World->GetFirstPlayerController();
+	if (!PC) return;
+	APawn* Pawn = PC->GetPawn();
+	if (!Pawn) return; // Pawn not spawned yet — timer will retry
+
+	// Stop retrying
+	World->GetTimerManager().ClearTimer(SetupRetryTimer);
+
+	// Find all SpringArms on the pawn
+	TArray<USpringArmComponent*> SpringArms;
+	Pawn->GetComponents<USpringArmComponent>(SpringArms);
+
+	USpringArmComponent* SA = nullptr;
+
+	// Prefer the BP "SpringArm" (the game camera arm)
+	for (USpringArmComponent* Candidate : SpringArms)
+	{
+		if (Candidate->GetName() == TEXT("SpringArm"))
+		{
+			SA = Candidate;
+			break;
+		}
+	}
+
+	// Fallback: use any SpringArm that has a camera attached
+	if (!SA)
+	{
+		for (USpringArmComponent* Candidate : SpringArms)
+		{
+			TArray<USceneComponent*> Children;
+			Candidate->GetChildrenComponents(false, Children);
+			for (USceneComponent* Child : Children)
+			{
+				if (Cast<UCameraComponent>(Child))
+				{
+					SA = Candidate;
+					break;
+				}
+			}
+			if (SA) break;
+		}
+	}
+
+	// Last fallback: first SpringArm
+	if (!SA && SpringArms.Num() > 0)
+	{
+		SA = SpringArms[0];
+	}
+
+	if (!SA)
+	{
+		UE_LOG(LogCamera, Error, TEXT("No SpringArmComponent found on pawn %s!"), *Pawn->GetName());
+		return;
+	}
+
+	// Force ALL settings — don't trust BP defaults
+	CachedSpringArm = SA;
+	CurrentYaw = 0.f;
+
+	SA->TargetArmLength = DefaultArmLength;
+	SA->SetRelativeRotation(FRotator(FixedPitch, CurrentYaw, 0.f));
+	SA->bUsePawnControlRotation = false;
+	SA->bInheritPitch = false;
+	SA->bInheritYaw = false;
+	SA->bInheritRoll = false;
+	SA->bDoCollisionTest = false;
+	SA->bEnableCameraLag = false;
+	SA->bEnableCameraRotationLag = false;
+
+	// Start occlusion transparency tick (every 0.1s — fast enough to feel responsive)
+	World->GetTimerManager().SetTimer(OcclusionTickTimer, FTimerDelegate::CreateLambda([this]()
+	{
+		UpdateOcclusionTransparency();
+	}), 0.1f, true);
+
+	UE_LOG(LogCamera, Log, TEXT("RO Classic camera configured: pitch=%.0f, yaw=%.0f, arm=%.0f on %s"),
+		FixedPitch, CurrentYaw, SA->TargetArmLength, *SA->GetName());
 }
 
 // ============================================================
@@ -36,7 +156,7 @@ void UCameraSubsystem::Deinitialize()
 void UCameraSubsystem::OnRightClickStarted()
 {
 	bIsRotatingCamera = true;
-	EnsureSpringArm();
+	bDidRotateThisClick = false;
 }
 
 void UCameraSubsystem::OnRightClickCompleted()
@@ -49,10 +169,9 @@ void UCameraSubsystem::OnMouseDelta(const FVector2D& Delta)
 	if (!bIsRotatingCamera) return;
 
 	USpringArmComponent* SA = CachedSpringArm.Get();
-	if (!SA) { EnsureSpringArm(); SA = CachedSpringArm.Get(); }
 	if (!SA) return;
 
-	// Apply yaw rotation immediately (no Tick delay)
+	bDidRotateThisClick = true;
 	CurrentYaw += Delta.X * RotationSensitivity;
 	SA->SetRelativeRotation(FRotator(FixedPitch, CurrentYaw, 0.f));
 }
@@ -60,7 +179,6 @@ void UCameraSubsystem::OnMouseDelta(const FVector2D& Delta)
 void UCameraSubsystem::OnZoom(float AxisValue)
 {
 	USpringArmComponent* SA = CachedSpringArm.Get();
-	if (!SA) { EnsureSpringArm(); SA = CachedSpringArm.Get(); }
 	if (!SA) return;
 
 	float NewLength = SA->TargetArmLength - (AxisValue * ZoomSpeed);
@@ -68,61 +186,71 @@ void UCameraSubsystem::OnZoom(float AxisValue)
 }
 
 // ============================================================
-// Helpers
+// Occlusion Transparency — fade environment meshes blocking
+// the camera's view of the player character
 // ============================================================
 
-void UCameraSubsystem::EnsureSpringArm()
-{
-	if (CachedSpringArm.IsValid()) return;
-
-	USpringArmComponent* SA = FindSpringArm();
-	if (!SA) return;
-
-	CachedSpringArm = SA;
-	FRotator Rot = SA->GetRelativeRotation();
-	CurrentYaw = Rot.Yaw;
-	SA->bUsePawnControlRotation = false;
-	SA->bInheritPitch = false;
-	SA->bInheritYaw = false;
-	SA->bInheritRoll = false;
-	SA->SetRelativeRotation(FRotator(FixedPitch, CurrentYaw, 0.f));
-	UE_LOG(LogCamera, Log, TEXT("SpringArm configured (pitch=%.0f, yaw=%.0f, arm=%.0f)"),
-		FixedPitch, CurrentYaw, SA->TargetArmLength);
-}
-
-USpringArmComponent* UCameraSubsystem::FindSpringArm() const
+void UCameraSubsystem::UpdateOcclusionTransparency()
 {
 	UWorld* World = GetWorld();
-	if (!World) return nullptr;
+	if (!World) return;
+
 	APlayerController* PC = World->GetFirstPlayerController();
-	if (!PC) return nullptr;
+	if (!PC || !PC->PlayerCameraManager) return;
+
 	APawn* Pawn = PC->GetPawn();
-	if (!Pawn) return nullptr;
+	if (!Pawn) return;
 
-	// BP_MMOCharacter has TWO SpringArms:
-	//   1. C++ "CameraBoom" (TargetArmLength=400, NOT used for game camera)
-	//   2. BP "SpringArm" (TargetArmLength=1200, the ACTUAL game camera)
-	// We must find the BP one, not the C++ one.
-	TArray<USpringArmComponent*> SpringArms;
-	Pawn->GetComponents<USpringArmComponent>(SpringArms);
+	FVector CameraLoc = PC->PlayerCameraManager->GetCameraLocation();
+	FVector PlayerLoc = Pawn->GetActorLocation() + FVector(0.f, 0.f, 80.f);
 
-	// Prefer the BP SpringArm named "SpringArm" (the game camera)
-	for (USpringArmComponent* SA : SpringArms)
+	// Multi-trace from camera to player
+	FCollisionQueryParams QueryParams;
+	QueryParams.AddIgnoredActor(Pawn);
+	QueryParams.bTraceComplex = false;
+
+	TArray<FHitResult> Hits;
+	World->LineTraceMultiByChannel(Hits, CameraLoc, PlayerLoc, ECC_Visibility, QueryParams);
+
+	// Collect currently occluding actors (use actor granularity, not component)
+	TSet<AActor*> CurrentlyOccluding;
+	for (const FHitResult& Hit : Hits)
 	{
-		if (SA->GetName() == TEXT("SpringArm"))
-			return SA;
-	}
+		AActor* HitActor = Hit.GetActor();
+		if (!HitActor || HitActor == Pawn) continue;
 
-	// Fallback: return the one with largest arm length (the actual camera)
-	USpringArmComponent* Best = nullptr;
-	float BestLength = 0.f;
-	for (USpringArmComponent* SA : SpringArms)
-	{
-		if (SA->TargetArmLength > BestLength)
+		// Skip sprites (CustomDepthStencilValue = 1 on their components)
+		UPrimitiveComponent* HitComp = Hit.GetComponent();
+		if (HitComp && HitComp->bRenderCustomDepth && HitComp->CustomDepthStencilValue == 1)
+			continue;
+
+		CurrentlyOccluding.Add(HitActor);
+
+		// Hide this actor if not already hidden
+		if (!OccludedActors.Contains(HitActor))
 		{
-			BestLength = SA->TargetArmLength;
-			Best = SA;
+			HitActor->SetActorHiddenInGame(true);
+			OccludedActors.Add(HitActor);
 		}
 	}
-	return Best ? Best : (SpringArms.Num() > 0 ? SpringArms[0] : nullptr);
+
+	// Restore actors no longer occluding
+	TArray<TWeakObjectPtr<AActor>> ToRemove;
+	for (auto& WeakActor : OccludedActors)
+	{
+		AActor* Actor = WeakActor.Get();
+		if (!Actor || !CurrentlyOccluding.Contains(Actor))
+		{
+			if (Actor)
+			{
+				Actor->SetActorHiddenInGame(false);
+			}
+			ToRemove.Add(WeakActor);
+		}
+	}
+
+	for (auto& Key : ToRemove)
+	{
+		OccludedActors.Remove(Key);
+	}
 }

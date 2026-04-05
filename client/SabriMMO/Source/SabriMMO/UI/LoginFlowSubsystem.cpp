@@ -8,11 +8,19 @@
 #include "MMOHttpManager.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "Engine/Texture2D.h"
 #include "Kismet/GameplayStatics.h"
 #include "TimerManager.h"
 #include "Widgets/SWeakWidget.h"
+#include "Widgets/Layout/SBox.h"
+#include "Widgets/Layout/SBorder.h"
+#include "Widgets/Layout/SScaleBox.h"
+#include "Widgets/Images/SImage.h"
+#include "Styling/CoreStyle.h"
 #include "Framework/Application/SlateApplication.h"
 #include "GenericPlatform/GenericPlatformMisc.h"
+
+DEFINE_LOG_CATEGORY_STATIC(LogLoginFlow, Log, All);
 
 // ============================================================
 // Lifecycle
@@ -36,18 +44,26 @@ void ULoginFlowSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
 	Super::OnWorldBeginPlay(InWorld);
 
-	// If the persistent socket is already connected, this is a game level — skip login UI.
-	// (Login level is loaded before ConnectSocket() is called from OnPlayCharacter.)
-	if (UMMOGameInstance* DetectGI = Cast<UMMOGameInstance>(InWorld.GetGameInstance()))
+	UMMOGameInstance* DetectGI = Cast<UMMOGameInstance>(InWorld.GetGameInstance());
+
+	// If socket is connected AND we're NOT returning to char select, this is a game level — skip.
+	if (DetectGI && DetectGI->IsSocketConnected() && !DetectGI->bReturningToCharSelect)
 	{
-		if (DetectGI->IsSocketConnected())
-		{
-			UE_LOG(LogTemp, Log, TEXT("[LoginFlow] Game level detected (socket already connected). Skipping login UI."));
-			return;
-		}
+		UE_LOG(LogLoginFlow, Log, TEXT("[LoginFlow] Game level detected (socket already connected). Skipping login UI."));
+		return;
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[LoginFlow] Login level detected. Initializing login flow..."));
+	// Detect return-from-game path (ESC → Character Select)
+	const bool bReturnToCharSelect = DetectGI && DetectGI->bReturningToCharSelect;
+	if (bReturnToCharSelect)
+	{
+		UE_LOG(LogLoginFlow, Log, TEXT("[LoginFlow] Returning to character select from game."));
+		DetectGI->bReturningToCharSelect = false;  // Consume the flag
+	}
+	else
+	{
+		UE_LOG(LogLoginFlow, Log, TEXT("[LoginFlow] Login level detected. Initializing login flow..."));
+	}
 
 	UMMOGameInstance* GI = GetGI();
 	if (!GI) return;
@@ -55,6 +71,10 @@ void ULoginFlowSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	// Create all widgets and add to viewport
 	UGameViewportClient* ViewportClient = InWorld.GetGameViewport();
 	if (!ViewportClient) return;
+
+	// --- Fullscreen Background (below all login widgets) ---
+	// Deferred — viewport and textures are not ready during OnWorldBeginPlay in standalone.
+	TryLoadBackgroundTexture(ViewportClient, 15);
 
 	// --- Login Widget ---
 	LoginWidget = SNew(SLoginWidget).Subsystem(this);
@@ -93,16 +113,6 @@ void ULoginFlowSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	GI->OnCharacterDeleteSuccess.AddDynamic(this, &ULoginFlowSubsystem::HandleCharacterDeleteSuccess);
 	GI->OnCharacterDeleteFailed.AddDynamic(this, &ULoginFlowSubsystem::HandleCharacterDeleteFailed);
 
-	// Pre-fill remembered username
-	if (GI->bRememberUsername && !GI->RememberedUsername.IsEmpty())
-	{
-		LoginWidget->SetUsername(GI->RememberedUsername);
-		LoginWidget->SetRememberUsername(true);
-	}
-
-	// Start at login screen
-	TransitionTo(ELoginFlowState::Login);
-
 	// Set input mode to UI only for the login level
 	if (APlayerController* PC = InWorld.GetFirstPlayerController())
 	{
@@ -110,6 +120,25 @@ void ULoginFlowSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 		PC->SetInputMode(InputMode);
 		PC->SetShowMouseCursor(true);
+	}
+
+	if (bReturnToCharSelect)
+	{
+		// Skip login + server select — go straight to character select.
+		// Re-fetch character list (stats may have changed in-game).
+		ShowLoadingOverlay(TEXT("Loading characters..."));
+		UHttpManager::GetCharacters(GetWorld());
+		// HandleCharacterListReceived will TransitionTo(CharacterSelect) when data arrives.
+	}
+	else
+	{
+		// Normal fresh login flow
+		if (GI->bRememberUsername && !GI->RememberedUsername.IsEmpty())
+		{
+			LoginWidget->SetUsername(GI->RememberedUsername);
+			LoginWidget->SetRememberUsername(true);
+		}
+		TransitionTo(ELoginFlowState::Login);
 	}
 }
 
@@ -130,6 +159,7 @@ void ULoginFlowSubsystem::Deinitialize()
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(EnterWorldTimer);
+		World->GetTimerManager().ClearTimer(BackgroundRetryTimer);
 	}
 
 	// Remove widgets from viewport
@@ -137,6 +167,7 @@ void ULoginFlowSubsystem::Deinitialize()
 	{
 		if (UGameViewportClient* VC = World->GetGameViewport())
 		{
+			if (BackgroundViewportWidget.IsValid()) VC->RemoveViewportWidgetContent(BackgroundViewportWidget.ToSharedRef());
 			if (LoginViewportWidget.IsValid()) VC->RemoveViewportWidgetContent(LoginViewportWidget.ToSharedRef());
 			if (ServerSelectViewportWidget.IsValid()) VC->RemoveViewportWidgetContent(ServerSelectViewportWidget.ToSharedRef());
 			if (CharacterSelectViewportWidget.IsValid()) VC->RemoveViewportWidgetContent(CharacterSelectViewportWidget.ToSharedRef());
@@ -145,6 +176,8 @@ void ULoginFlowSubsystem::Deinitialize()
 		}
 	}
 
+	BackgroundWidget.Reset();
+	BackgroundBrush = FSlateBrush();
 	LoginWidget.Reset();
 	ServerSelectWidget.Reset();
 	CharacterSelectWidget.Reset();
@@ -165,7 +198,7 @@ void ULoginFlowSubsystem::TransitionTo(ELoginFlowState NewState)
 	HideAllWidgets();
 	CurrentState = NewState;
 
-	UE_LOG(LogTemp, Log, TEXT("[LoginFlow] Transitioning to state: %d"), (int32)NewState);
+	UE_LOG(LogLoginFlow, Log, TEXT("[LoginFlow] Transitioning to state: %d"), (int32)NewState);
 
 	switch (NewState)
 	{
@@ -270,6 +303,12 @@ void ULoginFlowSubsystem::OnLoginSubmitted(const FString& Username, const FStrin
 	UHttpManager::LoginUser(GetWorld(), Username, Password);
 }
 
+void ULoginFlowSubsystem::OnRegisterSubmitted(const FString& Username, const FString& Email, const FString& Password)
+{
+	ShowLoadingOverlay(TEXT("Creating account..."));
+	UHttpManager::RegisterUser(GetWorld(), Username, Email, Password);
+}
+
 void ULoginFlowSubsystem::OnExitRequested()
 {
 	FPlatformMisc::RequestExit(false);
@@ -309,8 +348,17 @@ void ULoginFlowSubsystem::OnPlayCharacter(const FCharacterData& Character)
 	GI->PendingSpawnLocation = FVector(Character.X, Character.Y, Character.Z);
 	GI->bIsZoneTransitioning = true;
 
-	// Connect persistent socket before level transition — survives OpenLevel
-	GI->ConnectSocket();
+	if (GI->IsSocketConnected())
+	{
+		// Socket already connected (returning from game via ESC menu).
+		// Just re-emit player:join with the new character data.
+		GI->EmitPlayerJoin();
+	}
+	else
+	{
+		// Fresh login — connect socket (OnConnected callback will emit player:join).
+		GI->ConnectSocket();
+	}
 
 	TransitionTo(ELoginFlowState::EnteringWorld);
 }
@@ -328,6 +376,13 @@ void ULoginFlowSubsystem::OnCreateCharacterRequested()
 
 void ULoginFlowSubsystem::OnBackToServerSelect()
 {
+	// If socket is connected (returned from game via ESC), disconnect it
+	UMMOGameInstance* GI = GetGI();
+	if (GI && GI->IsSocketConnected())
+	{
+		GI->DisconnectSocket();
+	}
+
 	// Re-fetch servers for fresh population data
 	ShowLoadingOverlay(TEXT("Fetching server list..."));
 	UHttpManager::GetServerList(GetWorld());
@@ -357,7 +412,7 @@ void ULoginFlowSubsystem::OnCreateCharacterCancelled()
 
 void ULoginFlowSubsystem::HandleLoginSuccess()
 {
-	UE_LOG(LogTemp, Log, TEXT("[LoginFlow] Login successful. Fetching server list..."));
+	UE_LOG(LogLoginFlow, Log, TEXT("[LoginFlow] Login successful. Fetching server list..."));
 	HideLoadingOverlay();
 
 	// Save remembered username after successful login
@@ -373,7 +428,7 @@ void ULoginFlowSubsystem::HandleLoginSuccess()
 
 void ULoginFlowSubsystem::HandleLoginFailedWithReason(const FString& ErrorMessage)
 {
-	UE_LOG(LogTemp, Warning, TEXT("[LoginFlow] Login failed: %s"), *ErrorMessage);
+	UE_LOG(LogLoginFlow, Warning, TEXT("[LoginFlow] Login failed: %s"), *ErrorMessage);
 	HideLoadingOverlay();
 
 	if (CurrentState == ELoginFlowState::Login && LoginWidget.IsValid())
@@ -384,7 +439,7 @@ void ULoginFlowSubsystem::HandleLoginFailedWithReason(const FString& ErrorMessag
 
 void ULoginFlowSubsystem::HandleServerListReceived(const TArray<FServerInfo>& Servers)
 {
-	UE_LOG(LogTemp, Log, TEXT("[LoginFlow] Server list received: %d servers"), Servers.Num());
+	UE_LOG(LogLoginFlow, Log, TEXT("[LoginFlow] Server list received: %d servers"), Servers.Num());
 	HideLoadingOverlay();
 
 	if (ServerSelectWidget.IsValid())
@@ -397,7 +452,7 @@ void ULoginFlowSubsystem::HandleServerListReceived(const TArray<FServerInfo>& Se
 
 void ULoginFlowSubsystem::HandleCharacterListReceived()
 {
-	UE_LOG(LogTemp, Log, TEXT("[LoginFlow] Character list received"));
+	UE_LOG(LogLoginFlow, Log, TEXT("[LoginFlow] Character list received"));
 	HideLoadingOverlay();
 
 	UMMOGameInstance* GI = GetGI();
@@ -411,7 +466,7 @@ void ULoginFlowSubsystem::HandleCharacterListReceived()
 
 void ULoginFlowSubsystem::HandleCharacterCreated()
 {
-	UE_LOG(LogTemp, Log, TEXT("[LoginFlow] Character created. Refreshing list..."));
+	UE_LOG(LogLoginFlow, Log, TEXT("[LoginFlow] Character created. Refreshing list..."));
 	// Re-fetch characters to get the new one
 	ShowLoadingOverlay(TEXT("Loading characters..."));
 	UHttpManager::GetCharacters(GetWorld());
@@ -419,7 +474,7 @@ void ULoginFlowSubsystem::HandleCharacterCreated()
 
 void ULoginFlowSubsystem::HandleCharacterCreateFailed(const FString& ErrorMessage)
 {
-	UE_LOG(LogTemp, Warning, TEXT("[LoginFlow] Character creation failed: %s"), *ErrorMessage);
+	UE_LOG(LogLoginFlow, Warning, TEXT("[LoginFlow] Character creation failed: %s"), *ErrorMessage);
 	HideLoadingOverlay();
 
 	if (CurrentState == ELoginFlowState::CharacterCreate && CharacterCreateWidget.IsValid())
@@ -430,7 +485,7 @@ void ULoginFlowSubsystem::HandleCharacterCreateFailed(const FString& ErrorMessag
 
 void ULoginFlowSubsystem::HandleCharacterDeleteSuccess(const FString& CharacterName)
 {
-	UE_LOG(LogTemp, Log, TEXT("[LoginFlow] Character deleted: %s. Refreshing list..."), *CharacterName);
+	UE_LOG(LogLoginFlow, Log, TEXT("[LoginFlow] Character deleted: %s. Refreshing list..."), *CharacterName);
 
 	// Close the delete confirmation overlay
 	if (CharacterSelectWidget.IsValid())
@@ -445,13 +500,97 @@ void ULoginFlowSubsystem::HandleCharacterDeleteSuccess(const FString& CharacterN
 
 void ULoginFlowSubsystem::HandleCharacterDeleteFailed(const FString& ErrorMessage)
 {
-	UE_LOG(LogTemp, Warning, TEXT("[LoginFlow] Character deletion failed: %s"), *ErrorMessage);
+	UE_LOG(LogLoginFlow, Warning, TEXT("[LoginFlow] Character deletion failed: %s"), *ErrorMessage);
 	HideLoadingOverlay();
 
 	if (CharacterSelectWidget.IsValid())
 	{
 		CharacterSelectWidget->ShowStatusMessage(ErrorMessage);
 	}
+}
+
+// ============================================================
+// Background
+// ============================================================
+
+void ULoginFlowSubsystem::TryLoadBackgroundTexture(UGameViewportClient* VC, int32 RetriesLeft)
+{
+	if (!VC) return;
+
+	static const TCHAR* BackgroundPaths[] = {
+		TEXT("/Game/SabriMMO/Textures/UI/T_LoginBackground.T_LoginBackground"),
+		TEXT("/Game/SabriMMO/Textures/LoadingScreens/T_Loading_00.T_Loading_00"),
+		TEXT("/Game/SabriMMO/Textures/LoadingScreens/T_Loading_01.T_Loading_01"),
+	};
+
+	for (const TCHAR* Path : BackgroundPaths)
+	{
+		UTexture2D* Tex = Cast<UTexture2D>(StaticLoadObject(UTexture2D::StaticClass(), nullptr, Path));
+		if (Tex && Tex->GetSizeX() > 64)
+		{
+			BackgroundTexture = Tex;
+			break;
+		}
+	}
+
+	if (BackgroundTexture)
+	{
+		UE_LOG(LogLoginFlow, Log, TEXT("[LoginFlow] Background texture loaded %dx%d"),
+			BackgroundTexture->GetSizeX(), BackgroundTexture->GetSizeY());
+		CreateBackgroundWidget(VC);
+	}
+	else if (RetriesLeft > 0)
+	{
+		// Texture not ready yet — retry in 0.2s
+		UE_LOG(LogLoginFlow, Log, TEXT("[LoginFlow] Background texture not ready, retrying (%d attempts left)"), RetriesLeft);
+		if (UWorld* World = GetWorld())
+		{
+			World->GetTimerManager().SetTimer(BackgroundRetryTimer, [this, VC, RetriesLeft]()
+			{
+				TryLoadBackgroundTexture(VC, RetriesLeft - 1);
+			}, 0.2f, false);
+		}
+	}
+	else
+	{
+		// All retries exhausted — show fallback dark background
+		UE_LOG(LogLoginFlow, Warning, TEXT("[LoginFlow] Background texture never loaded at full resolution, using dark fallback"));
+		CreateBackgroundWidget(VC);
+	}
+}
+
+void ULoginFlowSubsystem::CreateBackgroundWidget(UGameViewportClient* VC)
+{
+	if (!VC) return;
+
+	if (BackgroundTexture)
+	{
+		BackgroundBrush.SetResourceObject(BackgroundTexture);
+		BackgroundBrush.ImageSize = FVector2D(BackgroundTexture->GetSizeX(), BackgroundTexture->GetSizeY());
+		BackgroundBrush.DrawAs = ESlateBrushDrawType::Image;
+		BackgroundBrush.Tiling = ESlateBrushTileType::NoTile;
+
+		BackgroundWidget =
+			SNew(SScaleBox)
+			.Stretch(EStretch::ScaleToFill)
+			.HAlign(HAlign_Center)
+			.VAlign(VAlign_Center)
+			[
+				SNew(SImage)
+				.Image(&BackgroundBrush)
+			];
+	}
+	else
+	{
+		static const FLinearColor DarkBg(0.05f, 0.03f, 0.02f, 1.f);
+		BackgroundWidget =
+			SNew(SBorder)
+			.BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
+			.BorderBackgroundColor(DarkBg);
+	}
+
+	BackgroundViewportWidget = SNew(SWeakWidget).PossiblyNullContent(BackgroundWidget);
+	VC->AddViewportWidgetContent(BackgroundViewportWidget.ToSharedRef(), BackgroundZOrder);
 }
 
 // ============================================================

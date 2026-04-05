@@ -56,6 +56,9 @@ public:
 	// Check if a player is currently hidden (Hiding/Cloaking)
 	bool IsPlayerHidden(int32 CharacterId) const;
 
+	// Get all players (for minimap iteration)
+	const TMap<int32, FPlayerEntry>& GetAllPlayers() const { return Players; }
+
 private:
 	// Entity registry: server character ID -> FPlayerEntry (actor + typed data)
 	TMap<int32, FPlayerEntry> Players;

@@ -3,6 +3,8 @@
 #include "SkillVFXSubsystem.h"
 #include "CastingCircleActor.h"
 #include "MMOGameInstance.h"
+#include "UI/EnemySubsystem.h"
+#include "UI/OtherPlayerSubsystem.h"
 #include "CharacterData.h"
 #include "SocketEventRouter.h"
 #include "NiagaraComponent.h"
@@ -525,12 +527,12 @@ void USkillVFXSubsystem::HandleBuffApplied(const TSharedPtr<FJsonValue>& Data)
 		// Remove any existing effect for this target+skill combo first
 		if (TWeakObjectPtr<UParticleSystemComponent>* OldCascade = ActiveCascadeBuffs.Find(Key))
 		{
-			if (OldCascade->IsValid()) { OldCascade->Get()->DeactivateImmediate(); OldCascade->Get()->DestroyComponent(); }
+			if (UParticleSystemComponent* Comp = OldCascade->IsValid() ? OldCascade->Get() : nullptr) { Comp->DeactivateImmediate(); Comp->DestroyComponent(); }
 			ActiveCascadeBuffs.Remove(Key);
 		}
 		if (TWeakObjectPtr<UNiagaraComponent>* OldNiagara = ActiveBuffAuras.Find(Key))
 		{
-			if (OldNiagara->IsValid()) { OldNiagara->Get()->DeactivateImmediate(); OldNiagara->Get()->DestroyComponent(); }
+			if (UNiagaraComponent* Comp = OldNiagara->IsValid() ? OldNiagara->Get() : nullptr) { Comp->DeactivateImmediate(); Comp->DestroyComponent(); }
 			ActiveBuffAuras.Remove(Key);
 		}
 
@@ -612,10 +614,10 @@ void USkillVFXSubsystem::HandleBuffRemoved(const TSharedPtr<FJsonValue>& Data)
 	// Clean up Niagara buff
 	if (TWeakObjectPtr<UNiagaraComponent>* Found = ActiveBuffAuras.Find(Key))
 	{
-		if (Found->IsValid())
+		if (UNiagaraComponent* Comp = Found->IsValid() ? Found->Get() : nullptr)
 		{
-			Found->Get()->DeactivateImmediate();
-			Found->Get()->DestroyComponent();
+			Comp->DeactivateImmediate();
+			Comp->DestroyComponent();
 		}
 		ActiveBuffAuras.Remove(Key);
 	}
@@ -623,10 +625,10 @@ void USkillVFXSubsystem::HandleBuffRemoved(const TSharedPtr<FJsonValue>& Data)
 	// Clean up Cascade buff (Frost Diver, etc.)
 	if (TWeakObjectPtr<UParticleSystemComponent>* CascadeFound = ActiveCascadeBuffs.Find(Key))
 	{
-		if (CascadeFound->IsValid())
+		if (UParticleSystemComponent* Comp = CascadeFound->IsValid() ? CascadeFound->Get() : nullptr)
 		{
-			CascadeFound->Get()->DeactivateImmediate();
-			CascadeFound->Get()->DestroyComponent();
+			Comp->DeactivateImmediate();
+			Comp->DestroyComponent();
 		}
 		ActiveCascadeBuffs.Remove(Key);
 	}
@@ -767,10 +769,10 @@ void USkillVFXSubsystem::HandleGroundEffectRemoved(const TSharedPtr<FJsonValue>&
 	auto& CascadeMap = GetCascadeGroundEffects();
 	if (TWeakObjectPtr<UParticleSystemComponent>* Found = CascadeMap.Find(EffectId))
 	{
-		if (Found->IsValid())
+		if (UParticleSystemComponent* Comp = Found->IsValid() ? Found->Get() : nullptr)
 		{
-			Found->Get()->DeactivateImmediate();
-			Found->Get()->DestroyComponent();
+			Comp->DeactivateImmediate();
+			Comp->DestroyComponent();
 		}
 		CascadeMap.Remove(EffectId);
 
@@ -876,12 +878,14 @@ void USkillVFXSubsystem::SpawnBoltFromSky(FVector TargetLocation, const FSkillVF
 
 				if (bUseCascade)
 				{
+					if (!IsValid(CascadeSys)) return;
 					UParticleSystemComponent* PSC = UGameplayStatics::SpawnEmitterAtLocation(
 						W, CascadeSys, SpawnLoc, SpawnRot, BoltScale, false);
 					MovingComp = PSC;
 				}
 				else
 				{
+					if (!IsValid(NiagaraSys)) return;
 					UNiagaraComponent* NComp = SpawnNiagaraAtLocation(NiagaraSys, SpawnLoc, SpawnRot, BoltScale);
 					if (NComp) SetNiagaraColor(NComp, CapturedConfig.PrimaryColor);
 					MovingComp = NComp;
@@ -1617,34 +1621,11 @@ void USkillVFXSubsystem::SpawnVFXAttached(const FSkillVFXConfig& Config, USceneC
 
 AActor* USkillVFXSubsystem::FindEnemyActorById(int32 EnemyId) const
 {
-	// BP_EnemyCharacter stores server ID in a Blueprint variable "EnemyId".
-	// Use property reflection to read it (same approach as SkillTreeSubsystem::GetEnemyIdFromActor).
+	// Direct subsystem lookup — O(1) instead of O(N) world scan
 	UWorld* World = GetWorld();
 	if (!World) return nullptr;
-
-	for (TActorIterator<AActor> It(World); It; ++It)
-	{
-		AActor* Actor = *It;
-		// Try reading the "EnemyId" Blueprint variable via reflection
-		static const FName PropNames[] = { FName("EnemyId"), FName("EnemyID"), FName("enemyId") };
-		for (const FName& PropName : PropNames)
-		{
-			FProperty* Prop = Actor->GetClass()->FindPropertyByName(PropName);
-			if (Prop)
-			{
-				FIntProperty* IntProp = CastField<FIntProperty>(Prop);
-				if (IntProp)
-				{
-					int32 Value = IntProp->GetPropertyValue_InContainer(Actor);
-					if (Value == EnemyId)
-					{
-						return Actor;
-					}
-				}
-				break; // Found the property name but wrong type or wrong value
-			}
-		}
-	}
+	if (UEnemySubsystem* ES = World->GetSubsystem<UEnemySubsystem>())
+		return ES->GetEnemy(EnemyId);
 	return nullptr;
 }
 
@@ -1660,15 +1641,9 @@ AActor* USkillVFXSubsystem::FindPlayerActorById(int32 PlayerId) const
 		return PC ? PC->GetPawn() : nullptr;
 	}
 
-	// Remote players — search by tag "PlayerId_<N>"
-	FString Tag = FString::Printf(TEXT("PlayerId_%d"), PlayerId);
-	for (TActorIterator<AActor> It(World); It; ++It)
-	{
-		if (It->ActorHasTag(FName(*Tag)))
-		{
-			return *It;
-		}
-	}
+	// Remote players — direct subsystem lookup
+	if (UOtherPlayerSubsystem* PS = World->GetSubsystem<UOtherPlayerSubsystem>())
+		return PS->GetPlayer(PlayerId);
 	return nullptr;
 }
 

@@ -26,6 +26,8 @@ struct FNameTagEntry
 	ENameTagEntityType Type = ENameTagEntityType::Player;
 	bool bVisible = true;
 	float VerticalOffset = 120.f; // Units above actor origin (above head in 3D)
+	float SpriteHeight = 0.f;     // If >0, use projected sprite height for positioning (scales with zoom)
+	FString VendingTitle;          // Non-empty = player is vending, show shop sign above name
 };
 
 UCLASS()
@@ -39,10 +41,11 @@ public:
 	virtual void Deinitialize() override;
 
 	// ---- Registration API ----
-	void RegisterEntity(AActor* Actor, const FString& Name, ENameTagEntityType Type, int32 Level = 0, float VertOffset = 120.f);
+	void RegisterEntity(AActor* Actor, const FString& Name, ENameTagEntityType Type, int32 Level = 0, float VertOffset = 120.f, float InSpriteHeight = 0.f);
 	void UnregisterEntity(AActor* Actor);
 	void SetVisible(AActor* Actor, bool bVisible);
 	void UpdateName(AActor* Actor, const FString& NewName);
+	void SetVendingTitle(AActor* Actor, const FString& Title);
 
 	// ---- Read by SNameTagOverlay in OnPaint ----
 	const TArray<FNameTagEntry>& GetEntries() const { return Entries; }

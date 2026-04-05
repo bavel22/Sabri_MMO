@@ -11,11 +11,13 @@ enum class ESpriteAnimState : uint8
 	Idle,
 	Walk,
 	Attack,
-	Cast,
+	CastSingle,   // targetType=single (e.g., Heal, Sonic Blow)
+	CastSelf,     // targetType=self (e.g., Blessing, Adrenaline Rush)
+	CastGround,   // targetType=ground (e.g., Storm Gust, traps)
+	CastAoe,      // targetType=aoe (e.g., Grand Cross, Frost Nova)
 	Hit,
 	Death,
 	Sit,
-	Taunt,
 	Pickup,
 	Block,
 	MAX UMETA(Hidden)
@@ -28,6 +30,7 @@ enum class ESpriteWeaponMode : uint8
 	None = 0,    // Unarmed atlas
 	OneHand,     // 1H weapon atlas
 	TwoHand,     // 2H weapon atlas
+	Bow,         // Bow atlas
 	MAX UMETA(Hidden)
 };
 

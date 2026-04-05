@@ -136,6 +136,13 @@ public:
     UFUNCTION(BlueprintCallable, Category = "MMO Auth")
     void Logout();
 
+    // Return to character select screen (ESC menu). Emits player:leave, keeps socket alive.
+    UFUNCTION(BlueprintCallable, Category = "MMO Auth")
+    void ReturnToCharacterSelect();
+
+    // Login level name (loaded from config or default)
+    FString LoginLevelName = TEXT("L_Startup");
+
     virtual void Init() override;
     virtual void Shutdown() override;
 
@@ -187,6 +194,14 @@ public:
 
     UPROPERTY(BlueprintReadWrite, Category = "MMO Zone")
     bool bIsZoneTransitioning = false;
+
+    // ---- Return to Character Select (ESC menu) ----
+    // Set by ReturnToCharacterSelect(), consumed by LoginFlowSubsystem
+    bool bReturningToCharSelect = false;
+
+    // ---- Minimap Preferences (persist across zone transitions) ----
+    int32 MinimapOpacityState = 2;  // 0=hidden, 1=transparent, 2=opaque
+    int32 MinimapZoomLevel = 0;     // 0-4
 
 private:
     UPROPERTY()

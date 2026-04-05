@@ -4,6 +4,7 @@
 #include "SocketIOClient.h"
 #include "SIOJsonObject.h"
 #include "Misc/ConfigCacheIni.h"
+#include "Kismet/GameplayStatics.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogMMOSocket, Log, All);
 
@@ -157,6 +158,35 @@ void UMMOGameInstance::Logout()
     ServerList.Empty();
 
     UE_LOG(LogTemp, Log, TEXT("Logged out. Returning to login screen."));
+}
+
+void UMMOGameInstance::ReturnToCharacterSelect()
+{
+    // Emit player:leave so the server does full cleanup but keeps the socket alive
+    EmitSocketEvent(TEXT("player:leave"), TEXT("{}"));
+
+    // Clear character selection (but keep auth + server selection)
+    SelectedCharacterId = 0;
+    SelectedCharacter = FCharacterData();
+    PendingLevelName.Empty();
+    PendingZoneName.Empty();
+    PendingSpawnLocation = FVector::ZeroVector;
+    bIsZoneTransitioning = false;
+    CurrentZoneName = TEXT("prontera_south");
+
+    // Flag that we're returning to char select (socket stays connected)
+    bReturningToCharSelect = true;
+
+    UE_LOG(LogTemp, Log, TEXT("[ReturnToCharSelect] Emitted player:leave. Opening login level."));
+
+    // Open the login level. LoginFlowSubsystem's background widget uses Z=200 which
+    // fully covers all game UI (Z 5-50). Game widgets get cleaned up when subsystem
+    // Deinitialize() runs during world teardown.
+    UWorld* World = GetWorld();
+    if (World)
+    {
+        UGameplayStatics::OpenLevel(World, *LoginLevelName);
+    }
 }
 
 void UMMOGameInstance::Shutdown()

@@ -34,15 +34,33 @@ public:
 private:
 	TWeakObjectPtr<ULoginFlowSubsystem> OwningSubsystem;
 
+	// Shared fields
 	TSharedPtr<SEditableTextBox> UsernameField;
 	TSharedPtr<SEditableTextBox> PasswordField;
 	TSharedPtr<SCheckBox> RememberCheckbox;
 	TSharedPtr<STextBlock> ErrorTextBlock;
 
+	// Register-only fields
+	TSharedPtr<SEditableTextBox> EmailField;
+	TSharedPtr<SEditableTextBox> ConfirmPasswordField;
+
+	// Containers for toggling login/register visibility
+	TSharedPtr<SWidget> EmailRow;
+	TSharedPtr<SWidget> ConfirmPasswordRow;
+	TSharedPtr<SWidget> RememberRow;
+	TSharedPtr<STextBlock> TitleTextBlock;
+	TSharedPtr<STextBlock> SubmitButtonText;
+	TSharedPtr<STextBlock> ToggleModeText;
+
+	bool bIsRegisterMode = false;
+
 	// Button handlers
-	FReply OnLoginClicked();
+	FReply OnSubmitClicked();
 	FReply OnExitClicked();
+	FReply OnToggleModeClicked();
 	void AttemptLogin();
+	void AttemptRegister();
+	void UpdateModeVisuals();
 
 	virtual FReply OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent) override;
 	virtual bool SupportsKeyboardFocus() const override { return true; }

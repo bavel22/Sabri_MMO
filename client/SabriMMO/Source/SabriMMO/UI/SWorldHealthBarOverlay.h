@@ -63,7 +63,7 @@ private:
 	static constexpr float BAR_FILL_H     = 5.f;    // Height of HP or SP fill area
 	static constexpr float BAR_BORDER     = 1.f;    // Border thickness
 	static constexpr float BAR_DIVIDER    = 1.f;    // Divider between HP and SP (same as border)
-	static constexpr float VERTICAL_OFFSET = 20.f;  // Pixels below projected feet position
+	static constexpr float VERTICAL_OFFSET = -8.f;  // Negative = above feet, positive = below. Adjusted for sprite.
 	static constexpr float CRITICAL_THRESHOLD = 0.25f; // 25% HP triggers color change
 
 	// Player bar total height: border + fill + divider + fill + border = 1+5+1+5+1 = 13

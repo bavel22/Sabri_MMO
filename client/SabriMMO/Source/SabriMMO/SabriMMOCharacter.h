@@ -91,7 +91,31 @@ private:
 	UInputAction* ToggleShopAction = nullptr;
 
 	UPROPERTY()
+	UInputAction* ToggleCartAction = nullptr;
+
+	UPROPERTY()
+	UInputAction* FocusChatAction = nullptr;
+
+	UPROPERTY()
+	UInputAction* ToggleSitAction = nullptr;
+
+	UPROPERTY()
+	UInputAction* TogglePartyAction = nullptr;
+
+	UPROPERTY()
 	UInputAction* CycleHotbarAction = nullptr;
+
+	UPROPERTY()
+	UInputAction* CycleMinimapAction = nullptr;
+
+	UPROPERTY()
+	UInputAction* ToggleWorldMapAction = nullptr;
+
+	UPROPERTY()
+	UInputAction* ToggleZoneNamesAction = nullptr;
+
+	UPROPERTY()
+	UInputAction* ToggleEscapeMenuAction = nullptr;
 
 	UPROPERTY()
 	UInputAction* HotbarSlotActions[9];
@@ -121,11 +145,19 @@ private:
 	void HandleMouseDelta(const FInputActionValue& Value);
 	void HandleZoom(const FInputActionValue& Value);
 
+	void HandleFocusChat();
+	void HandleToggleSit();
 	void HandleToggleCombatStats();
 	void HandleToggleInventory();
 	void HandleToggleEquipment();
 	void HandleToggleShop();
+	void HandleToggleCart();
+	void HandleToggleParty();
 	void HandleCycleHotbar();
+	void HandleCycleMinimap();
+	void HandleToggleWorldMap();
+	void HandleToggleZoneNames();
+	void HandleToggleEscapeMenu();
 	void HandleHotbarSlot1();
 	void HandleHotbarSlot2();
 	void HandleHotbarSlot3();

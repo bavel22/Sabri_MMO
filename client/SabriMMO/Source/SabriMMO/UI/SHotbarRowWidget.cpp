@@ -259,6 +259,27 @@ TSharedRef<SWidget> SHotbarRowWidget::BuildSlot(int32 SlotIndex)
 					.ShadowColorAndOpacity(HotbarColors::TextShadow)
 				]
 
+				// Layer 4b: Skill level badge (top-right, skills only)
+				+ SOverlay::Slot()
+				.HAlign(HAlign_Right)
+				.VAlign(VAlign_Top)
+				.Padding(FMargin(0.f, 1.f, 2.f, 0.f))
+				[
+					SNew(STextBlock)
+					.Text_Lambda([this, SlotIndex, Sub]() -> FText
+					{
+						if (!Sub) return FText::GetEmpty();
+						const FHotbarSlot& Slot = Sub->GetSlot(RowIndex, SlotIndex);
+						if (Slot.IsSkill() && Slot.SkillLevel > 0)
+							return FText::FromString(FString::Printf(TEXT("Lv%d"), Slot.SkillLevel));
+						return FText::GetEmpty();
+					})
+					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 6))
+					.ColorAndOpacity(FSlateColor(FLinearColor(0.9f, 0.8f, 0.3f, 1.0f)))
+					.ShadowOffset(FVector2D(1, 1))
+					.ShadowColorAndOpacity(HotbarColors::TextShadow)
+				]
+
 				// Layer 5: Cooldown overlay (skills only)
 				+ SOverlay::Slot()
 				[
@@ -534,7 +555,8 @@ FReply SHotbarRowWidget::OnMouseButtonDown(const FGeometry& MyGeometry, const FP
 						Sub->AssignSkill(RowIndex, SlotIdx,
 							SkillSub->DraggedSkillId,
 							SkillSub->DraggedSkillName,
-							SkillSub->DraggedSkillIcon);
+							SkillSub->DraggedSkillIcon,
+							SkillSub->DraggedSkillLevel);
 						SkillSub->CancelSkillDrag();
 						return FReply::Handled();
 					}
@@ -626,7 +648,8 @@ FReply SHotbarRowWidget::OnMouseButtonUp(const FGeometry& MyGeometry, const FPoi
 						Sub->AssignSkill(RowIndex, SlotIdx,
 							SkillSub->DraggedSkillId,
 							SkillSub->DraggedSkillName,
-							SkillSub->DraggedSkillIcon);
+							SkillSub->DraggedSkillIcon,
+							SkillSub->DraggedSkillLevel);
 						SkillSub->CancelSkillDrag();
 						return FReply::Handled();
 					}

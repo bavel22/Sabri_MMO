@@ -17,6 +17,12 @@
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Styling/CoreStyle.h"
+#include "BuffBarSubsystem.h"
+#include "ZoneTransitionSubsystem.h"
+#include "OtherPlayerSubsystem.h"
+#include "TradeSubsystem.h"
+#include "Kismet/GameplayStatics.h"
+#include "GameFramework/Character.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogChat, Log, All);
 
@@ -184,6 +190,14 @@ public:
 		}
 	}
 
+	void SetInputText(const FString& Text)
+	{
+		if (InputField.IsValid())
+		{
+			InputField->SetText(FText::FromString(Text));
+		}
+	}
+
 	virtual void Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime) override
 	{
 		UChatSubsystem* Sub = OwningSubsystem.Get();
@@ -246,18 +260,24 @@ private:
 	void OnInputCommitted(const FText& Text, ETextCommit::Type CommitType)
 	{
 		if (CommitType != ETextCommit::OnEnter) return;
-		if (Text.IsEmpty()) return;
 
-		UChatSubsystem* Sub = OwningSubsystem.Get();
-		if (Sub)
+		if (!Text.IsEmpty())
 		{
-			Sub->SendChatMessage(Text.ToString());
+			UChatSubsystem* Sub = OwningSubsystem.Get();
+			if (Sub)
+			{
+				Sub->SendChatMessage(Text.ToString());
+			}
 		}
 
-		// Clear input
+		// Clear input and return focus to the game
 		if (InputField.IsValid())
 		{
 			InputField->SetText(FText::GetEmpty());
+		}
+		if (FSlateApplication::IsInitialized())
+		{
+			FSlateApplication::Get().SetAllUserFocusToGameViewport();
 		}
 	}
 
@@ -434,6 +454,10 @@ void UChatSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 			[this](const TSharedPtr<FJsonValue>& D) { HandleCombatDeath(D); });
 		Router->RegisterHandler(TEXT("combat:respawn"), this,
 			[this](const TSharedPtr<FJsonValue>& D) { HandleCombatRespawn(D); });
+
+		// EXP gain events
+		Router->RegisterHandler(TEXT("exp:gain"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleExpGain(D); });
 	}
 
 	if (GI->IsSocketConnected())
@@ -596,13 +620,49 @@ void UChatSubsystem::HandleCombatDamage(const TSharedPtr<FJsonValue>& Data)
 		return;
 	}
 
+	// Element modifier (optional — sent when attack or target is non-neutral)
+	double EleModD = 0;
+	Obj->TryGetNumberField(TEXT("eleMod"), EleModD);
+	const int32 EleMod = (int32)EleModD;
+
+	// Magnum Break fire endow breakdown (optional)
+	double FireBonusDmgD = 0, FireEleModD = 0;
+	Obj->TryGetNumberField(TEXT("fireBonusDmg"), FireBonusDmgD);
+	Obj->TryGetNumberField(TEXT("fireEleMod"), FireEleModD);
+	const int32 FireBonusDmg = (int32)FireBonusDmgD;
+	const int32 FireEleMod = (int32)FireEleModD;
+
+	// Element name + effectiveness text helper
+	FString Element;
+	Obj->TryGetStringField(TEXT("element"), Element);
+
+	auto GetEffectivenessText = [](int32 Mod) -> FString {
+		if (Mod >= 200)      return TEXT("super effective");
+		if (Mod >= 150)      return TEXT("very effective");
+		if (Mod > 100)       return TEXT("effective");
+		if (Mod == 100)      return TEXT("neutral");
+		if (Mod > 50)        return TEXT("partially resisted");
+		if (Mod > 0)         return TEXT("heavily resisted");
+		return TEXT("immune");
+	};
+
 	if (AttackerId == LocalCharacterId)
 	{
-		// Player attacked something
-		FString Msg = FString::Printf(TEXT("You hit %s for %d damage"), *TargetName, Damage);
+		const int32 BaseDmg = (FireBonusDmg > 0) ? (Damage - FireBonusDmg) : Damage;
+		FString Msg = FString::Printf(TEXT("You hit %s for %d damage"), *TargetName, BaseDmg);
 		if (bIsCritical) Msg += TEXT(" (Critical!)");
+
+		// Element effectiveness on main attack (non-neutral only)
+		if (EleMod > 0 && EleMod != 100 && !Element.IsEmpty() && Element != TEXT("neutral"))
+			Msg += FString::Printf(TEXT(" [%s — %s]"), *Element, *GetEffectivenessText(EleMod));
+
 		if (bIsDualWield && Damage2 > 0)
 			Msg += FString::Printf(TEXT(" + %d (Left Hand)"), Damage2);
+
+		// Magnum Break fire bonus (separate from main element)
+		if (FireBonusDmg > 0)
+			Msg += FString::Printf(TEXT(" + %d fire (%s)"), FireBonusDmg, *GetEffectivenessText(FireEleMod));
+
 		AddCombatLogMessage(Msg);
 	}
 	else if ((int32)TargetIdD == LocalCharacterId || (!bIsEnemy && (int32)TargetIdD == LocalCharacterId))
@@ -658,18 +718,48 @@ void UChatSubsystem::HandleSkillEffectDamage(const TSharedPtr<FJsonValue>& Data)
 		return;
 	}
 
+	// Element effectiveness (auto-enriched by server for all skill:effect_damage)
+	double EleModD = 0;
+	Obj->TryGetNumberField(TEXT("eleMod"), EleModD);
+	const int32 EleMod = (int32)EleModD;
+	FString Element;
+	Obj->TryGetStringField(TEXT("element"), Element);
+
+	auto GetEffText = [](int32 Mod) -> FString {
+		if (Mod >= 200)      return TEXT("super effective");
+		if (Mod >= 150)      return TEXT("very effective");
+		if (Mod > 100)       return TEXT("effective");
+		if (Mod == 100)      return TEXT("neutral");
+		if (Mod > 50)        return TEXT("partially resisted");
+		if (Mod > 0)         return TEXT("heavily resisted");
+		return TEXT("immune");
+	};
+
+	// Auto-Blitz Beat (falcon proc) — show distinctly from manual skills
+	bool bIsAutoBlitz = false;
+	Obj->TryGetBoolField(TEXT("isAutoBlitz"), bIsAutoBlitz);
+
 	// Damage
 	if (Damage > 0)
 	{
 		if (AttackerId == LocalCharacterId)
 		{
-			FString Msg = FString::Printf(TEXT("Your %s hits %s for %d damage"), *SkillName, *TargetName, Damage);
+			FString Msg;
+			if (bIsAutoBlitz)
+				Msg = FString::Printf(TEXT("Your falcon strikes %s for %d damage"), *TargetName, Damage);
+			else
+				Msg = FString::Printf(TEXT("Your %s hits %s for %d damage"), *SkillName, *TargetName, Damage);
 			if (HitType == TEXT("critical")) Msg += TEXT(" (Critical!)");
+			if (EleMod > 0 && EleMod != 100 && !Element.IsEmpty() && Element != TEXT("neutral"))
+				Msg += FString::Printf(TEXT(" [%s — %s]"), *Element, *GetEffText(EleMod));
 			AddCombatLogMessage(Msg);
 		}
 		else if (TargetId == LocalCharacterId)
 		{
-			AddCombatLogMessage(FString::Printf(TEXT("%s's %s hits you for %d damage"), *AttackerName, *SkillName, Damage));
+			if (bIsAutoBlitz)
+				AddCombatLogMessage(FString::Printf(TEXT("%s's falcon strikes you for %d damage"), *AttackerName, Damage));
+			else
+				AddCombatLogMessage(FString::Printf(TEXT("%s's %s hits you for %d damage"), *AttackerName, *SkillName, Damage));
 		}
 	}
 }
@@ -704,7 +794,10 @@ void UChatSubsystem::HandleStatusApplied(const TSharedPtr<FJsonValue>& Data)
 			FString TargetName;
 			Obj->TryGetStringField(TEXT("targetName"), TargetName);
 			if (TargetName.IsEmpty()) TargetName = FString::Printf(TEXT("Enemy %d"), (int32)TargetIdD);
-			AddCombatLogMessage(FString::Printf(TEXT("%s is afflicted with %s"), *TargetName, *DisplayName));
+			if (DurationD > 0)
+				AddCombatLogMessage(FString::Printf(TEXT("%s is afflicted with %s (%.1fs)"), *TargetName, *DisplayName, DurationD / 1000.0));
+			else
+				AddCombatLogMessage(FString::Printf(TEXT("%s is afflicted with %s"), *TargetName, *DisplayName));
 		}
 		return;
 	}
@@ -726,13 +819,24 @@ void UChatSubsystem::HandleStatusRemoved(const TSharedPtr<FJsonValue>& Data)
 	bool bIsEnemy = false;
 	Obj->TryGetNumberField(TEXT("targetId"), TargetIdD);
 	Obj->TryGetBoolField(TEXT("isEnemy"), bIsEnemy);
-	if (bIsEnemy || (LocalCharacterId > 0 && (int32)TargetIdD != LocalCharacterId)) return;
 
 	FString StatusType;
 	Obj->TryGetStringField(TEXT("statusType"), StatusType);
 
 	FString DisplayName = StatusType;
 	DisplayName.ReplaceInline(TEXT("_"), TEXT(" "));
+
+	if (bIsEnemy)
+	{
+		// Show when a status we applied to an enemy wears off (trap stun/freeze/etc.)
+		FString TargetName;
+		Obj->TryGetStringField(TEXT("targetName"), TargetName);
+		if (!TargetName.IsEmpty())
+			AddCombatLogMessage(FString::Printf(TEXT("%s's %s wore off"), *TargetName, *DisplayName));
+		return;
+	}
+
+	if (LocalCharacterId > 0 && (int32)TargetIdD != LocalCharacterId) return;
 
 	AddCombatLogMessage(FString::Printf(TEXT("%s wore off"), *DisplayName));
 }
@@ -748,7 +852,6 @@ void UChatSubsystem::HandleBuffApplied(const TSharedPtr<FJsonValue>& Data)
 	bool bIsEnemy = false;
 	Obj->TryGetNumberField(TEXT("targetId"), TargetIdD);
 	Obj->TryGetBoolField(TEXT("isEnemy"), bIsEnemy);
-	if (bIsEnemy || (LocalCharacterId > 0 && (int32)TargetIdD != LocalCharacterId)) return;
 
 	FString BuffName;
 	double DurationD = 0;
@@ -758,6 +861,26 @@ void UChatSubsystem::HandleBuffApplied(const TSharedPtr<FJsonValue>& Data)
 	FString DisplayName = BuffName;
 	DisplayName.ReplaceInline(TEXT("_"), TEXT(" "));
 
+	if (bIsEnemy)
+	{
+		// Show when WE applied a buff/debuff to an enemy
+		double CasterIdD = 0;
+		Obj->TryGetNumberField(TEXT("casterId"), CasterIdD);
+		if (LocalCharacterId > 0 && (int32)CasterIdD == LocalCharacterId)
+		{
+			FString TargetName;
+			Obj->TryGetStringField(TEXT("targetName"), TargetName);
+			if (TargetName.IsEmpty()) TargetName = FString::Printf(TEXT("Enemy %d"), (int32)TargetIdD);
+			if (DurationD > 0)
+				AddCombatLogMessage(FString::Printf(TEXT("%s is affected by %s (%.0fs)"), *TargetName, *DisplayName, DurationD / 1000.0));
+			else
+				AddCombatLogMessage(FString::Printf(TEXT("%s is affected by %s"), *TargetName, *DisplayName));
+		}
+		return;
+	}
+
+	// Self buff
+	if (LocalCharacterId > 0 && (int32)TargetIdD != LocalCharacterId) return;
 	AddCombatLogMessage(FString::Printf(TEXT("%s applied (%.0fs)"), *DisplayName, DurationD / 1000.0));
 }
 
@@ -813,6 +936,51 @@ void UChatSubsystem::HandleCombatRespawn(const TSharedPtr<FJsonValue>& Data)
 	AddCombatLogMessage(TEXT("You have respawned"));
 }
 
+void UChatSubsystem::HandleExpGain(const TSharedPtr<FJsonValue>& Data)
+{
+	if (!Data.IsValid()) return;
+	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
+	const TSharedPtr<FJsonObject>& Obj = *ObjPtr;
+
+	double BaseExpD = 0, JobExpD = 0;
+	Obj->TryGetNumberField(TEXT("baseExpGained"), BaseExpD);
+	Obj->TryGetNumberField(TEXT("jobExpGained"), JobExpD);
+	int32 BaseExp = (int32)BaseExpD;
+	int32 JobExp = (int32)JobExpD;
+
+	FString EnemyName;
+	Obj->TryGetStringField(TEXT("enemyName"), EnemyName);
+
+	bool bPartyShared = false;
+	Obj->TryGetBoolField(TEXT("partyShared"), bPartyShared);
+
+	if (bPartyShared)
+	{
+		double OrigBaseD = 0, OrigJobD = 0, BonusPctD = 0, MemberCountD = 1;
+		Obj->TryGetNumberField(TEXT("originalBaseExp"), OrigBaseD);
+		Obj->TryGetNumberField(TEXT("originalJobExp"), OrigJobD);
+		Obj->TryGetNumberField(TEXT("partyBonusPct"), BonusPctD);
+		Obj->TryGetNumberField(TEXT("memberCount"), MemberCountD);
+		int32 OrigBase = (int32)OrigBaseD;
+		int32 OrigJob = (int32)OrigJobD;
+		int32 BonusPct = (int32)BonusPctD;
+		int32 MemberCount = (int32)MemberCountD;
+
+		// "Defeated Poring — +120 Base / +80 Job EXP (Party: 500 base split 4 ways, +60% bonus)"
+		AddCombatLogMessage(FString::Printf(
+			TEXT("%s — +%d Base / +%d Job EXP (Party: %d/%d base/job split %d ways, +%d%% bonus)"),
+			*EnemyName, BaseExp, JobExp, OrigBase, OrigJob, MemberCount, BonusPct));
+	}
+	else
+	{
+		// "Defeated Poring — +500 Base / +300 Job EXP"
+		AddCombatLogMessage(FString::Printf(
+			TEXT("%s — +%d Base / +%d Job EXP"),
+			*EnemyName, BaseExp, JobExp));
+	}
+}
+
 // ============================================================
 // Public API
 // ============================================================
@@ -827,6 +995,90 @@ void UChatSubsystem::SendChatMessage(const FString& Message, const FString& Chan
 
 	FString ActualMessage = Message;
 	FString ActualChannel = Channel;
+
+	// ── /sit and /stand: toggle sitting state (client-side, no server chat) ──
+	if (ActualMessage == TEXT("/sit") || ActualMessage == TEXT("/stand"))
+	{
+		UWorld* W = GetWorld();
+		if (!W) return;
+		bool bSitting = false;
+		if (UBuffBarSubsystem* BBS = W->GetSubsystem<UBuffBarSubsystem>())
+			bSitting = BBS->HasBuff(TEXT("sitting"));
+
+		if (ActualMessage == TEXT("/stand") || bSitting)
+			GI->EmitSocketEvent(TEXT("player:stand"), MakeShared<FJsonObject>());
+		else
+			GI->EmitSocketEvent(TEXT("player:sit"), MakeShared<FJsonObject>());
+		return;
+	}
+
+	// ── /trade PlayerName: initiate trade with another player ──
+	if (ActualMessage.StartsWith(TEXT("/trade ")))
+	{
+		FString TargetName = ActualMessage.Mid(7).TrimStartAndEnd();
+		if (TargetName.IsEmpty())
+		{
+			AddCombatLogMessage(TEXT("Usage: /trade PlayerName"));
+			return;
+		}
+		UWorld* W = GetWorld();
+		if (W)
+		{
+			if (UOtherPlayerSubsystem* OPS = W->GetSubsystem<UOtherPlayerSubsystem>())
+			{
+				int32 FoundCharId = 0;
+				for (const auto& Pair : OPS->GetAllPlayers())
+				{
+					if (Pair.Value.PlayerName.Equals(TargetName, ESearchCase::IgnoreCase))
+					{
+						FoundCharId = Pair.Key;
+						break;
+					}
+				}
+				if (FoundCharId > 0)
+				{
+					if (UTradeSubsystem* TradeSub = W->GetSubsystem<UTradeSubsystem>())
+						TradeSub->RequestTrade(FoundCharId);
+				}
+				else
+				{
+					AddCombatLogMessage(FString::Printf(TEXT("Player '%s' not found nearby."), *TargetName));
+				}
+			}
+		}
+		return;
+	}
+
+	// ── /where: display current map name and coordinates (RO Classic) ──
+	if (ActualMessage == TEXT("/where"))
+	{
+		UWorld* W = GetWorld();
+		if (W)
+		{
+			FString ZoneName = TEXT("unknown");
+			if (UZoneTransitionSubsystem* ZoneSub = W->GetSubsystem<UZoneTransitionSubsystem>())
+			{
+				ZoneName = ZoneSub->CurrentZoneName;
+			}
+			int32 CellX = 0, CellY = 0;
+			if (ACharacter* PlayerChar = UGameplayStatics::GetPlayerCharacter(W, 0))
+			{
+				FVector Pos = PlayerChar->GetActorLocation();
+				CellX = FMath::RoundToInt32(Pos.X / 50.f);
+				CellY = FMath::RoundToInt32(Pos.Y / 50.f);
+			}
+
+			FChatMessage Msg;
+			Msg.SenderName = TEXT("");
+			Msg.Message = FString::Printf(TEXT("%s (%d, %d)"), *ZoneName, CellX, CellY);
+			Msg.Channel = EChatChannel::System;
+			Msg.Timestamp = FPlatformTime::Seconds();
+			if (Messages.Num() >= MAX_MESSAGES) Messages.RemoveAt(0);
+			Messages.Add(MoveTemp(Msg));
+			++MessageVersion;
+		}
+		return;
+	}
 
 	// ── /r reply shortcut: expand to /w "LastWhisperer" message ──
 	if (ActualMessage.StartsWith(TEXT("/r ")) && !LastWhisperer.IsEmpty())
@@ -892,6 +1144,16 @@ void UChatSubsystem::FocusChatInput()
 {
 	if (ChatWidget.IsValid())
 	{
+		ChatWidget->FocusInput();
+	}
+}
+
+void UChatSubsystem::StartWhisperTo(const FString& PlayerName)
+{
+	if (ChatWidget.IsValid())
+	{
+		FString Prefill = FString::Printf(TEXT("/w \"%s\" "), *PlayerName);
+		ChatWidget->SetInputText(Prefill);
 		ChatWidget->FocusInput();
 	}
 }

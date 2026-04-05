@@ -37,11 +37,21 @@ public:
 	FString StatusMessage;
 	double StatusExpireTime = 0.0;
 
+	// Cart state (from kafra:data)
+	bool bHasCart = false;
+	FString JobClass;
+	int32 PushcartLevel = 0;
+
 	// ---- public API ----
 	void RequestOpenKafra(const FString& KafraId);
 	void RequestSave();
 	void RequestTeleport(const FString& DestZone);
+	void RequestRentCart();
+	void RequestRemoveCart();
 	void CloseKafra();
+
+	/** Returns true if the player's job class can use a pushcart. */
+	bool CanUseCart() const;
 
 	// ---- widget lifecycle ----
 	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
@@ -58,6 +68,9 @@ private:
 	void HandleKafraSaved(const TSharedPtr<FJsonValue>& Data);
 	void HandleKafraTeleported(const TSharedPtr<FJsonValue>& Data);
 	void HandleKafraError(const TSharedPtr<FJsonValue>& Data);
+	void HandleCartData(const TSharedPtr<FJsonValue>& Data);
+	void HandleCartEquipped(const TSharedPtr<FJsonValue>& Data);
+	void HandleCartError(const TSharedPtr<FJsonValue>& Data);
 
 	// ---- state ----
 	bool bWidgetAdded = false;

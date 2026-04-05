@@ -38,6 +38,7 @@ struct FHotbarSlot
 
 	// Skill fields (valid when SlotType == "skill")
 	int32 SkillId = 0;
+	int32 SkillLevel = 0;       // RO Classic: selected use level (1 to max learned, 0 = max)
 	FString SkillName;
 	FString SkillIcon;
 
@@ -49,7 +50,7 @@ struct FHotbarSlot
 	{
 		SlotType.Empty();
 		InventoryId = 0; ItemId = 0; ItemName.Empty(); ItemIcon.Empty(); Quantity = 0;
-		SkillId = 0; SkillName.Empty(); SkillIcon.Empty();
+		SkillId = 0; SkillLevel = 0; SkillName.Empty(); SkillIcon.Empty();
 	}
 };
 
@@ -110,7 +111,7 @@ public:
 
 	// ---- slot operations ----
 	void AssignItem(int32 RowIndex, int32 SlotIndex, const FInventoryItem& Item);
-	void AssignSkill(int32 RowIndex, int32 SlotIndex, int32 SkillId, const FString& SkillName, const FString& SkillIcon = TEXT(""));
+	void AssignSkill(int32 RowIndex, int32 SlotIndex, int32 SkillId, const FString& SkillName, const FString& SkillIcon = TEXT(""), int32 SkillLevel = 0);
 	void ClearSlot(int32 RowIndex, int32 SlotIndex);
 	void ActivateSlot(int32 RowIndex, int32 SlotIndex);
 	const FHotbarSlot& GetSlot(int32 RowIndex, int32 SlotIndex) const;
@@ -150,10 +151,11 @@ public:
 private:
 	// ---- event handlers ----
 	void HandleHotbarAllData(const TSharedPtr<FJsonValue>& Data);
+	void HandleHotbarData(const TSharedPtr<FJsonValue>& Data);
 
 	// ---- server emit helpers ----
 	void EmitSaveItem(int32 RowIndex, int32 SlotIndex, int32 InventoryId, int32 ItemId, const FString& ItemName);
-	void EmitSaveSkill(int32 RowIndex, int32 SlotIndex, int32 SkillId, const FString& SkillName);
+	void EmitSaveSkill(int32 RowIndex, int32 SlotIndex, int32 SkillId, const FString& SkillName, int32 SkillLevel = 0);
 	void EmitClearSlot(int32 RowIndex, int32 SlotIndex);
 
 	// ---- state ----

@@ -61,6 +61,8 @@ private:
 	void HandlePlayerJoined(const TSharedPtr<FJsonValue>& Data);
 	void HandleShopTransaction(const TSharedPtr<FJsonValue>& Data);
 	void HandleInventoryData(const TSharedPtr<FJsonValue>& Data);
+	void HandleWeightStatus(const TSharedPtr<FJsonValue>& Data);
+	void HandleZenyUpdate(const TSharedPtr<FJsonValue>& Data);
 
 	void ParseExpPayload(const TSharedPtr<FJsonObject>& ExpObj);
 	void PopulateNameFromGameInstance();

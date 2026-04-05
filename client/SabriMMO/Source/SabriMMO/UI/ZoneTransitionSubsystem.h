@@ -9,6 +9,7 @@
 #include "Subsystems/WorldSubsystem.h"
 #include "Dom/JsonValue.h"
 #include "Dom/JsonObject.h"
+#include "Styling/SlateBrush.h"
 #include "ZoneTransitionSubsystem.generated.h"
 
 UCLASS()
@@ -51,6 +52,7 @@ private:
 	// ---- loading overlay ----
 	void ShowLoadingOverlay(const FString& StatusText);
 	void HideLoadingOverlay();
+	void LoadLoadingScreenTextures();
 
 	// ---- transition completion ----
 	void ForceCompleteTransition();
@@ -64,4 +66,21 @@ private:
 	TSharedPtr<SWidget> LoadingWidget;
 	TSharedPtr<SWidget> LoadingOverlay;
 	bool bLoadingShown = false;
+
+	// Loading screen textures (randomly selected per transition)
+	UPROPERTY()
+	TArray<UTexture2D*> LoadingScreenTextures;
+	int32 LastLoadingScreenIndex = -1;
+	bool bLoadingTexturesLoaded = false;
+
+	// Active loading screen brush (must stay alive while overlay is shown)
+	TSharedPtr<FSlateBrush> ActiveLoadingBrush;
+
+	// Ken Burns animation — random per transition
+	float KenBurnsStartScale = 1.0f;
+	float KenBurnsEndScale = 1.08f;
+	FVector2D KenBurnsDrift = FVector2D::ZeroVector;  // normalized drift direction
+
+	// Loading start time (drives all animations)
+	mutable double LoadingStartTime = 0.0;
 };

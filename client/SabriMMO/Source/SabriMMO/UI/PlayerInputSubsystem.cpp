@@ -10,11 +10,20 @@
 #include "UI/MultiplayerEventSubsystem.h"
 #include "UI/CombatActionSubsystem.h"
 #include "UI/SkillTreeSubsystem.h"
+#include "UI/EnemySubsystem.h"
+#include "UI/OtherPlayerSubsystem.h"
+#include "UI/VendingSubsystem.h"
+#include "UI/TradeSubsystem.h"
+#include "UI/PartySubsystem.h"
+#include "UI/ChatSubsystem.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "NavigationSystem.h"
 #include "Blueprint/AIBlueprintHelperLibrary.h"
+#include "Framework/MultiBox/MultiBoxBuilder.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Widgets/SWindow.h"
 #include "TimerManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogMMOInput, Log, All);
@@ -61,6 +70,20 @@ void UPlayerInputSubsystem::OnWalkPollTick()
 	if (UCombatActionSubsystem* CAS = GetWorld()->GetSubsystem<UCombatActionSubsystem>())
 	{
 		if (CAS->IsDead()) return;
+	}
+
+	// Block walk-to processing while Play Dead or Hiding (movement locked)
+	// Also cancels any in-progress navmesh pathfollowing from click-to-move
+	if (UBuffBarSubsystem* BBS = GetWorld()->GetSubsystem<UBuffBarSubsystem>())
+	{
+		if (BBS->HasBuff(TEXT("play_dead")) || BBS->HasBuff(TEXT("hiding")) || BBS->HasBuff(TEXT("sitting")))
+		{
+			CancelMovement();
+			bWalkingToAttack = false;
+			bIsClickMoving = false;
+			PendingInteractNPC.Reset();
+			return;
+		}
 	}
 
 	// --- Walk-to-attack ---
@@ -151,6 +174,14 @@ void UPlayerInputSubsystem::OnLeftClickFromCharacter(ASabriMMOCharacter* Charact
 		if (CAS->IsDead()) return;
 	}
 
+	// Guard: Play Dead / Hiding — block all movement, attack, and interact input
+	// RO Classic: both states lock the player in place; server also rejects, but
+	// blocking here prevents visual desync and unnecessary network traffic
+	if (UBuffBarSubsystem* BBS = GetWorld()->GetSubsystem<UBuffBarSubsystem>())
+	{
+		if (BBS->HasBuff(TEXT("play_dead")) || BBS->HasBuff(TEXT("hiding")) || BBS->HasBuff(TEXT("sitting"))) return;
+	}
+
 	APlayerController* PC = Cast<APlayerController>(Character->GetController());
 	if (!PC) return;
 
@@ -200,7 +231,28 @@ void UPlayerInputSubsystem::OnLeftClickFromCharacter(ASabriMMOCharacter* Charact
 		}
 	}
 
-	// Priority 2: Enemies
+	// Priority 2: Vending player shops (click to browse)
+	if (HitActor)
+	{
+		if (UOtherPlayerSubsystem* OPS = GetWorld()->GetSubsystem<UOtherPlayerSubsystem>())
+		{
+			int32 PlayerId = OPS->GetPlayerIdFromActor(HitActor);
+			if (PlayerId > 0)
+			{
+				const FPlayerEntry* PE = OPS->GetPlayerData(PlayerId);
+				if (PE && PE->bIsVending)
+				{
+					if (UVendingSubsystem* VendSub = GetWorld()->GetSubsystem<UVendingSubsystem>())
+					{
+						VendSub->BrowseShop(PlayerId);
+					}
+					return;
+				}
+			}
+		}
+	}
+
+	// Priority 3: Enemies
 	if (HitActor)
 	{
 		int32 EnemyId = GetEnemyIdFromActor(HitActor);
@@ -218,6 +270,114 @@ void UPlayerInputSubsystem::OnLeftClickFromCharacter(ASabriMMOCharacter* Charact
 	}
 	PendingInteractNPC.Reset();
 	ProcessClickOnGround(Hit.ImpactPoint);
+}
+
+// ============================================================
+// Right-click — player context menu (RO Classic)
+// ============================================================
+
+void UPlayerInputSubsystem::OnRightClickFromCharacter(ASabriMMOCharacter* Character)
+{
+	if (!Character) return;
+
+	// Guard: dead
+	if (UCombatActionSubsystem* CAS = GetWorld()->GetSubsystem<UCombatActionSubsystem>())
+	{
+		if (CAS->IsDead()) return;
+	}
+
+	APlayerController* PC = Cast<APlayerController>(Character->GetController());
+	if (!PC) return;
+
+	// Cursor trace
+	FHitResult Hit;
+	if (!PC->GetHitResultUnderCursorByChannel(
+		UEngineTypes::ConvertToTraceType(ECC_Visibility), true, Hit))
+	{
+		return;
+	}
+
+	if (!Hit.bBlockingHit) return;
+
+	AActor* HitActor = Hit.GetActor();
+	if (!HitActor) return;
+
+	// Only show context menu for other players
+	UOtherPlayerSubsystem* OPS = GetWorld()->GetSubsystem<UOtherPlayerSubsystem>();
+	if (!OPS) return;
+
+	int32 PlayerId = OPS->GetPlayerIdFromActor(HitActor);
+	if (PlayerId <= 0) return;
+
+	// Skip hidden players (Hiding/Cloaking)
+	if (OPS->IsPlayerHidden(PlayerId)) return;
+
+	const FPlayerEntry* PE = OPS->GetPlayerData(PlayerId);
+	if (!PE) return;
+
+	ShowPlayerContextMenu(PlayerId, PE->PlayerName);
+}
+
+void UPlayerInputSubsystem::ShowPlayerContextMenu(int32 CharacterId, const FString& PlayerName)
+{
+	if (!FSlateApplication::IsInitialized()) return;
+
+	FMenuBuilder MenuBuilder(true, nullptr);
+
+	// Header: player name
+	MenuBuilder.BeginSection(NAME_None, FText::FromString(PlayerName));
+	MenuBuilder.EndSection();
+
+	// Trade
+	MenuBuilder.AddMenuEntry(
+		FText::FromString(TEXT("Trade")),
+		FText::FromString(TEXT("Request a trade")),
+		FSlateIcon(),
+		FUIAction(FExecuteAction::CreateLambda([this, CharacterId]()
+		{
+			if (UTradeSubsystem* TradeSub = GetWorld()->GetSubsystem<UTradeSubsystem>())
+				TradeSub->RequestTrade(CharacterId);
+		}))
+	);
+
+	// Party Invite
+	FString CapturedName = PlayerName;
+	MenuBuilder.AddMenuEntry(
+		FText::FromString(TEXT("Party Invite")),
+		FText::FromString(TEXT("Invite to party")),
+		FSlateIcon(),
+		FUIAction(FExecuteAction::CreateLambda([this, CapturedName]()
+		{
+			if (UPartySubsystem* PartySub = GetWorld()->GetSubsystem<UPartySubsystem>())
+				PartySub->InvitePlayer(CapturedName);
+		}))
+	);
+
+	// Whisper
+	MenuBuilder.AddMenuEntry(
+		FText::FromString(TEXT("Whisper")),
+		FText::FromString(TEXT("Send a private message")),
+		FSlateIcon(),
+		FUIAction(FExecuteAction::CreateLambda([this, CapturedName]()
+		{
+			if (UChatSubsystem* ChatSub = GetWorld()->GetSubsystem<UChatSubsystem>())
+				ChatSub->StartWhisperTo(CapturedName);
+		}))
+	);
+
+	TSharedRef<SWidget> MenuWidget = MenuBuilder.MakeWidget();
+
+	TSharedPtr<SWindow> ParentWindow = FSlateApplication::Get().GetActiveTopLevelRegularWindow();
+	if (!ParentWindow.IsValid()) return;
+
+	FVector2D CursorPos = FSlateApplication::Get().GetCursorPos();
+	FSlateApplication::Get().PushMenu(
+		ParentWindow.ToSharedRef(),
+		FWidgetPath(),
+		MenuWidget,
+		CursorPos,
+		FPopupTransitionEffect(FPopupTransitionEffect::ContextMenu)
+	);
 }
 
 // ============================================================
@@ -386,6 +546,14 @@ void UPlayerInputSubsystem::CancelMovement()
 		CMC->StopMovementImmediately();
 }
 
+void UPlayerInputSubsystem::ForceStopAllMovement()
+{
+	CancelMovement();
+	bWalkingToAttack = false;
+	bIsClickMoving = false;
+	PendingInteractNPC.Reset();
+}
+
 // ============================================================
 // Enemy ID extraction
 // ============================================================
@@ -393,23 +561,10 @@ void UPlayerInputSubsystem::CancelMovement()
 int32 UPlayerInputSubsystem::GetEnemyIdFromActor(AActor* Actor) const
 {
 	if (!Actor) return 0;
-
-	static const FName PropNames[] = {
-		FName("EnemyId"), FName("EnemyID"), FName("enemyId"), FName("Enemy Id")
-	};
-
-	for (const FName& PropName : PropNames)
-	{
-		FProperty* Prop = Actor->GetClass()->FindPropertyByName(PropName);
-		if (!Prop) continue;
-
-		if (FIntProperty* IntProp = CastField<FIntProperty>(Prop))
-		{
-			int32 Value = IntProp->GetPropertyValue_InContainer(Actor);
-			if (Value > 0) return Value;
-		}
-	}
-
+	UWorld* World = GetWorld();
+	if (!World) return 0;
+	if (UEnemySubsystem* ES = World->GetSubsystem<UEnemySubsystem>())
+		return ES->GetEnemyIdFromActor(Actor);
 	return 0;
 }
 

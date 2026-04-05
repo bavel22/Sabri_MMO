@@ -198,14 +198,14 @@ public:
 
 	// ---- skill usage ----
 	UFUNCTION(BlueprintCallable, Category = "SkillTree|Combat")
-	void UseSkill(int32 SkillId);
+	void UseSkill(int32 SkillId, int32 OverrideLevel = 0);
 
 	UFUNCTION(BlueprintCallable, Category = "SkillTree|Combat")
-	void UseSkillOnTarget(int32 SkillId, int32 TargetId, bool bIsEnemy);
+	void UseSkillOnTarget(int32 SkillId, int32 TargetId, bool bIsEnemy, int32 SkillLevel = 0);
 
 	/** Use a ground-targeted skill at a specific world position. */
 	UFUNCTION(BlueprintCallable, Category = "SkillTree|Combat")
-	void UseSkillOnGround(int32 SkillId, FVector GroundPosition);
+	void UseSkillOnGround(int32 SkillId, FVector GroundPosition, int32 SkillLevel = 0);
 
 	// ---- cooldown queries ----
 	UFUNCTION(BlueprintPure, Category = "SkillTree|Combat")
@@ -254,9 +254,15 @@ public:
 	/** Look up a cached skill entry by ID. Returns nullptr if not found. */
 	const FSkillEntry* FindSkillEntry(int32 SkillId) const;
 
+	// ---- RO Classic: per-skill selected use level (1 to max learned) ----
+	TMap<int32, int32> SelectedUseLevels;
+	int32 GetSelectedLevel(int32 SkillId) const;
+	void SetSelectedLevel(int32 SkillId, int32 Level);
+
 	// ---- skill drag state (for drag-to-hotbar) ----
 	bool bSkillDragging = false;
 	int32 DraggedSkillId = 0;
+	int32 DraggedSkillLevel = 0;
 	FString DraggedSkillName;
 	FString DraggedSkillIcon;
 
@@ -317,6 +323,7 @@ private:
 	// ---- targeting state ----
 	bool bIsInTargetingMode = false;
 	int32 PendingSkillId = 0;
+	int32 PendingSkillLevel = 0;
 	ESkillTargetingMode PendingTargetingMode = ESkillTargetingMode::None;
 	FString PendingSkillName;
 
@@ -329,4 +336,9 @@ private:
 	void HandleTargetingClick();
 	void HandleTargetingCancel();
 	int32 GetEnemyIdFromActor(AActor* Actor) const;
+
+	// ---- Warp Portal destination selection popup ----
+	void HandleWarpPortalSelect(const TSharedPtr<FJsonValue>& Data);
+	TSharedPtr<SWidget> WarpPortalPopup;
+	TSharedPtr<SWidget> WarpPortalPopupWrapper;
 };

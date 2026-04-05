@@ -47,6 +47,12 @@ void UKafraSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 			[this](const TSharedPtr<FJsonValue>& D) { HandleKafraTeleported(D); });
 		Router->RegisterHandler(TEXT("kafra:error"), this,
 			[this](const TSharedPtr<FJsonValue>& D) { HandleKafraError(D); });
+		Router->RegisterHandler(TEXT("cart:data"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleCartData(D); });
+		Router->RegisterHandler(TEXT("cart:error"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleCartError(D); });
+		Router->RegisterHandler(TEXT("cart:equipped"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleCartEquipped(D); });
 	}
 
 	UE_LOG(LogKafra, Log, TEXT("KafraSubsystem started — events registered via EventRouter."));
@@ -88,6 +94,14 @@ void UKafraSubsystem::HandleKafraData(const TSharedPtr<FJsonValue>& Data)
 
 	double Val = 0;
 	if (Obj->TryGetNumberField(TEXT("playerZuzucoin"), Val)) PlayerZuzucoin = (int32)Val;
+
+	// Parse cart state
+	bool HasCartVal = false;
+	if (Obj->TryGetBoolField(TEXT("hasCart"), HasCartVal)) bHasCart = HasCartVal;
+	FString JC;
+	if (Obj->TryGetStringField(TEXT("jobClass"), JC)) JobClass = JC;
+	double PushLv = 0;
+	if (Obj->TryGetNumberField(TEXT("pushcartLevel"), PushLv)) PushcartLevel = (int32)PushLv;
 
 	// Parse destinations
 	Destinations.Empty();
@@ -210,6 +224,75 @@ void UKafraSubsystem::RequestTeleport(const FString& DestZone)
 
 	GI->EmitSocketEvent(TEXT("kafra:teleport"), Payload);
 	UE_LOG(LogKafra, Log, TEXT("Requesting Kafra teleport to %s"), *DestZone);
+}
+
+void UKafraSubsystem::RequestRentCart()
+{
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
+	if (!GI) return;
+
+	GI->EmitSocketEvent(TEXT("cart:rent"), TEXT("{}"));
+	UE_LOG(LogKafra, Log, TEXT("Requesting cart rental."));
+}
+
+void UKafraSubsystem::RequestRemoveCart()
+{
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
+	if (!GI) return;
+
+	GI->EmitSocketEvent(TEXT("cart:remove"), TEXT("{}"));
+	UE_LOG(LogKafra, Log, TEXT("Requesting cart removal."));
+}
+
+bool UKafraSubsystem::CanUseCart() const
+{
+	static const TSet<FString> CartClasses = {
+		TEXT("merchant"), TEXT("blacksmith"), TEXT("alchemist"),
+		TEXT("whitesmith"), TEXT("creator"), TEXT("biochemist"),
+		TEXT("mastersmith"), TEXT("super_novice")
+	};
+	return CartClasses.Contains(JobClass.ToLower());
+}
+
+void UKafraSubsystem::HandleCartData(const TSharedPtr<FJsonValue>& Data)
+{
+	// Cart successfully rented — update state
+	bHasCart = true;
+	StatusMessage = TEXT("Cart equipped!");
+	StatusExpireTime = FPlatformTime::Seconds() + 3.0;
+	UE_LOG(LogKafra, Log, TEXT("Cart rented successfully."));
+}
+
+void UKafraSubsystem::HandleCartEquipped(const TSharedPtr<FJsonValue>& Data)
+{
+	if (!Data.IsValid()) return;
+	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
+
+	bool HasCartVal = false;
+	(*ObjPtr)->TryGetBoolField(TEXT("hasCart"), HasCartVal);
+	bHasCart = HasCartVal;
+
+	if (!HasCartVal)
+	{
+		StatusMessage = TEXT("Cart removed.");
+		StatusExpireTime = FPlatformTime::Seconds() + 3.0;
+	}
+}
+
+void UKafraSubsystem::HandleCartError(const TSharedPtr<FJsonValue>& Data)
+{
+	if (!Data.IsValid()) return;
+	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
+
+	FString Msg;
+	if ((*ObjPtr)->TryGetStringField(TEXT("message"), Msg))
+	{
+		StatusMessage = Msg;
+		StatusExpireTime = FPlatformTime::Seconds() + 4.0;
+		UE_LOG(LogKafra, Warning, TEXT("Cart error: %s"), *Msg);
+	}
 }
 
 void UKafraSubsystem::CloseKafra()

@@ -50,6 +50,7 @@ public:
 	int32 StatusATK = 0;
 	int32 WeaponATK = 0;
 	int32 PassiveATK = 0;
+	int32 ArrowATK = 0;
 	int32 StatusMATK = 0;
 	int32 MATKMin = 0;
 	int32 MATKMax = 0;
@@ -75,6 +76,32 @@ public:
 	FString ElementRight;
 	FString ElementLeft;
 
+	// Elemental Resistances (% reduction per element)
+	int32 ResistNeutral = 0;
+	int32 ResistFire = 0;
+	int32 ResistWater = 0;
+	int32 ResistEarth = 0;
+	int32 ResistWind = 0;
+	int32 ResistPoison = 0;
+	int32 ResistHoly = 0;
+	int32 ResistDark = 0;
+	int32 ResistGhost = 0;
+	int32 ResistUndead = 0;
+
+	// Block chance (Auto Guard)
+	int32 BlockChance = 0;
+
+	// Race ATK/DEF (passive + cards + buffs)
+	TMap<FString, int32> RaceAtk;
+	TMap<FString, int32> RaceDef;
+
+	// Size ATK/DEF (cards)
+	TMap<FString, int32> SizeAtk;
+	TMap<FString, int32> SizeDef;
+
+	// Element ATK (cards)
+	TMap<FString, int32> EleAtk;
+
 	// ---- stat allocation ----
 	void AllocateStat(const FString& StatName);
 
@@ -86,6 +113,8 @@ public:
 	// ---- widget visibility ----
 	void ToggleWidget();
 	bool IsWidgetVisible() const;
+	void ToggleAdvancedWidget();
+	bool IsAdvancedWidgetVisible() const;
 
 private:
 	// ---- event handlers ----
@@ -93,8 +122,11 @@ private:
 
 	// ---- state ----
 	bool bWidgetVisible = false;
+	bool bAdvancedWidgetVisible = false;
 	int32 LocalCharacterId = 0;
 
 	TSharedPtr<SCombatStatsWidget> StatsWidget;
 	TSharedPtr<SWidget> ViewportOverlay;
+	TSharedPtr<class SAdvancedStatsWidget> AdvancedWidget;
+	TSharedPtr<SWidget> AdvancedOverlay;
 };

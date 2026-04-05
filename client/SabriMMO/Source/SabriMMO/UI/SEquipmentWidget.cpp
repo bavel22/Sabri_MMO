@@ -250,7 +250,7 @@ TSharedRef<SWidget> SEquipmentWidget::BuildEquipSlot(const FString& SlotPosition
 							EquipIconWidget
 						]
 					]
-					// Item name or slot label
+					// Item name or slot label (ammo slot shows quantity)
 					+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center).Padding(4, 0, 0, 0)
 					[
 						SNew(STextBlock)
@@ -258,7 +258,11 @@ TSharedRef<SWidget> SEquipmentWidget::BuildEquipSlot(const FString& SlotPosition
 							if (!Sub) return FText::FromString(EquipSlots::GetDisplayName(SlotPos));
 							FInventoryItem Item = Sub->GetEquippedItem(SlotPos);
 							if (Item.IsValid())
+							{
+								if (SlotPos == EquipSlots::Ammo && Item.Quantity > 0)
+									return FText::FromString(FString::Printf(TEXT("%s x%d"), *Item.GetDisplayName(), Item.Quantity));
 								return FText::FromString(Item.GetDisplayName());
+							}
 							return FText::FromString(EquipSlots::GetDisplayName(SlotPos, Sub->GetLocalJobClass()));
 						})
 						.Font_Lambda([Sub, SlotPos]() -> FSlateFontInfo {
@@ -418,6 +422,8 @@ TSharedRef<SWidget> SEquipmentWidget::BuildEquipmentLayout()
 			[ BuildEquipSlot(EquipSlots::Footgear) ]
 			+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)
 			[ BuildEquipSlot(EquipSlots::Accessory2) ]
+			+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)
+			[ BuildEquipSlot(EquipSlots::Ammo) ]
 		];
 }
 
@@ -536,7 +542,7 @@ FString SEquipmentWidget::GetSlotAtPosition(const FGeometry& MyGeometry, const F
 	if (RelY < 0) return TEXT("");
 
 	int32 RowIndex = (int32)(RelY / SlotHeight);
-	if (RowIndex < 0 || RowIndex > 4) return TEXT("");
+	if (RowIndex < 0 || RowIndex > 5) return TEXT("");  // 6 rows (0-5) — added Ammo slot
 
 	// Left column check (x < 100)
 	if (LocalPos.X >= 4.f && LocalPos.X <= 100.f)
@@ -554,7 +560,7 @@ FString SEquipmentWidget::GetSlotAtPosition(const FGeometry& MyGeometry, const F
 	{
 		static const FString RightSlots[] = {
 			EquipSlots::HeadMid, EquipSlots::Armor, EquipSlots::Shield,
-			EquipSlots::Footgear, EquipSlots::Accessory2
+			EquipSlots::Footgear, EquipSlots::Accessory2, EquipSlots::Ammo
 		};
 		return RightSlots[RowIndex];
 	}

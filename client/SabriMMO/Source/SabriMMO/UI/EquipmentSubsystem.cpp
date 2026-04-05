@@ -49,6 +49,11 @@ void UEquipmentSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 
 void UEquipmentSubsystem::Deinitialize()
 {
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(RefreshTimerHandle);
+	}
+
 	if (bWidgetVisible)
 	{
 		ToggleWidget();
@@ -79,9 +84,14 @@ void UEquipmentSubsystem::HandleInventoryData(const TSharedPtr<FJsonValue>& Data
 	// Defer our refresh by one tick so InventorySubsystem has already updated its Items.
 	if (UWorld* World = GetWorld())
 	{
-		World->GetTimerManager().SetTimerForNextTick([this]()
+		World->GetTimerManager().ClearTimer(RefreshTimerHandle);
+		TWeakObjectPtr<UEquipmentSubsystem> WeakThis(this);
+		RefreshTimerHandle = World->GetTimerManager().SetTimerForNextTick([WeakThis]()
 		{
-			RefreshEquippedSlots();
+			if (UEquipmentSubsystem* Self = WeakThis.Get())
+			{
+				Self->RefreshEquippedSlots();
+			}
 		});
 	}
 }
@@ -122,6 +132,8 @@ void UEquipmentSubsystem::RefreshEquippedSlots()
 	}
 
 	UE_LOG(LogEquipment, Log, TEXT("Equipment refreshed: %d slots occupied"), EquippedSlots.Num());
+
+	OnEquipmentChanged.Broadcast();
 }
 
 FInventoryItem UEquipmentSubsystem::GetEquippedItem(const FString& SlotPosition) const
@@ -168,6 +180,9 @@ bool UEquipmentSubsystem::CanEquipToSlot(const FString& ItemEquipSlot, const FSt
 		FString JobClass = GetLocalJobClass();
 		if (EquipSlots::CanDualWield(JobClass)) return true;
 	}
+	// Ammo items (equip_slot "Ammo" or "ammo") → ammo slot
+	if ((ItemEquipSlot == TEXT("Ammo") || ItemEquipSlot == TEXT("ammo")) && SlotPosition == EquipSlots::Ammo)
+		return true;
 	return ItemEquipSlot == SlotPosition;
 }
 

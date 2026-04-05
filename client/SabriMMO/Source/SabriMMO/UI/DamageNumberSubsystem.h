@@ -28,6 +28,9 @@ public:
 private:
 	// ---- event handlers ----
 	void HandleCombatDamage(const TSharedPtr<FJsonValue>& Data);
+	void HandleCombatBlocked(const TSharedPtr<FJsonValue>& Data);
+	void HandleStatusTick(const TSharedPtr<FJsonValue>& Data);
+	void HandleStatusApplied(const TSharedPtr<FJsonValue>& Data);
 
 	// ---- overlay management ----
 	void ShowOverlay();
@@ -42,6 +45,17 @@ private:
 		const FVector& TargetWorldPos,
 		const FString& HitType = TEXT("normal"),
 		const FString& Element = TEXT("neutral"));
+
+	// ---- spawn a floating text label (e.g. "Poisoned!", "Stunned!") ----
+	void SpawnTextPop(const FString& Text, const FLinearColor& Color,
+		bool bIsEnemy, int32 TargetId, const FVector& TargetWorldPos);
+
+	// ---- resolve target world position from ID ----
+	bool ResolveTargetPosition(bool bIsEnemy, int32 TargetId, FVector& OutPos) const;
+
+	// ---- map status type to display name + color ----
+	static FString GetStatusDisplayName(const FString& StatusType);
+	static FLinearColor GetStatusColor(const FString& StatusType);
 
 	// ---- state ----
 	bool bOverlayAdded = false;

@@ -3,6 +3,7 @@
 
 #include "SWorldHealthBarOverlay.h"
 #include "WorldHealthBarSubsystem.h"
+#include "Sprite/SpriteAtlasData.h"
 #include "Rendering/DrawElements.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Styling/CoreStyle.h"
@@ -10,6 +11,7 @@
 #include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
 #include "Widgets/SNullWidget.h"
+#include "Kismet/GameplayStatics.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWorldHealthBarOverlay, Log, All);
 
@@ -75,11 +77,35 @@ int32 SWorldHealthBarOverlay::OnPaint(
 	// ---- Draw local player bar (HP + SP) ----
 	if (!Sub->bPlayerDead && Sub->PlayerMaxHP > 0)
 	{
-		FVector PlayerFeetPos;
-		if (Sub->GetPlayerFeetPosition(PlayerFeetPos))
+		APlayerController* BarPC = Sub->GetWorld()
+			? UGameplayStatics::GetPlayerController(Sub->GetWorld(), 0)
+			: nullptr;
+		APawn* Pawn = BarPC ? BarPC->GetPawn() : nullptr;
+
+		if (BarPC && Pawn)
 		{
+			// Use sprite screen bounds for positioning (scales with zoom)
+			FVector ActorPos = Pawn->GetActorLocation();
+			FVector2D TopScreen, BottomScreen;
+			const float SpriteH = 150.f; // SpriteSize.Y
+
 			FVector2D ScreenPos;
-			if (Sub->ProjectWorldToScreen(PlayerFeetPos, ScreenPos))
+			if (GetSpriteScreenBounds(BarPC, ActorPos, SpriteH, TopScreen, BottomScreen))
+			{
+				float SpriteScreenH = BottomScreen.Y - TopScreen.Y;
+				float Margin = FMath::Max(SpriteScreenH * 0.05f, 2.f);
+				// Position health bar just below sprite bottom
+				ScreenPos = FVector2D(BottomScreen.X, BottomScreen.Y + Margin);
+			}
+			else if (Sub->ProjectWorldToScreen(ActorPos, ScreenPos))
+			{
+				// Fallback: project from actor pos
+			}
+			else
+			{
+				goto SkipPlayerBar;
+			}
+
 			{
 				const float HPPercent = FMath::Clamp(
 					(float)Sub->PlayerCurrentHP / (float)Sub->PlayerMaxHP, 0.f, 1.f);
@@ -92,6 +118,7 @@ int32 SWorldHealthBarOverlay::OnPaint(
 			}
 		}
 	}
+	SkipPlayerBar:
 
 	// ---- Draw enemy bars ----
 	for (const auto& Pair : Sub->EnemyHealthMap)
@@ -116,22 +143,9 @@ int32 SWorldHealthBarOverlay::OnPaint(
 			ScreenPos, HPPercent, bCritical);
 	}
 
-	// ---- Draw NPC name labels (screen-space text above NPC actors) ----
+	// ---- NPC name labels REMOVED (Phase 5) ----
+	// NPC names now rendered by UNameTagSubsystem (Z=7) with RO Classic hover-only behavior.
 	const int32 TextLayerId = BarLayerId + 2;
-	for (const FNPCNameData& NPC : Sub->NPCNames)
-	{
-		if (!NPC.Actor.IsValid()) continue;
-
-		// Project NPC head position to screen (offset above capsule)
-		FVector NPCPos = NPC.Actor->GetActorLocation();
-		NPCPos.Z += 120.f; // Above the NPC's head
-
-		FVector2D ScreenPos;
-		if (!Sub->ProjectWorldToScreen(NPCPos, ScreenPos)) continue;
-
-		DrawNPCName(OutDrawElements, TextLayerId, AllottedGeometry, InvScale,
-			ScreenPos, NPC.DisplayName);
-	}
 
 	return TextLayerId;
 }

@@ -27,7 +27,10 @@ public class SabriMMO : ModuleRules
 			"JsonUtilities",
 			"Niagara",
 			"NiagaraCore",
-			"NavigationSystem"
+			"NavigationSystem",
+			"Navmesh",
+			"ProceduralMeshComponent",
+			"RenderCore"
 		});
 
 		// Exclude NetworkPrediction module due to UE 5.7 compiler bug
@@ -35,6 +38,7 @@ public class SabriMMO : ModuleRules
 
 		PublicIncludePaths.AddRange(new string[] {
 			"SabriMMO",
+			"SabriMMO/Sprite",
 			"SabriMMO/Variant_Platforming",
 			"SabriMMO/Variant_Platforming/Animation",
 			"SabriMMO/Variant_Combat",

@@ -1,6 +1,7 @@
 // MultiplayerEventSubsystem.h — UWorldSubsystem that bridges Socket.io events
 // from the persistent EventRouter to BP_SocketManager's existing handler functions.
-// Bridges 14 events to BP (inventory, loot, chat, stats, hotbar, shop).
+// All 14 bridges removed (Phases A-E). Only outbound emit helpers remain.
+// chat:receive now handled by ChatSubsystem (Phase E).
 // Player/enemy/combat events migrated to C++ subsystems in Phases 2-3.
 
 #pragma once
@@ -35,19 +36,5 @@ public:
 	void EmitChatMessage(const FString& Message, const FString& Channel);
 
 private:
-	// Bridge: converts FJsonValue to FString and calls BP handler via ProcessEvent
-	void ForwardToBPHandler(const FString& FunctionName, const TSharedPtr<FJsonValue>& Data);
-
-	// Utility to serialize FJsonValue to a JSON string for BP handler consumption
-	static FString JsonValueToString(const TSharedPtr<FJsonValue>& Value);
-
-	// Cached reference to BP_SocketManager actor (found once on begin play)
-	TWeakObjectPtr<AActor> SocketManagerActor;
-
-	// Find BP_SocketManager in the level
-	AActor* FindSocketManagerActor() const;
-
-	// Guard: prevents ProcessEvent calls during PostLoad (crashes UE5).
-	// Set to true one frame after OnWorldBeginPlay via SetTimerForNextTick.
-	bool bReadyToForward = false;
+	// Bridge infrastructure removed in Phase F — all 14 bridges migrated to C++ subsystems.
 };

@@ -37,11 +37,13 @@ static FString GetBuffAbbrev(const FString& Name)
 	if (Name == TEXT("auto berserk") || Name == TEXT("auto_berserk")) return TEXT("BRK");
 	if (Name == TEXT("energy coat") || Name == TEXT("energy_coat")) return TEXT("ENC");
 	if (Name == TEXT("hiding"))     return TEXT("HID");
+	if (Name == TEXT("play_dead") || Name == TEXT("play dead"))  return TEXT("PDd");
 	if (Name == TEXT("improve concentration") || Name == TEXT("improve_concentration")) return TEXT("CON");
 	if (Name == TEXT("loud exclamation") || Name == TEXT("loud_exclamation")) return TEXT("LXC");
 	if (Name == TEXT("ruwach"))     return TEXT("RUW");
 	if (Name == TEXT("signum crucis") || Name == TEXT("signum_crucis")) return TEXT("SCR");
 	if (Name == TEXT("pneuma"))     return TEXT("PNE");
+	if (Name == TEXT("magnum break fire") || Name == TEXT("magnum_break_fire")) return TEXT("MBF");
 	// Default: first 3 chars uppercase
 	FString Upper = Name.ToUpper();
 	return Upper.Left(3);
@@ -377,6 +379,16 @@ void UBuffBarSubsystem::HideWidget()
 bool UBuffBarSubsystem::IsWidgetVisible() const
 {
 	return bWidgetAdded;
+}
+
+bool UBuffBarSubsystem::HasBuff(const FString& BuffName) const
+{
+	for (const FActiveBuffInfo& B : ActiveBuffs)
+	{
+		if (B.Name == BuffName && GetRemainingSeconds(B.RemainingMs, B.ReceivedAt) > 0.f)
+			return true;
+	}
+	return false;
 }
 
 float UBuffBarSubsystem::GetRemainingSeconds(float RemainingMs, double ReceivedAt)

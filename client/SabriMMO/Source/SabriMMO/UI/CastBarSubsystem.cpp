@@ -12,6 +12,8 @@
 #include "TimerManager.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Widgets/SWeakWidget.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogCastBar, Log, All);
 
@@ -164,6 +166,17 @@ void UCastBarSubsystem::HandleCastStart(const TSharedPtr<FJsonValue>& Data)
 
 	ActiveCasts.Add(CasterId, Entry);
 
+	// Free Cast speed reduction: server sends freeCastSpeedPct (55-100) for Sage with Free Cast
+	if (CasterId == LocalCharacterId)
+	{
+		double FreeCastPct = 0;
+		Obj->TryGetNumberField(TEXT("freeCastSpeedPct"), FreeCastPct);
+		if (FreeCastPct > 0 && FreeCastPct < 100)
+		{
+			ApplyFreeCastSpeed((float)FreeCastPct);
+		}
+	}
+
 	UE_LOG(LogCastBar, Log, TEXT("Cast started: %s casting %s (%.1fs)"),
 		*CasterName, *SkillName, Entry.CastDuration);
 }
@@ -182,6 +195,11 @@ void UCastBarSubsystem::HandleCastComplete(const TSharedPtr<FJsonValue>& Data)
 
 	ActiveCasts.Remove(CasterId);
 
+	if (CasterId == LocalCharacterId)
+	{
+		RestoreNormalSpeed();
+	}
+
 	UE_LOG(LogCastBar, Log, TEXT("Cast complete: caster %d"), CasterId);
 }
 
@@ -191,6 +209,7 @@ void UCastBarSubsystem::HandleCastInterrupted(const TSharedPtr<FJsonValue>& Data
 	if (LocalCharacterId > 0)
 	{
 		ActiveCasts.Remove(LocalCharacterId);
+		RestoreNormalSpeed();
 	}
 
 	if (!Data.IsValid()) return;
@@ -231,4 +250,54 @@ void UCastBarSubsystem::HandleCastFailed(const TSharedPtr<FJsonValue>& Data)
 	}
 
 	UE_LOG(LogCastBar, Log, TEXT("Cast failed (local)"));
+}
+
+// ============================================================
+// Free Cast speed reduction
+// ============================================================
+
+void UCastBarSubsystem::ApplyFreeCastSpeed(float SpeedPct)
+{
+	if (bFreeCastSpeedApplied) return;
+
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	APlayerController* PC = World->GetFirstPlayerController();
+	if (!PC) return;
+
+	ACharacter* Char = Cast<ACharacter>(PC->GetPawn());
+	if (!Char) return;
+
+	UCharacterMovementComponent* CMC = Char->GetCharacterMovement();
+	if (!CMC) return;
+
+	SavedMaxWalkSpeed = CMC->MaxWalkSpeed;
+	CMC->MaxWalkSpeed = SavedMaxWalkSpeed * (SpeedPct / 100.f);
+	bFreeCastSpeedApplied = true;
+
+	UE_LOG(LogCastBar, Log, TEXT("Free Cast speed applied: %.0f%% (%.0f -> %.0f)"),
+		SpeedPct, SavedMaxWalkSpeed, CMC->MaxWalkSpeed);
+}
+
+void UCastBarSubsystem::RestoreNormalSpeed()
+{
+	if (!bFreeCastSpeedApplied) return;
+
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	APlayerController* PC = World->GetFirstPlayerController();
+	if (!PC) return;
+
+	ACharacter* Char = Cast<ACharacter>(PC->GetPawn());
+	if (!Char) return;
+
+	UCharacterMovementComponent* CMC = Char->GetCharacterMovement();
+	if (!CMC) return;
+
+	CMC->MaxWalkSpeed = SavedMaxWalkSpeed;
+	bFreeCastSpeedApplied = false;
+
+	UE_LOG(LogCastBar, Log, TEXT("Free Cast speed restored: %.0f"), SavedMaxWalkSpeed);
 }

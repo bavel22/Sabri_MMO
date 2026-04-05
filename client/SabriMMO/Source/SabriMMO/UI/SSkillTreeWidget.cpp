@@ -587,16 +587,71 @@ void SSkillTreeWidget::DoRebuildSkillGrid()
 				.WrapTextAt(CELL_WIDTH - 8.f)
 			];
 
-			// Row 3: Level text
+			// Row 3: Level text + use-level selector arrows (RO Classic)
 			CellContent->AddSlot()
 			.AutoHeight()
 			.HAlign(HAlign_Center)
 			.Padding(0.f, 1.f, 0.f, 0.f)
 			[
-				SNew(STextBlock)
-				.Text(FText::FromString(FString::Printf(TEXT("%d/%d"), Skill->CurrentLevel, Skill->MaxLevel)))
-				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 6))
-				.ColorAndOpacity(FSlateColor(bMaxed ? SKColors::GoldHighlight : (bLearned ? SKColors::TextGreen : SKColors::TextDim)))
+				SNew(SHorizontalBox)
+				// Down arrow (decrease use level) — only for active/toggle skills, not passives
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+				[
+					SNew(SButton)
+					.ButtonStyle(FCoreStyle::Get(), "NoBorder")
+					.ContentPadding(FMargin(0.f))
+					.Visibility(bLearned && Skill->CurrentLevel > 1 && Skill->Type != TEXT("passive") ? EVisibility::Visible : EVisibility::Hidden)
+					.OnClicked_Lambda([WeakSub, SkillId]() -> FReply {
+						if (USkillTreeSubsystem* S = WeakSub.Get()) {
+							int32 Cur = S->GetSelectedLevel(SkillId);
+							if (Cur > 1) S->SetSelectedLevel(SkillId, Cur - 1);
+						}
+						return FReply::Handled();
+					})
+					[
+						SNew(STextBlock)
+						.Text(FText::FromString(TEXT("<")))
+						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 7))
+						.ColorAndOpacity(FSlateColor(SKColors::TextGreen))
+					]
+				]
+				// Level display: "useLevel / maxLearned"
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(2.f, 0.f)
+				[
+					SNew(STextBlock)
+					.Text_Lambda([WeakSub, SkillId, Skill]() -> FText {
+						if (USkillTreeSubsystem* S = WeakSub.Get()) {
+							if (Skill->CurrentLevel > 0) {
+								int32 UseLv = S->GetSelectedLevel(SkillId);
+								return FText::FromString(FString::Printf(TEXT("%d/%d"), UseLv, Skill->CurrentLevel));
+							}
+						}
+						return FText::FromString(FString::Printf(TEXT("%d/%d"), Skill->CurrentLevel, Skill->MaxLevel));
+					})
+					.Font(FCoreStyle::GetDefaultFontStyle("Regular", 6))
+					.ColorAndOpacity(FSlateColor(bMaxed ? SKColors::GoldHighlight : (bLearned ? SKColors::TextGreen : SKColors::TextDim)))
+				]
+				// Up arrow (increase use level) — only for active/toggle skills, not passives
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+				[
+					SNew(SButton)
+					.ButtonStyle(FCoreStyle::Get(), "NoBorder")
+					.ContentPadding(FMargin(0.f))
+					.Visibility(bLearned && Skill->CurrentLevel > 1 && Skill->Type != TEXT("passive") ? EVisibility::Visible : EVisibility::Hidden)
+					.OnClicked_Lambda([WeakSub, SkillId, Skill]() -> FReply {
+						if (USkillTreeSubsystem* S = WeakSub.Get()) {
+							int32 Cur = S->GetSelectedLevel(SkillId);
+							if (Cur < Skill->CurrentLevel) S->SetSelectedLevel(SkillId, Cur + 1);
+						}
+						return FReply::Handled();
+					})
+					[
+						SNew(STextBlock)
+						.Text(FText::FromString(TEXT(">")))
+						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 7))
+						.ColorAndOpacity(FSlateColor(SKColors::TextGreen))
+					]
+				]
 			];
 
 			// Row 4: Learn button [+] (only if can learn and not maxed)

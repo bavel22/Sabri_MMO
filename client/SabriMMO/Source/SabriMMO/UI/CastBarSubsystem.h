@@ -51,6 +51,12 @@ private:
 	void ShowOverlay();
 	void HideOverlay();
 
+	// ---- Free Cast speed reduction ----
+	void ApplyFreeCastSpeed(float SpeedPct);
+	void RestoreNormalSpeed();
+	float SavedMaxWalkSpeed = 0.f;
+	bool bFreeCastSpeedApplied = false;
+
 	// ---- state ----
 	bool bOverlayAdded = false;
 

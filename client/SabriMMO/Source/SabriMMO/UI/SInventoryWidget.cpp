@@ -3,6 +3,7 @@
 
 #include "SInventoryWidget.h"
 #include "InventorySubsystem.h"
+#include "StorageSubsystem.h"
 #include "ItemInspectSubsystem.h"
 #include "ItemTooltipBuilder.h"
 #include "Engine/Engine.h"
@@ -15,6 +16,7 @@
 #include "Widgets/SNullWidget.h"
 #include "Widgets/Text/STextBlock.h"
 #include "Widgets/Input/SButton.h"
+#include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/SToolTip.h"
 #include "Widgets/Images/SImage.h"
 #include "Styling/SlateTypes.h"
@@ -94,6 +96,9 @@ void SInventoryWidget::Construct(const FArguments& InArgs)
 							SNew(SBox).HeightOverride(1.f).Padding(FMargin(2.f, 1.f))
 							[ SNew(SBorder).BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox")).BorderBackgroundColor(InvColors::GoldDivider) ]
 						]
+						// Toolbar (Search + Sort + AutoStack)
+						+ SVerticalBox::Slot().AutoHeight()
+						[ BuildToolbar() ]
 						// Tab bar + Grid area
 						+ SVerticalBox::Slot().FillHeight(1.f)
 						[
@@ -227,17 +232,92 @@ TSharedRef<SWidget> SInventoryWidget::BuildTabBar()
 }
 
 // ============================================================
+// Toolbar — Search + Sort + AutoStack
+// ============================================================
+
+TSharedRef<SWidget> SInventoryWidget::BuildToolbar()
+{
+	UInventorySubsystem* Sub = OwningSubsystem.Get();
+
+	auto MakeToolBtn = [](const FString& Label, TFunction<void()> OnClick) -> TSharedRef<SWidget>
+	{
+		return SNew(SBorder)
+			.BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
+			.BorderBackgroundColor(InvColors::PanelMedium)
+			.Padding(FMargin(4.f, 1.f))
+			.OnMouseButtonDown_Lambda([OnClick](const FGeometry&, const FPointerEvent& Event) -> FReply {
+				if (Event.GetEffectingButton() == EKeys::LeftMouseButton)
+				{
+					OnClick();
+					return FReply::Handled();
+				}
+				return FReply::Unhandled();
+			})
+			[
+				SNew(STextBlock)
+				.Text(FText::FromString(Label))
+				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 7))
+				.ColorAndOpacity(FSlateColor(InvColors::TextPrimary))
+			];
+	};
+
+	return SNew(SBox)
+		.HeightOverride(20.f)
+		.Padding(FMargin(4.f, 1.f))
+		[
+			SNew(SHorizontalBox)
+			// Search input
+			+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center).Padding(0, 0, 4, 0)
+			[
+				SNew(SEditableTextBox)
+				.HintText(FText::FromString(TEXT("Search...")))
+				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 7))
+				.OnTextChanged_Lambda([Sub](const FText& NewText) {
+					if (Sub)
+					{
+						Sub->SearchFilter = NewText.ToString();
+						++Sub->DataVersion;
+					}
+				})
+			]
+			// Sort: Type
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(1, 0)
+			[ MakeToolBtn(TEXT("Type"), [Sub]() { if (Sub) Sub->SortInventory(TEXT("type")); }) ]
+			// Sort: Name
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(1, 0)
+			[ MakeToolBtn(TEXT("Name"), [Sub]() { if (Sub) Sub->SortInventory(TEXT("name")); }) ]
+			// Sort: Weight
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(1, 0)
+			[ MakeToolBtn(TEXT("Wt"), [Sub]() { if (Sub) Sub->SortInventory(TEXT("weight")); }) ]
+			// Auto-Stack
+			+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(1, 0)
+			[ MakeToolBtn(TEXT("Stack"), [Sub]() { if (Sub) Sub->AutoStack(); }) ]
+		];
+}
+
+// ============================================================
 // Grid area (scrollable item grid)
 // ============================================================
 
 TSharedRef<SWidget> SInventoryWidget::BuildGridArea()
 {
-	return SAssignNew(GridScrollBox, SScrollBox)
-		.Orientation(Orient_Vertical)
-		.ScrollBarVisibility(EVisibility::Visible)
-		+ SScrollBox::Slot()
+	return SNew(SOverlay)
+		+ SOverlay::Slot()
 		[
-			SAssignNew(GridContainer, SVerticalBox)
+			SAssignNew(GridScrollBox, SScrollBox)
+			.Orientation(Orient_Vertical)
+			.ScrollBarVisibility(EVisibility::Visible)
+			+ SScrollBox::Slot()
+			[
+				SAssignNew(GridContainer, SVerticalBox)
+			]
+		]
+		+ SOverlay::Slot()
+		.HAlign(HAlign_Left)
+		.VAlign(VAlign_Top)
+		[
+			SAssignNew(SplitPopupBox, SBox)
+			.Visibility(EVisibility::Collapsed)
 		];
 }
 
@@ -375,6 +455,21 @@ TSharedRef<SWidget> SInventoryWidget::BuildItemSlot(int32 SlotIndex)
 						.ColorAndOpacity(FSlateColor(InvColors::TextBright))
 						.ShadowOffset(FVector2D(1, 1))
 						.ShadowColorAndOpacity(InvColors::TextShadow)
+					]
+					// Unidentified "?" indicator (top-left)
+					+ SOverlay::Slot().HAlign(HAlign_Left).VAlign(VAlign_Top)
+					[
+						SNew(STextBlock)
+						.Text_Lambda([this, SlotIndex]() -> FText {
+							FInventoryItem It = GetItemAtSlot(SlotIndex);
+							return (It.IsValid() && !It.bIdentified)
+								? FText::FromString(TEXT("?"))
+								: FText::GetEmpty();
+						})
+						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+						.ColorAndOpacity(FSlateColor(FLinearColor(0.9f, 0.6f, 0.2f, 1.f)))
+						.ShadowOffset(FVector2D(1, 1))
+						.ShadowColorAndOpacity(FLinearColor(0.f, 0.f, 0.f, 0.85f))
 					]
 				]
 			]
@@ -580,11 +675,11 @@ FLinearColor SInventoryWidget::GetItemTypeColor(const FString& ItemType) const
 int32 SInventoryWidget::GetSlotIndexFromPosition(const FGeometry& MyGeometry, const FVector2D& ScreenPos) const
 {
 	// Calculate which grid slot the mouse is over
-	// Grid starts after: 3px borders + 20px title + 1px divider = 24px top,
+	// Grid starts after: 3px borders + 20px title + 3px divider + 20px toolbar = 46px top,
 	//                    3px borders + 22px tab bar = 25px left
 	FVector2D LocalPos = MyGeometry.AbsoluteToLocal(ScreenPos);
 	float GridLeft = 25.f;
-	float GridTop = 24.f;
+	float GridTop = 46.f;
 
 	float RelX = LocalPos.X - GridLeft;
 	float RelY = LocalPos.Y - GridTop;
@@ -624,6 +719,114 @@ void SInventoryWidget::ApplyLayout()
 }
 
 // ============================================================
+// Keyboard input
+// ============================================================
+
+FReply SInventoryWidget::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InKeyEvent)
+{
+	if (InKeyEvent.GetKey() == EKeys::Escape)
+	{
+		if (bSplitPopupActive)
+		{
+			HideSplitPopup();
+			return FReply::Handled();
+		}
+		UInventorySubsystem* Sub = OwningSubsystem.Get();
+		if (Sub) Sub->ToggleWidget();
+		return FReply::Handled();
+	}
+	return FReply::Unhandled();
+}
+
+// ============================================================
+// Split quantity popup (floating at icon position)
+// ============================================================
+
+void SInventoryWidget::ShowSplitPopup(int32 InventoryId, int32 MaxQty, const FVector2D& LocalPos)
+{
+	SplitSourceInventoryId = InventoryId;
+	SplitMaxQuantity = MaxQty;
+	bSplitPopupActive = true;
+	if (!SplitPopupBox.IsValid()) return;
+
+	SplitPopupBox->SetVisibility(EVisibility::Visible);
+	SplitPopupBox->SetContent(
+		SNew(SBorder)
+		.BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
+		.BorderBackgroundColor(InvColors::GoldTrim)
+		.Padding(FMargin(1.f))
+		[
+			SNew(SBorder)
+			.BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
+			.BorderBackgroundColor(InvColors::PanelDark)
+			.Padding(FMargin(2.f))
+			[
+				SNew(SHorizontalBox)
+				+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
+				[
+					SNew(SBox).WidthOverride(36.f)
+					[
+						SAssignNew(SplitInputBox, SEditableTextBox)
+						.Font(FCoreStyle::GetDefaultFontStyle("Regular", 8))
+						.Text(FText::AsNumber(FMath::Max(1, MaxQty / 2)))
+						.SelectAllTextWhenFocused(true)
+						.OnTextCommitted_Lambda([this](const FText&, ETextCommit::Type CommitType) {
+							if (CommitType == ETextCommit::OnEnter) ConfirmSplit();
+						})
+					]
+				]
+				+ SHorizontalBox::Slot().AutoWidth().Padding(2, 0, 0, 0).VAlign(VAlign_Center)
+				[
+					SNew(SBorder)
+					.BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
+					.BorderBackgroundColor(InvColors::GoldDark)
+					.Padding(FMargin(3.f, 1.f))
+					.OnMouseButtonDown_Lambda([this](const FGeometry&, const FPointerEvent& E) -> FReply {
+						if (E.GetEffectingButton() == EKeys::LeftMouseButton) { ConfirmSplit(); return FReply::Handled(); }
+						return FReply::Unhandled();
+					})
+					[
+						SNew(STextBlock)
+						.Text(FText::FromString(TEXT("OK")))
+						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 7))
+						.ColorAndOpacity(FSlateColor(InvColors::TextBright))
+					]
+				]
+			]
+		]
+	);
+
+	float PopupX = FMath::Clamp(LocalPos.X - 30.f, 0.f, CurrentSize.X - 70.f);
+	float PopupY = FMath::Clamp(LocalPos.Y - 22.f, 0.f, CurrentSize.Y - 22.f);
+	SplitPopupBox->SetRenderTransform(FSlateRenderTransform(FVector2f((float)PopupX, (float)PopupY)));
+
+	if (SplitInputBox.IsValid()) FSlateApplication::Get().SetKeyboardFocus(SplitInputBox);
+}
+
+void SInventoryWidget::HideSplitPopup()
+{
+	bSplitPopupActive = false;
+	SplitSourceInventoryId = 0;
+	SplitMaxQuantity = 0;
+	SplitInputBox.Reset();
+	if (SplitPopupBox.IsValid())
+	{
+		SplitPopupBox->SetVisibility(EVisibility::Collapsed);
+		SplitPopupBox->SetContent(SNullWidget::NullWidget);
+	}
+}
+
+void SInventoryWidget::ConfirmSplit()
+{
+	if (!SplitInputBox.IsValid() || SplitSourceInventoryId == 0) { HideSplitPopup(); return; }
+	int32 Qty = FCString::Atoi(*SplitInputBox->GetText().ToString().TrimStartAndEnd());
+	if (Qty < 1 || Qty > SplitMaxQuantity) { HideSplitPopup(); return; }
+	UInventorySubsystem* Sub = OwningSubsystem.Get();
+	if (Sub) Sub->SplitStack(SplitSourceInventoryId, Qty);
+	HideSplitPopup();
+}
+
+// ============================================================
 // Mouse input
 // ============================================================
 
@@ -658,11 +861,19 @@ FReply SInventoryWidget::OnMouseButtonDown(const FGeometry& MyGeometry, const FP
 			return FReply::Handled().CaptureMouse(SharedThis(this));
 		}
 
-		// Check if clicking on a grid item — start potential drag
+		// Check if clicking on a grid item
 		int32 SlotIdx = GetSlotIndexFromPosition(MyGeometry, ScreenPos);
 		FInventoryItem Item = GetItemAtSlot(SlotIdx);
 		if (Item.IsValid())
 		{
+			// Shift+Click: show split quantity dialog
+			if (MouseEvent.IsShiftDown() && Item.bStackable && Item.Quantity > 1)
+			{
+				ShowSplitPopup(Item.InventoryId, Item.Quantity - 1, LocalPos);
+				return FReply::Handled();
+			}
+
+			// Normal click: start potential drag
 			bDragInitiated = true;
 			DragStartPos = ScreenPos;
 			DragSourceInventoryId = Item.InventoryId;
@@ -673,13 +884,30 @@ FReply SInventoryWidget::OnMouseButtonDown(const FGeometry& MyGeometry, const FP
 		return FReply::Handled();
 	}
 
-	// Right-click: open item inspect
+	// Right-click handling
 	if (MouseEvent.GetEffectingButton() == EKeys::RightMouseButton)
 	{
 		int32 SlotIdx = GetSlotIndexFromPosition(MyGeometry, ScreenPos);
 		FInventoryItem Item = GetItemAtSlot(SlotIdx);
 		if (Item.IsValid())
 		{
+			// Alt+RightClick: quick deposit to storage (if open)
+			if (MouseEvent.IsAltDown())
+			{
+				if (UWorld* World = GEngine ? GEngine->GetCurrentPlayWorld() : nullptr)
+				{
+					if (UStorageSubsystem* StorageSub = World->GetSubsystem<UStorageSubsystem>())
+					{
+						if (StorageSub->bIsOpen)
+						{
+							StorageSub->DepositItem(Item.InventoryId, Item.Quantity);
+							return FReply::Handled();
+						}
+					}
+				}
+			}
+
+			// Normal right-click: open item inspect
 			if (UWorld* World = GEngine ? GEngine->GetCurrentPlayWorld() : nullptr)
 			{
 				if (UItemInspectSubsystem* InspectSub = World->GetSubsystem<UItemInspectSubsystem>())
@@ -736,6 +964,11 @@ FReply SInventoryWidget::OnMouseButtonUp(const FGeometry& MyGeometry, const FPoi
 					// From equipment → drop outside inventory = unequip to inventory
 					Sub->CompleteDrop(EItemDropTarget::InventorySlot);
 				}
+				else if (Sub->DragState.Source == EItemDragSource::Cart)
+				{
+					// From cart → drop outside inventory = move to inventory
+					Sub->CompleteDrop(EItemDropTarget::InventorySlot);
+				}
 				else if (!Sub->DragState.EquipSlot.IsEmpty())
 				{
 					// Equippable item dragged outside inventory = equip it
@@ -753,6 +986,11 @@ FReply SInventoryWidget::OnMouseButtonUp(const FGeometry& MyGeometry, const FPoi
 				int32 TargetVisualSlot = GetSlotIndexFromPosition(MyGeometry, ScreenPos);
 				if (Sub->DragState.Source == EItemDragSource::Equipment)
 				{
+					Sub->CompleteDrop(EItemDropTarget::InventorySlot);
+				}
+				else if (Sub->DragState.Source == EItemDragSource::Cart)
+				{
+					// From cart → dropped on inventory = move to inventory
 					Sub->CompleteDrop(EItemDropTarget::InventorySlot);
 				}
 				else if (TargetVisualSlot >= 0)

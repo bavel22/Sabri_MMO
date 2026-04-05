@@ -20,7 +20,8 @@ enum class EDamagePopType : uint8
 	Miss,            // Light blue — "Miss" text
 	Heal,            // Green — healing received
 	Dodge,           // Green — FLEE dodge (target dodged via AGI)
-	PerfectDodge     // Bright green — Lucky Dodge (target dodged via LUK)
+	PerfectDodge,    // Bright green — Lucky Dodge (target dodged via LUK)
+	Block            // Silver/white — Auto Guard shield block
 };
 
 // Single damage pop-up entry in the pool
@@ -33,6 +34,9 @@ struct FDamagePopEntry
 	double SpawnTime = 0.0;
 	float RandomXBias = 0.0f;  // Slight random horizontal offset for organic feel
 	FString Element;           // Attack element for coloring (e.g., "fire", "water")
+	FString TextLabel;         // If non-empty, renders this text instead of Value digits
+	FLinearColor CustomColor = FLinearColor::White;  // Used when TextLabel is set
+	bool bHasCustomColor = false;
 };
 
 class SDamageNumberOverlay : public SCompoundWidget
@@ -45,6 +49,9 @@ public:
 
 	/** Add a new damage pop-up at the given screen position. */
 	void AddDamagePop(int32 Value, EDamagePopType Type, FVector2D ScreenPosition, const FString& Element = TEXT(""));
+
+	/** Add a floating text label (e.g. "Poisoned!", "Stunned!") at the given screen position. */
+	void AddTextPop(const FString& Text, const FLinearColor& Color, FVector2D ScreenPosition);
 
 	// SWidget interface
 	virtual int32 OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry,
@@ -79,6 +86,7 @@ private:
 	static constexpr int32 MISS_FONT_SIZE = 18;
 	static constexpr int32 HEAL_FONT_SIZE = 19;
 	static constexpr int32 DODGE_FONT_SIZE = 18;
+	static constexpr int32 STATUS_TEXT_FONT_SIZE = 17;
 	static constexpr float OUTLINE_SIZE_NORMAL = 2.0f;
 	static constexpr float OUTLINE_SIZE_CRIT = 3.0f;
 

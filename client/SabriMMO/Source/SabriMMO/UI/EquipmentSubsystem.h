@@ -28,6 +28,7 @@ namespace EquipSlots
 	static const FString Footgear   = TEXT("footgear");
 	static const FString Accessory1 = TEXT("accessory_1");
 	static const FString Accessory2 = TEXT("accessory_2");
+	static const FString Ammo       = TEXT("ammo");  // Arrows, bullets (RO Classic ammunition slot)
 
 	// Check if a job class can dual wield (Assassin/Assassin Cross)
 	inline bool CanDualWield(const FString& JobClass)
@@ -47,6 +48,7 @@ namespace EquipSlots
 		if (EquipSlot == TEXT("accessory")) return { Accessory1, Accessory2 };
 		// Assassin: weapon items can go to weapon or weapon_left
 		if (EquipSlot == TEXT("weapon") && CanDualWield(JobClass)) return { Weapon, WeaponLeft };
+		if (EquipSlot == TEXT("Ammo") || EquipSlot == TEXT("ammo")) return { Ammo };
 		return { EquipSlot };
 	}
 
@@ -69,6 +71,7 @@ namespace EquipSlots
 		if (Position == Footgear)   return TEXT("Footgear");
 		if (Position == Accessory1) return TEXT("Accessory");
 		if (Position == Accessory2) return TEXT("Accessory");
+		if (Position == Ammo)       return TEXT("Ammo");
 		return Position;
 	}
 }
@@ -100,6 +103,10 @@ public:
 	// Get the local player's job class for dual wield detection
 	FString GetLocalJobClass() const;
 
+	/** Broadcast when equipped items change (for sprite weapon mode updates) */
+	DECLARE_MULTICAST_DELEGATE(FOnEquipmentChanged);
+	FOnEquipmentChanged OnEquipmentChanged;
+
 	// ---- lifecycle ----
 	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
@@ -112,6 +119,7 @@ public:
 private:
 	void HandleInventoryData(const TSharedPtr<FJsonValue>& Data);
 
+	FTimerHandle RefreshTimerHandle;
 	bool bWidgetVisible = false;
 	int32 LocalCharacterId = 0;
 

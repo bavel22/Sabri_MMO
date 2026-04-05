@@ -4,6 +4,7 @@
 
 #include "WorldHealthBarSubsystem.h"
 #include "SWorldHealthBarOverlay.h"
+#include "EnemySubsystem.h"
 #include "MMOGameInstance.h"
 #include "SocketEventRouter.h"
 #include "Engine/World.h"
@@ -499,22 +500,16 @@ void UWorldHealthBarSubsystem::CacheEnemyActors()
 	UWorld* World = GetWorld();
 	if (!World) return;
 
-	// Collect all character actors in the world (enemy pawns are ACharacter-derived)
+	// Collect enemy actors from EnemySubsystem registry (replaces class name heuristic)
 	TArray<AActor*> CandidateActors;
-	for (TActorIterator<ACharacter> It(World); It; ++It)
+	if (UEnemySubsystem* ES = World->GetSubsystem<UEnemySubsystem>())
 	{
-		ACharacter* Char = *It;
-		if (!Char) continue;
-
-		// Skip the local player pawn
-		APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0);
-		if (PC && PC->GetPawn() == Char) continue;
-
-		// Only consider actors whose class name contains "Enemy"
-		FString ClassName = Char->GetClass()->GetName();
-		if (ClassName.Contains(TEXT("Enemy")))
+		for (const auto& Pair : ES->GetAllEnemies())
 		{
-			CandidateActors.Add(Char);
+			const FEnemyEntry& Entry = Pair.Value;
+			if (Entry.bIsDead) continue;
+			AActor* Actor = Entry.Actor.Get();
+			if (Actor) CandidateActors.Add(Actor);
 		}
 	}
 

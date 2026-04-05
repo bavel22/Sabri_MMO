@@ -14,9 +14,16 @@
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Text/STextBlock.h"
+#include "Widgets/SOverlay.h"
+#include "Widgets/SBoxPanel.h"
+#include "Widgets/Images/SImage.h"
+#include "Widgets/Notifications/SProgressBar.h"
 #include "Styling/CoreStyle.h"
+#include "Styling/SlateBrush.h"
+#include "Engine/Texture2D.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Character.h"
+#include "PlayerInputSubsystem.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/PlayerStart.h"
 #include "NavigationSystem.h"
@@ -259,9 +266,15 @@ void UZoneTransitionSubsystem::HandlePlayerTeleport(const TSharedPtr<FJsonValue>
 		TEXT("player:teleport — type: %s pos: (%.0f, %.0f, %.0f)"),
 		*TeleportType, X, Y, Z);
 
-	// Snap local pawn to new position
+	// Cancel all active movement (pathfinding, walk-to-attack, click-to-move)
+	// so the pathfollowing component doesn't drag the pawn back to its old destination.
 	UWorld* World = GetWorld();
 	if (!World) return;
+
+	if (UPlayerInputSubsystem* PIS = World->GetSubsystem<UPlayerInputSubsystem>())
+	{
+		PIS->ForceStopAllMovement();
+	}
 
 	APlayerController* PC = World->GetFirstPlayerController();
 	if (!PC) return;
@@ -492,6 +505,195 @@ void UZoneTransitionSubsystem::TeleportPawnToSpawn()
 // Loading overlay
 // ============================================================
 
+void UZoneTransitionSubsystem::LoadLoadingScreenTextures()
+{
+	if (bLoadingTexturesLoaded) return;
+	bLoadingTexturesLoaded = true;
+
+	// Try to load T_Loading_00 through T_Loading_19 (stops at first missing)
+	for (int32 i = 0; i < 20; ++i)
+	{
+		FString Path = FString::Printf(
+			TEXT("/Game/SabriMMO/Textures/LoadingScreens/T_Loading_%02d.T_Loading_%02d"), i, i);
+		UTexture2D* Tex = Cast<UTexture2D>(StaticLoadObject(UTexture2D::StaticClass(), nullptr, *Path));
+		if (Tex)
+		{
+			LoadingScreenTextures.Add(Tex);
+		}
+	}
+
+	UE_LOG(LogZoneTransition, Log, TEXT("Loaded %d loading screen textures"), LoadingScreenTextures.Num());
+}
+
+// ── Animated loading screen widget (Ken Burns + particles + progress) ──
+class SLoadingScreenOverlay : public SCompoundWidget
+{
+public:
+	SLATE_BEGIN_ARGS(SLoadingScreenOverlay) {}
+		SLATE_ARGUMENT(FString, StatusText)
+		SLATE_ARGUMENT(FSlateBrush*, ImageBrush)
+		SLATE_ARGUMENT(float, KenBurnsStartScale)
+		SLATE_ARGUMENT(float, KenBurnsEndScale)
+		SLATE_ARGUMENT(FVector2D, KenBurnsDrift)
+		SLATE_ARGUMENT(double, StartTime)
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& InArgs)
+	{
+		StatusText = InArgs._StatusText;
+		ImageBrush = InArgs._ImageBrush;
+		KBStartScale = InArgs._KenBurnsStartScale;
+		KBEndScale = InArgs._KenBurnsEndScale;
+		KBDrift = InArgs._KenBurnsDrift;
+		StartTime = InArgs._StartTime;
+
+		SetVisibility(EVisibility::HitTestInvisible);
+		RegisterActiveTimer(0.016f, FWidgetActiveTimerDelegate::CreateLambda(
+			[](double, float) -> EActiveTimerReturnType { return EActiveTimerReturnType::Continue; }));
+
+		// Generate random sparkle particles
+		for (int32 i = 0; i < 30; ++i)
+		{
+			FParticle P;
+			P.X = FMath::FRand();
+			P.Y = FMath::FRand();
+			P.SpeedX = (FMath::FRand() - 0.5f) * 0.02f;
+			P.SpeedY = -0.005f - FMath::FRand() * 0.015f;  // drift upward
+			P.Size = 1.f + FMath::FRand() * 2.f;
+			P.Alpha = 0.2f + FMath::FRand() * 0.5f;
+			P.Phase = FMath::FRand() * PI * 2.f;  // twinkle phase offset
+			Particles.Add(P);
+		}
+
+		ChildSlot[ SNew(SBorder).BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
+			.BorderBackgroundColor(FLinearColor(0, 0, 0, 0)).Visibility(EVisibility::HitTestInvisible) ];
+	}
+
+	virtual int32 OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry,
+		const FSlateRect& MyCullingRect, FSlateWindowElementList& OutDrawElements,
+		int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const override
+	{
+		const FVector2D Size = AllottedGeometry.GetLocalSize();
+		const double Elapsed = FPlatformTime::Seconds() - StartTime;
+		const float T = (float)Elapsed;
+		const FSlateBrush* WB = FCoreStyle::Get().GetBrush("GenericWhiteBox");
+
+		// ── Layer 1: Black background ──
+		FSlateDrawElement::MakeBox(OutDrawElements, LayerId,
+			AllottedGeometry.ToPaintGeometry(), WB, ESlateDrawEffect::None,
+			FLinearColor(0.02f, 0.02f, 0.05f, 1.f));
+		LayerId++;
+
+		// ── Layer 2: Ken Burns animated image ──
+		if (ImageBrush)
+		{
+			// Fade in over 0.8 seconds
+			float FadeAlpha = FMath::Clamp(T / 0.8f, 0.f, 1.f);
+
+			// Ken Burns: slow zoom from StartScale to EndScale over 8 seconds + drift
+			float KBProgress = FMath::Clamp(T / 8.f, 0.f, 1.f);
+			float Scale = FMath::Lerp(KBStartScale, KBEndScale, KBProgress);
+			float DriftX = KBDrift.X * KBProgress * Size.X * 0.03f;
+			float DriftY = KBDrift.Y * KBProgress * Size.Y * 0.03f;
+
+			// Calculate scaled size and centered offset
+			float ScaledW = Size.X * Scale;
+			float ScaledH = Size.Y * Scale;
+			float OffsetX = (Size.X - ScaledW) * 0.5f + DriftX;
+			float OffsetY = (Size.Y - ScaledH) * 0.5f + DriftY;
+
+			FSlateDrawElement::MakeBox(OutDrawElements, LayerId,
+				AllottedGeometry.ToPaintGeometry(
+					FVector2D(ScaledW, ScaledH),
+					FSlateLayoutTransform(FVector2f(OffsetX, OffsetY))),
+				ImageBrush, ESlateDrawEffect::None,
+				FLinearColor(1, 1, 1, FadeAlpha));
+		}
+		LayerId++;
+
+		// ── Layer 3: Floating sparkle particles ──
+		{
+			float ParticleFade = FMath::Clamp(T / 1.5f, 0.f, 1.f);
+			for (const FParticle& P : Particles)
+			{
+				// Animate position (wrap around)
+				float PX = FMath::Fmod(P.X + P.SpeedX * T + 10.f, 1.f);
+				float PY = FMath::Fmod(P.Y + P.SpeedY * T + 10.f, 1.f);
+				// Twinkle alpha
+				float Twinkle = 0.5f + 0.5f * FMath::Sin(T * 2.f + P.Phase);
+				float Alpha = P.Alpha * Twinkle * ParticleFade;
+
+				FSlateDrawElement::MakeBox(OutDrawElements, LayerId,
+					AllottedGeometry.ToPaintGeometry(
+						FVector2D(P.Size, P.Size),
+						FSlateLayoutTransform(FVector2f(PX * Size.X, PY * Size.Y))),
+					WB, ESlateDrawEffect::None,
+					FLinearColor(1.f, 0.95f, 0.7f, Alpha));
+			}
+		}
+		LayerId++;
+
+		// ── Layer 4: Bottom bar (dark strip + zone name + progress bar) ──
+		float BarH = 56.f;
+		float BarY = Size.Y - BarH;
+
+		// Dark strip
+		FSlateDrawElement::MakeBox(OutDrawElements, LayerId,
+			AllottedGeometry.ToPaintGeometry(
+				FVector2D(Size.X, BarH),
+				FSlateLayoutTransform(FVector2f(0.f, BarY))),
+			WB, ESlateDrawEffect::None, FLinearColor(0.f, 0.f, 0.f, 0.75f));
+
+		// Zone name
+		FSlateDrawElement::MakeText(OutDrawElements, LayerId + 1,
+			AllottedGeometry.ToPaintGeometry(
+				FVector2D(Size.X - 40.f, 22.f),
+				FSlateLayoutTransform(FVector2f(20.f, BarY + 8.f))),
+			StatusText,
+			FCoreStyle::GetDefaultFontStyle("Bold", 14),
+			ESlateDrawEffect::None, FLinearColor(0.96f, 0.90f, 0.78f, 1.f));
+
+		// Progress bar background
+		float PBarY = BarY + 36.f;
+		float PBarH = 5.f;
+		float PBarMargin = 20.f;
+		float PBarW = Size.X - PBarMargin * 2.f;
+
+		FSlateDrawElement::MakeBox(OutDrawElements, LayerId,
+			AllottedGeometry.ToPaintGeometry(
+				FVector2D(PBarW, PBarH),
+				FSlateLayoutTransform(FVector2f(PBarMargin, PBarY))),
+			WB, ESlateDrawEffect::None, FLinearColor(0.10f, 0.07f, 0.04f, 1.f));
+
+		// Progress bar fill (0% → 95% over 3s)
+		float Progress = FMath::Clamp(T / 3.f, 0.f, 0.95f);
+		FSlateDrawElement::MakeBox(OutDrawElements, LayerId + 1,
+			AllottedGeometry.ToPaintGeometry(
+				FVector2D(PBarW * Progress, PBarH),
+				FSlateLayoutTransform(FVector2f(PBarMargin, PBarY))),
+			WB, ESlateDrawEffect::None, FLinearColor(0.72f, 0.58f, 0.28f, 1.f));
+
+		LayerId += 2;
+		return LayerId;
+	}
+
+private:
+	FString StatusText;
+	FSlateBrush* ImageBrush = nullptr;
+	float KBStartScale = 1.f;
+	float KBEndScale = 1.08f;
+	FVector2D KBDrift = FVector2D::ZeroVector;
+	double StartTime = 0.0;
+
+	struct FParticle
+	{
+		float X, Y, SpeedX, SpeedY, Size, Alpha, Phase;
+	};
+	mutable TArray<FParticle> Particles;
+};
+
+// ============================================================
+
 void UZoneTransitionSubsystem::ShowLoadingOverlay(const FString& StatusText)
 {
 	if (bLoadingShown) return;
@@ -501,26 +703,64 @@ void UZoneTransitionSubsystem::ShowLoadingOverlay(const FString& StatusText)
 	UGameViewportClient* ViewportClient = World->GetGameViewport();
 	if (!ViewportClient) return;
 
+	// Load textures on first use
+	LoadLoadingScreenTextures();
+
+	// Pick a random loading screen (avoid repeating the last one)
+	UTexture2D* ChosenTexture = nullptr;
+	if (LoadingScreenTextures.Num() > 0)
+	{
+		int32 Index = FMath::RandRange(0, LoadingScreenTextures.Num() - 1);
+		if (LoadingScreenTextures.Num() > 1 && Index == LastLoadingScreenIndex)
+		{
+			Index = (Index + 1) % LoadingScreenTextures.Num();
+		}
+		LastLoadingScreenIndex = Index;
+		ChosenTexture = LoadingScreenTextures[Index];
+	}
+
+	// Set up loading screen brush
+	ActiveLoadingBrush.Reset();
+	if (ChosenTexture)
+	{
+		ActiveLoadingBrush = MakeShared<FSlateBrush>();
+		ActiveLoadingBrush->SetResourceObject(ChosenTexture);
+		ActiveLoadingBrush->ImageSize = FVector2D(ChosenTexture->GetSizeX(), ChosenTexture->GetSizeY());
+		ActiveLoadingBrush->DrawAs = ESlateBrushDrawType::Image;
+		ActiveLoadingBrush->Tiling = ESlateBrushTileType::NoTile;
+	}
+
+	// Randomize Ken Burns direction per transition
+	KenBurnsStartScale = 1.0f;
+	KenBurnsEndScale = 1.06f + FMath::FRand() * 0.04f;  // 1.06 to 1.10
+	KenBurnsDrift = FVector2D(
+		(FMath::FRand() - 0.5f) * 2.f,   // random horizontal drift
+		(FMath::FRand() - 0.5f) * 2.f);   // random vertical drift
+
+	LoadingStartTime = FPlatformTime::Seconds();
+
+	// Build animated loading screen
+	TSharedPtr<SBox> Wrapper;
 	LoadingWidget =
-		SNew(SBorder)
-		.BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
-		.BorderBackgroundColor(FLinearColor(0.02f, 0.02f, 0.05f, 1.f))
-		.HAlign(HAlign_Center)
-		.VAlign(VAlign_Center)
+		SAssignNew(Wrapper, SBox)
+		.HAlign(HAlign_Fill)
+		.VAlign(VAlign_Fill)
 		[
-			SNew(STextBlock)
-			.Text(FText::FromString(StatusText))
-			.Font(FCoreStyle::GetDefaultFontStyle("Bold", 18))
-			.ColorAndOpacity(FSlateColor(FLinearColor(0.96f, 0.90f, 0.78f, 1.f)))
-			.ShadowOffset(FVector2D(2, 2))
-			.ShadowColorAndOpacity(FLinearColor(0.f, 0.f, 0.f, 0.9f))
+			SNew(SLoadingScreenOverlay)
+			.StatusText(StatusText)
+			.ImageBrush(ActiveLoadingBrush.IsValid() ? ActiveLoadingBrush.Get() : nullptr)
+			.KenBurnsStartScale(KenBurnsStartScale)
+			.KenBurnsEndScale(KenBurnsEndScale)
+			.KenBurnsDrift(KenBurnsDrift)
+			.StartTime(LoadingStartTime)
 		];
 
 	LoadingOverlay = SNew(SWeakWidget).PossiblyNullContent(LoadingWidget);
-	ViewportClient->AddViewportWidgetContent(LoadingOverlay.ToSharedRef(), 50);
+	ViewportClient->AddViewportWidgetContent(LoadingOverlay.ToSharedRef(), 100);
 	bLoadingShown = true;
 
-	UE_LOG(LogZoneTransition, Log, TEXT("Loading overlay shown: %s"), *StatusText);
+	UE_LOG(LogZoneTransition, Log, TEXT("Loading overlay shown: %s (image: %s)"),
+		*StatusText, ChosenTexture ? *ChosenTexture->GetName() : TEXT("none"));
 }
 
 void UZoneTransitionSubsystem::HideLoadingOverlay()
@@ -539,6 +779,7 @@ void UZoneTransitionSubsystem::HideLoadingOverlay()
 
 	LoadingWidget.Reset();
 	LoadingOverlay.Reset();
+	ActiveLoadingBrush.Reset();
 	bLoadingShown = false;
 
 	UE_LOG(LogZoneTransition, Log, TEXT("Loading overlay hidden."));

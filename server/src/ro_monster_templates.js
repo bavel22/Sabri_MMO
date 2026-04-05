@@ -36,6 +36,7 @@ RO_MONSTER_TEMPLATES['poring'] = {
     raceGroups: {},
     stats: { str: 0, agi: 0, vit: 0, int: 0, dex: 6, luk: 30, level: 1, weaponATK: 7 },
     modes: {},
+    spriteClass: 'poring', weaponMode: 0,
     drops: [
         { itemName: 'Jellopy', rate: 70 },
         { itemName: 'Knife', rate: 1 },
@@ -1211,6 +1212,7 @@ RO_MONSTER_TEMPLATES['skeleton'] = {
     aspd: 155, walkSpeed: 200, attackDelay: 2228, attackMotion: 528, damageMotion: 576,
     size: 'medium', race: 'undead', element: { type: 'undead', level: 1 },
     monsterClass: 'normal', aiType: 'aggressive', respawnMs: 10000,
+    spriteClass: 'skeleton', weaponMode: 0,
     raceGroups: {},
     stats: { str: 0, agi: 5, vit: 10, int: 0, dex: 12, luk: 0, level: 10, weaponATK: 39 },
     modes: {},

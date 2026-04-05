@@ -13,6 +13,7 @@
 #include "Framework/Application/SlateApplication.h"
 #include "Widgets/SWeakWidget.h"
 #include "GameFramework/PlayerController.h"
+#include "EnemySubsystem.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogDamageNumbers, Log, All);
 
@@ -47,6 +48,12 @@ void UDamageNumberSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 			[this](const TSharedPtr<FJsonValue>& D) { HandleCombatDamage(D); });
 		Router->RegisterHandler(TEXT("skill:effect_damage"), this,
 			[this](const TSharedPtr<FJsonValue>& D) { HandleCombatDamage(D); });
+		Router->RegisterHandler(TEXT("combat:blocked"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleCombatBlocked(D); });
+		Router->RegisterHandler(TEXT("status:tick"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleStatusTick(D); });
+		Router->RegisterHandler(TEXT("status:applied"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleStatusApplied(D); });
 	}
 
 	// Only show overlay when socket is connected (game level)
@@ -225,6 +232,236 @@ void UDamageNumberSubsystem::HandleCombatDamage(const TSharedPtr<FJsonValue>& Da
 }
 
 // ============================================================
+// Handle combat:blocked — Auto Guard shield block
+// ============================================================
+
+void UDamageNumberSubsystem::HandleCombatBlocked(const TSharedPtr<FJsonValue>& Data)
+{
+	if (!Data.IsValid() || !OverlayWidget.IsValid()) return;
+
+	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
+	const TSharedPtr<FJsonObject>& Obj = *ObjPtr;
+
+	double TargetIdD = 0;
+	Obj->TryGetNumberField(TEXT("targetId"), TargetIdD);
+	const int32 TargetId = (int32)TargetIdD;
+
+	// Get target position from event data
+	double TX = 0, TY = 0, TZ = 0;
+	Obj->TryGetNumberField(TEXT("targetX"), TX);
+	Obj->TryGetNumberField(TEXT("targetY"), TY);
+	Obj->TryGetNumberField(TEXT("targetZ"), TZ);
+
+	FVector TargetWorldPos((float)TX, (float)TY, (float)TZ);
+
+	// Fallback: resolve from player character if position is zero
+	if (TargetWorldPos.IsNearlyZero())
+	{
+		if (!ResolveTargetPosition(false, TargetId, TargetWorldPos)) return;
+	}
+
+	SpawnDamagePop(0, false, false, 0, TargetId, TargetWorldPos, TEXT("blocked"));
+}
+
+// ============================================================
+// Resolve target world position from ID (shared by tick + applied)
+// ============================================================
+
+bool UDamageNumberSubsystem::ResolveTargetPosition(bool bIsEnemy, int32 TargetId, FVector& OutPos) const
+{
+	if (bIsEnemy)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			if (UEnemySubsystem* ES = World->GetSubsystem<UEnemySubsystem>())
+			{
+				const FEnemyEntry* EnemyData = ES->GetEnemyData(TargetId);
+				if (EnemyData && EnemyData->Actor.IsValid())
+				{
+					OutPos = EnemyData->Actor->GetActorLocation();
+					return true;
+				}
+			}
+		}
+	}
+	else if (TargetId == LocalCharacterId)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0);
+			if (PC && PC->GetPawn())
+			{
+				OutPos = PC->GetPawn()->GetActorLocation();
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+// ============================================================
+// Status display name + color mapping
+// ============================================================
+
+FString UDamageNumberSubsystem::GetStatusDisplayName(const FString& StatusType)
+{
+	if (StatusType == TEXT("poison"))    return TEXT("Poisoned!");
+	if (StatusType == TEXT("stun"))      return TEXT("Stunned!");
+	if (StatusType == TEXT("freeze"))    return TEXT("Frozen!");
+	if (StatusType == TEXT("blind"))     return TEXT("Blinded!");
+	if (StatusType == TEXT("silence"))   return TEXT("Silenced!");
+	if (StatusType == TEXT("stone"))     return TEXT("Petrified!");
+	if (StatusType == TEXT("petrifying")) return TEXT("Petrifying!");
+	if (StatusType == TEXT("sleep"))     return TEXT("Sleep!");
+	if (StatusType == TEXT("bleeding"))  return TEXT("Bleeding!");
+	if (StatusType == TEXT("confusion")) return TEXT("Confused!");
+	if (StatusType == TEXT("curse"))     return TEXT("Cursed!");
+	// Fallback: capitalize first letter
+	FString Display = StatusType;
+	Display.ReplaceInline(TEXT("_"), TEXT(" "));
+	if (Display.Len() > 0) Display[0] = FChar::ToUpper(Display[0]);
+	return Display + TEXT("!");
+}
+
+FLinearColor UDamageNumberSubsystem::GetStatusColor(const FString& StatusType)
+{
+	if (StatusType == TEXT("poison"))    return FLinearColor(0.70f, 0.30f, 0.80f); // Purple
+	if (StatusType == TEXT("stun"))      return FLinearColor(1.00f, 0.92f, 0.23f); // Yellow
+	if (StatusType == TEXT("freeze"))    return FLinearColor(0.40f, 0.70f, 1.00f); // Blue
+	if (StatusType == TEXT("blind"))     return FLinearColor(0.60f, 0.60f, 0.60f); // Grey
+	if (StatusType == TEXT("silence"))   return FLinearColor(0.70f, 0.80f, 1.00f); // Light blue
+	if (StatusType == TEXT("stone"))     return FLinearColor(0.70f, 0.55f, 0.30f); // Brown
+	if (StatusType == TEXT("petrifying")) return FLinearColor(0.70f, 0.55f, 0.30f); // Brown
+	if (StatusType == TEXT("sleep"))     return FLinearColor(0.75f, 0.60f, 0.90f); // Light purple
+	if (StatusType == TEXT("bleeding"))  return FLinearColor(1.00f, 0.20f, 0.20f); // Red
+	if (StatusType == TEXT("confusion")) return FLinearColor(1.00f, 0.45f, 0.65f); // Pink
+	if (StatusType == TEXT("curse"))     return FLinearColor(0.50f, 0.20f, 0.50f); // Dark purple
+	return FLinearColor(0.90f, 0.90f, 0.90f); // Default white-ish
+}
+
+// ============================================================
+// Handle status:tick — periodic damage from poison/bleeding/stone
+// ============================================================
+
+void UDamageNumberSubsystem::HandleStatusTick(const TSharedPtr<FJsonValue>& Data)
+{
+	if (!Data.IsValid() || !OverlayWidget.IsValid()) return;
+
+	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
+	const TSharedPtr<FJsonObject>& Obj = *ObjPtr;
+
+	double TargetIdD = 0, DrainD = 0;
+	bool bIsEnemy = false;
+	FString StatusType;
+
+	Obj->TryGetNumberField(TEXT("targetId"), TargetIdD);
+	Obj->TryGetNumberField(TEXT("drain"), DrainD);
+	Obj->TryGetBoolField(TEXT("isEnemy"), bIsEnemy);
+	Obj->TryGetStringField(TEXT("statusType"), StatusType);
+
+	const int32 TargetId = (int32)TargetIdD;
+	const int32 Drain = (int32)DrainD;
+	if (Drain <= 0) return;
+
+	FVector TargetPos;
+	if (!ResolveTargetPosition(bIsEnemy, TargetId, TargetPos)) return;
+
+	// Map status type to element for color tinting
+	FString Element = TEXT("neutral");
+	if (StatusType == TEXT("poison")) Element = TEXT("poison");
+	else if (StatusType == TEXT("stone")) Element = TEXT("earth");
+	else if (StatusType == TEXT("bleeding")) Element = TEXT("fire");
+
+	SpawnDamagePop(Drain, false, bIsEnemy, 0, TargetId, TargetPos,
+		TEXT("normal"), Element);
+}
+
+// ============================================================
+// Handle status:applied — show floating status name text
+// ============================================================
+
+void UDamageNumberSubsystem::HandleStatusApplied(const TSharedPtr<FJsonValue>& Data)
+{
+	if (!Data.IsValid() || !OverlayWidget.IsValid()) return;
+
+	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
+	const TSharedPtr<FJsonObject>& Obj = *ObjPtr;
+
+	double TargetIdD = 0;
+	bool bIsEnemy = false;
+	FString StatusType;
+
+	Obj->TryGetNumberField(TEXT("targetId"), TargetIdD);
+	Obj->TryGetBoolField(TEXT("isEnemy"), bIsEnemy);
+	Obj->TryGetStringField(TEXT("statusType"), StatusType);
+
+	const int32 TargetId = (int32)TargetIdD;
+	if (StatusType.IsEmpty()) return;
+
+	// Only show for: enemies hit by us, or the local player being afflicted
+	if (bIsEnemy)
+	{
+		// For enemies, only show if WE applied it (sourceId == local player)
+		double SourceIdD = 0;
+		Obj->TryGetNumberField(TEXT("sourceId"), SourceIdD);
+		if (LocalCharacterId > 0 && (int32)SourceIdD != LocalCharacterId) return;
+	}
+	else
+	{
+		// For players, only show if it's the local player
+		if (LocalCharacterId > 0 && TargetId != LocalCharacterId) return;
+	}
+
+	FVector TargetPos;
+	if (!ResolveTargetPosition(bIsEnemy, TargetId, TargetPos)) return;
+
+	FString DisplayText = GetStatusDisplayName(StatusType);
+	FLinearColor Color = GetStatusColor(StatusType);
+
+	SpawnTextPop(DisplayText, Color, bIsEnemy, TargetId, TargetPos);
+}
+
+// ============================================================
+// Spawn a floating text label at a target's position
+// ============================================================
+
+void UDamageNumberSubsystem::SpawnTextPop(
+	const FString& Text, const FLinearColor& Color,
+	bool bIsEnemy, int32 TargetId, const FVector& TargetWorldPos)
+{
+	if (!OverlayWidget.IsValid()) return;
+
+	// Offset above head (same as damage numbers)
+	FVector HeadPos = TargetWorldPos;
+	HeadPos.Z += HEAD_OFFSET_Z;
+
+	// For local player, use actual pawn position
+	if (!bIsEnemy && TargetId == LocalCharacterId)
+	{
+		if (UWorld* World = GetWorld())
+		{
+			APlayerController* PC = UGameplayStatics::GetPlayerController(World, 0);
+			if (PC && PC->GetPawn())
+			{
+				HeadPos = PC->GetPawn()->GetActorLocation();
+				HeadPos.Z += HEAD_OFFSET_Z;
+			}
+		}
+	}
+
+	FVector2D ScreenPos;
+	if (!ProjectWorldToScreen(HeadPos, ScreenPos)) return;
+
+	// Offset slightly higher than damage numbers so text appears above the drain number
+	ScreenPos.Y -= 20.0f;
+
+	OverlayWidget->AddTextPop(Text, Color, ScreenPos);
+}
+
+// ============================================================
 // Spawn a damage pop-up from parsed event data
 // ============================================================
 
@@ -290,6 +527,10 @@ void UDamageNumberSubsystem::SpawnDamagePop(
 	else if (HitType == TEXT("perfectDodge"))
 	{
 		PopType = EDamagePopType::PerfectDodge;
+	}
+	else if (HitType == TEXT("blocked"))
+	{
+		PopType = EDamagePopType::Block;
 	}
 	else if (Damage <= 0)
 	{

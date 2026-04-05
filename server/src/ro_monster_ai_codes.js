@@ -92,7 +92,7 @@ const MONSTER_AI_CODES = {
   1072:  4,   // Kaho
   1073:  1,   // Crab
   1074: 17,   // Shellfish
-  1076: 17,   // Skeleton
+  1076:  4,   // Skeleton (aggressive melee — rAthena pre-renewal)
   1077:  4,   // Poison Spore
   1078:  6,   // Red Plant
   1079:  6,   // Blue Plant

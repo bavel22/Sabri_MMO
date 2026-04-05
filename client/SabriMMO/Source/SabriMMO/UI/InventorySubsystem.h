@@ -14,6 +14,24 @@
 
 class SInventoryWidget;
 class SCardCompoundPopup;
+class SIdentifyPopup;
+
+// ============================================================
+// Loot notification data (displayed by SLootNotificationOverlay)
+// ============================================================
+
+struct FLootNotifyItem
+{
+	FString Name;
+	int32 Quantity = 0;
+};
+
+struct FLootNotifyEntry
+{
+	FString EnemyName;
+	TArray<FLootNotifyItem> Items;
+	double SpawnTime = 0.0;
+};
 
 UCLASS()
 class SABRIMMO_API UInventorySubsystem : public UWorldSubsystem
@@ -47,13 +65,25 @@ public:
 	void UnequipItem(int32 InventoryId);
 	void DropItem(int32 InventoryId, int32 Quantity = 0);
 	void MoveItem(int32 InventoryId, int32 NewSlotIndex);
+	void MergeItems(int32 SourceInventoryId, int32 TargetInventoryId);
 	void RequestInventoryRefresh();
+	void SplitStack(int32 InventoryId, int32 Quantity);
+	void SortInventory(const FString& SortBy = TEXT("type"));  // "type", "name", "weight"
+	void AutoStack();
+
+	// ---- search filter (set by widget, read by GetFilteredItems) ----
+	FString SearchFilter;
 
 	// ---- card compound (double-click card in inventory) ----
 	void BeginCardCompound(const FInventoryItem& Card);
 	void HideCardCompoundPopup();
 	bool IsCardCompoundVisible() const;
 	void EmitCardCompound(int32 CardInventoryId, int32 EquipInventoryId, int32 SlotIndex);
+
+	// ---- identify popup (Magnifying Glass / Identify skill) ----
+	void ShowIdentifyPopup(const TArray<FInventoryItem>& UnidentifiedItems, bool bIsMagnifier);
+	void HideIdentifyPopup();
+	bool IsIdentifyPopupVisible() const;
 
 	// ---- widget lifecycle ----
 	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
@@ -70,6 +100,12 @@ public:
 	// ---- item icon utilities (reusable by any widget/system) ----
 	FSlateBrush* GetOrCreateItemIconBrush(const FString& IconName);
 
+	// ---- loot notifications (read by SLootNotificationOverlay) ----
+	static constexpr float LOOT_NOTIFY_DURATION = 4.0f;
+	static constexpr float LOOT_NOTIFY_FADE_TIME = 1.0f;
+	static constexpr int32 MAX_LOOT_NOTIFICATIONS = 8;
+	TArray<FLootNotifyEntry> LootNotifications;
+
 private:
 	// ---- event handlers ----
 	void HandleInventoryData(const TSharedPtr<FJsonValue>& Data);
@@ -77,6 +113,8 @@ private:
 	void HandleInventoryDropped(const TSharedPtr<FJsonValue>& Data);
 	void HandleInventoryError(const TSharedPtr<FJsonValue>& Data);
 	void HandleCardResult(const TSharedPtr<FJsonValue>& Data);
+	void HandleItemUsed(const TSharedPtr<FJsonValue>& Data);
+	void HandleLootDrop(const TSharedPtr<FJsonValue>& Data);
 
 	// ---- helpers ----
 	FInventoryItem ParseItemFromJson(const TSharedPtr<FJsonObject>& Obj);
@@ -97,12 +135,29 @@ private:
 	TSharedPtr<SWidget> CardCompoundOverlay;
 	bool bCardCompoundVisible = false;
 
+	// ---- identify popup ----
+	void HandleIdentifyItemList(const TSharedPtr<FJsonValue>& Data);
+	void HandleIdentifyResult(const TSharedPtr<FJsonValue>& Data);
+	TSharedPtr<SIdentifyPopup> IdentifyPopup;
+	TSharedPtr<SWidget> IdentifyAlignWrapper;
+	TSharedPtr<SWidget> IdentifyOverlay;
+	bool bIdentifyPopupVisible = false;
+	bool bIdentifyIsMagnifier = false;
+
 	// ---- drag cursor overlay ----
 	void ShowDragCursor(const FInventoryItem& Item);
 	void HideDragCursor();
 	TSharedPtr<SBox> DragCursorBox;
 	TSharedPtr<SWidget> DragCursorAlignWrapper;  // Keeps drag cursor alive + constrains size
 	TSharedPtr<SWidget> DragCursorOverlay;
+
+	// ---- loot notification overlay (full-viewport, draws at bottom-right in OnPaint) ----
+	TSharedPtr<SWidget> LootOverlayWidget;
+	TSharedPtr<SWidget> LootOverlayViewport;
+	bool bLootOverlayAdded = false;
+	FTimerHandle LootCleanupTimer;
+	void ShowLootOverlay();
+	void HideLootOverlay();
 
 	// ---- item icon brush cache (TSharedPtr so raw FSlateBrush* survives TMap rehash) ----
 	TMap<FString, TSharedPtr<FSlateBrush>> ItemIconBrushCache;

@@ -122,7 +122,9 @@ private:
 	TObjectPtr<UMaterialInterface> MI_CastingCircle;
 
 	// ---- per-skill VFX override cache (avoids repeated LoadObject calls) ----
+	UPROPERTY()
 	TMap<FString, TObjectPtr<UNiagaraSystem>> NiagaraOverrideCache;
+	UPROPERTY()
 	TMap<FString, TObjectPtr<UParticleSystem>> CascadeOverrideCache;
 	UNiagaraSystem* GetOrLoadNiagaraOverride(const FString& Path);
 	UParticleSystem* GetOrLoadCascadeOverride(const FString& Path);

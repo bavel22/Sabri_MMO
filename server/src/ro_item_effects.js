@@ -501,7 +501,21 @@ const ITEM_USE_EFFECTS = {
     14601: {"type":"multi","effects":[{"type":"sc_start","status":"SC_FLEEFOOD","duration":300000,"value":30},{"type":"sc_start","status":"SC_HITFOOD","duration":300000,"value":30},{"type":"sc_start","status":"SC_ATKPOTION","duration":300000,"value":20},{"type":"sc_start","status":"SC_MATKPOTION","duration":300000,"value":20}]}, // Tyr's Blessing
     14607: {"type":"sc_start","status":"SC_INCALLSTATUS","duration":3600000,"value":3}, // Luxurious Western Food
     14608: {"type":"sc_start","status":"SC_INCALLSTATUS","duration":3600000,"value":6}, // Manchu-Han Imperial Feast
-    14609: {"type":"percentheal","hp":10,"sp":10} // Spoiled Cuisine
+    14609: {"type":"percentheal","hp":10,"sp":10}, // Spoiled Cuisine
+    // Arrow Quivers — consumable packs that grant 500 arrows each
+    12004: {"type":"getitem","itemId":1750,"quantity":500}, // Quiver → 500 Arrow
+    12005: {"type":"getitem","itemId":1770,"quantity":500}, // Iron Arrow Quiver → 500 Iron Arrow
+    12006: {"type":"getitem","itemId":1753,"quantity":500}, // Steel Arrow Quiver → 500 Steel Arrow
+    12007: {"type":"getitem","itemId":1765,"quantity":500}, // Oridecon Arrow Quiver → 500 Oridecon Arrow
+    12008: {"type":"getitem","itemId":1752,"quantity":500}, // Fire Arrow Quiver → 500 Fire Arrow
+    12009: {"type":"getitem","itemId":1751,"quantity":500}, // Silver Arrow Quiver → 500 Silver Arrow
+    12010: {"type":"getitem","itemId":1755,"quantity":500}, // Wind Arrow Quiver → 500 Arrow of Wind
+    12011: {"type":"getitem","itemId":1756,"quantity":500}, // Stone Arrow Quiver → 500 Stone Arrow
+    12012: {"type":"getitem","itemId":1754,"quantity":500}, // Crystal Arrow Quiver → 500 Crystal Arrow
+    12013: {"type":"getitem","itemId":1767,"quantity":500}, // Shadow Arrow Quiver → 500 Arrow of Shadow
+    12014: {"type":"getitem","itemId":1757,"quantity":500}, // Immaterial Arrow Quiver → 500 Immaterial Arrow
+    12015: {"type":"getitem","itemId":1762,"quantity":500}, // Rusty Arrow Quiver → 500 Rusty Arrow
+    12183: {"type":"getitem","itemId":1772,"quantity":500}  // Holy Arrow Quiver → 500 Holy Arrow
 };
 
 module.exports = { ITEM_USE_EFFECTS };

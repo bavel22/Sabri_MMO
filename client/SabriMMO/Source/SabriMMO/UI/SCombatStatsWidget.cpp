@@ -84,8 +84,8 @@ void SCombatStatsWidget::Construct(const FArguments& InArgs)
 								TAttribute<FText>::CreateLambda([this]() -> FText {
 									if (!Subsystem) return FText::GetEmpty();
 									if (Subsystem->bIsDualWielding)
-										return FText::FromString(FString::Printf(TEXT("%d + %d (%d%%)"), Subsystem->StatusATK, Subsystem->WeaponATK_Right + Subsystem->PassiveATK, Subsystem->RightHandDamagePercent));
-									return FText::FromString(FString::Printf(TEXT("%d + %d"), Subsystem->StatusATK, Subsystem->WeaponATK + Subsystem->PassiveATK));
+										return FText::FromString(FString::Printf(TEXT("%d + %d (%d%%)"), Subsystem->StatusATK, Subsystem->WeaponATK_Right + Subsystem->PassiveATK + Subsystem->ArrowATK, Subsystem->RightHandDamagePercent));
+									return FText::FromString(FString::Printf(TEXT("%d + %d"), Subsystem->StatusATK, Subsystem->WeaponATK + Subsystem->PassiveATK + Subsystem->ArrowATK));
 								})
 							)
 						]
@@ -333,6 +333,14 @@ void SCombatStatsWidget::Construct(const FArguments& InArgs)
 								TEXT("luk")
 							)
 						]
+
+						// --- Divider ---
+						+ SVerticalBox::Slot().AutoHeight()
+						[ BuildDivider() ]
+
+						// --- Details button ---
+						+ SVerticalBox::Slot().AutoHeight().Padding(6, 2, 6, 4)
+						[ BuildAdvancedStatsButton() ]
 					]
 				]
 			]
@@ -553,6 +561,45 @@ FReply SCombatStatsWidget::OnAllocateStatClicked(FString StatName)
 	if (Subsystem)
 	{
 		Subsystem->AllocateStat(StatName);
+	}
+	return FReply::Handled();
+}
+
+// ============================================================
+// Advanced Stats button — opens element resist panel
+// ============================================================
+TSharedRef<SWidget> SCombatStatsWidget::BuildAdvancedStatsButton()
+{
+	return SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot()
+		.HAlign(HAlign_Center)
+		[
+			SNew(SButton)
+			.ButtonStyle(FCoreStyle::Get(), "NoBorder")
+			.ContentPadding(FMargin(8.f, 2.f))
+			.OnClicked(FOnClicked::CreateSP(this, &SCombatStatsWidget::OnAdvancedStatsClicked))
+			[
+				SNew(SBorder)
+				.BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
+				.BorderBackgroundColor(CombatColors::ButtonNormal)
+				.Padding(FMargin(12.f, 2.f))
+				[
+					SNew(STextBlock)
+					.Text(FText::FromString(TEXT("Details >>")))
+					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 8))
+					.ColorAndOpacity(FSlateColor(CombatColors::GoldTrim))
+					.ShadowOffset(FVector2D(1, 1))
+					.ShadowColorAndOpacity(CombatColors::TextShadow)
+				]
+			]
+		];
+}
+
+FReply SCombatStatsWidget::OnAdvancedStatsClicked()
+{
+	if (Subsystem)
+	{
+		Subsystem->ToggleAdvancedWidget();
 	}
 	return FReply::Handled();
 }

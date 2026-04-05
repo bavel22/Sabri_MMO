@@ -4,7 +4,11 @@
 #include "InventorySubsystem.h"
 #include "SInventoryWidget.h"
 #include "SCardCompoundPopup.h"
+#include "SIdentifyPopup.h"
 #include "HotbarSubsystem.h"
+#include "CartSubsystem.h"
+#include "StorageSubsystem.h"
+#include "TradeSubsystem.h"
 #include "MMOGameInstance.h"
 #include "SocketEventRouter.h"
 #include "Engine/Texture2D.h"
@@ -17,8 +21,178 @@
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Images/SImage.h"
+#include "Widgets/SNullWidget.h"
+#include "Rendering/DrawElements.h"
+#include "Fonts/FontMeasure.h"
+#include "Styling/CoreStyle.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogInventory, Log, All);
+
+// ============================================================
+// SLootNotificationOverlay — OnPaint overlay for loot popups
+// ============================================================
+
+class SLootNotificationOverlay : public SCompoundWidget
+{
+public:
+	SLATE_BEGIN_ARGS(SLootNotificationOverlay) : _Subsystem(nullptr) {}
+		SLATE_ARGUMENT(UInventorySubsystem*, Subsystem)
+	SLATE_END_ARGS()
+
+	void Construct(const FArguments& InArgs)
+	{
+		OwningSubsystem = InArgs._Subsystem;
+		SetVisibility(EVisibility::HitTestInvisible);
+		ChildSlot[ SNullWidget::NullWidget ];
+
+		RegisterActiveTimer(0.0f,
+			FWidgetActiveTimerDelegate::CreateSP(this, &SLootNotificationOverlay::OnRepaintTick));
+	}
+
+	virtual int32 OnPaint(
+		const FPaintArgs& Args,
+		const FGeometry& AllottedGeometry,
+		const FSlateRect& MyCullingRect,
+		FSlateWindowElementList& OutDrawElements,
+		int32 LayerId,
+		const FWidgetStyle& InWidgetStyle,
+		bool bParentEnabled) const override
+	{
+		int32 OutLayerId = SCompoundWidget::OnPaint(Args, AllottedGeometry, MyCullingRect,
+			OutDrawElements, LayerId, InWidgetStyle, bParentEnabled);
+
+		UInventorySubsystem* Sub = OwningSubsystem.Get();
+		if (!Sub || Sub->LootNotifications.Num() == 0) return OutLayerId;
+
+		const double Now = FPlatformTime::Seconds();
+		const FSlateFontInfo EnemyFont = FCoreStyle::GetDefaultFontStyle("Bold", 10);
+		const FSlateFontInfo ItemFont = FCoreStyle::GetDefaultFontStyle("Regular", 9);
+		const TSharedRef<FSlateFontMeasure> FontMeasure =
+			FSlateApplication::Get().GetRenderer()->GetFontMeasureService();
+
+		// Full-viewport geometry — use DPI-corrected local size
+		const FVector2D AreaSize = AllottedGeometry.GetLocalSize();
+		if (AreaSize.X < 100.f || AreaSize.Y < 100.f) return OutLayerId;
+
+		const FSlateBrush* WhiteBrush = FCoreStyle::Get().GetBrush("GenericWhiteBox");
+
+		static const FLinearColor BgColor(0.15f, 0.10f, 0.05f, 0.85f);
+		static const FLinearColor BorderColor(0.60f, 0.48f, 0.22f, 1.0f);
+		static const FLinearColor EnemyNameColor(0.95f, 0.82f, 0.48f, 1.0f);
+		static const FLinearColor ItemTextColor(0.96f, 0.90f, 0.78f, 1.0f);
+		static const FLinearColor ShadowColor(0.0f, 0.0f, 0.0f, 0.9f);
+
+		constexpr float PadX = 8.f;
+		constexpr float PadY = 3.f;
+		constexpr float EntryGap = 3.f;
+		constexpr float BottomMargin = 80.f;   // above hotbar area
+		constexpr float RightMargin = 15.f;
+
+		const int32 BoxLayer = OutLayerId + 1;
+		const int32 TextLayer = OutLayerId + 2;
+
+		// Start from bottom-right of the actual viewport
+		float YBottom = AreaSize.Y - BottomMargin;
+
+		// Draw newest at bottom, oldest at top
+		for (int32 i = Sub->LootNotifications.Num() - 1; i >= 0; --i)
+		{
+			const FLootNotifyEntry& Entry = Sub->LootNotifications[i];
+			const float Age = (float)(Now - Entry.SpawnTime);
+			if (Age > UInventorySubsystem::LOOT_NOTIFY_DURATION) continue;
+
+			// Fade during last FADE_TIME seconds
+			float Alpha = 1.0f;
+			const float FadeStart = UInventorySubsystem::LOOT_NOTIFY_DURATION
+				- UInventorySubsystem::LOOT_NOTIFY_FADE_TIME;
+			if (Age > FadeStart)
+			{
+				Alpha = 1.0f - (Age - FadeStart) / UInventorySubsystem::LOOT_NOTIFY_FADE_TIME;
+			}
+			Alpha = FMath::Clamp(Alpha, 0.f, 1.f);
+			if (Alpha <= 0.01f) continue;
+
+			// Build item text (always show quantity: "Red Potion x1, Jellopy x3")
+			FString ItemsText;
+			for (int32 j = 0; j < Entry.Items.Num(); ++j)
+			{
+				if (j > 0) ItemsText += TEXT(", ");
+				ItemsText += FString::Printf(TEXT("%s x%d"), *Entry.Items[j].Name, Entry.Items[j].Quantity);
+			}
+
+			const FString EnemyText = Entry.EnemyName + TEXT(": ");
+			const FVector2D EnemySize = FontMeasure->Measure(EnemyText, EnemyFont);
+			const FVector2D ItemsSize = FontMeasure->Measure(ItemsText, ItemFont);
+			const float TotalWidth = EnemySize.X + ItemsSize.X + PadX * 2;
+			const float BoxHeight = FMath::Max(EnemySize.Y, ItemsSize.Y) + PadY * 2;
+
+			// Right-aligned within the actual viewport, stacking upward
+			YBottom -= BoxHeight;
+			const float XOffset = AreaSize.X - TotalWidth - RightMargin;
+
+			// Border box (1px larger)
+			FLinearColor BorderAlpha = BorderColor;
+			BorderAlpha.A *= Alpha;
+			FSlateDrawElement::MakeBox(OutDrawElements, BoxLayer,
+				AllottedGeometry.ToPaintGeometry(
+					FVector2D(TotalWidth + 2, BoxHeight + 2),
+					FSlateLayoutTransform(FVector2f(XOffset - 1, YBottom - 1))),
+				WhiteBrush, ESlateDrawEffect::None, BorderAlpha);
+
+			// Background
+			FLinearColor BgAlpha = BgColor;
+			BgAlpha.A *= Alpha;
+			FSlateDrawElement::MakeBox(OutDrawElements, BoxLayer + 1,
+				AllottedGeometry.ToPaintGeometry(
+					FVector2D(TotalWidth, BoxHeight),
+					FSlateLayoutTransform(FVector2f(XOffset, YBottom))),
+				WhiteBrush, ESlateDrawEffect::None, BgAlpha);
+
+			// Text Y centering
+			const float TextBaseY = YBottom + PadY;
+
+			// Shadow + enemy name
+			FLinearColor ShadAlpha = ShadowColor;
+			ShadAlpha.A *= Alpha;
+			FSlateDrawElement::MakeText(OutDrawElements, TextLayer,
+				AllottedGeometry.ToPaintGeometry(
+					EnemySize, FSlateLayoutTransform(FVector2f(XOffset + PadX + 1, TextBaseY + 1))),
+				EnemyText, EnemyFont, ESlateDrawEffect::None, ShadAlpha);
+			FLinearColor EnemyAlpha = EnemyNameColor;
+			EnemyAlpha.A *= Alpha;
+			FSlateDrawElement::MakeText(OutDrawElements, TextLayer + 1,
+				AllottedGeometry.ToPaintGeometry(
+					EnemySize, FSlateLayoutTransform(FVector2f(XOffset + PadX, TextBaseY))),
+				EnemyText, EnemyFont, ESlateDrawEffect::None, EnemyAlpha);
+
+			// Shadow + items text
+			const float ItemTextX = XOffset + PadX + EnemySize.X;
+			FSlateDrawElement::MakeText(OutDrawElements, TextLayer,
+				AllottedGeometry.ToPaintGeometry(
+					ItemsSize, FSlateLayoutTransform(FVector2f(ItemTextX + 1, TextBaseY + 1))),
+				ItemsText, ItemFont, ESlateDrawEffect::None, ShadAlpha);
+			FLinearColor ItemAlpha = ItemTextColor;
+			ItemAlpha.A *= Alpha;
+			FSlateDrawElement::MakeText(OutDrawElements, TextLayer + 1,
+				AllottedGeometry.ToPaintGeometry(
+					ItemsSize, FSlateLayoutTransform(FVector2f(ItemTextX, TextBaseY))),
+				ItemsText, ItemFont, ESlateDrawEffect::None, ItemAlpha);
+
+			YBottom -= EntryGap;
+		}
+
+		return TextLayer + 2;
+	}
+
+private:
+	EActiveTimerReturnType OnRepaintTick(double, float)
+	{
+		Invalidate(EInvalidateWidgetReason::Paint);
+		return EActiveTimerReturnType::Continue;
+	}
+
+	TWeakObjectPtr<UInventorySubsystem> OwningSubsystem;
+};
 
 // ============================================================
 // Lifecycle
@@ -55,17 +229,52 @@ void UInventorySubsystem::OnWorldBeginPlay(UWorld& InWorld)
 			[this](const TSharedPtr<FJsonValue>& D) { HandleInventoryError(D); });
 		Router->RegisterHandler(TEXT("card:result"), this,
 			[this](const TSharedPtr<FJsonValue>& D) { HandleCardResult(D); });
+		Router->RegisterHandler(TEXT("inventory:used"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleItemUsed(D); });
+		Router->RegisterHandler(TEXT("loot:drop"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleLootDrop(D); });
+		Router->RegisterHandler(TEXT("identify:item_list"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleIdentifyItemList(D); });
+		Router->RegisterHandler(TEXT("identify:result"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleIdentifyResult(D); });
 	}
 
 	// Request fresh inventory data
 	GI->EmitSocketEvent(TEXT("inventory:load"), TEXT("{}"));
+
+	// Show loot notification overlay (always visible when in game world)
+	if (GI->IsSocketConnected())
+	{
+		ShowLootOverlay();
+
+		// Periodic cleanup of expired notifications
+		InWorld.GetTimerManager().SetTimer(LootCleanupTimer,
+			FTimerDelegate::CreateLambda([this]()
+			{
+				const double Now = FPlatformTime::Seconds();
+				LootNotifications.RemoveAll([Now](const FLootNotifyEntry& E)
+				{
+					return (float)(Now - E.SpawnTime) > LOOT_NOTIFY_DURATION + 0.5f;
+				});
+			}),
+			1.0f, true);
+	}
 
 	UE_LOG(LogInventory, Log, TEXT("InventorySubsystem started — events registered via EventRouter. LocalCharId=%d"), LocalCharacterId);
 }
 
 void UInventorySubsystem::Deinitialize()
 {
+	HideLootOverlay();
+	LootNotifications.Empty();
+
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(LootCleanupTimer);
+	}
+
 	HideCardCompoundPopup();
+	HideIdentifyPopup();
 
 	if (bWidgetVisible)
 	{
@@ -139,6 +348,7 @@ FInventoryItem UInventorySubsystem::ParseItemFromJson(const TSharedPtr<FJsonObje
 	if (Obj->TryGetBoolField(TEXT("stackable"), bBool)) Item.bStackable = bBool;
 	if (Obj->TryGetBoolField(TEXT("refineable"), bBool)) Item.bRefineable = bBool;
 	if (Obj->TryGetBoolField(TEXT("two_handed"), bBool)) Item.bTwoHanded = bBool;
+	if (Obj->TryGetBoolField(TEXT("identified"), bBool)) Item.bIdentified = bBool;
 
 	FString Str;
 	if (Obj->TryGetStringField(TEXT("name"), Str)) Item.Name = Str;
@@ -148,6 +358,7 @@ FInventoryItem UInventorySubsystem::ParseItemFromJson(const TSharedPtr<FJsonObje
 	if (Obj->TryGetStringField(TEXT("equip_slot"), Str)) Item.EquipSlot = Str;
 	if (Obj->TryGetStringField(TEXT("equipped_position"), Str)) Item.EquippedPosition = Str;
 	if (Obj->TryGetStringField(TEXT("icon"), Str)) Item.Icon = Str;
+	if (Obj->TryGetNumberField(TEXT("view_sprite"), Val)) Item.ViewSprite = (int32)Val;
 	if (Obj->TryGetStringField(TEXT("weapon_type"), Str)) Item.WeaponType = Str;
 	if (Obj->TryGetStringField(TEXT("jobs_allowed"), Str)) Item.JobsAllowed = Str;
 	if (Obj->TryGetStringField(TEXT("card_type"), Str)) Item.CardType = Str;
@@ -256,6 +467,108 @@ void UInventorySubsystem::HandleInventoryError(const TSharedPtr<FJsonValue>& Dat
 	FString Msg;
 	(*ObjPtr)->TryGetStringField(TEXT("message"), Msg);
 	UE_LOG(LogInventory, Warning, TEXT("Inventory error: %s"), *Msg);
+}
+
+void UInventorySubsystem::HandleItemUsed(const TSharedPtr<FJsonValue>& Data)
+{
+	if (!Data.IsValid()) return;
+	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
+	const TSharedPtr<FJsonObject>& Obj = *ObjPtr;
+
+	FString ItemName;
+	double Healed = 0, SPRestored = 0;
+	Obj->TryGetStringField(TEXT("itemName"), ItemName);
+	Obj->TryGetNumberField(TEXT("healed"), Healed);
+	Obj->TryGetNumberField(TEXT("spRestored"), SPRestored);
+
+	UE_LOG(LogInventory, Log, TEXT("Item used: %s — healed %d, SP restored %d"),
+		*ItemName, (int32)Healed, (int32)SPRestored);
+
+	// Request full inventory refresh to update quantities
+	// (server also sends inventory:data, but requesting ensures consistency)
+	RequestInventoryRefresh();
+}
+
+void UInventorySubsystem::HandleLootDrop(const TSharedPtr<FJsonValue>& Data)
+{
+	if (!Data.IsValid()) return;
+	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
+	const TSharedPtr<FJsonObject>& Obj = *ObjPtr;
+
+	FString EnemyName;
+	Obj->TryGetStringField(TEXT("enemyName"), EnemyName);
+
+	FLootNotifyEntry Notification;
+	Notification.EnemyName = EnemyName;
+	Notification.SpawnTime = FPlatformTime::Seconds();
+
+	const TArray<TSharedPtr<FJsonValue>>* ItemsArray = nullptr;
+	if (Obj->TryGetArrayField(TEXT("items"), ItemsArray) && ItemsArray)
+	{
+		for (const TSharedPtr<FJsonValue>& ItemVal : *ItemsArray)
+		{
+			const TSharedPtr<FJsonObject>* ItemObj = nullptr;
+			if (!ItemVal->TryGetObject(ItemObj) || !ItemObj) continue;
+
+			FLootNotifyItem LootItem;
+			double Qty = 0;
+			(*ItemObj)->TryGetStringField(TEXT("itemName"), LootItem.Name);
+			(*ItemObj)->TryGetNumberField(TEXT("quantity"), Qty);
+			LootItem.Quantity = (int32)Qty;
+
+			Notification.Items.Add(LootItem);
+
+			UE_LOG(LogInventory, Log, TEXT("Looted %s x%d from %s"),
+				*LootItem.Name, LootItem.Quantity, *EnemyName);
+		}
+	}
+
+	// Add notification (cap to MAX)
+	if (LootNotifications.Num() >= MAX_LOOT_NOTIFICATIONS)
+	{
+		LootNotifications.RemoveAt(0);
+	}
+	LootNotifications.Add(MoveTemp(Notification));
+
+	// No need to refresh inventory — server already sends inventory:data after loot:drop
+}
+
+// ============================================================
+// Loot notification overlay lifecycle
+// ============================================================
+
+void UInventorySubsystem::ShowLootOverlay()
+{
+	if (bLootOverlayAdded) return;
+	UWorld* World = GetWorld();
+	if (!World) return;
+	UGameViewportClient* VC = World->GetGameViewport();
+	if (!VC) return;
+
+	// Full-viewport overlay (same pattern as WorldHealthBarSubsystem / DamageNumberSubsystem)
+	// No alignment wrapper — the widget fills the entire viewport and draws at bottom-right in OnPaint
+	LootOverlayWidget = SNew(SLootNotificationOverlay).Subsystem(this);
+	LootOverlayViewport = SNew(SWeakWidget).PossiblyNullContent(LootOverlayWidget);
+	VC->AddViewportWidgetContent(LootOverlayViewport.ToSharedRef(), 17);
+	bLootOverlayAdded = true;
+}
+
+void UInventorySubsystem::HideLootOverlay()
+{
+	if (!bLootOverlayAdded) return;
+
+	UWorld* World = GetWorld();
+	UGameViewportClient* VC = World ? World->GetGameViewport() : nullptr;
+	if (VC && LootOverlayViewport.IsValid())
+	{
+		VC->RemoveViewportWidgetContent(LootOverlayViewport.ToSharedRef());
+	}
+
+	LootOverlayWidget.Reset();
+	LootOverlayViewport.Reset();
+	bLootOverlayAdded = false;
 }
 
 // ============================================================
@@ -417,21 +730,24 @@ TArray<FInventoryItem> UInventorySubsystem::GetFilteredItems() const
 	{
 		if (Item.bIsEquipped) continue; // Equipped items don't show in inventory grid
 
+		// Tab filter
+		bool bPassTab = false;
 		switch (CurrentTab)
 		{
-		case 0: // Item (consumables)
-			if (Item.ItemType == TEXT("consumable"))
-				Filtered.Add(Item);
-			break;
-		case 1: // Equip (weapons, armor with equip_slot)
-			if (!Item.EquipSlot.IsEmpty())
-				Filtered.Add(Item);
-			break;
-		case 2: // Etc (everything else: etc, card, etc)
-			if (Item.ItemType == TEXT("etc") || Item.ItemType == TEXT("card"))
-				Filtered.Add(Item);
-			break;
+		case 0: bPassTab = (Item.ItemType == TEXT("consumable") || Item.ItemType == TEXT("usable")); break;
+		case 1: bPassTab = (!Item.EquipSlot.IsEmpty() || Item.ItemType == TEXT("ammo")); break;
+		case 2: bPassTab = (Item.ItemType == TEXT("etc") || Item.ItemType == TEXT("card")); break;
 		}
+		if (!bPassTab) continue;
+
+		// Search filter
+		if (!SearchFilter.IsEmpty())
+		{
+			if (!Item.Name.Contains(SearchFilter, ESearchCase::IgnoreCase))
+				continue;
+		}
+
+		Filtered.Add(Item);
 	}
 	return Filtered;
 }
@@ -499,6 +815,18 @@ void UInventorySubsystem::MoveItem(int32 InventoryId, int32 NewSlotIndex)
 	UE_LOG(LogInventory, Log, TEXT("Sent inventory:move inv_id=%d → slot=%d"), InventoryId, NewSlotIndex);
 }
 
+void UInventorySubsystem::MergeItems(int32 SourceInventoryId, int32 TargetInventoryId)
+{
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
+	if (!GI) return;
+
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+	Payload->SetNumberField(TEXT("sourceInventoryId"), SourceInventoryId);
+	Payload->SetNumberField(TEXT("targetInventoryId"), TargetInventoryId);
+	GI->EmitSocketEvent(TEXT("inventory:merge"), Payload);
+	UE_LOG(LogInventory, Log, TEXT("Sent inventory:merge source=%d → target=%d"), SourceInventoryId, TargetInventoryId);
+}
+
 void UInventorySubsystem::RequestInventoryRefresh()
 {
 	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
@@ -506,6 +834,32 @@ void UInventorySubsystem::RequestInventoryRefresh()
 
 	GI->EmitSocketEvent(TEXT("inventory:load"), TEXT("{}"));
 	UE_LOG(LogInventory, Log, TEXT("Sent inventory:load request"));
+}
+
+void UInventorySubsystem::SplitStack(int32 InventoryId, int32 Quantity)
+{
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
+	if (!GI) return;
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+	Payload->SetNumberField(TEXT("inventoryId"), InventoryId);
+	Payload->SetNumberField(TEXT("quantity"), Quantity);
+	GI->EmitSocketEvent(TEXT("inventory:split"), Payload);
+}
+
+void UInventorySubsystem::SortInventory(const FString& SortBy)
+{
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
+	if (!GI) return;
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+	Payload->SetStringField(TEXT("sortBy"), SortBy);
+	GI->EmitSocketEvent(TEXT("inventory:sort"), Payload);
+}
+
+void UInventorySubsystem::AutoStack()
+{
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
+	if (!GI) return;
+	GI->EmitSocketEvent(TEXT("inventory:auto_stack"), TEXT("{}"));
 }
 
 // ============================================================
@@ -539,13 +893,54 @@ void UInventorySubsystem::CompleteDrop(EItemDropTarget Target, const FString& Sl
 		break;
 
 	case EItemDropTarget::InventorySlot:
+		// Cart → Inventory: move item from cart to inventory
+		if (DragState.Source == EItemDragSource::Cart)
+		{
+			if (UWorld* World = GetWorld())
+			{
+				if (UCartSubsystem* CartSub = World->GetSubsystem<UCartSubsystem>())
+				{
+					CartSub->MoveToInventory(DragState.InventoryId, DragState.Quantity);
+				}
+			}
+			break;
+		}
+		// Storage → Inventory: withdraw item from storage
+		if (DragState.Source == EItemDragSource::Storage)
+		{
+			if (UWorld* World = GetWorld())
+			{
+				if (UStorageSubsystem* StorageSub = World->GetSubsystem<UStorageSubsystem>())
+				{
+					StorageSub->WithdrawItem(DragState.InventoryId, DragState.Quantity);
+				}
+			}
+			break;
+		}
 		if (DragState.bIsEquipped)
 		{
 			UnequipItem(DragState.InventoryId);
 		}
 		else if (TargetSlotIndex >= 0)
 		{
-			MoveItem(DragState.InventoryId, TargetSlotIndex);
+			// Check if target slot has same stackable item → merge instead of swap
+			FInventoryItem* TargetItem = nullptr;
+			for (FInventoryItem& It : Items)
+			{
+				if (It.SlotIndex == TargetSlotIndex && It.InventoryId != DragState.InventoryId)
+				{
+					TargetItem = &It;
+					break;
+				}
+			}
+			if (TargetItem && TargetItem->ItemId == DragState.ItemId && DragState.bStackable)
+			{
+				MergeItems(DragState.InventoryId, TargetItem->InventoryId);
+			}
+			else
+			{
+				MoveItem(DragState.InventoryId, TargetSlotIndex);
+			}
 		}
 		break;
 
@@ -565,6 +960,55 @@ void UInventorySubsystem::CompleteDrop(EItemDropTarget Target, const FString& Sl
 				if (FullItem)
 				{
 					HotbarSub->AssignItem(Row, Slot, *FullItem);
+				}
+			}
+		}
+		break;
+
+	case EItemDropTarget::CartSlot:
+		if (DragState.Source == EItemDragSource::Inventory)
+		{
+			if (UWorld* World = GetWorld())
+			{
+				if (UCartSubsystem* CartSub = World->GetSubsystem<UCartSubsystem>())
+				{
+					CartSub->MoveToCart(DragState.InventoryId, DragState.Quantity);
+				}
+			}
+		}
+		else if (DragState.Source == EItemDragSource::Storage)
+		{
+			if (UWorld* World = GetWorld())
+			{
+				if (UStorageSubsystem* StorageSub = World->GetSubsystem<UStorageSubsystem>())
+				{
+					StorageSub->WithdrawToCart(DragState.InventoryId, DragState.Quantity);
+				}
+			}
+		}
+		break;
+
+	case EItemDropTarget::StorageSlot:
+		if (DragState.Source == EItemDragSource::Inventory)
+		{
+			if (UWorld* World = GetWorld())
+			{
+				if (UStorageSubsystem* StorageSub = World->GetSubsystem<UStorageSubsystem>())
+				{
+					StorageSub->DepositItem(DragState.InventoryId, DragState.Quantity);
+				}
+			}
+		}
+		break;
+
+	case EItemDropTarget::TradeSlot:
+		if (DragState.Source == EItemDragSource::Inventory)
+		{
+			if (UWorld* World = GetWorld())
+			{
+				if (UTradeSubsystem* TradeSub = World->GetSubsystem<UTradeSubsystem>())
+				{
+					TradeSub->AddItem(DragState.InventoryId, DragState.Quantity);
 				}
 			}
 		}
@@ -892,4 +1336,166 @@ void UInventorySubsystem::HandleCardResult(const TSharedPtr<FJsonValue>& Data)
 			CardCompoundPopup->SetStatusMessage(Message, true);
 		}
 	}
+}
+
+// ============================================================
+// Identify popup — Item Appraisal
+// ============================================================
+
+void UInventorySubsystem::HandleIdentifyItemList(const TSharedPtr<FJsonValue>& Data)
+{
+	if (!Data.IsValid()) return;
+	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
+	const TSharedPtr<FJsonObject>& Obj = *ObjPtr;
+
+	// Parse source field to determine if magnifier or skill
+	FString Source;
+	Obj->TryGetStringField(TEXT("source"), Source);
+	bool bMagnifier = (Source == TEXT("magnifier"));
+
+	// Parse items array
+	const TArray<TSharedPtr<FJsonValue>>* ItemsArray = nullptr;
+	if (!Obj->TryGetArrayField(TEXT("items"), ItemsArray) || !ItemsArray)
+	{
+		UE_LOG(LogInventory, Warning, TEXT("identify:item_list — no items array"));
+		return;
+	}
+
+	TArray<FInventoryItem> UnidentifiedItems;
+	for (const TSharedPtr<FJsonValue>& ItemVal : *ItemsArray)
+	{
+		const TSharedPtr<FJsonObject>* ItemObjPtr = nullptr;
+		if (!ItemVal.IsValid() || !ItemVal->TryGetObject(ItemObjPtr) || !ItemObjPtr) continue;
+		const TSharedPtr<FJsonObject>& ItemObj = *ItemObjPtr;
+
+		FInventoryItem Item;
+		double Val = 0;
+		if (ItemObj->TryGetNumberField(TEXT("inventory_id"), Val)) Item.InventoryId = (int32)Val;
+		if (ItemObj->TryGetNumberField(TEXT("item_id"), Val)) Item.ItemId = (int32)Val;
+
+		FString Str;
+		if (ItemObj->TryGetStringField(TEXT("name"), Str)) Item.Name = Str;
+		if (ItemObj->TryGetStringField(TEXT("item_type"), Str)) Item.ItemType = Str;
+		if (ItemObj->TryGetStringField(TEXT("icon"), Str)) Item.Icon = Str;
+		if (ItemObj->TryGetStringField(TEXT("equip_slot"), Str)) Item.EquipSlot = Str;
+		if (ItemObj->TryGetStringField(TEXT("weapon_type"), Str)) Item.WeaponType = Str;
+		Item.bIdentified = false;
+
+		if (Item.InventoryId > 0)
+		{
+			UnidentifiedItems.Add(Item);
+		}
+	}
+
+	if (UnidentifiedItems.Num() == 0)
+	{
+		UE_LOG(LogInventory, Log, TEXT("identify:item_list — no unidentified items to show"));
+		return;
+	}
+
+	UE_LOG(LogInventory, Log, TEXT("identify:item_list — %d items, source=%s"), UnidentifiedItems.Num(), *Source);
+	ShowIdentifyPopup(UnidentifiedItems, bMagnifier);
+}
+
+void UInventorySubsystem::HandleIdentifyResult(const TSharedPtr<FJsonValue>& Data)
+{
+	if (!Data.IsValid()) return;
+	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
+	const TSharedPtr<FJsonObject>& Obj = *ObjPtr;
+
+	bool bSuccess = false;
+	Obj->TryGetBoolField(TEXT("success"), bSuccess);
+	FString Message;
+	Obj->TryGetStringField(TEXT("message"), Message);
+	FString ItemName;
+	Obj->TryGetStringField(TEXT("itemName"), ItemName);
+
+	double InvIdVal = 0;
+	int32 InventoryId = 0;
+	if (Obj->TryGetNumberField(TEXT("inventoryId"), InvIdVal))
+	{
+		InventoryId = (int32)InvIdVal;
+	}
+
+	if (bSuccess)
+	{
+		UE_LOG(LogInventory, Log, TEXT("Identify success: %s (invId=%d)"), *ItemName, InventoryId);
+
+		// RO Classic: both Magnifier and Item Appraisal identify 1 item per use, then close
+		HideIdentifyPopup();
+		// inventory:data refresh arrives separately from server and triggers grid rebuild via DataVersion++
+	}
+	else
+	{
+		UE_LOG(LogInventory, Warning, TEXT("Identify failed: %s"), *Message);
+		if (IdentifyPopup.IsValid() && bIdentifyPopupVisible)
+		{
+			IdentifyPopup->SetStatusMessage(Message, true);
+		}
+	}
+}
+
+void UInventorySubsystem::ShowIdentifyPopup(const TArray<FInventoryItem>& UnidentifiedItems, bool bIsMagnifier)
+{
+	HideIdentifyPopup();
+
+	UWorld* World = GetWorld();
+	if (!World) return;
+	UGameViewportClient* VC = World->GetGameViewport();
+	if (!VC) return;
+
+	bIdentifyIsMagnifier = bIsMagnifier;
+
+	IdentifyPopup = SNew(SIdentifyPopup)
+		.Subsystem(this)
+		.UnidentifiedItems(UnidentifiedItems)
+		.IsMagnifier(bIsMagnifier);
+
+	IdentifyAlignWrapper =
+		SNew(SBox)
+		.HAlign(HAlign_Fill)
+		.VAlign(VAlign_Fill)
+		.Visibility(EVisibility::Visible)
+		[
+			IdentifyPopup.ToSharedRef()
+		];
+
+	IdentifyOverlay = SNew(SWeakWidget).PossiblyNullContent(IdentifyAlignWrapper);
+	VC->AddViewportWidgetContent(IdentifyOverlay.ToSharedRef(), 24);
+	bIdentifyPopupVisible = true;
+
+	// Focus the popup so Escape key works
+	FSlateApplication::Get().SetKeyboardFocus(IdentifyPopup);
+
+	UE_LOG(LogInventory, Log, TEXT("Identify popup shown — %d items, magnifier=%d (Z=24)"), UnidentifiedItems.Num(), bIsMagnifier ? 1 : 0);
+}
+
+void UInventorySubsystem::HideIdentifyPopup()
+{
+	if (!bIdentifyPopupVisible) return;
+
+	if (IdentifyOverlay.IsValid())
+	{
+		if (UWorld* World = GetWorld())
+		{
+			if (UGameViewportClient* VC = World->GetGameViewport())
+			{
+				VC->RemoveViewportWidgetContent(IdentifyOverlay.ToSharedRef());
+			}
+		}
+	}
+	IdentifyPopup.Reset();
+	IdentifyAlignWrapper.Reset();
+	IdentifyOverlay.Reset();
+	bIdentifyPopupVisible = false;
+	bIdentifyIsMagnifier = false;
+
+	UE_LOG(LogInventory, Log, TEXT("Identify popup hidden."));
+}
+
+bool UInventorySubsystem::IsIdentifyPopupVisible() const
+{
+	return bIdentifyPopupVisible;
 }

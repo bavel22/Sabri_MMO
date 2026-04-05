@@ -5,6 +5,8 @@
 
 #include "SKafraWidget.h"
 #include "KafraSubsystem.h"
+#include "StorageSubsystem.h"
+#include "Engine/Engine.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/SOverlay.h"
@@ -217,6 +219,87 @@ TSharedRef<SWidget> SKafraWidget::BuildMainMenuContent()
 					return FReply::Handled();
 				})
 			)
+		]
+
+		// Use Storage button
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)
+		[
+			BuildKafraButton(
+				FText::FromString(TEXT("Use Storage (40z)")),
+				FOnClicked::CreateLambda([this]() -> FReply
+				{
+					auto* KSub = OwningSubsystem.Get();
+					if (!KSub) return FReply::Handled();
+					if (UWorld* World = KSub->GetWorld())
+					{
+						if (UStorageSubsystem* StorageSub = World->GetSubsystem<UStorageSubsystem>())
+						{
+							StorageSub->RequestOpen();
+						}
+					}
+					return FReply::Handled();
+				})
+			)
+		]
+
+		// Rent Cart / Remove Cart button (only for Merchant classes with Pushcart skill)
+		+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)
+		[
+			SNew(SBox)
+			.Visibility_Lambda([this]() -> EVisibility
+			{
+				auto* Sub = OwningSubsystem.Get();
+				if (!Sub || !Sub->CanUseCart()) return EVisibility::Collapsed;
+				return EVisibility::Visible;
+			})
+			[
+				SNew(SBox)
+				[
+					SNew(SOverlay)
+					// Rent Cart button (shown when no cart)
+					+ SOverlay::Slot()
+					[
+						SNew(SBox)
+						.Visibility_Lambda([this]() -> EVisibility
+						{
+							auto* Sub = OwningSubsystem.Get();
+							return (Sub && !Sub->bHasCart) ? EVisibility::Visible : EVisibility::Collapsed;
+						})
+						[
+							BuildKafraButton(
+								FText::FromString(TEXT("Rent Cart (800z)")),
+								FOnClicked::CreateLambda([this]() -> FReply
+								{
+									auto* Sub = OwningSubsystem.Get();
+									if (Sub) Sub->RequestRentCart();
+									return FReply::Handled();
+								})
+							)
+						]
+					]
+					// Remove Cart button (shown when has cart)
+					+ SOverlay::Slot()
+					[
+						SNew(SBox)
+						.Visibility_Lambda([this]() -> EVisibility
+						{
+							auto* Sub = OwningSubsystem.Get();
+							return (Sub && Sub->bHasCart) ? EVisibility::Visible : EVisibility::Collapsed;
+						})
+						[
+							BuildKafraButton(
+								FText::FromString(TEXT("Remove Cart")),
+								FOnClicked::CreateLambda([this]() -> FReply
+								{
+									auto* Sub = OwningSubsystem.Get();
+									if (Sub) Sub->RequestRemoveCart();
+									return FReply::Handled();
+								})
+							)
+						]
+					]
+				]
+			]
 		]
 
 		// Cancel button

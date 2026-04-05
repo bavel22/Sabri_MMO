@@ -395,13 +395,13 @@ static TMap<int32, FSkillVFXConfig> BuildSkillVFXConfigs()
 		AddConfig(Configs, C);
 	}
 
-	// Arrow Shower (304) — Arrow rain AoE
+	// Arrow Shower (304) — Arrow rain AoE (5x5 cells = 125 UE radius)
 	{
 		FSkillVFXConfig C;
 		C.SkillId    = 304;
 		C.Template   = ESkillVFXTemplate::GroundAoERain;
 		C.PrimaryColor = FLinearColor(0.7f, 0.5f, 0.2f, 1.f);
-		C.AoERadius  = 400.f;
+		C.AoERadius  = 125.f;
 		C.bUseCastingCircle = true;
 		AddConfig(Configs, C);
 	}
@@ -452,7 +452,7 @@ static TMap<int32, FSkillVFXConfig> BuildSkillVFXConfigs()
 		C.SkillId    = 608;
 		C.Template   = ESkillVFXTemplate::AoEImpact;
 		C.PrimaryColor = FLinearColor(0.6f, 0.4f, 0.2f, 1.f);
-		C.AoERadius  = 300.f;
+		C.AoERadius  = 150.f;
 		AddConfig(Configs, C);
 	}
 
@@ -483,6 +483,667 @@ static TMap<int32, FSkillVFXConfig> BuildSkillVFXConfigs()
 		C.Template   = ESkillVFXTemplate::SelfBuff;
 		C.PrimaryColor = FLinearColor(0.9f, 0.9f, 0.5f, 1.f);
 		C.Duration   = 1.5f;
+		AddConfig(Configs, C);
+	}
+
+	// ================================================================
+	// SAGE SKILLS (Phase 2C)
+	// ================================================================
+
+	// Endow Blaze (1408) — Fire weapon endow
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1408;
+		C.Template   = ESkillVFXTemplate::SelfBuff;
+		C.PrimaryColor = FLinearColor(1.f, 0.4f, 0.1f, 1.f);
+		C.Duration   = 1.5f;
+		AddConfig(Configs, C);
+	}
+
+	// Endow Tsunami (1409) — Water weapon endow
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1409;
+		C.Template   = ESkillVFXTemplate::SelfBuff;
+		C.PrimaryColor = FLinearColor(0.3f, 0.5f, 0.9f, 1.f);
+		C.Duration   = 1.5f;
+		AddConfig(Configs, C);
+	}
+
+	// Endow Tornado (1410) — Wind weapon endow
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1410;
+		C.Template   = ESkillVFXTemplate::SelfBuff;
+		C.PrimaryColor = FLinearColor(0.6f, 0.9f, 0.4f, 1.f);
+		C.Duration   = 1.5f;
+		AddConfig(Configs, C);
+	}
+
+	// Endow Quake (1411) — Earth weapon endow
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1411;
+		C.Template   = ESkillVFXTemplate::SelfBuff;
+		C.PrimaryColor = FLinearColor(0.6f, 0.45f, 0.2f, 1.f);
+		C.Duration   = 1.5f;
+		AddConfig(Configs, C);
+	}
+
+	// Volcano (1412) — Fire ground zone
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1412;
+		C.Template   = ESkillVFXTemplate::GroundPersistent;
+		C.PrimaryColor = FLinearColor(1.f, 0.35f, 0.1f, 1.f);
+		C.AoERadius  = 350.f;
+		C.Duration   = 10.f;
+		AddConfig(Configs, C);
+	}
+
+	// Deluge (1413) — Water ground zone
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1413;
+		C.Template   = ESkillVFXTemplate::GroundPersistent;
+		C.PrimaryColor = FLinearColor(0.3f, 0.5f, 0.9f, 1.f);
+		C.AoERadius  = 350.f;
+		C.Duration   = 10.f;
+		AddConfig(Configs, C);
+	}
+
+	// Violent Gale (1414) — Wind ground zone
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1414;
+		C.Template   = ESkillVFXTemplate::GroundPersistent;
+		C.PrimaryColor = FLinearColor(0.5f, 0.8f, 0.4f, 1.f);
+		C.AoERadius  = 350.f;
+		C.Duration   = 10.f;
+		AddConfig(Configs, C);
+	}
+
+	// Land Protector (1415) — Neutral nullification zone
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1415;
+		C.Template   = ESkillVFXTemplate::GroundPersistent;
+		C.PrimaryColor = FLinearColor(0.8f, 0.8f, 0.6f, 1.f);
+		C.AoERadius  = 350.f;
+		C.Duration   = 10.f;
+		AddConfig(Configs, C);
+	}
+
+	// Dispell (1403) — White dispel flash
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1403;
+		C.Template   = ESkillVFXTemplate::TargetDebuff;
+		C.PrimaryColor = FLinearColor(0.9f, 0.9f, 1.f, 1.f);
+		AddConfig(Configs, C);
+	}
+
+	// Magic Rod (1404) — Blue shield aura
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1404;
+		C.Template   = ESkillVFXTemplate::SelfBuff;
+		C.PrimaryColor = FLinearColor(0.4f, 0.6f, 1.f, 1.f);
+		C.Duration   = 0.5f;
+		AddConfig(Configs, C);
+	}
+
+	// Spell Breaker (1406) — Purple interrupt bolt
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1406;
+		C.Template   = ESkillVFXTemplate::Projectile;
+		C.PrimaryColor = FLinearColor(0.7f, 0.3f, 0.9f, 1.f);
+		C.ProjectileSpeed = 2000.f;
+		AddConfig(Configs, C);
+	}
+
+	// Hindsight (1402) — Orange autocast aura
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1402;
+		C.Template   = ESkillVFXTemplate::SelfBuff;
+		C.PrimaryColor = FLinearColor(1.f, 0.7f, 0.3f, 1.f);
+		C.Duration   = 1.5f;
+		AddConfig(Configs, C);
+	}
+
+	// ================================================================
+	// WIZARD SKILLS (Phase 2B)
+	// ================================================================
+
+	// Jupitel Thunder (800) — Wind bolt projectile
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 800;
+		C.Template   = ESkillVFXTemplate::Projectile;
+		C.PrimaryColor = FLinearColor(0.6f, 0.8f, 1.f, 1.f);
+		C.ProjectileSpeed = 1200.f;
+		AddConfig(Configs, C);
+	}
+
+	// Lord of Vermilion (801) — Massive wind AoE
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 801;
+		C.Template   = ESkillVFXTemplate::GroundAoERain;
+		C.PrimaryColor = FLinearColor(0.7f, 0.7f, 1.f, 1.f);
+		C.AoERadius  = 450.f;
+		C.Scale      = 2.5f;
+		AddConfig(Configs, C);
+	}
+
+	// Meteor Storm (802) — Fire meteor rain
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 802;
+		C.Template   = ESkillVFXTemplate::GroundAoERain;
+		C.PrimaryColor = FLinearColor(1.f, 0.4f, 0.1f, 1.f);
+		C.AoERadius  = 350.f;
+		C.Scale      = 2.f;
+		AddConfig(Configs, C);
+	}
+
+	// Storm Gust (803) — Water blizzard AoE
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 803;
+		C.Template   = ESkillVFXTemplate::GroundAoERain;
+		C.PrimaryColor = FLinearColor(0.5f, 0.7f, 1.f, 1.f);
+		C.AoERadius  = 350.f;
+		C.Scale      = 2.f;
+		AddConfig(Configs, C);
+	}
+
+	// Earth Spike (804) — Earth bolt impact
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 804;
+		C.Template   = ESkillVFXTemplate::BoltFromSky;
+		C.PrimaryColor = FLinearColor(0.6f, 0.45f, 0.2f, 1.f);
+		AddConfig(Configs, C);
+	}
+
+	// Heaven's Drive (805) — Earth AoE spikes
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 805;
+		C.Template   = ESkillVFXTemplate::AoEImpact;
+		C.PrimaryColor = FLinearColor(0.6f, 0.45f, 0.2f, 1.f);
+		C.AoERadius  = 250.f;
+		AddConfig(Configs, C);
+	}
+
+	// Quagmire (806) — Earth debuff zone
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 806;
+		C.Template   = ESkillVFXTemplate::GroundPersistent;
+		C.PrimaryColor = FLinearColor(0.3f, 0.25f, 0.1f, 1.f);
+		C.AoERadius  = 250.f;
+		C.Duration   = 5.f;
+		AddConfig(Configs, C);
+	}
+
+	// Water Ball (807) — Water bolt multi-hit
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 807;
+		C.Template   = ESkillVFXTemplate::BoltFromSky;
+		C.PrimaryColor = FLinearColor(0.3f, 0.5f, 0.9f, 1.f);
+		AddConfig(Configs, C);
+	}
+
+	// Ice Wall (808) — Ice barrier
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 808;
+		C.Template   = ESkillVFXTemplate::GroundPersistent;
+		C.PrimaryColor = FLinearColor(0.6f, 0.85f, 1.f, 1.f);
+		C.AoERadius  = 250.f;
+		C.Duration   = 10.f;
+		AddConfig(Configs, C);
+	}
+
+	// Sight Rasher (809) — Fire AoE explosion
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 809;
+		C.Template   = ESkillVFXTemplate::AoEImpact;
+		C.PrimaryColor = FLinearColor(1.f, 0.5f, 0.15f, 1.f);
+		C.AoERadius  = 350.f;
+		C.Scale      = 1.5f;
+		AddConfig(Configs, C);
+	}
+
+	// Fire Pillar (810) — Fire ground trap
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 810;
+		C.Template   = ESkillVFXTemplate::GroundPersistent;
+		C.PrimaryColor = FLinearColor(1.f, 0.3f, 0.1f, 1.f);
+		C.AoERadius  = 100.f;
+		C.Duration   = 3.f;
+		AddConfig(Configs, C);
+	}
+
+	// Frost Nova (811) — Water freeze AoE
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 811;
+		C.Template   = ESkillVFXTemplate::AoEImpact;
+		C.PrimaryColor = FLinearColor(0.5f, 0.7f, 1.f, 1.f);
+		C.AoERadius  = 250.f;
+		AddConfig(Configs, C);
+	}
+
+	// Sight Blaster (813) — Fire reactive buff
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 813;
+		C.Template   = ESkillVFXTemplate::SelfBuff;
+		C.PrimaryColor = FLinearColor(1.f, 0.6f, 0.2f, 1.f);
+		C.Duration   = 1.5f;
+		AddConfig(Configs, C);
+	}
+
+	// Earth Spike Sage (1417) — reuse Earth Spike VFX
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1417;
+		C.Template   = ESkillVFXTemplate::BoltFromSky;
+		C.PrimaryColor = FLinearColor(0.6f, 0.45f, 0.2f, 1.f);
+		AddConfig(Configs, C);
+	}
+
+	// Heaven's Drive Sage (1418) — reuse Heaven's Drive VFX
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1418;
+		C.Template   = ESkillVFXTemplate::AoEImpact;
+		C.PrimaryColor = FLinearColor(0.6f, 0.45f, 0.2f, 1.f);
+		C.AoERadius  = 250.f;
+		AddConfig(Configs, C);
+	}
+
+	// ================================================================
+	// CRUSADER SKILLS (Phase 2A)
+	// ================================================================
+
+	// Holy Cross (1302) — Holy impact, golden
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1302;
+		C.Template   = ESkillVFXTemplate::AoEImpact;
+		C.PrimaryColor = FLinearColor(1.f, 0.9f, 0.4f, 1.f);
+		C.Scale      = 1.2f;
+		AddConfig(Configs, C);
+	}
+
+	// Grand Cross (1303) — Holy cross AoE, bright gold
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1303;
+		C.Template   = ESkillVFXTemplate::AoEImpact;
+		C.PrimaryColor = FLinearColor(1.f, 0.95f, 0.6f, 1.f);
+		C.AoERadius  = 200.f;
+		C.Scale      = 2.f;
+		AddConfig(Configs, C);
+	}
+
+	// Shield Charge (1304) — Silver impact
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1304;
+		C.Template   = ESkillVFXTemplate::AoEImpact;
+		C.PrimaryColor = FLinearColor(0.8f, 0.8f, 0.9f, 1.f);
+		AddConfig(Configs, C);
+	}
+
+	// Shield Boomerang (1305) — Silver projectile
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1305;
+		C.Template   = ESkillVFXTemplate::Projectile;
+		C.PrimaryColor = FLinearColor(0.7f, 0.75f, 0.85f, 1.f);
+		C.ProjectileSpeed = 1500.f;
+		AddConfig(Configs, C);
+	}
+
+	// Auto Guard (1301) — Blue shield buff
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1301;
+		C.Template   = ESkillVFXTemplate::SelfBuff;
+		C.PrimaryColor = FLinearColor(0.4f, 0.6f, 0.9f, 1.f);
+		C.Duration   = 1.f;
+		AddConfig(Configs, C);
+	}
+
+	// Reflect Shield (1307) — White shield aura
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1307;
+		C.Template   = ESkillVFXTemplate::SelfBuff;
+		C.PrimaryColor = FLinearColor(0.9f, 0.9f, 1.f, 1.f);
+		C.Duration   = 1.5f;
+		AddConfig(Configs, C);
+	}
+
+	// Defender (1309) — Blue defensive aura
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1309;
+		C.Template   = ESkillVFXTemplate::SelfBuff;
+		C.PrimaryColor = FLinearColor(0.3f, 0.5f, 0.8f, 1.f);
+		C.Duration   = 1.5f;
+		AddConfig(Configs, C);
+	}
+
+	// Devotion (1306) — Golden link flash on target
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1306;
+		C.Template   = ESkillVFXTemplate::HealFlash;
+		C.PrimaryColor = FLinearColor(1.f, 0.85f, 0.3f, 1.f);
+		AddConfig(Configs, C);
+	}
+
+	// Providence (1308) — Holy resistance buff, soft gold
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1308;
+		C.Template   = ESkillVFXTemplate::SelfBuff;
+		C.PrimaryColor = FLinearColor(0.9f, 0.85f, 0.5f, 1.f);
+		C.Duration   = 1.f;
+		AddConfig(Configs, C);
+	}
+
+	// Spear Quicken (1310) — Blue speed aura
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1310;
+		C.Template   = ESkillVFXTemplate::SelfBuff;
+		C.PrimaryColor = FLinearColor(0.4f, 0.7f, 1.f, 1.f);
+		C.Duration   = 1.f;
+		AddConfig(Configs, C);
+	}
+
+	// Heal Crusader (1311) — Green heal flash
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1311;
+		C.Template   = ESkillVFXTemplate::HealFlash;
+		C.PrimaryColor = FLinearColor(0.3f, 1.f, 0.4f, 1.f);
+		AddConfig(Configs, C);
+	}
+
+	// Cure Crusader (1312) — White cure flash
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1312;
+		C.Template   = ESkillVFXTemplate::HealFlash;
+		C.PrimaryColor = FLinearColor(0.9f, 0.95f, 1.f, 1.f);
+		AddConfig(Configs, C);
+	}
+
+	// =====================================================================
+	// HUNTER SKILLS (900-917) — Phase 3C
+	// =====================================================================
+
+	// Blitz Beat (900) — Gold falcon strike
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 900;
+		C.Template   = ESkillVFXTemplate::BoltFromSky;
+		C.PrimaryColor = FLinearColor(1.f, 0.85f, 0.4f, 1.f);
+		C.BoltSpawnHeight = 400.f;
+		AddConfig(Configs, C);
+	}
+
+	// Land Mine (904) — Brown earth explosion
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 904;
+		C.Template   = ESkillVFXTemplate::AoEImpact;
+		C.PrimaryColor = FLinearColor(0.6f, 0.45f, 0.2f, 1.f);
+		AddConfig(Configs, C);
+	}
+
+	// Blast Mine (912) — Cyan-white wind explosion
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 912;
+		C.Template   = ESkillVFXTemplate::AoEImpact;
+		C.PrimaryColor = FLinearColor(0.5f, 0.9f, 1.f, 1.f);
+		C.AoERadius  = 75.f;
+		AddConfig(Configs, C);
+	}
+
+	// Claymore Trap (907) — Orange-red fire explosion
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 907;
+		C.Template   = ESkillVFXTemplate::AoEImpact;
+		C.PrimaryColor = FLinearColor(1.f, 0.5f, 0.1f, 1.f);
+		C.AoERadius  = 125.f;
+		AddConfig(Configs, C);
+	}
+
+	// Freezing Trap (911) — Blue-white ice burst
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 911;
+		C.Template   = ESkillVFXTemplate::AoEImpact;
+		C.PrimaryColor = FLinearColor(0.4f, 0.7f, 1.f, 1.f);
+		C.AoERadius  = 75.f;
+		AddConfig(Configs, C);
+	}
+
+	// Phantasmic Arrow (917) — White ghost projectile
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 917;
+		C.Template   = ESkillVFXTemplate::Projectile;
+		C.PrimaryColor = FLinearColor(0.9f, 0.9f, 1.f, 1.f);
+		C.ProjectileSpeed = 2500.f;
+		AddConfig(Configs, C);
+	}
+
+	// =====================================================================
+	// MONK SKILLS (1600-1615) — Phase 3A
+	// =====================================================================
+
+	// Summon Spirit Sphere (1601) — Golden holy sphere aura
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1601;
+		C.Template   = ESkillVFXTemplate::SelfBuff;
+		C.PrimaryColor = FLinearColor(1.f, 0.85f, 0.3f, 1.f);
+		C.Duration   = 0.8f;
+		AddConfig(Configs, C);
+	}
+
+	// Investigate (1602) — White melee impact
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1602;
+		C.Template   = ESkillVFXTemplate::AoEImpact;
+		C.PrimaryColor = FLinearColor(1.f, 1.f, 0.9f, 1.f);
+		AddConfig(Configs, C);
+	}
+
+	// Finger Offensive (1604) — Golden ranged projectile
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1604;
+		C.Template   = ESkillVFXTemplate::Projectile;
+		C.PrimaryColor = FLinearColor(1.f, 0.85f, 0.3f, 1.f);
+		C.ProjectileSpeed = 2000.f;
+		AddConfig(Configs, C);
+	}
+
+	// Asura Strike (1605) — Massive white-gold burst
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1605;
+		C.Template   = ESkillVFXTemplate::AoEImpact;
+		C.PrimaryColor = FLinearColor(1.f, 0.95f, 0.7f, 1.f);
+		C.AoERadius  = 150.f;
+		AddConfig(Configs, C);
+	}
+
+	// Critical Explosion / Fury (1611) — Red-gold self buff aura
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1611;
+		C.Template   = ESkillVFXTemplate::SelfBuff;
+		C.PrimaryColor = FLinearColor(1.f, 0.4f, 0.1f, 1.f);
+		C.Duration   = 1.2f;
+		AddConfig(Configs, C);
+	}
+
+	// Steel Body (1612) — Silver metallic self buff
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1612;
+		C.Template   = ESkillVFXTemplate::SelfBuff;
+		C.PrimaryColor = FLinearColor(0.75f, 0.75f, 0.8f, 1.f);
+		C.Duration   = 1.5f;
+		AddConfig(Configs, C);
+	}
+
+	// Ki Explosion (1615) — Orange AoE burst
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1615;
+		C.Template   = ESkillVFXTemplate::AoEImpact;
+		C.PrimaryColor = FLinearColor(1.f, 0.6f, 0.2f, 1.f);
+		C.AoERadius  = 150.f;
+		AddConfig(Configs, C);
+	}
+
+	// Absorb Spirit Sphere (1607) — Blue-white absorb aura
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1607;
+		C.Template   = ESkillVFXTemplate::SelfBuff;
+		C.PrimaryColor = FLinearColor(0.5f, 0.7f, 1.f, 1.f);
+		C.Duration   = 0.8f;
+		AddConfig(Configs, C);
+	}
+
+	// Triple Attack (1603) — Yellow-gold melee impact (passive proc)
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1603;
+		C.Template   = ESkillVFXTemplate::AoEImpact;
+		C.PrimaryColor = FLinearColor(1.f, 0.9f, 0.4f, 1.f);
+		AddConfig(Configs, C);
+	}
+
+	// Chain Combo (1610) — Orange rapid melee impacts
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1610;
+		C.Template   = ESkillVFXTemplate::AoEImpact;
+		C.PrimaryColor = FLinearColor(1.f, 0.65f, 0.15f, 1.f);
+		AddConfig(Configs, C);
+	}
+
+	// Combo Finish (1613) — Red-orange burst with AoE
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1613;
+		C.Template   = ESkillVFXTemplate::AoEImpact;
+		C.PrimaryColor = FLinearColor(1.f, 0.4f, 0.1f, 1.f);
+		C.AoERadius  = 250.f;
+		AddConfig(Configs, C);
+	}
+
+	// =====================================================================
+	//  ALCHEMIST
+	// =====================================================================
+
+	// Acid Terror (1801) — Green acid projectile at enemy
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1801;
+		C.Template   = ESkillVFXTemplate::Projectile;
+		C.PrimaryColor = FLinearColor(0.3f, 0.9f, 0.1f, 1.f);  // acid green
+		C.Element    = TEXT("neutral");
+		C.ProjectileSpeed = 1800.f;
+		C.VFXOverridePath = TEXT("/Game/Free_Magic/VFX_Niagara/NS_Free_Magic_Projectile1.NS_Free_Magic_Projectile1");
+		AddConfig(Configs, C);
+	}
+
+	// Demonstration (1802) — Persistent fire ground zone
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1802;
+		C.Template   = ESkillVFXTemplate::GroundPersistent;
+		C.PrimaryColor = FLinearColor(1.f, 0.4f, 0.1f, 1.f);  // fire orange
+		C.Element    = TEXT("fire");
+		C.AoERadius  = 150.f;
+		C.bLooping   = true;
+		C.bSelfCentered = false;
+		AddConfig(Configs, C);
+	}
+
+	// Potion Pitcher (1806) — Heal flash on target
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1806;
+		C.Template   = ESkillVFXTemplate::HealFlash;
+		C.PrimaryColor = FLinearColor(0.2f, 0.9f, 0.3f, 1.f);  // green heal
+		C.Element    = TEXT("neutral");
+		C.Scale      = 200.0f;
+		C.VFXOverridePath = TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Potion.NS_Potion");
+		AddConfig(Configs, C);
+	}
+
+	// Chemical Protection Helm (1808) — Buff aura on self
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1808;
+		C.Template   = ESkillVFXTemplate::SelfBuff;
+		C.PrimaryColor = FLinearColor(0.8f, 0.8f, 0.2f, 1.f);  // golden yellow
+		C.Element    = TEXT("neutral");
+		AddConfig(Configs, C);
+	}
+
+	// Chemical Protection Shield (1809)
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1809;
+		C.Template   = ESkillVFXTemplate::SelfBuff;
+		C.PrimaryColor = FLinearColor(0.8f, 0.8f, 0.2f, 1.f);
+		C.Element    = TEXT("neutral");
+		AddConfig(Configs, C);
+	}
+
+	// Chemical Protection Armor (1810)
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1810;
+		C.Template   = ESkillVFXTemplate::SelfBuff;
+		C.PrimaryColor = FLinearColor(0.8f, 0.8f, 0.2f, 1.f);
+		C.Element    = TEXT("neutral");
+		AddConfig(Configs, C);
+	}
+
+	// Chemical Protection Weapon (1811)
+	{
+		FSkillVFXConfig C;
+		C.SkillId    = 1811;
+		C.Template   = ESkillVFXTemplate::SelfBuff;
+		C.PrimaryColor = FLinearColor(0.8f, 0.8f, 0.2f, 1.f);
+		C.Element    = TEXT("neutral");
 		AddConfig(Configs, C);
 	}
 

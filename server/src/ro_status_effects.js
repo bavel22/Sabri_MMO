@@ -66,7 +66,7 @@ const STATUS_EFFECTS = {
             interval: 5000,     // drain every 5s
             hpPercent: 0.01,    // 1% of max HP
             flatDrain: 0,
-            minHpPercent: null   // uses canKill=false → min 1 HP
+            minHpPercent: 0.25   // RO Classic: stone HP drain stops at 25% MaxHP
         }
     },
     sleep: {
@@ -83,6 +83,20 @@ const STATUS_EFFECTS = {
         blocksSPRegen: false,
         statMods: {}
         // Special: attacks against sleeping targets always hit, 2x crit rate
+    },
+    ankle_snare: {
+        resistStat: null,           // No resistance — always applies (rAthena: SCSTART_NORATEDEF)
+        resistCap: null,
+        baseDuration: 20000,
+        canKill: false,
+        breakOnDamage: false,       // NOT broken by damage (rAthena: no RemoveOnDamaged flag)
+        preventsMovement: true,     // ONLY prevents movement
+        preventsCasting: false,     // CAN cast while snared (rAthena status.yml: only NoMove)
+        preventsAttack: false,      // CAN attack while snared
+        preventsItems: false,       // CAN use items while snared
+        blocksHPRegen: false,
+        blocksSPRegen: false,
+        statMods: {}
     },
     poison: {
         resistStat: 'vit',
@@ -101,8 +115,8 @@ const STATUS_EFFECTS = {
             startDelay: 0,
             interval: 1000,     // every 1s
             hpPercent: 0.015,   // 1.5% max HP
-            flatDrain: 2,       // +2 flat
-            minHpPercent: 0.25  // cannot kill, floor at 25% HP
+            flatDrain: 2        // +2 flat
+            // canKill: false → floor is 1 HP (RO Classic: poison can't kill)
         }
     },
     blind: {
@@ -186,6 +200,21 @@ const STATUS_EFFECTS = {
             lukOverride: 0,
             moveSpeedMultiplier: 0.1
         }
+    },
+    petrifying: {
+        resistStat: 'mdef',
+        resistCap: null,
+        baseDuration: 5000,      // Phase 1: 5 seconds
+        canKill: false,
+        breakOnDamage: false,    // NOT broken by damage (unlike most CC)
+        preventsMovement: false, // Can still move during Phase 1
+        preventsCasting: true,   // Cannot cast
+        preventsAttack: true,    // Cannot attack
+        preventsItems: false,    // Can use items
+        blocksHPRegen: false,
+        blocksSPRegen: false,
+        statMods: {},
+        transitionsTo: 'stone'   // Auto-transitions to full stone when Phase 1 expires
     }
 };
 
@@ -280,8 +309,19 @@ function calculateResistance(source, target, statusType, baseChance) {
         cardResistReduction = Math.floor(baseChance * cardResEff / 10000);
     }
 
+    // Buff-based status resist (Invulnerable Siegfried ensemble — reduces chance by statusResist%)
+    let buffStatusResist = 0;
+    if (target.activeBuffs) {
+        const now = Date.now();
+        for (const buff of target.activeBuffs) {
+            if (now >= buff.expiresAt) continue;
+            if (buff.statusResist) buffStatusResist += buff.statusResist;
+        }
+    }
+    const buffResistReduction = buffStatusResist > 0 ? Math.floor(baseChance * buffStatusResist / 100) : 0;
+
     // Final chance calculation
-    let finalChance = baseChance - (baseChance * resistStatValue / 100) + srcLevel - tarLevel - targetLuk - cardResistReduction;
+    let finalChance = baseChance - (baseChance * resistStatValue / 100) + srcLevel - tarLevel - targetLuk - cardResistReduction - buffResistReduction;
     finalChance = Math.max(5, Math.min(95, finalChance));
 
     // Roll
@@ -330,6 +370,20 @@ function applyStatusEffect(source, target, statusType, baseChance, overrideDurat
         sourceLevel: source.level || (source.stats && source.stats.level) || 1,
         lastDrainTime: null
     });
+
+    // Devotion break on CC: if target (Crusader) has devotionLinks and gets CC'd, break all links
+    // rAthena: Devotion breaks when Crusader is stunned/frozen/petrified/put to sleep
+    const CC_TYPES = ['stun', 'freeze', 'stone', 'sleep'];
+    if (CC_TYPES.includes(statusType) && target.devotionLinks && target.devotionLinks.length > 0) {
+        const brokenLinks = [...target.devotionLinks];
+        target.devotionLinks = [];
+        // Clear devotedTo on each linked target (objects are passed by reference)
+        for (const link of brokenLinks) {
+            // link.targetCharId references the protected player — we need to find them
+            // The caller's connectedPlayers map isn't available here, so we flag for caller
+        }
+        return { applied: true, duration, devotionBroken: true, brokenLinks };
+    }
 
     return { applied: true, duration };
 }
@@ -428,12 +482,33 @@ function tickStatusEffects(target, now) {
 
     const expired = [];
     const drains = [];
+    const transitions = []; // { from: 'petrifying', to: 'stone', duration: 20000 }
 
     for (const [type, effect] of target.activeStatusEffects.entries()) {
         // Expiry check
         if (now >= effect.expiresAt) {
             target.activeStatusEffects.delete(type);
             expired.push(type);
+
+            // Auto-transition: petrifying → stone
+            const config = STATUS_EFFECTS[type];
+            if (config && config.transitionsTo) {
+                const toType = config.transitionsTo;
+                const toConfig = STATUS_EFFECTS[toType];
+                if (toConfig && !target.activeStatusEffects.has(toType)) {
+                    const toDuration = toConfig.baseDuration;
+                    target.activeStatusEffects.set(toType, {
+                        type: toType,
+                        appliedAt: now,
+                        duration: toDuration,
+                        expiresAt: now + toDuration,
+                        sourceId: effect.sourceId,
+                        sourceLevel: effect.sourceLevel,
+                        lastDrainTime: null
+                    });
+                    transitions.push({ from: type, to: toType, duration: toDuration });
+                }
+            }
             continue;
         }
 
@@ -485,7 +560,7 @@ function tickStatusEffects(target, now) {
         }
     }
 
-    return { expired, drains };
+    return { expired, drains, transitions };
 }
 
 // ============================================================================
@@ -524,6 +599,7 @@ function getStatusModifiers(target) {
         // Individual status flags (for specific checks)
         isFrozen: false,
         isStoned: false,
+        isPetrifying: false,
         isStunned: false,
         isSleeping: false,
         isPoisoned: false,
@@ -568,9 +644,10 @@ function getStatusModifiers(target) {
 
         // Individual flags
         switch (type) {
-            case 'freeze':    mods.isFrozen = true; break;
-            case 'stone':     mods.isStoned = true; break;
-            case 'stun':      mods.isStunned = true; break;
+            case 'freeze':      mods.isFrozen = true; break;
+            case 'stone':       mods.isStoned = true; break;
+            case 'petrifying':  mods.isPetrifying = true; break;
+            case 'stun':        mods.isStunned = true; break;
             case 'sleep':     mods.isSleeping = true; break;
             case 'poison':    mods.isPoisoned = true; break;
             case 'bleeding':  mods.isBleeding = true; break;

@@ -2,6 +2,9 @@
 
 #include "SkillTreeSubsystem.h"
 #include "CombatStatsSubsystem.h"
+#include "EnemySubsystem.h"
+#include "OtherPlayerSubsystem.h"
+#include "VendingSubsystem.h"
 #include "SSkillTreeWidget.h"
 #include "SSkillTargetingOverlay.h"
 #include "DrawDebugHelpers.h"
@@ -167,9 +170,23 @@ namespace GroundAoE
 			float EffectSec = FMath::Max(1, SkillLevel - 1) * 0.3f + 0.5f;
 			return { 500.f, FColor(180, 220,  80), EffectSec };
 		}
-		case 304: return { 400.f, FColor(180, 140,  60), 0.f  };  // Arrow Shower — neutral AoE
+		case 304: return { 125.f, FColor(180, 140,  60), 0.f  };  // Arrow Shower — 5x5 cells = 125 UE radius
 		case 407: return { 500.f, FColor(255, 255, 200), 0.f  };  // Signum Crucis — holy AoE
 		case 608: return { 300.f, FColor(160, 110,  60), 0.f  };  // Cart Revolution — neutral AoE
+		case 800: return {   0.f, FColor(100, 180, 255), 0.f  };  // Jupitel Thunder — single target, no circle
+		case 801: return { 450.f, FColor(150, 150, 255), 4.0f };  // Lord of Vermilion — 9x9 wind AoE
+		case 802: return { 350.f, FColor(255, 100,  30), 3.0f };  // Meteor Storm — 7x7 fire rain
+		case 803: return { 350.f, FColor(100, 150, 255), 5.0f };  // Storm Gust — 7x7 water blizzard
+		case 805: return { 250.f, FColor(150, 110,  50), 1.0f };  // Heaven's Drive — 5x5 earth AoE
+		case 1418: return { 250.f, FColor(150, 110, 50), 1.0f };  // Heaven's Drive Sage
+		case 806: return { 250.f, FColor( 80,  70,  30), 5.0f };  // Quagmire — 5x5 debuff zone
+		case 808: return { 125.f, FColor(130, 200, 255), 10.f };  // Ice Wall — ice barrier
+		case 810: return {  50.f, FColor(255,  80,  20), 30.f };  // Fire Pillar — ground trap
+		case 1412: return { 350.f, FColor(255, 100,  30), 60.f };  // Volcano — fire buff zone
+		case 1413: return { 350.f, FColor( 80, 130, 230), 60.f };  // Deluge — water buff zone
+		case 1414: return { 350.f, FColor(130, 200, 100), 60.f };  // Violent Gale — wind buff zone
+		case 1415: return { 350.f, FColor(200, 200, 150), 120.f }; // Land Protector — nullification zone
+		case 1303: return { 150.f, FColor(255, 230, 100), 1.0f }; // Grand Cross — cross-shaped holy AoE
 		default:  return { 200.f, FColor(100, 200, 255), 2.0f };  // Default
 		}
 	}
@@ -196,6 +213,7 @@ namespace WalkToCast
 		bool bIsSingleTarget = false;
 		int32 TargetId = 0;
 		bool bTargetIsEnemy = false;
+		int32 SkillLevel = 0;
 		TWeakObjectPtr<AActor> TargetActor;  // track the enemy actor for live position
 	};
 
@@ -302,6 +320,8 @@ void USkillTreeSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 			[this](const TSharedPtr<FJsonValue>& D) { HandleSkillBuffRemoved(D); });
 		Router->RegisterHandler(TEXT("skill:cooldown_started"), this,
 			[this](const TSharedPtr<FJsonValue>& D) { HandleSkillCooldownStarted(D); });
+		Router->RegisterHandler(TEXT("warp_portal:select"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleWarpPortalSelect(D); });
 
 		// --- Events that dismiss the ground AoE circle (cast rejected/failed/interrupted) ---
 		auto DismissCircle = [this](const TSharedPtr<FJsonValue>&)
@@ -617,8 +637,27 @@ void USkillTreeSubsystem::HandleHotbarAllData(const TSharedPtr<FJsonValue>& Data
 	UE_LOG(LogSkillTree, Log, TEXT("HandleHotbarAllData: %d skill slots mapped"), HotbarSkillMap.Num());
 }
 
-void USkillTreeSubsystem::UseSkill(int32 SkillId)
+int32 USkillTreeSubsystem::GetSelectedLevel(int32 SkillId) const
 {
+	const int32* Level = SelectedUseLevels.Find(SkillId);
+	if (Level && *Level > 0) return *Level;
+	// Default to max learned level
+	const FSkillEntry* Entry = FindSkillEntry(SkillId);
+	return Entry ? Entry->CurrentLevel : 1;
+}
+
+void USkillTreeSubsystem::SetSelectedLevel(int32 SkillId, int32 Level)
+{
+	const FSkillEntry* Entry = FindSkillEntry(SkillId);
+	if (!Entry || Level < 1) return;
+	SelectedUseLevels.Add(SkillId, FMath::Clamp(Level, 1, Entry->CurrentLevel));
+}
+
+void USkillTreeSubsystem::UseSkill(int32 SkillId, int32 OverrideLevel)
+{
+	// Store the level to use for targeting (from hotbar slot or selected level)
+	PendingSkillLevel = (OverrideLevel > 0) ? OverrideLevel : GetSelectedLevel(SkillId);
+
 	// Check if this skill requires targeting (RO-style click-to-cast)
 	const FSkillEntry* Entry = FindSkillEntry(SkillId);
 	if (Entry && Entry->CurrentLevel > 0)
@@ -630,6 +669,13 @@ void USkillTreeSubsystem::UseSkill(int32 SkillId)
 		}
 		if (Entry->TargetType == TEXT("aoe"))
 		{
+			// Self-centered AoE (range=0): fire immediately, no targeting needed
+			// e.g. Frost Nova, Sight Rasher, Magnum Break — centered on caster
+			if (Entry->Range <= 0)
+			{
+				UseSkillOnTarget(SkillId, 0, false, PendingSkillLevel);
+				return;
+			}
 			BeginTargeting(SkillId);
 			return;
 		}
@@ -641,11 +687,11 @@ void USkillTreeSubsystem::UseSkill(int32 SkillId)
 	}
 
 	// Self/none/passive skills execute immediately (e.g. First Aid)
-	UseSkillOnTarget(SkillId, 0, false);
+	UseSkillOnTarget(SkillId, 0, false, PendingSkillLevel);
 }
 
 
-void USkillTreeSubsystem::UseSkillOnTarget(int32 SkillId, int32 TargetId, bool bIsEnemy)
+void USkillTreeSubsystem::UseSkillOnTarget(int32 SkillId, int32 TargetId, bool bIsEnemy, int32 SkillLevel)
 {
 	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld() ? GetWorld()->GetGameInstance() : nullptr);
 	if (!GI || !GI->IsSocketConnected())
@@ -672,6 +718,8 @@ void USkillTreeSubsystem::UseSkillOnTarget(int32 SkillId, int32 TargetId, bool b
 
 	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 	Payload->SetNumberField(TEXT("skillId"), SkillId);
+	if (SkillLevel > 0)
+		Payload->SetNumberField(TEXT("skillLevel"), SkillLevel);
 	if (TargetId > 0)
 	{
 		Payload->SetNumberField(TEXT("targetId"), TargetId);
@@ -683,7 +731,7 @@ void USkillTreeSubsystem::UseSkillOnTarget(int32 SkillId, int32 TargetId, bool b
 		SkillId, TargetId, bIsEnemy);
 }
 
-void USkillTreeSubsystem::UseSkillOnGround(int32 SkillId, FVector GroundPosition)
+void USkillTreeSubsystem::UseSkillOnGround(int32 SkillId, FVector GroundPosition, int32 SkillLevel)
 {
 	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld() ? GetWorld()->GetGameInstance() : nullptr);
 	if (!GI || !GI->IsSocketConnected())
@@ -709,13 +757,15 @@ void USkillTreeSubsystem::UseSkillOnGround(int32 SkillId, FVector GroundPosition
 
 	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 	Payload->SetNumberField(TEXT("skillId"), SkillId);
+	if (SkillLevel > 0)
+		Payload->SetNumberField(TEXT("skillLevel"), SkillLevel);
 	Payload->SetNumberField(TEXT("groundX"), GroundPosition.X);
 	Payload->SetNumberField(TEXT("groundY"), GroundPosition.Y);
 	Payload->SetNumberField(TEXT("groundZ"), GroundPosition.Z);
 
 	GI->EmitSocketEvent(TEXT("skill:use"), Payload);
-	UE_LOG(LogSkillTree, Log, TEXT("Emitted skill:use for skillId=%d at ground (%.0f, %.0f, %.0f)"),
-		SkillId, GroundPosition.X, GroundPosition.Y, GroundPosition.Z);
+	UE_LOG(LogSkillTree, Log, TEXT("Emitted skill:use for skillId=%d Lv%d at ground (%.0f, %.0f, %.0f)"),
+		SkillId, SkillLevel, GroundPosition.X, GroundPosition.Y, GroundPosition.Z);
 }
 
 bool USkillTreeSubsystem::IsSkillOnCooldown(int32 SkillId) const
@@ -896,8 +946,11 @@ void USkillTreeSubsystem::HandleSkillData(const TSharedPtr<FJsonValue>& Data)
 					S->TryGetStringField(TEXT("description"), Entry.Description);
 					S->TryGetStringField(TEXT("icon"), Entry.Icon);
 					// Build icon path: /Game/SabriMMO/Assets/Skill_Icons/<ClassFolder>/<icon>
+					// Use iconClassId (original class) for the folder, not the tab's class
 					{
-						FString ClassFolder = Group.ClassId;
+						FString ClassFolder;
+						S->TryGetStringField(TEXT("iconClassId"), ClassFolder);
+						if (ClassFolder.IsEmpty()) ClassFolder = Group.ClassId;
 						if (ClassFolder.Len() > 0) ClassFolder[0] = FChar::ToUpper(ClassFolder[0]);
 						Entry.IconPath = FString::Printf(TEXT("/Game/SabriMMO/Assets/Skill_Icons/%s/%s"), *ClassFolder, *Entry.Icon);
 						if (!DynamicIconPaths.Contains(Entry.Icon))
@@ -1067,18 +1120,24 @@ void USkillTreeSubsystem::HandleSkillUsed(const TSharedPtr<FJsonValue>& Data)
 
 	FString SkillName;
 	Obj->TryGetStringField(TEXT("skillName"), SkillName);
-	double Level = 0, SpCost = 0;
+	double SkillIdD = 0, Level = 0, SpCost = 0;
+	Obj->TryGetNumberField(TEXT("skillId"), SkillIdD);
 	Obj->TryGetNumberField(TEXT("level"), Level);
 	Obj->TryGetNumberField(TEXT("spCost"), SpCost);
+	int32 SkillId = (int32)SkillIdD;
+	int32 SkillLevel = (int32)Level;
 
-	UE_LOG(LogSkillTree, Log, TEXT("Skill used: %s Lv%d (SP cost: %d)"),
-		*SkillName, (int32)Level, (int32)SpCost);
+	UE_LOG(LogSkillTree, Log, TEXT("Skill used: %s (id=%d) Lv%d (SP cost: %d)"),
+		*SkillName, SkillId, SkillLevel, (int32)SpCost);
 
 	if (GEngine)
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Cyan,
-			FString::Printf(TEXT("%s Lv%d used! (-%d SP)"), *SkillName, (int32)Level, (int32)SpCost));
+			FString::Printf(TEXT("%s Lv%d used! (-%d SP)"), *SkillName, SkillLevel, (int32)SpCost));
 	}
+
+	// Vending skill (605): server sends vending:setup event which triggers the UI.
+	// Do NOT open the popup here — it causes a dual-trigger (setup shown twice).
 }
 
 void USkillTreeSubsystem::HandleHotbarData(const TSharedPtr<FJsonValue>& Data)
@@ -1318,6 +1377,97 @@ void USkillTreeSubsystem::HandleSkillCooldownStarted(const TSharedPtr<FJsonValue
 }
 
 // ============================================================
+// HandleWarpPortalSelect — server sends destination choices
+// ============================================================
+
+void USkillTreeSubsystem::HandleWarpPortalSelect(const TSharedPtr<FJsonValue>& Data)
+{
+	if (!Data.IsValid()) return;
+	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
+	const TSharedPtr<FJsonObject>& Obj = *ObjPtr;
+
+	const TArray<TSharedPtr<FJsonValue>>* DestsArray = nullptr;
+	if (!Obj->TryGetArrayField(TEXT("destinations"), DestsArray) || !DestsArray) return;
+
+	UWorld* World = GetWorld();
+	if (!World) return;
+	UGameViewportClient* VC = World->GetGameViewport();
+	if (!VC) return;
+
+	// Build destination buttons as a simple Slate popup
+	TSharedPtr<SVerticalBox> ButtonList = SNew(SVerticalBox);
+
+	TWeakObjectPtr<USkillTreeSubsystem> WeakThis(this);
+	for (const TSharedPtr<FJsonValue>& DestVal : *DestsArray)
+	{
+		const TSharedPtr<FJsonObject>* DestObj = nullptr;
+		if (!DestVal->TryGetObject(DestObj) || !DestObj) continue;
+
+		double IdxD = 0;
+		FString Name;
+		(*DestObj)->TryGetNumberField(TEXT("index"), IdxD);
+		(*DestObj)->TryGetStringField(TEXT("name"), Name);
+		const int32 DestIdx = (int32)IdxD;
+
+		ButtonList->AddSlot().AutoHeight().Padding(2.f)
+		[
+			SNew(SButton)
+			.OnClicked_Lambda([WeakThis, DestIdx, VC]() -> FReply {
+				if (USkillTreeSubsystem* S = WeakThis.Get())
+				{
+					// Send confirmation to server
+					UMMOGameInstance* GI = Cast<UMMOGameInstance>(S->GetWorld()->GetGameInstance());
+					if (GI)
+					{
+						TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+						Payload->SetNumberField(TEXT("destIndex"), DestIdx);
+						GI->EmitSocketEvent(TEXT("warp_portal:confirm"), Payload);
+					}
+					// Remove popup
+					if (S->WarpPortalPopupWrapper.IsValid() && VC)
+						VC->RemoveViewportWidgetContent(S->WarpPortalPopupWrapper.ToSharedRef());
+					S->WarpPortalPopup.Reset();
+					S->WarpPortalPopupWrapper.Reset();
+				}
+				return FReply::Handled();
+			})
+			[
+				SNew(STextBlock)
+				.Text(FText::FromString(Name))
+				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+				.ColorAndOpacity(FSlateColor(FLinearColor::White))
+			]
+		];
+	}
+
+	WarpPortalPopup = SNew(SBorder)
+		.BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
+		.BorderBackgroundColor(FLinearColor(0.12f, 0.08f, 0.04f, 0.95f))
+		.Padding(FMargin(10.f))
+		.HAlign(HAlign_Center).VAlign(VAlign_Center)
+		[
+			SNew(SVerticalBox)
+			+ SVerticalBox::Slot().AutoHeight().HAlign(HAlign_Center).Padding(0, 0, 0, 5)
+			[
+				SNew(STextBlock)
+				.Text(FText::FromString(TEXT("Select Warp Destination")))
+				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
+				.ColorAndOpacity(FSlateColor(FLinearColor(0.9f, 0.8f, 0.3f)))
+			]
+			+ SVerticalBox::Slot().AutoHeight()
+			[
+				ButtonList.ToSharedRef()
+			]
+		];
+
+	WarpPortalPopupWrapper = SNew(SWeakWidget).PossiblyNullContent(WarpPortalPopup);
+	VC->AddViewportWidgetContent(WarpPortalPopupWrapper.ToSharedRef(), 150);
+
+	UE_LOG(LogSkillTree, Log, TEXT("Warp Portal: showing %d destination choices"), DestsArray->Num());
+}
+
+// ============================================================
 // FindSkillEntry — look up a skill by ID from cached groups
 // ============================================================
 
@@ -1380,7 +1530,9 @@ void USkillTreeSubsystem::BeginTargeting(int32 SkillId)
 	}
 
 	PendingSkillId   = SkillId;
-	PendingSkillName = Entry->DisplayName;
+	PendingSkillName = (PendingSkillLevel > 0)
+		? FString::Printf(TEXT("%s Lv %d"), *Entry->DisplayName, PendingSkillLevel)
+		: Entry->DisplayName;
 
 	if (Entry->TargetType == TEXT("single"))
 	{
@@ -1447,7 +1599,7 @@ void USkillTreeSubsystem::ShowTargetingOverlay()
 	FString Hint;
 	if (PendingTargetingMode == ESkillTargetingMode::SingleTarget)
 	{
-		Hint = TEXT("Left-click an enemy to use — Right-click / ESC to cancel");
+		Hint = TEXT("Left-click a target to use — Right-click / ESC to cancel");
 	}
 	else
 	{
@@ -1507,49 +1659,60 @@ void USkillTreeSubsystem::HandleTargetingClick()
 
 	if (PendingTargetingMode == ESkillTargetingMode::SingleTarget)
 	{
-		// Line trace under cursor against Pawn channel (Characters have capsule collision)
+		// Line trace under cursor against Visibility channel (sprite enemies use Visibility, not Pawn)
 		FHitResult HitResult;
-		if (PC->GetHitResultUnderCursor(ECC_Pawn, false, HitResult) && HitResult.bBlockingHit)
+		if (PC->GetHitResultUnderCursor(ECC_Visibility, false, HitResult) && HitResult.bBlockingHit)
 		{
 			AActor* HitActor = HitResult.GetActor();
 			if (HitActor)
 			{
-				int32 EnemyId = GetEnemyIdFromActor(HitActor);
-				if (EnemyId > 0)
-				{
-					const int32 SkillToUse = PendingSkillId;
-					const FSkillEntry* Entry = FindSkillEntry(SkillToUse);
-					const float SkillRange = Entry ? static_cast<float>(Entry->Range) : 0.f;
+				const int32 SkillToUse = PendingSkillId;
+				const FSkillEntry* Entry = FindSkillEntry(SkillToUse);
+				const float SkillRange = Entry ? static_cast<float>(Entry->Range) : 0.f;
+				APawn* Pawn = PC->GetPawn();
+				const float RangeTolerance = 30.f;
 
-					APawn* Pawn = PC->GetPawn();
+				// Check if clicked an enemy
+				int32 EnemyId = GetEnemyIdFromActor(HitActor);
+				// Check if clicked another player
+				int32 PlayerId = 0;
+				if (EnemyId <= 0)
+				{
+					if (UOtherPlayerSubsystem* OPS = World->GetSubsystem<UOtherPlayerSubsystem>())
+						PlayerId = OPS->GetPlayerIdFromActor(HitActor);
+				}
+				// Check if clicked self (own pawn)
+				bool bClickedSelf = (EnemyId <= 0 && PlayerId <= 0 && HitActor == Pawn);
+
+				if (EnemyId > 0 || PlayerId > 0)
+				{
+					const int32 TargetId = (EnemyId > 0) ? EnemyId : PlayerId;
+					const bool bIsTargetEnemy = (EnemyId > 0);
 					const float Dist2D = Pawn ? FVector::Dist2D(Pawn->GetActorLocation(), HitActor->GetActorLocation()) : 0.f;
-					const float RangeTolerance = 30.f;
 
 					if (SkillRange > 0.f && Pawn && Dist2D > SkillRange + RangeTolerance)
 					{
-						// Out of range — walk toward enemy and auto-cast when close enough
+						// Out of range — walk toward target and auto-cast when close enough
 						WalkToCast::FPending& P = WalkToCast::Get(World);
 						P.SkillId = SkillToUse;
-						P.GroundTarget = HitActor->GetActorLocation();  // initial enemy position
+						P.GroundTarget = HitActor->GetActorLocation();
 						P.RequiredRange = SkillRange;
 						P.bActive = true;
 						P.bWaitingForStop = false;
 						P.bIsSingleTarget = true;
-						P.TargetId = EnemyId;
-						P.bTargetIsEnemy = true;
+						P.TargetId = TargetId;
+						P.SkillLevel = PendingSkillLevel;
+						P.bTargetIsEnemy = bIsTargetEnemy;
 						P.TargetActor = HitActor;
 
-						// Clear targeting UI
 						bIsInTargetingMode = false;
 						PendingSkillId = 0;
 						PendingSkillName.Empty();
 						PendingTargetingMode = ESkillTargetingMode::None;
 						HideTargetingOverlay();
 
-						// Start walking toward enemy
 						UAIBlueprintHelperLibrary::SimpleMoveToLocation(PC, HitActor->GetActorLocation());
 
-						// Poll distance at 50ms — two-phase: walk to range, then wait for stop
 						TWeakObjectPtr<USkillTreeSubsystem> WeakThis(this);
 						World->GetTimerManager().SetTimer(
 							P.CheckTimer,
@@ -1567,25 +1730,19 @@ void USkillTreeSubsystem::HandleTargetingClick()
 									return;
 								}
 
-								// Use live enemy position if actor is still valid
-								FVector EnemyPos = WP.GroundTarget;
+								FVector TargetPos = WP.GroundTarget;
 								if (WP.TargetActor.IsValid())
 								{
-									EnemyPos = WP.TargetActor->GetActorLocation();
-									WP.GroundTarget = EnemyPos;
-
-									// Update walk destination to track moving enemies
+									TargetPos = WP.TargetActor->GetActorLocation();
+									WP.GroundTarget = TargetPos;
 									if (!WP.bWaitingForStop)
-									{
-										UAIBlueprintHelperLibrary::SimpleMoveToLocation(WPC, EnemyPos);
-									}
+										UAIBlueprintHelperLibrary::SimpleMoveToLocation(WPC, TargetPos);
 								}
 
-								const float WDist = FVector::Dist2D(WPawn->GetActorLocation(), EnemyPos);
+								const float WDist = FVector::Dist2D(WPawn->GetActorLocation(), TargetPos);
 
 								if (!WP.bWaitingForStop)
 								{
-									// Phase 1: walking toward enemy — check if we've reached range
 									if (WDist <= WP.RequiredRange + 30.f)
 									{
 										WP.bWaitingForStop = true;
@@ -1595,20 +1752,20 @@ void USkillTreeSubsystem::HandleTargetingClick()
 								}
 								else
 								{
-									// Phase 2: waiting for pawn velocity to reach zero
 									const float Speed = WPawn->GetVelocity().Size();
 									if (Speed < 5.f)
 									{
 										const int32 CapturedSkillId = WP.SkillId;
 										const int32 CapturedTargetId = WP.TargetId;
 										const bool CapturedIsEnemy = WP.bTargetIsEnemy;
+										const int32 CapturedLevel = WP.SkillLevel;
 										WP.bActive = false;
 										WP.bWaitingForStop = false;
 										WP.bIsSingleTarget = false;
 										WP.TargetActor.Reset();
 										World->GetTimerManager().ClearTimer(WP.CheckTimer);
 
-										WeakThis->UseSkillOnTarget(CapturedSkillId, CapturedTargetId, CapturedIsEnemy);
+										WeakThis->UseSkillOnTarget(CapturedSkillId, CapturedTargetId, CapturedIsEnemy, CapturedLevel);
 										UE_LOG(LogSkillTree, Log, TEXT("WalkToCast(single): stopped, casting skill %d on target %d"),
 											CapturedSkillId, CapturedTargetId);
 									}
@@ -1616,27 +1773,38 @@ void USkillTreeSubsystem::HandleTargetingClick()
 							}),
 							0.05f, true);
 
-						UE_LOG(LogSkillTree, Log, TEXT("WalkToCast(single): skill %d on enemy %d out of range (%.0f > %.0f), walking"),
-							SkillToUse, EnemyId, Dist2D, SkillRange);
+						UE_LOG(LogSkillTree, Log, TEXT("WalkToCast(single): skill %d on %s %d out of range (%.0f > %.0f), walking"),
+							SkillToUse, bIsTargetEnemy ? TEXT("enemy") : TEXT("player"), TargetId, Dist2D, SkillRange);
 					}
 					else
 					{
 						// In range — fire immediately
 						CancelTargeting();
-						UseSkillOnTarget(SkillToUse, EnemyId, /*bIsEnemy=*/ true);
-						UE_LOG(LogSkillTree, Log, TEXT("Targeting executed: skill %d on enemy %d"), SkillToUse, EnemyId);
+						UseSkillOnTarget(SkillToUse, TargetId, bIsTargetEnemy, PendingSkillLevel);
+						UE_LOG(LogSkillTree, Log, TEXT("Targeting executed: skill %d Lv%d on %s %d"), SkillToUse, PendingSkillLevel, bIsTargetEnemy ? TEXT("enemy") : TEXT("player"), TargetId);
 					}
+					return;
+				}
+
+				// Clicked own pawn → self-cast
+				if (bClickedSelf)
+				{
+					CancelTargeting();
+					UseSkillOnTarget(SkillToUse, 0, false, PendingSkillLevel);
+					UE_LOG(LogSkillTree, Log, TEXT("Targeting executed: skill %d Lv%d on self"), SkillToUse, PendingSkillLevel);
 					return;
 				}
 			}
 		}
 
-		// No valid enemy under cursor
-		if (GEngine)
+		// No valid target under cursor — self-cast (supportive skills like Heal default to self)
 		{
-			GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Red, TEXT("Invalid target — click an enemy"));
+			const int32 SkillToUse = PendingSkillId;
+			const int32 LevelToUse = PendingSkillLevel;
+			CancelTargeting();
+			UseSkillOnTarget(SkillToUse, 0, false, LevelToUse);
+			UE_LOG(LogSkillTree, Log, TEXT("Targeting: no target under cursor, self-casting skill %d Lv%d"), SkillToUse, LevelToUse);
 		}
-		UE_LOG(LogSkillTree, Log, TEXT("Targeting click: no valid enemy under cursor"));
 	}
 	else if (PendingTargetingMode == ESkillTargetingMode::GroundTarget)
 	{
@@ -1661,6 +1829,7 @@ void USkillTreeSubsystem::HandleTargetingClick()
 				P.SkillId = SkillToUse;
 				P.GroundTarget = GroundPos;
 				P.RequiredRange = SkillRange;
+				P.SkillLevel = PendingSkillLevel;
 				P.bActive = true;
 
 				// Clear targeting UI but keep ground circle following the locked position
@@ -1754,9 +1923,9 @@ void USkillTreeSubsystem::HandleTargetingClick()
 								GroundAoE::FAoEInfo WAoE = GroundAoE::GetAoEInfo(CapturedSkillId, WSkillLv);
 								GroundAoE::LockAndDismissAfter(World, CastPos, WCastSec + WAoE.EffectDurationSec);
 
-								WeakThis->UseSkillOnGround(CapturedSkillId, CastPos);
-								UE_LOG(LogSkillTree, Log, TEXT("WalkToCast: stopped, casting skill %d at max range (%.0f, %.0f, %.0f)"),
-									CapturedSkillId, CastPos.X, CastPos.Y, CastPos.Z);
+								WeakThis->UseSkillOnGround(CapturedSkillId, CastPos, WP.SkillLevel);
+								UE_LOG(LogSkillTree, Log, TEXT("WalkToCast: stopped, casting skill %d Lv%d at max range"),
+									CapturedSkillId, WP.SkillLevel);
 							}
 						}
 					}),
@@ -1789,10 +1958,10 @@ void USkillTreeSubsystem::HandleTargetingClick()
 				PendingTargetingMode = ESkillTargetingMode::None;
 				HideTargetingOverlay();
 
-				UseSkillOnGround(SkillToUse, GroundPos);
+				UseSkillOnGround(SkillToUse, GroundPos, PendingSkillLevel);
 
-				UE_LOG(LogSkillTree, Log, TEXT("Targeting executed: skill %d Lv%d at ground (%.0f, %.0f, %.0f) — cast %.1fs (DEX %d) + effect %.1fs = circle %.1fs"),
-					SkillToUse, SkillLevel, GroundPos.X, GroundPos.Y, GroundPos.Z, ActualCastTimeSec, PlayerDex, AoEInfo.EffectDurationSec, TotalDuration);
+				UE_LOG(LogSkillTree, Log, TEXT("Targeting executed: skill %d Lv%d at ground (%.0f, %.0f, %.0f)"),
+					SkillToUse, PendingSkillLevel, GroundPos.X, GroundPos.Y, GroundPos.Z);
 			}
 		}
 		else
@@ -1824,6 +1993,7 @@ void USkillTreeSubsystem::StartSkillDrag(int32 SkillId, const FString& Name, con
 {
 	bSkillDragging = true;
 	DraggedSkillId = SkillId;
+	DraggedSkillLevel = GetSelectedLevel(SkillId);
 	DraggedSkillName = Name;
 	DraggedSkillIcon = Icon;
 	ShowSkillDragCursor(Icon);
@@ -1925,50 +2095,16 @@ void USkillTreeSubsystem::UpdateSkillDragCursorPosition()
 }
 
 // ============================================================
-// GetEnemyIdFromActor — extract the EnemyId Blueprint variable
-// via UE5 property reflection.  BP_EnemyCharacter stores
-// "EnemyId" as an int variable (server-assigned, 2000001+).
+// GetEnemyIdFromActor — uses EnemySubsystem C++ struct lookup
+// (replaces property reflection — struct refactor)
 // ============================================================
 
 int32 USkillTreeSubsystem::GetEnemyIdFromActor(AActor* Actor) const
 {
 	if (!Actor) return 0;
-
-	// Try the known Blueprint variable name first (from BP_EnemyCharacter docs)
-	static const FName PrimaryName(TEXT("EnemyId"));
-	if (FProperty* Prop = Actor->GetClass()->FindPropertyByName(PrimaryName))
-	{
-		if (FIntProperty* IntProp = CastField<FIntProperty>(Prop))
-		{
-			int32 Value = IntProp->GetPropertyValue_InContainer(Actor);
-			if (Value > 0)
-			{
-				return Value;
-			}
-		}
-	}
-
-	// Fallback: try alternate capitalisations
-	static const FName Alternates[] = {
-		FName(TEXT("EnemyID")),
-		FName(TEXT("enemyId")),
-		FName(TEXT("Enemy Id"))
-	};
-
-	for (const FName& AltName : Alternates)
-	{
-		if (FProperty* Prop = Actor->GetClass()->FindPropertyByName(AltName))
-		{
-			if (FIntProperty* IntProp = CastField<FIntProperty>(Prop))
-			{
-				int32 Value = IntProp->GetPropertyValue_InContainer(Actor);
-				if (Value > 0)
-				{
-					return Value;
-				}
-			}
-		}
-	}
-
+	UWorld* World = GetWorld();
+	if (!World) return 0;
+	if (UEnemySubsystem* ES = World->GetSubsystem<UEnemySubsystem>())
+		return ES->GetEnemyIdFromActor(Actor);
 	return 0;
 }

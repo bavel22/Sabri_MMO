@@ -1,4 +1,4 @@
-// SLoginWidget.cpp — Full-screen centered login form (RO Classic brown/gold theme)
+// SLoginWidget.cpp — Full-screen centered login/register form (RO Classic brown/gold theme)
 
 #include "SLoginWidget.h"
 #include "LoginFlowSubsystem.h"
@@ -39,8 +39,11 @@ namespace LoginColors
 	// Buttons
 	static const FLinearColor ButtonGreen  (0.20f, 0.55f, 0.20f, 1.f);
 	static const FLinearColor ButtonRed    (0.55f, 0.15f, 0.15f, 1.f);
+	static const FLinearColor ButtonBlue   (0.20f, 0.35f, 0.60f, 1.f);
 	// Input fields
 	static const FLinearColor FieldBg      (0.15f, 0.10f, 0.06f, 1.f);
+	// Link text
+	static const FLinearColor LinkGold     (0.85f, 0.72f, 0.35f, 1.f);
 }
 
 // ============================================================
@@ -93,7 +96,7 @@ void SLoginWidget::Construct(const FArguments& InArgs)
 								.Padding(FMargin(0.f, 6.f))
 								.HAlign(HAlign_Center)
 								[
-									SNew(STextBlock)
+									SAssignNew(TitleTextBlock, STextBlock)
 									.Text(FText::FromString(TEXT("SABRI MMO")))
 									.Font(FCoreStyle::GetDefaultFontStyle("Bold", 12))
 									.ColorAndOpacity(FSlateColor(LoginColors::GoldHighlight))
@@ -138,12 +141,39 @@ void SLoginWidget::Construct(const FArguments& InArgs)
 									.Font(FCoreStyle::GetDefaultFontStyle("Regular", 10))
 								]
 
-								// 4px spacing
+								// --- Email row (register only) ---
 								+ SVerticalBox::Slot()
 								.AutoHeight()
 								.Padding(FMargin(0.f, 4.f, 0.f, 0.f))
 								[
-									// Password label
+									SAssignNew(EmailRow, SVerticalBox)
+									.Visibility(EVisibility::Collapsed)
+
+									+ SVerticalBox::Slot()
+									.AutoHeight()
+									[
+										SNew(STextBlock)
+										.Text(FText::FromString(TEXT("Email")))
+										.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+										.ColorAndOpacity(FSlateColor(LoginColors::TextPrimary))
+									]
+
+									+ SVerticalBox::Slot()
+									.AutoHeight()
+									[
+										SAssignNew(EmailField, SEditableTextBox)
+										.Style(&FCoreStyle::Get().GetWidgetStyle<FEditableTextBoxStyle>("NormalEditableTextBox"))
+										.BackgroundColor(LoginColors::FieldBg)
+										.ForegroundColor(FSlateColor(LoginColors::TextBright))
+										.Font(FCoreStyle::GetDefaultFontStyle("Regular", 10))
+									]
+								]
+
+								// 4px spacing + Password label
+								+ SVerticalBox::Slot()
+								.AutoHeight()
+								.Padding(FMargin(0.f, 4.f, 0.f, 0.f))
+								[
 									SNew(STextBlock)
 									.Text(FText::FromString(TEXT("Password")))
 									.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
@@ -162,13 +192,41 @@ void SLoginWidget::Construct(const FArguments& InArgs)
 									.IsPassword(true)
 								]
 
-								// 6px spacing
+								// --- Confirm Password row (register only) ---
+								+ SVerticalBox::Slot()
+								.AutoHeight()
+								.Padding(FMargin(0.f, 4.f, 0.f, 0.f))
+								[
+									SAssignNew(ConfirmPasswordRow, SVerticalBox)
+									.Visibility(EVisibility::Collapsed)
+
+									+ SVerticalBox::Slot()
+									.AutoHeight()
+									[
+										SNew(STextBlock)
+										.Text(FText::FromString(TEXT("Confirm Password")))
+										.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+										.ColorAndOpacity(FSlateColor(LoginColors::TextPrimary))
+									]
+
+									+ SVerticalBox::Slot()
+									.AutoHeight()
+									[
+										SAssignNew(ConfirmPasswordField, SEditableTextBox)
+										.Style(&FCoreStyle::Get().GetWidgetStyle<FEditableTextBoxStyle>("NormalEditableTextBox"))
+										.BackgroundColor(LoginColors::FieldBg)
+										.ForegroundColor(FSlateColor(LoginColors::TextBright))
+										.Font(FCoreStyle::GetDefaultFontStyle("Regular", 10))
+										.IsPassword(true)
+									]
+								]
+
+								// 6px spacing + Remember Username checkbox (login only)
 								+ SVerticalBox::Slot()
 								.AutoHeight()
 								.Padding(FMargin(0.f, 6.f, 0.f, 0.f))
 								[
-									// Remember Username checkbox row
-									SNew(SHorizontalBox)
+									SAssignNew(RememberRow, SHorizontalBox)
 
 									+ SHorizontalBox::Slot()
 									.AutoWidth()
@@ -189,17 +247,17 @@ void SLoginWidget::Construct(const FArguments& InArgs)
 									]
 								]
 
-								// 6px spacing
+								// 6px spacing + Error text (hidden by default)
 								+ SVerticalBox::Slot()
 								.AutoHeight()
 								.Padding(FMargin(0.f, 6.f, 0.f, 0.f))
 								[
-									// Error text (hidden by default)
 									SAssignNew(ErrorTextBlock, STextBlock)
 									.Text(FText::GetEmpty())
 									.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
 									.ColorAndOpacity(FSlateColor(LoginColors::ErrorRed))
 									.Visibility(EVisibility::Collapsed)
+									.AutoWrapText(true)
 								]
 
 								// 6px bottom spacing
@@ -228,20 +286,20 @@ void SLoginWidget::Construct(const FArguments& InArgs)
 							[
 								SNew(SHorizontalBox)
 
-								// Login button (fills available space)
+								// Login/Register button (fills available space)
 								+ SHorizontalBox::Slot()
 								.FillWidth(1.f)
 								[
 									SNew(SButton)
 									.ButtonColorAndOpacity(LoginColors::ButtonGreen)
-									.OnClicked(this, &SLoginWidget::OnLoginClicked)
+									.OnClicked(this, &SLoginWidget::OnSubmitClicked)
 									[
 										SNew(SBox)
 										.HAlign(HAlign_Center)
 										.VAlign(VAlign_Center)
 										.Padding(FMargin(16.f, 4.f))
 										[
-											SNew(STextBlock)
+											SAssignNew(SubmitButtonText, STextBlock)
 											.Text(FText::FromString(TEXT("Login")))
 											.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
 											.ColorAndOpacity(FSlateColor(LoginColors::TextBright))
@@ -272,12 +330,64 @@ void SLoginWidget::Construct(const FArguments& InArgs)
 									]
 								]
 							]
+
+							// --- Toggle mode link ---
+							+ SVerticalBox::Slot()
+							.AutoHeight()
+							.Padding(FMargin(8.f, 0.f, 8.f, 6.f))
+							.HAlign(HAlign_Center)
+							[
+								SNew(SButton)
+								.ButtonStyle(&FCoreStyle::Get().GetWidgetStyle<FButtonStyle>("NoBorder"))
+								.OnClicked(this, &SLoginWidget::OnToggleModeClicked)
+								.Cursor(EMouseCursor::Hand)
+								[
+									SAssignNew(ToggleModeText, STextBlock)
+									.Text(FText::FromString(TEXT("Create Account")))
+									.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+									.ColorAndOpacity(FSlateColor(LoginColors::LinkGold))
+								]
+							]
 						]
 					]
 				]
 			]
 		]
 	];
+}
+
+// ============================================================
+// Mode Toggle
+// ============================================================
+void SLoginWidget::UpdateModeVisuals()
+{
+	if (bIsRegisterMode)
+	{
+		TitleTextBlock->SetText(FText::FromString(TEXT("CREATE ACCOUNT")));
+		SubmitButtonText->SetText(FText::FromString(TEXT("Register")));
+		ToggleModeText->SetText(FText::FromString(TEXT("Back to Login")));
+		EmailRow->SetVisibility(EVisibility::Visible);
+		ConfirmPasswordRow->SetVisibility(EVisibility::Visible);
+		RememberRow->SetVisibility(EVisibility::Collapsed);
+	}
+	else
+	{
+		TitleTextBlock->SetText(FText::FromString(TEXT("SABRI MMO")));
+		SubmitButtonText->SetText(FText::FromString(TEXT("Login")));
+		ToggleModeText->SetText(FText::FromString(TEXT("Create Account")));
+		EmailRow->SetVisibility(EVisibility::Collapsed);
+		ConfirmPasswordRow->SetVisibility(EVisibility::Collapsed);
+		RememberRow->SetVisibility(EVisibility::Visible);
+	}
+	ClearError();
+}
+
+FReply SLoginWidget::OnToggleModeClicked()
+{
+	bIsRegisterMode = !bIsRegisterMode;
+	UpdateModeVisuals();
+	FocusAppropriateField();
+	return FReply::Handled();
 }
 
 // ============================================================
@@ -336,9 +446,12 @@ void SLoginWidget::FocusAppropriateField()
 // ============================================================
 // Button Handlers
 // ============================================================
-FReply SLoginWidget::OnLoginClicked()
+FReply SLoginWidget::OnSubmitClicked()
 {
-	AttemptLogin();
+	if (bIsRegisterMode)
+		AttemptRegister();
+	else
+		AttemptLogin();
 	return FReply::Handled();
 }
 
@@ -391,6 +504,52 @@ void SLoginWidget::AttemptLogin()
 	}
 }
 
+void SLoginWidget::AttemptRegister()
+{
+	if (!UsernameField.IsValid() || !EmailField.IsValid() || !PasswordField.IsValid() || !ConfirmPasswordField.IsValid())
+		return;
+
+	const FString Username = UsernameField->GetText().ToString();
+	const FString Email = EmailField->GetText().ToString();
+	const FString Password = PasswordField->GetText().ToString();
+	const FString ConfirmPassword = ConfirmPasswordField->GetText().ToString();
+
+	if (Username.IsEmpty() || Username.Len() < 3)
+	{
+		ShowError(TEXT("Username must be at least 3 characters."));
+		FSlateApplication::Get().SetKeyboardFocus(UsernameField, EFocusCause::SetDirectly);
+		return;
+	}
+
+	if (Email.IsEmpty() || !Email.Contains(TEXT("@")) || !Email.Contains(TEXT(".")))
+	{
+		ShowError(TEXT("Please enter a valid email address."));
+		FSlateApplication::Get().SetKeyboardFocus(EmailField, EFocusCause::SetDirectly);
+		return;
+	}
+
+	if (Password.Len() < 8)
+	{
+		ShowError(TEXT("Password must be at least 8 characters."));
+		FSlateApplication::Get().SetKeyboardFocus(PasswordField, EFocusCause::SetDirectly);
+		return;
+	}
+
+	if (Password != ConfirmPassword)
+	{
+		ShowError(TEXT("Passwords do not match."));
+		FSlateApplication::Get().SetKeyboardFocus(ConfirmPasswordField, EFocusCause::SetDirectly);
+		return;
+	}
+
+	ClearError();
+
+	if (OwningSubsystem.IsValid())
+	{
+		OwningSubsystem->OnRegisterSubmitted(Username, Email, Password);
+	}
+}
+
 // ============================================================
 // Keyboard Input
 // ============================================================
@@ -400,25 +559,44 @@ FReply SLoginWidget::OnKeyDown(const FGeometry& MyGeometry, const FKeyEvent& InK
 
 	if (Key == EKeys::Enter)
 	{
-		AttemptLogin();
+		if (bIsRegisterMode)
+			AttemptRegister();
+		else
+			AttemptLogin();
 		return FReply::Handled();
 	}
 
 	if (Key == EKeys::Tab)
 	{
-		// Toggle focus between username and password fields
-		if (UsernameField.IsValid() && PasswordField.IsValid())
+		// Cycle focus through visible fields
+		TSharedPtr<SWidget> Focused = FSlateApplication::Get().GetKeyboardFocusedWidget();
+
+		if (bIsRegisterMode)
 		{
-			TSharedPtr<SWidget> FocusedWidget = FSlateApplication::Get().GetKeyboardFocusedWidget();
-			if (FocusedWidget == UsernameField)
-			{
+			if (Focused == UsernameField)
+				FSlateApplication::Get().SetKeyboardFocus(EmailField, EFocusCause::Navigation);
+			else if (Focused == EmailField)
 				FSlateApplication::Get().SetKeyboardFocus(PasswordField, EFocusCause::Navigation);
-			}
+			else if (Focused == PasswordField)
+				FSlateApplication::Get().SetKeyboardFocus(ConfirmPasswordField, EFocusCause::Navigation);
 			else
-			{
 				FSlateApplication::Get().SetKeyboardFocus(UsernameField, EFocusCause::Navigation);
-			}
 		}
+		else
+		{
+			if (Focused == UsernameField)
+				FSlateApplication::Get().SetKeyboardFocus(PasswordField, EFocusCause::Navigation);
+			else
+				FSlateApplication::Get().SetKeyboardFocus(UsernameField, EFocusCause::Navigation);
+		}
+		return FReply::Handled();
+	}
+
+	if (Key == EKeys::Escape && bIsRegisterMode)
+	{
+		bIsRegisterMode = false;
+		UpdateModeVisuals();
+		FocusAppropriateField();
 		return FReply::Handled();
 	}
 

@@ -17,6 +17,10 @@
 #include "MMOGameInstance.h"
 #include "SocketEventRouter.h"
 #include "UI/EquipmentSubsystem.h"
+#include "Components/DecalComponent.h"
+#include "Materials/MaterialExpressionCustom.h"
+#include "Materials/MaterialExpressionVectorParameter.h"
+#include "Materials/MaterialExpressionTextureCoordinate.h"
 
 // State name → enum mapping for JSON parsing
 static const TMap<FString, ESpriteAnimState> StateNameMap = {
@@ -81,6 +85,67 @@ void ASpriteCharacterActor::BeginPlay()
 		CreateLayerQuad(i);
 	}
 
+	// Blob shadow — circular decal projected downward onto the ground
+	BlobShadow = NewObject<UDecalComponent>(this, TEXT("BlobShadow"));
+	if (BlobShadow)
+	{
+		BlobShadow->SetupAttachment(RootComp);
+		BlobShadow->RegisterComponent();
+		BlobShadow->SetRelativeRotation(FRotator(-90.f, 0.f, 0.f)); // project downward
+		BlobShadow->DecalSize = FVector(64.f, 48.f, 48.f);
+		BlobShadow->SetRelativeLocation(FVector(0.f, 0.f, 5.f)); // just above ground
+
+		// Try editor asset first, then create at runtime
+		UMaterialInterface* ShadowMat = Cast<UMaterialInterface>(StaticLoadObject(
+			UMaterialInterface::StaticClass(), nullptr,
+			TEXT("/Game/SabriMMO/Materials/M_BlobShadow")));
+
+		if (!ShadowMat)
+		{
+			// Create blob shadow material at runtime (deferred decal, radial gradient)
+			UMaterial* Mat = NewObject<UMaterial>(GetTransientPackage(), NAME_None, RF_Transient);
+			Mat->MaterialDomain = MD_DeferredDecal;
+			Mat->BlendMode = BLEND_Translucent;
+			Mat->DecalBlendMode = DBM_Translucent;
+
+			// Custom HLSL: radial gradient from center, dark circle
+			auto* Custom = NewObject<UMaterialExpressionCustom>(Mat);
+			Custom->OutputType = CMOT_Float1;
+			Custom->Code = TEXT(
+				"float2 Centered = UV - float2(0.5, 0.5);\n"
+				"float Dist = length(Centered) * 2.0;\n"
+				"float Alpha = saturate(1.0 - Dist) * 0.5;\n"
+				"// Smooth circle fade\n"
+				"Alpha *= Alpha;\n"
+				"return Alpha;\n"
+			);
+
+			// TextureCoordinate as UV input
+			auto* TexCoord = NewObject<UMaterialExpressionTextureCoordinate>(Mat);
+			Mat->GetExpressionCollection().AddExpression(TexCoord);
+
+			FCustomInput& In0 = Custom->Inputs.AddDefaulted_GetRef();
+			In0.InputName = TEXT("UV");
+			In0.Input.Connect(0, TexCoord);
+
+			Mat->GetExpressionCollection().AddExpression(Custom);
+			Mat->GetEditorOnlyData()->Opacity.Connect(0, Custom);
+
+			// Emissive = black (shadow)
+			auto* BlackColor = NewObject<UMaterialExpressionVectorParameter>(Mat);
+			BlackColor->ParameterName = TEXT("ShadowColor");
+			BlackColor->DefaultValue = FLinearColor(0.f, 0.f, 0.f, 1.f);
+			Mat->GetExpressionCollection().AddExpression(BlackColor);
+			Mat->GetEditorOnlyData()->EmissiveColor.Connect(0, BlackColor);
+
+			Mat->PreEditChange(nullptr);
+			Mat->PostEditChange();
+			ShadowMat = Mat;
+		}
+
+		BlobShadow->SetDecalMaterial(ShadowMat);
+	}
+
 	UE_LOG(LogTemp, Warning, TEXT("=== SpriteCharacter BeginPlay === Location: %s"),
 		*GetActorLocation().ToString());
 
@@ -104,6 +169,10 @@ void ASpriteCharacterActor::CreateLayerQuad(int32 LayerIndex)
 	Layer.MeshComp->CastShadow = false;
 	Layer.MeshComp->bReceivesDecals = false;
 	Layer.MeshComp->SetVisibility(false);
+
+	// Mark sprites with Custom Stencil so the post-process outline pass skips them
+	Layer.MeshComp->SetRenderCustomDepth(true);
+	Layer.MeshComp->SetCustomDepthStencilValue(1);
 
 	float HalfW = SpriteSize.X * 0.5f;
 	float HalfH = SpriteSize.Y * 0.5f;

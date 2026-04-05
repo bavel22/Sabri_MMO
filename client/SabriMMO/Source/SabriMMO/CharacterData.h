@@ -13,7 +13,10 @@ enum class EItemDragSource : uint8
 {
 	None,
 	Inventory,
-	Equipment
+	Equipment,
+	Cart,
+	Storage,
+	Trade
 };
 
 UENUM()
@@ -24,7 +27,10 @@ enum class EItemDropTarget : uint8
 	EquipmentSlot,
 	EquipmentPortrait,
 	GameWorld,
-	HotbarSlot   // Future: drag to hotbar
+	HotbarSlot,
+	CartSlot,
+	StorageSlot,
+	TradeSlot
 };
 
 // ============================================================
@@ -93,6 +99,7 @@ struct FInventoryItem
 	bool bStackable = false;
 	int32 MaxStack = 1;
 	FString Icon;
+	int32 ViewSprite = 0;           // Visual sprite ID for equipment layer rendering
 	FString WeaponType;             // dagger, one_hand_sword, bow, mace, staff, spear, axe, whip, instrument
 	int32 ASPDModifier = 0;
 	int32 WeaponRange = 150;
@@ -107,13 +114,14 @@ struct FInventoryItem
 	FString CardPrefix;             // Card prefix name ("Bloody", "Titan")
 	FString CardSuffix;             // Card suffix name ("of Endure")
 	bool bTwoHanded = false;
+	bool bIdentified = true;        // False for unidentified equipment drops
 	FString Element;                // Weapon element: "neutral", "fire", etc.
 	TArray<int32> CompoundedCards;  // Card item_ids per slot (-1 = empty, >0 = card ID)
 	TArray<FCompoundedCardInfo> CompoundedCardDetails;  // Parallel card detail data
 
 	bool IsValid() const { return InventoryId > 0; }
 	bool IsEquippable() const { return !EquipSlot.IsEmpty(); }
-	bool IsConsumable() const { return ItemType == TEXT("consumable"); }
+	bool IsConsumable() const { return ItemType == TEXT("consumable") || ItemType == TEXT("usable"); }
 	bool IsCard() const { return ItemType == TEXT("card"); }
 	bool HasSlots() const { return Slots > 0; }
 
@@ -234,6 +242,8 @@ struct FDraggedItem
 	FString Icon;
 	int32 Quantity = 1;
 	bool bIsEquipped = false;
+	bool bStackable = false;
+	bool bIdentified = true;
 	EItemDragSource Source = EItemDragSource::None;
 	int32 SourceSlotIndex = -1;
 
@@ -251,6 +261,8 @@ struct FDraggedItem
 		D.Icon = Item.Icon;
 		D.Quantity = Item.Quantity;
 		D.bIsEquipped = Item.bIsEquipped;
+		D.bStackable = Item.bStackable;
+		D.bIdentified = Item.bIdentified;
 		D.Source = InSource;
 		D.SourceSlotIndex = Item.SlotIndex;
 		return D;

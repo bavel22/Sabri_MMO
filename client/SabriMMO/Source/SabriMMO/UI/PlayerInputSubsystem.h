@@ -7,6 +7,7 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
+#include "BuffBarSubsystem.h"
 #include "PlayerInputSubsystem.generated.h"
 
 class ASabriMMOCharacter;
@@ -23,6 +24,7 @@ public:
 
 	// --- Public API ---
 	void OnLeftClickFromCharacter(ASabriMMOCharacter* Character);
+	void OnRightClickFromCharacter(ASabriMMOCharacter* Character);
 	void StopAutoAttack();
 	bool IsAutoAttacking() const { return bIsAutoAttacking; }
 	int32 GetAttackTargetId() const { return AttackTargetId; }
@@ -32,6 +34,10 @@ public:
 	// Called by CombatActionSubsystem when the server sends target_lost/stopped
 	// to avoid redundantly re-emitting the stop command.
 	void ClearAttackStateNoEmit();
+
+	// Stop all active pathfinding, walk-to-attack, walk-to-interact, and click-to-move.
+	// Called by ZoneTransitionSubsystem on teleport (e.g. Back Slide, Fly Wing).
+	void ForceStopAllMovement();
 
 private:
 	// --- Auto-attack state ---
@@ -58,6 +64,7 @@ private:
 	void ProcessClickOnEnemy(AActor* EnemyActor);
 	void ProcessClickOnNPC(AActor* NPCActor);
 	void ProcessClickOnGround(const FVector& Location);
+	void ShowPlayerContextMenu(int32 CharacterId, const FString& PlayerName);
 
 	// --- Movement helpers ---
 	void MoveToLocation(const FVector& Destination);

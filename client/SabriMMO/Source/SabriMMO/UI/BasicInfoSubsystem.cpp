@@ -12,6 +12,9 @@
 #include "Widgets/SWeakWidget.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SConstraintCanvas.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/PlayerController.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogBasicInfo, Log, All);
 
@@ -63,6 +66,10 @@ void UBasicInfoSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 			[this](const TSharedPtr<FJsonValue>& D) { HandleShopTransaction(D); });
 		Router->RegisterHandler(TEXT("inventory:data"), this,
 			[this](const TSharedPtr<FJsonValue>& D) { HandleInventoryData(D); });
+		Router->RegisterHandler(TEXT("weight:status"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleWeightStatus(D); });
+		Router->RegisterHandler(TEXT("inventory:zeny_update"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleZenyUpdate(D); });
 	}
 
 	// Only show widget and request data if socket is connected (game level, not login)
@@ -287,6 +294,34 @@ void UBasicInfoSubsystem::HandlePlayerStats(const TSharedPtr<FJsonValue>& Data)
 		(*DerivedPtr)->TryGetNumberField(TEXT("maxSP"), MS);
 		if (MH > 0) MaxHP = (int32)MH;
 		if (MS > 0) MaxSP = (int32)MS;
+
+		// Apply movement speed from server (ms/cell, lower = faster)
+		// Base: 150 ms/cell. UE5 base MaxWalkSpeed: 500.
+		// Formula: walkSpeed = BASE_WALK_SPEED * (BASE_MS_PER_CELL / serverMoveSpeed)
+		double MoveSpeedMs = 0;
+		(*DerivedPtr)->TryGetNumberField(TEXT("moveSpeed"), MoveSpeedMs);
+		if (MoveSpeedMs > 0)
+		{
+			constexpr float BASE_WALK_SPEED = 500.f;
+			constexpr float BASE_MS_PER_CELL = 150.f;
+			float NewWalkSpeed = BASE_WALK_SPEED * (BASE_MS_PER_CELL / (float)MoveSpeedMs);
+			NewWalkSpeed = FMath::Clamp(NewWalkSpeed, 100.f, 1200.f);
+
+			if (UWorld* World = GetWorld())
+			{
+				APlayerController* PC = World->GetFirstPlayerController();
+				if (PC)
+				{
+					if (ACharacter* Char = Cast<ACharacter>(PC->GetPawn()))
+					{
+						if (UCharacterMovementComponent* CMC = Char->GetCharacterMovement())
+						{
+							CMC->MaxWalkSpeed = NewWalkSpeed;
+						}
+					}
+				}
+			}
+		}
 	}
 
 	// Parse base stats for STR (used in weight calc)
@@ -385,9 +420,23 @@ void UBasicInfoSubsystem::HandleInventoryData(const TSharedPtr<FJsonValue>& Data
 		Zuzucoin = (int32)ZI;
 	}
 
-	// Calculate total weight from items array
+	// Read server-authoritative maxWeight (includes Enlarge Weight Limit, mount bonus, etc.)
+	double ServerMaxWeight = 0;
+	if (Obj->TryGetNumberField(TEXT("maxWeight"), ServerMaxWeight) && ServerMaxWeight > 0)
+	{
+		MaxWeight = (int32)ServerMaxWeight;
+	}
+
+	// Read server-authoritative currentWeight if present
+	double ServerCurrentWeight = 0;
+	if (Obj->TryGetNumberField(TEXT("currentWeight"), ServerCurrentWeight))
+	{
+		CurrentWeight = (int32)ServerCurrentWeight;
+	}
+
+	// Fallback: calculate weight from items array if currentWeight not in payload
 	const TArray<TSharedPtr<FJsonValue>>* ItemsArray = nullptr;
-	if (Obj->TryGetArrayField(TEXT("items"), ItemsArray) && ItemsArray)
+	if (ServerCurrentWeight <= 0 && Obj->TryGetArrayField(TEXT("items"), ItemsArray) && ItemsArray)
 	{
 		int32 TotalWeight = 0;
 		for (const TSharedPtr<FJsonValue>& ItemVal : *ItemsArray)
@@ -402,6 +451,37 @@ void UBasicInfoSubsystem::HandleInventoryData(const TSharedPtr<FJsonValue>& Data
 			}
 		}
 		CurrentWeight = TotalWeight;
+	}
+}
+
+void UBasicInfoSubsystem::HandleWeightStatus(const TSharedPtr<FJsonValue>& Data)
+{
+	if (!Data.IsValid()) return;
+	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
+	const TSharedPtr<FJsonObject>& Obj = *ObjPtr;
+
+	double CW = 0, MW = 0;
+	if (Obj->TryGetNumberField(TEXT("currentWeight"), CW))
+	{
+		CurrentWeight = (int32)CW;
+	}
+	if (Obj->TryGetNumberField(TEXT("maxWeight"), MW) && MW > 0)
+	{
+		MaxWeight = (int32)MW;
+	}
+}
+
+void UBasicInfoSubsystem::HandleZenyUpdate(const TSharedPtr<FJsonValue>& Data)
+{
+	if (!Data.IsValid()) return;
+	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
+
+	double Z = 0;
+	if ((*ObjPtr)->TryGetNumberField(TEXT("zeny"), Z))
+	{
+		Zuzucoin = (int32)Z;
 	}
 }
 

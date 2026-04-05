@@ -64,6 +64,8 @@ public:
 	void SendChatMessage(const FString& Message, const FString& Channel = TEXT("normal"));
 
 	void FocusChatInput();
+	void StartWhisperTo(const FString& PlayerName);
+	void AddCombatLogMessage(const FString& Message);
 
 	// ---- helpers ----
 	static FLinearColor GetChannelColor(EChatChannel Channel);
@@ -82,8 +84,7 @@ private:
 	void HandleBuffRemoved(const TSharedPtr<FJsonValue>& Data);
 	void HandleCombatDeath(const TSharedPtr<FJsonValue>& Data);
 	void HandleCombatRespawn(const TSharedPtr<FJsonValue>& Data);
-
-	void AddCombatLogMessage(const FString& Message);
+	void HandleExpGain(const TSharedPtr<FJsonValue>& Data);
 
 	void ShowWidget();
 	void HideWidget();

@@ -66,6 +66,21 @@ const ZONE_REGISTRY = {
                 ]
             }
         ],
+        guideNpcs: [
+            {
+                id: 'guide_prontera_1',
+                name: 'Guide',
+                x: -100, y: -1600, z: 590,
+                facilities: [
+                    { name: 'Weapon Shop', x: 120, y: -800, z: 590, color: 0xFF4444 },
+                    { name: 'Armor Shop', x: -300, y: -600, z: 590, color: 0x4444FF },
+                    { name: 'Tool Shop', x: 280, y: -1200, z: 590, color: 0x44FF44 },
+                    { name: 'Inn', x: -200, y: -1000, z: 590, color: 0xFFFF44 },
+                    { name: 'Kafra Service', x: 200, y: -1800, z: 300, color: 0xFF44FF },
+                    { name: 'Blacksmith', x: 400, y: -500, z: 590, color: 0xFF8844 }
+                ]
+            }
+        ],
         enemySpawns: []  // towns have no enemies
     },
 
@@ -106,6 +121,15 @@ const ZONE_REGISTRY = {
             }
         ],
         kafraNpcs: [],
+        waterAreas: [
+            {
+                id: 'prtsouth_pond_01',
+                type: 'shallow',
+                x: 300, y: -800, z: 90,
+                extentX: 300, extentY: 200,
+                waterLevel: 100
+            }
+        ],
         enemySpawns: [
             // ── Zone 1: Starter mobs (Level 1-10) ────────
             { template: 'poring',       x: 300,   y: 300,   z: 300, wanderRadius: 400 },

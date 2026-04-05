@@ -27,6 +27,7 @@ namespace RODamageColors
 	static const FLinearColor HealGreen    (0.30f, 1.00f, 0.40f, 1.0f);  // Bright green for heals
 	static const FLinearColor DodgeGreen   (0.40f, 0.90f, 0.50f, 1.0f);  // Green for FLEE dodge
 	static const FLinearColor PerfDodgeGold(0.95f, 0.85f, 0.20f, 1.0f);  // Gold for Lucky Dodge
+	static const FLinearColor BlockSilver  (0.85f, 0.90f, 1.00f, 1.0f);  // Silver/white for shield block
 
 	// Element tint colors — used when attack has non-neutral element
 	static const FLinearColor EleWater     (0.40f, 0.70f, 1.00f, 1.0f);  // Blue
@@ -105,6 +106,40 @@ void SDamageNumberOverlay::AddDamagePop(int32 Value, EDamagePopType Type, FVecto
 		Value, (int32)Type, *Element, AdjustedPos.X, AdjustedPos.Y, StackCount, ActiveCount);
 }
 
+void SDamageNumberOverlay::AddTextPop(const FString& Text, const FLinearColor& Color, FVector2D ScreenPosition)
+{
+	const double Now = FPlatformTime::Seconds();
+
+	// Stacking (same logic as AddDamagePop)
+	int32 StackCount = 0;
+	for (int32 i = 0; i < MAX_ENTRIES; ++i)
+	{
+		const FDamagePopEntry& E = Entries[i];
+		if (!E.bActive) continue;
+		if ((Now - E.SpawnTime) > STACK_CHECK_TIME) continue;
+		if (FVector2D::Distance(E.ScreenAnchor, ScreenPosition) < STACK_CHECK_RADIUS)
+			++StackCount;
+	}
+
+	FVector2D AdjustedPos = ScreenPosition;
+	AdjustedPos.Y += StackCount * STACK_OFFSET_Y;
+
+	FDamagePopEntry& Entry = Entries[NextEntryIndex];
+	Entry.bActive = true;
+	Entry.Value = 0;
+	Entry.Type = EDamagePopType::Miss; // Reuse Miss type for font sizing fallback
+	Entry.ScreenAnchor = AdjustedPos;
+	Entry.SpawnTime = Now;
+	Entry.RandomXBias = FMath::FRandRange(-RANDOM_X_RANGE, RANDOM_X_RANGE);
+	Entry.Element = TEXT("");
+	Entry.TextLabel = Text;
+	Entry.CustomColor = Color;
+	Entry.bHasCustomColor = true;
+
+	NextEntryIndex = (NextEntryIndex + 1) % MAX_ENTRIES;
+	++ActiveCount;
+}
+
 // ============================================================
 // Active timer — invalidate for repaint each frame
 // ============================================================
@@ -172,6 +207,7 @@ FLinearColor SDamageNumberOverlay::GetFillColor(EDamagePopType Type)
 	case EDamagePopType::Heal:           return RODamageColors::HealGreen;
 	case EDamagePopType::Dodge:          return RODamageColors::DodgeGreen;
 	case EDamagePopType::PerfectDodge:   return RODamageColors::PerfDodgeGold;
+	case EDamagePopType::Block:          return RODamageColors::BlockSilver;
 	default:                             return RODamageColors::NormalYellow;
 	}
 }
@@ -192,6 +228,7 @@ int32 SDamageNumberOverlay::GetFontSize(EDamagePopType Type)
 	case EDamagePopType::Heal:           return HEAL_FONT_SIZE;
 	case EDamagePopType::Dodge:          return DODGE_FONT_SIZE;
 	case EDamagePopType::PerfectDodge:   return DODGE_FONT_SIZE;
+	case EDamagePopType::Block:          return DODGE_FONT_SIZE;
 	default:                             return NORMAL_FONT_SIZE;
 	}
 }
@@ -285,7 +322,7 @@ int32 SDamageNumberOverlay::OnPaint(
 		Alpha = FMath::Clamp(Alpha, 0.0f, 1.0f);
 
 		// ---- Font setup ----
-		const int32 FontSize = GetFontSize(Entry.Type);
+		const int32 FontSize = Entry.bHasCustomColor ? STATUS_TEXT_FONT_SIZE : GetFontSize(Entry.Type);
 		const float OutlineSz = GetOutlineSize(Entry.Type);
 
 		FSlateFontInfo DigitFont = FCoreStyle::GetDefaultFontStyle("Bold", FontSize);
@@ -299,8 +336,14 @@ int32 SDamageNumberOverlay::OnPaint(
 
 		// ---- Build display text ----
 		FString DisplayText;
-		bool bIsTextLabel = false; // True for "Miss", "Dodge", etc. — render as single block
-		if (Entry.Type == EDamagePopType::Miss)
+		bool bIsTextLabel = false; // True for "Miss", "Dodge", status text — render as single block
+		if (!Entry.TextLabel.IsEmpty())
+		{
+			// Custom text label (e.g. "Poisoned!", "Stunned!")
+			DisplayText = Entry.TextLabel;
+			bIsTextLabel = true;
+		}
+		else if (Entry.Type == EDamagePopType::Miss)
 		{
 			DisplayText = TEXT("Miss");
 			bIsTextLabel = true;
@@ -315,6 +358,11 @@ int32 SDamageNumberOverlay::OnPaint(
 			DisplayText = TEXT("Lucky Dodge");
 			bIsTextLabel = true;
 		}
+		else if (Entry.Type == EDamagePopType::Block)
+		{
+			DisplayText = TEXT("Block");
+			bIsTextLabel = true;
+		}
 		else
 		{
 			DisplayText = FString::FromInt(FMath::Abs(Entry.Value));
@@ -322,7 +370,7 @@ int32 SDamageNumberOverlay::OnPaint(
 		const int32 NumChars = DisplayText.Len();
 
 		// ---- Tint color with alpha ----
-		FLinearColor TintColor = GetFillColor(Entry.Type);
+		FLinearColor TintColor = Entry.bHasCustomColor ? Entry.CustomColor : GetFillColor(Entry.Type);
 
 		// Apply element tinting for non-neutral elemental attacks (blend toward element color)
 		if (!Entry.Element.IsEmpty() && Entry.Element != TEXT("neutral") && !bIsTextLabel && Entry.Type != EDamagePopType::Heal)

@@ -60,6 +60,9 @@ public:
 	void HideWidget();
 	bool IsWidgetVisible() const;
 
+	/** Check if a buff with the given name is currently active (e.g. "hiding", "play_dead") */
+	bool HasBuff(const FString& BuffName) const;
+
 	/** Get remaining seconds for a status/buff entry */
 	static float GetRemainingSeconds(float RemainingMs, double ReceivedAt);
 

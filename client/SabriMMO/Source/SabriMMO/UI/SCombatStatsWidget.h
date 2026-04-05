@@ -67,4 +67,8 @@ private:
 
 	// --- stat allocation callback ---
 	FReply OnAllocateStatClicked(FString StatName);
+
+	// --- advanced stats button ---
+	TSharedRef<SWidget> BuildAdvancedStatsButton();
+	FReply OnAdvancedStatsClicked();
 };

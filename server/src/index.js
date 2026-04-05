@@ -76,6 +76,7 @@ const {
     PET_DB, PET_INTIMATE, PET_HUNGER, getPetData, getPetByTamingItem, getPetByEggItem,
     getIntimacyLevel, getHungerLevel, calculateCaptureRate, calculateFeedIntimacyChange,
 } = require('./ro_pet_data');
+const { getWorldMapData } = require('./ro_world_map_data');
 
 // Setup file logging
 const logsDir = path.join(__dirname, '..', 'logs');
@@ -523,6 +524,47 @@ let nextPlantId = 1;
 const activeMarineSpheres = new Map();
 const playerSpheres = new Map(); // characterId → Set of sphereIds
 let nextSphereId = 1;
+
+// ============================================================
+// PLAYER-TO-PLAYER TRADING SYSTEM
+// ============================================================
+const TRADE = { MAX_ITEMS: 10, MAX_ZENY: 999999999, MAX_DISTANCE: 100, REQUEST_TIMEOUT_MS: 30000 };
+const activeTrades = new Map();
+const pendingTradeRequests = new Map();
+
+class TradeSession {
+    constructor(playerAId, playerBId) {
+        this.playerAId = playerAId; this.playerBId = playerBId;
+        this.itemsA = []; this.itemsB = [];
+        this.zenyA = 0; this.zenyB = 0;
+        this.lockedA = false; this.lockedB = false;
+        this.confirmedA = false; this.confirmedB = false;
+    }
+    getPartner(charId) { return charId === this.playerAId ? this.playerBId : this.playerAId; }
+    isPlayerA(charId) { return charId === this.playerAId; }
+    getMyItems(charId) { return this.isPlayerA(charId) ? this.itemsA : this.itemsB; }
+    getMyZeny(charId) { return this.isPlayerA(charId) ? this.zenyA : this.zenyB; }
+    setMyZeny(charId, amount) { if (this.isPlayerA(charId)) this.zenyA = amount; else this.zenyB = amount; }
+    isMyLocked(charId) { return this.isPlayerA(charId) ? this.lockedA : this.lockedB; }
+    setMyLocked(charId, val) { if (this.isPlayerA(charId)) this.lockedA = val; else this.lockedB = val; }
+    setMyConfirmed(charId, val) { if (this.isPlayerA(charId)) this.confirmedA = val; else this.confirmedB = val; }
+    resetLocks() { this.lockedA = false; this.lockedB = false; this.confirmedA = false; this.confirmedB = false; }
+    areBothLocked() { return this.lockedA && this.lockedB; }
+    areBothConfirmed() { return this.confirmedA && this.confirmedB; }
+}
+
+function cancelTrade(characterId, reason = 'Trade cancelled.') {
+    const session = activeTrades.get(characterId);
+    if (!session) return;
+    const aId = session.playerAId, bId = session.playerBId;
+    const playerA = connectedPlayers.get(aId), playerB = connectedPlayers.get(bId);
+    if (playerA) { playerA.isTrading = false; playerA.tradePartnerId = null; const s = io.sockets.sockets.get(playerA.socketId); if (s) s.emit('trade:cancelled', { reason }); }
+    if (playerB) { playerB.isTrading = false; playerB.tradePartnerId = null; const s = io.sockets.sockets.get(playerB.socketId); if (s) s.emit('trade:cancelled', { reason }); }
+    activeTrades.delete(aId); activeTrades.delete(bId);
+    logger.info(`[TRADE] Cancelled trade between ${aId} and ${bId}: ${reason}`);
+}
+
+function getPlayerSocket(player) { return player ? io.sockets.sockets.get(player.socketId) : null; }
 
 // Flora plant data per skill level (rAthena + RateMyServer pre-renewal)
 const FLORA_PLANTS = {
@@ -2070,6 +2112,8 @@ const BUFFS_SURVIVE_DEATH = new Set([
 ]);
 
 function clearBuffsOnDeath(player, characterId, zone) {
+    // Cancel active trade on death
+    if (player.isTrading) { cancelTrade(characterId, 'Player died.'); }
     if (!player.activeBuffs || player.activeBuffs.length === 0) return;
     const removed = [];
     player.activeBuffs = player.activeBuffs.filter(b => {
@@ -4599,6 +4643,13 @@ const INVENTORY = {
     OVERWEIGHT_90: 0.9,       // Attack/skills blocked at 90% weight
 };
 
+const STORAGE = {
+    MAX_SLOTS: 300,           // Account-shared Kafra storage capacity
+    ACCESS_FEE: 40,           // Zeny per open
+    FREE_TICKET_ID: 7059,     // Item that bypasses fee
+    REQUIRED_BASIC_SKILL: 6,  // Basic Skill Lv.6 needed to open storage
+};
+
 // Item definitions cache (loaded from DB on startup)
 const itemDefinitions = new Map();
 // Runtime name→id lookup built from itemDefinitions (replaces ro_item_mapping.js)
@@ -5036,6 +5087,70 @@ async function addFullItemToInventory(characterId, itemId, quantity, attrs = {})
     }
 }
 
+// Send storage contents to a client (Kafra Storage — account-shared)
+async function sendStorageContents(socket, userId, isOpenEvent = false, newZuzucoin = undefined) {
+    try {
+        const result = await pool.query(`
+            SELECT s.storage_id, s.item_id, s.quantity, s.slot_index, s.identified,
+                   s.refine_level, s.compounded_cards, s.forged_by, s.forged_element, s.forged_star_crumbs,
+                   i.name, i.description, i.full_description, i.item_type, i.equip_slot, i.weight,
+                   i.price, i.buy_price, i.sell_price, i.atk, i.def, i.matk, i.mdef,
+                   i.str_bonus, i.agi_bonus, i.vit_bonus, i.int_bonus, i.dex_bonus, i.luk_bonus,
+                   i.max_hp_bonus, i.max_sp_bonus, i.hit_bonus, i.flee_bonus, i.critical_bonus,
+                   i.perfect_dodge_bonus, i.weapon_type, i.weapon_level, i.slots, i.refineable,
+                   i.icon, i.required_level, i.stackable, i.max_stack, i.equip_locations,
+                   i.two_handed, i.element, i.card_type, i.card_prefix, i.card_suffix, i.jobs_allowed,
+                   i.sub_type, i.view_sprite, i.aspd_modifier, i.weapon_range
+            FROM account_storage s
+            JOIN items i ON s.item_id = i.item_id
+            WHERE s.user_id = $1
+            ORDER BY s.slot_index
+        `, [userId]);
+
+        const items = result.rows.map(row => ({
+            storageId: row.storage_id,
+            itemId: row.item_id,
+            name: row.name,
+            description: row.description,
+            fullDescription: row.full_description,
+            itemType: row.item_type,
+            equipSlot: row.equip_slot,
+            weight: row.weight,
+            price: row.price,
+            buyPrice: row.buy_price,
+            sellPrice: row.sell_price,
+            quantity: row.quantity,
+            slotIndex: row.slot_index,
+            identified: row.identified,
+            refineLevel: row.refine_level,
+            compoundedCards: JSON.parse(row.compounded_cards || '[]'),
+            forgedBy: row.forged_by,
+            forgedElement: row.forged_element,
+            forgedStarCrumbs: row.forged_star_crumbs,
+            atk: row.atk, def: row.def, matk: row.matk, mdef: row.mdef,
+            strBonus: row.str_bonus, agiBonus: row.agi_bonus, vitBonus: row.vit_bonus,
+            intBonus: row.int_bonus, dexBonus: row.dex_bonus, lukBonus: row.luk_bonus,
+            maxHpBonus: row.max_hp_bonus, maxSpBonus: row.max_sp_bonus,
+            hitBonus: row.hit_bonus, fleeBonus: row.flee_bonus,
+            criticalBonus: row.critical_bonus, perfectDodgeBonus: row.perfect_dodge_bonus,
+            weaponType: row.weapon_type, weaponLevel: row.weapon_level,
+            slots: row.slots, refineable: row.refineable,
+            icon: row.icon, requiredLevel: row.required_level,
+            stackable: row.stackable, maxStack: row.max_stack,
+            twoHanded: row.two_handed, element: row.element,
+            cardType: row.card_type, cardPrefix: row.card_prefix, cardSuffix: row.card_suffix,
+            jobsAllowed: row.jobs_allowed, subType: row.sub_type,
+            viewSprite: row.view_sprite, aspdModifier: row.aspd_modifier, weaponRange: row.weapon_range
+        }));
+
+        const payload = { items, usedSlots: items.length, maxSlots: STORAGE.MAX_SLOTS };
+        if (isOpenEvent && newZuzucoin !== undefined) payload.newZuzucoin = newZuzucoin;
+        socket.emit(isOpenEvent ? 'storage:opened' : 'storage:updated', payload);
+    } catch (err) {
+        logger.error(`[STORAGE] sendStorageContents error: ${err.message}`);
+    }
+}
+
 // Get full inventory for a character
 async function getPlayerInventory(characterId) {
     try {
@@ -5307,6 +5422,16 @@ const SOCKET_RATE_LIMITS = {
     'cart:remove':           2,
     'cart:move_to_cart':      5,
     'cart:move_to_inventory': 5,
+    'storage:open':          2,
+    'storage:close':         2,
+    'storage:deposit':       5,
+    'storage:withdraw':      5,
+    'storage:cart_deposit':  5,
+    'storage:cart_withdraw': 5,
+    'inventory:split':       5,
+    'inventory:sort':        2,
+    'inventory:auto_stack':  2,
+    'storage:sort':          2,
     'identify:select':       5,
     'vending:start':         2,
     'vending:close':         2,
@@ -5358,6 +5483,21 @@ io.on('connection', (socket) => {
         const characterId = parseInt(data.characterId);
         const { token, characterName } = data;
 
+        // Defensive: if this socket already has a character in connectedPlayers, remove it first.
+        // This handles the case where player:leave's async DB saves haven't finished yet but the
+        // sync cleanup already removed the old character. Belt-and-suspenders safety.
+        const existingPlayer = findPlayerBySocketId(socket.id);
+        if (existingPlayer) {
+            const oldCharId = existingPlayer.characterId;
+            const oldZone = existingPlayer.player.zone || 'prontera_south';
+            logger.warn(`[SAFETY] Socket ${socket.id} already has character ${oldCharId} in zone ${oldZone} — removing before new join`);
+            connectedPlayers.delete(oldCharId);
+            autoAttackState.delete(oldCharId);
+            activeCasts.delete(oldCharId);
+            socket.leave('zone:' + oldZone);
+            broadcastToZone(oldZone, 'player:left', { characterId: oldCharId, characterName: existingPlayer.player.characterName || 'Unknown' });
+        }
+
         // SECURITY: Verify JWT token — MANDATORY, reject if missing
         // BP_SocketManager sends GetAuthHeader() which includes "Bearer " prefix — strip it
         const rawToken = token && token.startsWith('Bearer ') ? token.slice(7) : token;
@@ -5379,6 +5519,8 @@ io.on('connection', (socket) => {
                 return;
             }
             logger.info(`[AUTH] JWT verified for user ${decoded.user_id}, character ${characterId}`);
+            // Store user_id for account-level features (Kafra Storage, etc.)
+            socket._authenticatedUserId = decoded.user_id;
         } catch (err) {
             logger.warn(`[SECURITY] Invalid JWT on player:join: ${err.message}`);
             socket.emit('player:join_error', { error: 'Invalid or expired token' });
@@ -5745,6 +5887,7 @@ io.on('connection', (socket) => {
         connectedPlayers.set(characterId, {
             socketId: socket.id,
             characterId: characterId,
+            userId: socket._authenticatedUserId || null,
             characterName: characterName || 'Unknown',
             gender: playerGender,
             equipVisuals,
@@ -5844,9 +5987,14 @@ io.on('connection', (socket) => {
             // Appearance
             hairStyle: dbHairStyle,
             hairColor: dbHairColor,
+            // Storage System (Kafra — account-shared)
+            isStorageOpen: false,
             // Vending System
             isVending: false,
             vendingShop: null,      // { shopId, title, items }
+            // Trading System
+            isTrading: false,
+            tradePartnerId: null,
         });
         
         // Rebuild card bonuses from compounded cards on equipped items
@@ -6313,6 +6461,8 @@ io.on('connection', (socket) => {
                     // Cross-zone teleport — full zone transition sequence
                     const destZoneData = ZONE_REGISTRY[portal.destZone];
                     if (destZoneData) {
+                        // 0. Cancel active trade on zone change (warp portal collision)
+                        if (player.isTrading) cancelTrade(characterId, 'Player changed zones.');
                         // 1. Cancel active combat/casting
                         if (autoAttackState.has(characterId)) {
                             autoAttackState.delete(characterId);
@@ -6373,6 +6523,9 @@ io.on('connection', (socket) => {
                             const prt = activeParties.get(player.partyId);
                             if (prt) { const mem = prt.members.get(characterId); if (mem) mem.map = portal.destZone; }
                             broadcastToParty(player.partyId, 'party:member_update', { characterId, map: portal.destZone });
+                            broadcastToParty(player.partyId, 'map:party_positions', {
+                                members: [{ characterId, characterName: player.characterName, map: portal.destZone, x: player.lastX, y: player.lastY, z: player.lastZ }]
+                            });
                         }
 
                         // 9. Tell client to load the new level
@@ -6509,6 +6662,17 @@ io.on('connection', (socket) => {
             }
         }
 
+        // Close storage on zone change
+        if (player.isStorageOpen) {
+            player.isStorageOpen = false;
+            socket.emit('storage:closed', {});
+        }
+
+        // Cancel active trade on zone change
+        if (player.isTrading) {
+            cancelTrade(characterId, 'Player changed zones.');
+        }
+
         // Broadcast player:left to old zone
         broadcastToZone(oldZone, 'player:left', {
             characterId, characterName: player.characterName, reason: 'zone_change'
@@ -6529,6 +6693,9 @@ io.on('connection', (socket) => {
             const prt = activeParties.get(player.partyId);
             if (prt) { const mem = prt.members.get(characterId); if (mem) mem.map = newZone; }
             broadcastToParty(player.partyId, 'party:member_update', { characterId, map: newZone });
+            broadcastToParty(player.partyId, 'map:party_positions', {
+                members: [{ characterId, characterName: player.characterName, map: newZone, x: warp.destX, y: warp.destY, z: warp.destZ }]
+            });
         }
 
         // Mark as transitioning so login redirect is skipped on reconnect
@@ -6709,7 +6876,80 @@ io.on('connection', (socket) => {
         });
         logger.info(`[SEND] buff:list to ${socket.id} on zone:ready (${getActiveBuffList(player).length} buffs, ${getActiveStatusList(player).length} statuses)`);
 
+        // Send world map data for minimap + world map
+        socket.emit('map:world_data', getWorldMapData());
+
+        // Send party member positions for minimap party dots
+        if (player.partyId) {
+            const party = activeParties.get(player.partyId);
+            if (party) {
+                const partyPositions = [];
+                for (const [memCharId, mem] of party.members) {
+                    if (memCharId === characterId) continue;
+                    if (!mem.online) continue;
+                    const memPlayer = connectedPlayers.get(memCharId);
+                    if (memPlayer) {
+                        partyPositions.push({
+                            characterId: memCharId,
+                            characterName: mem.characterName,
+                            map: memPlayer.zone || mem.map,
+                            x: memPlayer.lastX || 0,
+                            y: memPlayer.lastY || 0,
+                            z: memPlayer.lastZ || 0
+                        });
+                    }
+                }
+                if (partyPositions.length > 0) {
+                    socket.emit('map:party_positions', { members: partyPositions });
+                }
+            }
+        }
+
         logger.info(`[ZONE] ${player.characterName} ready in zone ${zone}`);
+    });
+
+    // ============================================================
+    // Water Area Events
+    // ============================================================
+    socket.on('water:enter', (data) => {
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { characterId, player } = playerInfo;
+        const { waterAreaId, isDeep } = data || {};
+
+        player.inWater = true;
+        player.waterAreaId = waterAreaId || '';
+
+        logger.info(`[WATER] Player ${characterId} entered water: ${waterAreaId} (deep=${isDeep})`);
+
+        // Broadcast to zone so other clients can show visual effects
+        const zone = player.zone || 'prontera_south';
+        broadcastToZoneExcept(socket, zone, 'player:water_state', {
+            characterId,
+            inWater: true,
+            waterAreaId: waterAreaId || '',
+            isDeep: isDeep || false
+        });
+    });
+
+    socket.on('water:exit', (data) => {
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { characterId, player } = playerInfo;
+        const { waterAreaId } = data || {};
+
+        player.inWater = false;
+        player.waterAreaId = '';
+
+        logger.info(`[WATER] Player ${characterId} exited water: ${waterAreaId}`);
+
+        const zone = player.zone || 'prontera_south';
+        broadcastToZoneExcept(socket, zone, 'player:water_state', {
+            characterId,
+            inWater: false,
+            waterAreaId: waterAreaId || '',
+            isDeep: false
+        });
     });
 
     // ============================================================
@@ -6815,6 +7055,9 @@ io.on('connection', (socket) => {
             return;
         }
 
+        // Cancel active trade on kafra teleport
+        if (player.isTrading) cancelTrade(characterId, 'Player changed zones.');
+
         // Deduct cost
         player.zuzucoin -= dest.cost;
         player.zeny = player.zuzucoin; // Keep in sync
@@ -6867,6 +7110,9 @@ io.on('connection', (socket) => {
             const prt = activeParties.get(player.partyId);
             if (prt) { const mem = prt.members.get(characterId); if (mem) mem.map = destZone; }
             broadcastToParty(player.partyId, 'party:member_update', { characterId, map: destZone });
+            broadcastToParty(player.partyId, 'map:party_positions', {
+                members: [{ characterId, characterName: player.characterName, map: destZone, x: destSpawn.x, y: destSpawn.y, z: destSpawn.z }]
+            });
         }
 
         try {
@@ -6902,6 +7148,461 @@ io.on('connection', (socket) => {
         });
 
         logger.info(`[KAFRA] ${player.characterName} teleported ${zone} → ${destZone} (cost: ${dest.cost}z)`);
+    });
+
+    // ============================================================
+    // Kafra Storage Events (account-shared, 300 slots)
+    // ============================================================
+
+    socket.on('storage:open', async () => {
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { characterId, player } = playerInfo;
+
+        // State validation
+        if (player.isDead) return socket.emit('storage:error', { message: 'Cannot use storage while dead' });
+        if (player.isVending) return socket.emit('storage:error', { message: 'Cannot use storage while vending' });
+        if (player.isTrading) return socket.emit('storage:error', { message: 'Cannot use storage while trading' });
+        if (player.isStorageOpen) return socket.emit('storage:error', { message: 'Storage is already open' });
+
+        // Check Basic Skill Lv.6
+        const basicSkillLevel = (player.learnedSkills && player.learnedSkills[1]) || 0;
+        if (basicSkillLevel < STORAGE.REQUIRED_BASIC_SKILL) {
+            return socket.emit('storage:error', { message: 'You need Basic Skill Level 6 to use storage' });
+        }
+
+        // Check for Free Ticket (item 7059) — consume if found, else deduct 40z
+        const ticketResult = await pool.query(
+            `SELECT inventory_id, quantity FROM character_inventory
+             WHERE character_id = $1 AND item_id = $2 AND quantity > 0 AND is_equipped = false`,
+            [characterId, STORAGE.FREE_TICKET_ID]
+        );
+
+        if (ticketResult.rows.length > 0) {
+            const ticket = ticketResult.rows[0];
+            if (ticket.quantity > 1) {
+                await pool.query('UPDATE character_inventory SET quantity = quantity - 1 WHERE inventory_id = $1', [ticket.inventory_id]);
+            } else {
+                await pool.query('DELETE FROM character_inventory WHERE inventory_id = $1', [ticket.inventory_id]);
+            }
+        } else {
+            if ((player.zuzucoin || 0) < STORAGE.ACCESS_FEE) {
+                return socket.emit('storage:error', { message: 'Not enough Zeny (40z required)' });
+            }
+            player.zuzucoin -= STORAGE.ACCESS_FEE;
+            await pool.query('UPDATE characters SET zuzucoin = $1 WHERE character_id = $2', [player.zuzucoin, characterId]);
+        }
+
+        // Load storage contents (keyed on user_id — account-shared)
+        player.isStorageOpen = true;
+        await sendStorageContents(socket, player.userId, true, player.zuzucoin);
+
+        // Refresh inventory (ticket or zeny consumed)
+        const freshInv = await getPlayerInventory(characterId);
+        socket.emit('inventory:data', { items: freshInv, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+
+        logger.info(`[STORAGE] ${player.characterName} opened Kafra storage (user_id=${player.userId})`);
+    });
+
+    socket.on('storage:close', () => {
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { player } = playerInfo;
+        player.isStorageOpen = false;
+        socket.emit('storage:closed', {});
+    });
+
+    socket.on('storage:deposit', async (data) => {
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { characterId, player } = playerInfo;
+        if (!player.isStorageOpen) return socket.emit('storage:error', { message: 'Storage is not open' });
+        const { inventoryId, quantity } = data || {};
+        if (!inventoryId || !quantity || quantity < 1) return socket.emit('storage:error', { message: 'Invalid request' });
+
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+
+            // Lock and validate inventory item
+            const invResult = await client.query(
+                `SELECT ci.*, i.item_type, i.stackable, i.weight, i.name, i.trade_flag
+                 FROM character_inventory ci
+                 JOIN items i ON ci.item_id = i.item_id
+                 WHERE ci.inventory_id = $1 AND ci.character_id = $2 FOR UPDATE`,
+                [inventoryId, characterId]
+            );
+            if (invResult.rows.length === 0) { await client.query('ROLLBACK'); return socket.emit('storage:error', { message: 'Item not found' }); }
+            const item = invResult.rows[0];
+
+            // Validation
+            if (item.is_equipped) { await client.query('ROLLBACK'); return socket.emit('storage:error', { message: 'Unequip the item first' }); }
+            if (quantity > item.quantity) { await client.query('ROLLBACK'); return socket.emit('storage:error', { message: 'Not enough quantity' }); }
+            const tradeFlag = item.trade_flag || 0;
+            if (tradeFlag & 0x004) { await client.query('ROLLBACK'); return socket.emit('storage:error', { message: 'This item cannot be stored' }); }
+
+            // Check storage slot count
+            const countResult = await client.query('SELECT COUNT(*) as cnt FROM account_storage WHERE user_id = $1', [player.userId]);
+            const usedSlots = parseInt(countResult.rows[0].cnt);
+
+            // Try to stack with existing storage item (if stackable + same identified state)
+            let stacked = false;
+            if (item.stackable) {
+                const existingResult = await client.query(
+                    `SELECT storage_id, quantity FROM account_storage
+                     WHERE user_id = $1 AND item_id = $2 AND identified = $3 FOR UPDATE`,
+                    [player.userId, item.item_id, item.identified !== false]
+                );
+                if (existingResult.rows.length > 0) {
+                    await client.query(
+                        'UPDATE account_storage SET quantity = quantity + $1 WHERE storage_id = $2',
+                        [quantity, existingResult.rows[0].storage_id]
+                    );
+                    stacked = true;
+                }
+            }
+
+            // If not stacked, insert new storage entry
+            if (!stacked) {
+                if (usedSlots >= STORAGE.MAX_SLOTS) {
+                    await client.query('ROLLBACK');
+                    return socket.emit('storage:error', { message: `Storage is full (${STORAGE.MAX_SLOTS}/${STORAGE.MAX_SLOTS})` });
+                }
+                const maxSlotResult = await client.query(
+                    'SELECT COALESCE(MAX(slot_index), -1) + 1 as next_slot FROM account_storage WHERE user_id = $1',
+                    [player.userId]
+                );
+                await client.query(`
+                    INSERT INTO account_storage (user_id, item_id, quantity, slot_index, identified, refine_level, compounded_cards, forged_by, forged_element, forged_star_crumbs)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                `, [player.userId, item.item_id, quantity, maxSlotResult.rows[0].next_slot,
+                    item.identified !== false, item.refine_level || 0,
+                    JSON.stringify(item.compounded_cards || []),
+                    item.forged_by, item.forged_element, item.forged_star_crumbs || 0]);
+            }
+
+            // Remove from inventory
+            if (quantity >= item.quantity) {
+                await client.query('DELETE FROM character_inventory WHERE inventory_id = $1', [inventoryId]);
+            } else {
+                await client.query('UPDATE character_inventory SET quantity = quantity - $1 WHERE inventory_id = $2', [quantity, inventoryId]);
+            }
+
+            await client.query('COMMIT');
+
+            // Update weight cache and refresh both views
+            player.currentWeight = await calculatePlayerCurrentWeight(characterId);
+            const freshInv = await getPlayerInventory(characterId);
+            socket.emit('inventory:data', { items: freshInv, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await sendStorageContents(socket, player.userId, false);
+
+        } catch (err) {
+            await client.query('ROLLBACK');
+            logger.error(`[STORAGE] deposit error: ${err.message}`);
+            socket.emit('storage:error', { message: 'Deposit failed' });
+        } finally {
+            client.release();
+        }
+    });
+
+    socket.on('storage:withdraw', async (data) => {
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { characterId, player } = playerInfo;
+        if (!player.isStorageOpen) return socket.emit('storage:error', { message: 'Storage is not open' });
+        const { storageId, quantity } = data || {};
+        if (!storageId || !quantity || quantity < 1) return socket.emit('storage:error', { message: 'Invalid request' });
+
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+
+            // Lock and validate storage item
+            const storResult = await client.query(
+                `SELECT s.*, i.name, i.item_type, i.stackable, i.weight
+                 FROM account_storage s
+                 JOIN items i ON s.item_id = i.item_id
+                 WHERE s.storage_id = $1 AND s.user_id = $2 FOR UPDATE`,
+                [storageId, player.userId]
+            );
+            if (storResult.rows.length === 0) { await client.query('ROLLBACK'); return socket.emit('storage:error', { message: 'Item not found in storage' }); }
+            const sItem = storResult.rows[0];
+
+            if (quantity > sItem.quantity) { await client.query('ROLLBACK'); return socket.emit('storage:error', { message: 'Not enough quantity in storage' }); }
+
+            // Remove from storage FIRST (anti-dupe)
+            if (quantity >= sItem.quantity) {
+                await client.query('DELETE FROM account_storage WHERE storage_id = $1', [storageId]);
+            } else {
+                await client.query('UPDATE account_storage SET quantity = quantity - $1 WHERE storage_id = $2', [quantity, storageId]);
+            }
+
+            await client.query('COMMIT');
+
+            // Add to inventory (uses pool internally, not the PG client)
+            await addFullItemToInventory(characterId, sItem.item_id, quantity, {
+                identified: sItem.identified,
+                refine_level: sItem.refine_level,
+                compounded_cards: sItem.compounded_cards,
+                forged_by: sItem.forged_by,
+                forged_element: sItem.forged_element,
+                forged_star_crumbs: sItem.forged_star_crumbs,
+            });
+
+            // Update weight cache and refresh both views
+            player.currentWeight = await calculatePlayerCurrentWeight(characterId);
+            const freshInv = await getPlayerInventory(characterId);
+            socket.emit('inventory:data', { items: freshInv, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await sendStorageContents(socket, player.userId, false);
+
+        } catch (err) {
+            await client.query('ROLLBACK');
+            logger.error(`[STORAGE] withdraw error: ${err.message}`);
+            socket.emit('storage:error', { message: 'Withdraw failed' });
+        } finally {
+            client.release();
+        }
+    });
+
+    socket.on('storage:cart_deposit', async (data) => {
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { characterId, player } = playerInfo;
+        if (!player.isStorageOpen) return socket.emit('storage:error', { message: 'Storage is not open' });
+        if (!player.hasCart) return socket.emit('storage:error', { message: 'You don\'t have a cart' });
+        if (player.isVending) return socket.emit('storage:error', { message: 'Cannot access cart while vending' });
+        const { cartId, quantity } = data || {};
+        if (!cartId || !quantity || quantity < 1) return socket.emit('storage:error', { message: 'Invalid request' });
+
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+
+            // Lock and validate cart item
+            const cartResult = await client.query(
+                `SELECT c.*, i.item_type, i.stackable, i.weight, i.name, i.trade_flag
+                 FROM character_cart c
+                 JOIN items i ON c.item_id = i.item_id
+                 WHERE c.cart_id = $1 AND c.character_id = $2 FOR UPDATE`,
+                [cartId, characterId]
+            );
+            if (cartResult.rows.length === 0) { await client.query('ROLLBACK'); return socket.emit('storage:error', { message: 'Cart item not found' }); }
+            const item = cartResult.rows[0];
+            if (quantity > item.quantity) { await client.query('ROLLBACK'); return socket.emit('storage:error', { message: 'Not enough quantity' }); }
+            const tradeFlag = item.trade_flag || 0;
+            if (tradeFlag & 0x004) { await client.query('ROLLBACK'); return socket.emit('storage:error', { message: 'This item cannot be stored' }); }
+
+            // Check storage slot count
+            const countResult = await client.query('SELECT COUNT(*) as cnt FROM account_storage WHERE user_id = $1', [player.userId]);
+            const usedSlots = parseInt(countResult.rows[0].cnt);
+
+            // Try to stack
+            let stacked = false;
+            if (item.stackable) {
+                const existingResult = await client.query(
+                    `SELECT storage_id, quantity FROM account_storage
+                     WHERE user_id = $1 AND item_id = $2 AND identified = $3 FOR UPDATE`,
+                    [player.userId, item.item_id, item.identified !== false]
+                );
+                if (existingResult.rows.length > 0) {
+                    await client.query('UPDATE account_storage SET quantity = quantity + $1 WHERE storage_id = $2', [quantity, existingResult.rows[0].storage_id]);
+                    stacked = true;
+                }
+            }
+
+            if (!stacked) {
+                if (usedSlots >= STORAGE.MAX_SLOTS) { await client.query('ROLLBACK'); return socket.emit('storage:error', { message: `Storage is full (${STORAGE.MAX_SLOTS}/${STORAGE.MAX_SLOTS})` }); }
+                const maxSlotResult = await client.query('SELECT COALESCE(MAX(slot_index), -1) + 1 as next_slot FROM account_storage WHERE user_id = $1', [player.userId]);
+                await client.query(`
+                    INSERT INTO account_storage (user_id, item_id, quantity, slot_index, identified, refine_level, compounded_cards, forged_by, forged_element, forged_star_crumbs)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                `, [player.userId, item.item_id, quantity, maxSlotResult.rows[0].next_slot,
+                    item.identified !== false, item.refine_level || 0,
+                    JSON.stringify(item.compounded_cards || []),
+                    item.forged_by, item.forged_element, item.forged_star_crumbs || 0]);
+            }
+
+            // Remove from cart
+            if (quantity >= item.quantity) {
+                await client.query('DELETE FROM character_cart WHERE cart_id = $1', [cartId]);
+            } else {
+                await client.query('UPDATE character_cart SET quantity = quantity - $1 WHERE cart_id = $2', [quantity, cartId]);
+            }
+
+            await client.query('COMMIT');
+
+            // Refresh cart and storage
+            // Reload cart data
+            const cartReload = await pool.query(
+                `SELECT cc.cart_id, cc.item_id, cc.quantity, cc.slot_index, cc.identified,
+                        cc.refine_level, cc.compounded_cards, i.name, i.item_type, i.weight, i.price, i.atk, i.def, i.slots,
+                        i.description, i.equip_slot, i.sub_type, i.buy_price, i.sell_price
+                 FROM character_cart cc JOIN items i ON cc.item_id = i.item_id
+                 WHERE cc.character_id = $1 ORDER BY cc.slot_index`, [characterId]);
+            player.cartItems = cartReload.rows;
+            player.cartWeight = cartReload.rows.reduce((w, it) => w + (it.weight || 0) * it.quantity, 0);
+            socket.emit('cart:data', { items: player.cartItems, cartWeight: player.cartWeight, cartMaxWeight: player.cartMaxWeight });
+            await sendStorageContents(socket, player.userId, false);
+
+        } catch (err) {
+            await client.query('ROLLBACK');
+            logger.error(`[STORAGE] cart_deposit error: ${err.message}`);
+            socket.emit('storage:error', { message: 'Cart deposit failed' });
+        } finally {
+            client.release();
+        }
+    });
+
+    socket.on('storage:cart_withdraw', async (data) => {
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { characterId, player } = playerInfo;
+        if (!player.isStorageOpen) return socket.emit('storage:error', { message: 'Storage is not open' });
+        if (!player.hasCart) return socket.emit('storage:error', { message: 'You don\'t have a cart' });
+        if (player.isVending) return socket.emit('storage:error', { message: 'Cannot access cart while vending' });
+        const { storageId, quantity } = data || {};
+        if (!storageId || !quantity || quantity < 1) return socket.emit('storage:error', { message: 'Invalid request' });
+
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+
+            // Lock and validate storage item
+            const storResult = await client.query(
+                `SELECT s.*, i.name, i.item_type, i.stackable, i.weight
+                 FROM account_storage s
+                 JOIN items i ON s.item_id = i.item_id
+                 WHERE s.storage_id = $1 AND s.user_id = $2 FOR UPDATE`,
+                [storageId, player.userId]
+            );
+            if (storResult.rows.length === 0) { await client.query('ROLLBACK'); return socket.emit('storage:error', { message: 'Item not found in storage' }); }
+            const sItem = storResult.rows[0];
+            if (quantity > sItem.quantity) { await client.query('ROLLBACK'); return socket.emit('storage:error', { message: 'Not enough quantity' }); }
+
+            // Check cart weight
+            const itemWeight = (sItem.weight || 0) * quantity;
+            if ((player.cartWeight || 0) + itemWeight > player.cartMaxWeight) {
+                await client.query('ROLLBACK');
+                return socket.emit('storage:error', { message: 'Cart is too heavy' });
+            }
+
+            // Remove from storage FIRST
+            if (quantity >= sItem.quantity) {
+                await client.query('DELETE FROM account_storage WHERE storage_id = $1', [storageId]);
+            } else {
+                await client.query('UPDATE account_storage SET quantity = quantity - $1 WHERE storage_id = $2', [quantity, storageId]);
+            }
+
+            // Add to cart (stack if stackable)
+            const isStackable = sItem.stackable && !['weapon', 'armor'].includes(sItem.item_type);
+            if (isStackable) {
+                const existing = await client.query(
+                    'SELECT cart_id, quantity FROM character_cart WHERE character_id = $1 AND item_id = $2', [characterId, sItem.item_id]);
+                if (existing.rows.length > 0) {
+                    await client.query('UPDATE character_cart SET quantity = quantity + $1 WHERE cart_id = $2', [quantity, existing.rows[0].cart_id]);
+                    await client.query('COMMIT');
+                    await sendCartData(socket, characterId, player);
+                    await sendStorageContents(socket, player.userId, false);
+                    return;
+                }
+            }
+            const maxSlot = await client.query('SELECT COALESCE(MAX(slot_index), -1) + 1 as next_slot FROM character_cart WHERE character_id = $1', [characterId]);
+            await client.query(`
+                INSERT INTO character_cart (character_id, item_id, quantity, slot_index, identified, refine_level, compounded_cards, forged_by, forged_element, forged_star_crumbs)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            `, [characterId, sItem.item_id, quantity, maxSlot.rows[0].next_slot,
+                sItem.identified, sItem.refine_level || 0, sItem.compounded_cards || '[]',
+                sItem.forged_by, sItem.forged_element, sItem.forged_star_crumbs || 0]);
+
+            await client.query('COMMIT');
+
+            // Reload cart data
+            const cartReload = await pool.query(
+                `SELECT cc.cart_id, cc.item_id, cc.quantity, cc.slot_index, cc.identified,
+                        cc.refine_level, cc.compounded_cards, i.name, i.item_type, i.weight, i.price, i.atk, i.def, i.slots,
+                        i.description, i.equip_slot, i.sub_type, i.buy_price, i.sell_price
+                 FROM character_cart cc JOIN items i ON cc.item_id = i.item_id
+                 WHERE cc.character_id = $1 ORDER BY cc.slot_index`, [characterId]);
+            player.cartItems = cartReload.rows;
+            player.cartWeight = cartReload.rows.reduce((w, it) => w + (it.weight || 0) * it.quantity, 0);
+            socket.emit('cart:data', { items: player.cartItems, cartWeight: player.cartWeight, cartMaxWeight: player.cartMaxWeight });
+            await sendStorageContents(socket, player.userId, false);
+
+        } catch (err) {
+            await client.query('ROLLBACK');
+            logger.error(`[STORAGE] cart_withdraw error: ${err.message}`);
+            socket.emit('storage:error', { message: 'Cart withdraw failed' });
+        } finally {
+            client.release();
+        }
+    });
+
+    // ============================================================
+    // Guide NPC Events
+    // ============================================================
+    socket.on('guide:interact', (data) => {
+        logger.info(`[RECV] guide:interact from ${socket.id}: ${JSON.stringify(data)}`);
+        const { guideId } = data;
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { player } = playerInfo;
+        const zone = player.zone || 'prontera_south';
+        const zoneData = getZone(zone);
+        if (!zoneData) {
+            socket.emit('guide:error', { message: 'Zone not found' });
+            return;
+        }
+
+        const guideNpcs = zoneData.guideNpcs || [];
+        const guide = guideNpcs.find(g => g.id === guideId);
+        if (!guide) {
+            socket.emit('guide:error', { message: 'Guide NPC not found in this zone' });
+            return;
+        }
+
+        // Store active marks on player for clear support
+        player.activeGuideMarks = guide.facilities.map((f, i) => ({
+            id: `${guideId}_mark_${i}`,
+            name: f.name,
+            x: f.x,
+            y: f.y,
+            z: f.z,
+            color: f.color
+        }));
+
+        // Emit marks to the client
+        for (const mark of player.activeGuideMarks) {
+            socket.emit('map:mark', {
+                type: 1,
+                id: mark.id,
+                name: mark.name,
+                x: mark.x,
+                y: mark.y,
+                z: mark.z,
+                color: mark.color,
+                duration: 15
+            });
+        }
+
+        logger.info(`[GUIDE] ${player.characterName} interacted with ${guide.name} in ${zone}, sent ${guide.facilities.length} marks`);
+    });
+
+    socket.on('guide:clear_marks', () => {
+        logger.info(`[RECV] guide:clear_marks from ${socket.id}`);
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { player } = playerInfo;
+
+        const marks = player.activeGuideMarks || [];
+        for (const mark of marks) {
+            socket.emit('map:mark', {
+                type: 2,
+                id: mark.id
+            });
+        }
+        player.activeGuideMarks = [];
+
+        logger.info(`[GUIDE] ${player.characterName} cleared ${marks.length} guide marks`);
     });
 
     // ========== CART SYSTEM (Pushcart 604) ==========
@@ -7171,6 +7872,8 @@ io.on('connection', (socket) => {
 
         if (!player.hasCart) { socket.emit('vending:error', { message: 'No cart.' }); return; }
         if (player.isVending) { socket.emit('vending:error', { message: 'Already vending.' }); return; }
+        if (player.isStorageOpen) { socket.emit('vending:error', { message: 'Close storage first.' }); return; }
+        if (player.isTrading) { socket.emit('vending:error', { message: 'Cannot vend while trading.' }); return; }
 
         const vendingLv = (player.learnedSkills || {})[605] || 0;
         if (vendingLv <= 0) { socket.emit('vending:error', { message: 'Need Vending skill.' }); return; }
@@ -7435,6 +8138,632 @@ io.on('connection', (socket) => {
         }
     });
 
+    // ============================================================
+    // TRADE SOCKET EVENTS
+    // ============================================================
+
+    socket.on('trade:request', async (data) => {
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { characterId, player } = playerInfo;
+
+        if (player.isTrading) return socket.emit('trade:error', { message: 'Already in a trade.' });
+        if (player.isVending) return socket.emit('trade:error', { message: 'Cannot trade while vending.' });
+        if (player.isStorageOpen) return socket.emit('trade:error', { message: 'Close storage first.' });
+        if (player.isDead) return socket.emit('trade:error', { message: 'Cannot trade while dead.' });
+
+        // Basic Skill Lv1 required for trading (RO Classic)
+        const basicSkillLv = (player.learnedSkills && player.learnedSkills[1]) || 0;
+        if (basicSkillLv < 1) return socket.emit('trade:error', { message: "You need Basic Skill Level 1 to trade." });
+
+        // Check notrade mapflag
+        const tradeZoneData = ZONE_REGISTRY[player.zone];
+        if (tradeZoneData && tradeZoneData.flags && tradeZoneData.flags.notrade) {
+            return socket.emit('trade:error', { message: 'Trading is not allowed in this area.' });
+        }
+
+        const targetId = parseInt(data.targetCharacterId);
+        if (!targetId || targetId === characterId) return socket.emit('trade:error', { message: 'Invalid target.' });
+
+        const target = connectedPlayers.get(targetId);
+        if (!target) return socket.emit('trade:error', { message: 'Player not found or offline.' });
+        if (target.zone !== player.zone) return socket.emit('trade:error', { message: 'Player is in a different zone.' });
+        if (target.isTrading) return socket.emit('trade:error', { message: 'Player is already trading.' });
+        if (target.isVending) return socket.emit('trade:error', { message: 'Player is vending.' });
+        if (target.isDead) return socket.emit('trade:error', { message: 'Player is dead.' });
+        if (target.isStorageOpen) return socket.emit('trade:error', { message: 'Player is busy.' });
+        // Block if target has pending party/guild invite
+        if (pendingInvites.has(targetId)) return socket.emit('trade:error', { message: 'Player has a pending invitation.' });
+        // Target also needs Basic Skill Lv1
+        const targetBasicSkill = (target.learnedSkills && target.learnedSkills[1]) || 0;
+        if (targetBasicSkill < 1) return socket.emit('trade:error', { message: 'Player cannot trade yet.' });
+
+        const dx = (player.lastX || 0) - (target.lastX || 0);
+        const dy = (player.lastY || 0) - (target.lastY || 0);
+        if (Math.sqrt(dx * dx + dy * dy) > TRADE.MAX_DISTANCE) return socket.emit('trade:error', { message: 'Too far away.' });
+
+        if (pendingTradeRequests.has(targetId)) {
+            clearTimeout(pendingTradeRequests.get(targetId).timer);
+            pendingTradeRequests.delete(targetId);
+        }
+
+        const timer = setTimeout(() => {
+            if (pendingTradeRequests.has(targetId)) {
+                pendingTradeRequests.delete(targetId);
+                socket.emit('trade:error', { message: 'Trade request timed out.' });
+            }
+        }, TRADE.REQUEST_TIMEOUT_MS);
+
+        pendingTradeRequests.set(targetId, { requesterId: characterId, requesterName: player.characterName, timestamp: Date.now(), timer });
+
+        const targetSocket = getPlayerSocket(target);
+        if (targetSocket) targetSocket.emit('trade:request_received', { fromCharacterId: characterId, fromName: player.characterName });
+        logger.info(`[TRADE] ${player.characterName} sent trade request to ${target.characterName}`);
+    });
+
+    socket.on('trade:accept', async (data) => {
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { characterId, player } = playerInfo;
+
+        const requesterId = parseInt(data.requesterId);
+        const pending = pendingTradeRequests.get(characterId);
+        if (!pending || pending.requesterId !== requesterId) return socket.emit('trade:error', { message: 'No pending trade request.' });
+
+        clearTimeout(pending.timer);
+        pendingTradeRequests.delete(characterId);
+
+        const requester = connectedPlayers.get(requesterId);
+        if (!requester) return socket.emit('trade:error', { message: 'Requester went offline.' });
+        if (player.isTrading || player.isVending || player.isDead || player.isStorageOpen) return socket.emit('trade:error', { message: 'Cannot trade right now.' });
+        if (requester.isTrading || requester.isVending || requester.isDead) return socket.emit('trade:error', { message: 'Other player is busy.' });
+        if (player.zone !== requester.zone) return socket.emit('trade:error', { message: 'Different zone.' });
+        // Basic Skill Lv1 check on acceptor
+        const acceptorBasicSkill = (player.learnedSkills && player.learnedSkills[1]) || 0;
+        if (acceptorBasicSkill < 1) return socket.emit('trade:error', { message: "You need Basic Skill Level 1 to trade." });
+
+        const dx = (player.lastX || 0) - (requester.lastX || 0);
+        const dy = (player.lastY || 0) - (requester.lastY || 0);
+        if (Math.sqrt(dx * dx + dy * dy) > TRADE.MAX_DISTANCE) return socket.emit('trade:error', { message: 'Too far away.' });
+
+        const session = new TradeSession(requesterId, characterId);
+        activeTrades.set(requesterId, session);
+        activeTrades.set(characterId, session);
+        player.isTrading = true; player.tradePartnerId = requesterId;
+        requester.isTrading = true; requester.tradePartnerId = characterId;
+
+        const requesterSocket = getPlayerSocket(requester);
+        if (requesterSocket) requesterSocket.emit('trade:opened', { partnerId: characterId, partnerName: player.characterName });
+        socket.emit('trade:opened', { partnerId: requesterId, partnerName: requester.characterName });
+        logger.info(`[TRADE] Trade opened: ${requester.characterName} <-> ${player.characterName}`);
+    });
+
+    socket.on('trade:decline', async (data) => {
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { characterId } = playerInfo;
+        const requesterId = parseInt(data.requesterId);
+        const pending = pendingTradeRequests.get(characterId);
+        if (!pending || pending.requesterId !== requesterId) return;
+        clearTimeout(pending.timer);
+        pendingTradeRequests.delete(characterId);
+        const requester = connectedPlayers.get(requesterId);
+        if (requester) { const s = getPlayerSocket(requester); if (s) s.emit('trade:error', { message: 'Trade request declined.' }); }
+    });
+
+    socket.on('trade:cancel', async (data) => {
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { characterId, player } = playerInfo;
+        if (activeTrades.has(characterId)) cancelTrade(characterId, `${player.characterName} cancelled the trade.`);
+        for (const [targetId, req] of pendingTradeRequests.entries()) {
+            if (req.requesterId === characterId) { clearTimeout(req.timer); pendingTradeRequests.delete(targetId); }
+        }
+    });
+
+    socket.on('trade:add_item', async (data) => {
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { characterId, player } = playerInfo;
+
+        const session = activeTrades.get(characterId);
+        if (!session) return socket.emit('trade:error', { message: 'No active trade.' });
+        if (session.isMyLocked(characterId)) return socket.emit('trade:error', { message: 'Your offer is locked.' });
+
+        const myItems = session.getMyItems(characterId);
+        if (myItems.length >= TRADE.MAX_ITEMS) return socket.emit('trade:error', { message: 'Maximum 10 items per trade.' });
+
+        const inventoryId = parseInt(data.inventoryId);
+        const quantity = parseInt(data.quantity) || 1;
+
+        const itemResult = await pool.query(
+            `SELECT ci.*, i.name, i.icon, i.item_type, i.equip_slot, i.weight, i.slots, i.weapon_level, i.trade_flag, i.card_prefix, i.card_suffix, i.stackable
+             FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
+             WHERE ci.inventory_id = $1 AND ci.character_id = $2`, [inventoryId, characterId]);
+
+        if (itemResult.rows.length === 0) return socket.emit('trade:error', { message: 'Item not found.' });
+        const item = itemResult.rows[0];
+
+        if (item.is_equipped) return socket.emit('trade:error', { message: 'Unequip item first.' });
+        // Block non-tradeable (0x002), account-bound (0x100), character-bound (0x200)
+        if ((item.trade_flag || 0) & (0x002 | 0x100 | 0x200)) return socket.emit('trade:error', { message: 'This item cannot be traded.' });
+        if (myItems.some(ti => ti.inventoryId === inventoryId)) return socket.emit('trade:error', { message: 'Item already in trade.' });
+        // Block hatched pet eggs (RO Classic: active pets cannot be traded as eggs)
+        try {
+            const petCheck = await pool.query(
+                'SELECT id FROM character_pets WHERE character_id = $1 AND egg_inventory_id = $2 AND is_hatched = true LIMIT 1',
+                [characterId, inventoryId]
+            );
+            if (petCheck.rows.length > 0) return socket.emit('trade:error', { message: 'Cannot trade a hatched pet egg.' });
+        } catch (e) { /* character_pets table may not exist yet */ }
+
+        const tradeQty = Math.min(quantity, item.quantity);
+
+        // Weight check on partner
+        const partnerId = session.getPartner(characterId);
+        const partner = connectedPlayers.get(partnerId);
+        if (partner) {
+            const partnerWeight = await calculatePlayerCurrentWeight(partnerId);
+            const partnerMaxWeight = getPlayerMaxWeight(partner);
+            let pendingWeight = 0;
+            for (const ti of myItems) pendingWeight += (ti.weight || 0) * ti.quantity;
+            if (partnerWeight + pendingWeight + (item.weight || 0) * tradeQty > partnerMaxWeight)
+                return socket.emit('trade:error', { message: 'Partner would be overweight.' });
+        }
+
+        const tradeSlot = myItems.length;
+        const tradeItem = {
+            tradeSlot, inventoryId, itemId: item.item_id, name: item.name, icon: item.icon, quantity: tradeQty,
+            refineLevel: item.refine_level || 0, slots: item.slots || 0, compoundedCards: item.compounded_cards || '[]',
+            itemType: item.item_type, equipSlot: item.equip_slot, weight: item.weight || 0,
+            identified: item.identified !== false, cardPrefix: item.card_prefix || '', cardSuffix: item.card_suffix || '',
+            weaponLevel: item.weapon_level || 0, forgedBy: item.forged_by || null,
+            forgedElement: item.forged_element || null, forgedStarCrumbs: item.forged_star_crumbs || 0,
+        };
+        myItems.push(tradeItem);
+
+        if (session.lockedA || session.lockedB) {
+            logger.warn(`[TRADE] Lock reset — ${player.characterName} modified offer after lock`);
+            session.resetLocks();
+            const ps = getPlayerSocket(partner);
+            if (ps) ps.emit('trade:locks_reset', {});
+            socket.emit('trade:locks_reset', {});
+        }
+
+        socket.emit('trade:item_added', { side: 'my', item: tradeItem });
+        const ps = getPlayerSocket(partner);
+        if (ps) ps.emit('trade:item_added', { side: 'partner', item: tradeItem });
+        logger.info(`[TRADE] ${player.characterName} added ${item.name} x${tradeQty}`);
+    });
+
+    socket.on('trade:remove_item', async (data) => {
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { characterId, player } = playerInfo;
+
+        const session = activeTrades.get(characterId);
+        if (!session) return socket.emit('trade:error', { message: 'No active trade.' });
+        if (session.isMyLocked(characterId)) return socket.emit('trade:error', { message: 'Your offer is locked.' });
+
+        const tradeSlot = parseInt(data.tradeSlot);
+        const myItems = session.getMyItems(characterId);
+        const idx = myItems.findIndex(i => i.tradeSlot === tradeSlot);
+        if (idx === -1) return;
+
+        myItems.splice(idx, 1);
+        myItems.forEach((item, i) => item.tradeSlot = i);
+
+        if (session.lockedA || session.lockedB) {
+            session.resetLocks();
+            const partnerId = session.getPartner(characterId);
+            const partner = connectedPlayers.get(partnerId);
+            const ps = getPlayerSocket(partner);
+            if (ps) ps.emit('trade:locks_reset', {});
+            socket.emit('trade:locks_reset', {});
+        }
+
+        socket.emit('trade:item_removed', { side: 'my', tradeSlot });
+        const partnerId = session.getPartner(characterId);
+        const ps = getPlayerSocket(connectedPlayers.get(partnerId));
+        if (ps) ps.emit('trade:item_removed', { side: 'partner', tradeSlot });
+    });
+
+    socket.on('trade:set_zeny', async (data) => {
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { characterId, player } = playerInfo;
+
+        const session = activeTrades.get(characterId);
+        if (!session) return socket.emit('trade:error', { message: 'No active trade.' });
+        if (session.isMyLocked(characterId)) return socket.emit('trade:error', { message: 'Your offer is locked.' });
+
+        const rawAmount = data.amount;
+        let amount = parseInt(rawAmount) || 0;
+        // Zeny hacker detection
+        if (amount < 0 || amount > 2147483647 || !Number.isFinite(parseFloat(rawAmount))) {
+            logger.warn(`[TRADE] Suspicious zeny input from ${player.characterName}: ${JSON.stringify(rawAmount)}`);
+        }
+        amount = Math.max(0, Math.min(amount, TRADE.MAX_ZENY));
+        const currentZeny = parseInt(player.zuzucoin) || 0;
+        if (amount > currentZeny) amount = currentZeny;
+
+        const partnerId = session.getPartner(characterId);
+        const partner = connectedPlayers.get(partnerId);
+        if (partner) {
+            const partnerZeny = parseInt(partner.zuzucoin) || 0;
+            if (partnerZeny + amount > 2147483647) amount = Math.max(0, 2147483647 - partnerZeny);
+        }
+
+        session.setMyZeny(characterId, amount);
+
+        if (session.lockedA || session.lockedB) {
+            logger.warn(`[TRADE] Lock reset — ${player.characterName} modified offer after lock`);
+            session.resetLocks();
+            const ps = getPlayerSocket(partner);
+            if (ps) ps.emit('trade:locks_reset', {});
+            socket.emit('trade:locks_reset', {});
+        }
+
+        socket.emit('trade:zeny_updated', { side: 'my', amount });
+        const ps = getPlayerSocket(partner);
+        if (ps) ps.emit('trade:zeny_updated', { side: 'partner', amount });
+    });
+
+    socket.on('trade:lock', async (data) => {
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { characterId } = playerInfo;
+
+        const session = activeTrades.get(characterId);
+        if (!session) return;
+        if (session.isMyLocked(characterId)) return;
+
+        session.setMyLocked(characterId, true);
+
+        const partnerId = session.getPartner(characterId);
+        const ps = getPlayerSocket(connectedPlayers.get(partnerId));
+        if (ps) ps.emit('trade:partner_locked', {});
+
+        if (session.areBothLocked()) {
+            socket.emit('trade:both_locked', {});
+            if (ps) ps.emit('trade:both_locked', {});
+        }
+    });
+
+    socket.on('trade:confirm', async (data) => {
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { characterId, player } = playerInfo;
+
+        const session = activeTrades.get(characterId);
+        if (!session) return socket.emit('trade:error', { message: 'No active trade.' });
+        if (!session.areBothLocked()) return socket.emit('trade:error', { message: 'Both must lock first.' });
+
+        session.setMyConfirmed(characterId, true);
+        if (!session.areBothConfirmed()) { logger.info(`[TRADE] ${player.characterName} confirmed, waiting for partner`); return; }
+
+        // === BOTH CONFIRMED — EXECUTE TRADE ===
+        const aId = session.playerAId, bId = session.playerBId;
+        const playerA = connectedPlayers.get(aId), playerB = connectedPlayers.get(bId);
+        if (!playerA || !playerB) { cancelTrade(characterId, 'Player disconnected.'); return; }
+
+        const client = await pool.connect();
+        try {
+            await client.query('BEGIN');
+
+            // Re-validate ALL items with FOR UPDATE locks
+            for (const item of session.itemsA) {
+                const check = await client.query('SELECT inventory_id, character_id, quantity, is_equipped FROM character_inventory WHERE inventory_id = $1 FOR UPDATE', [item.inventoryId]);
+                if (check.rows.length === 0 || check.rows[0].character_id !== aId || check.rows[0].is_equipped || check.rows[0].quantity < item.quantity) {
+                    await client.query('ROLLBACK'); cancelTrade(characterId, 'An item is no longer available.'); client.release(); return;
+                }
+            }
+            for (const item of session.itemsB) {
+                const check = await client.query('SELECT inventory_id, character_id, quantity, is_equipped FROM character_inventory WHERE inventory_id = $1 FOR UPDATE', [item.inventoryId]);
+                if (check.rows.length === 0 || check.rows[0].character_id !== bId || check.rows[0].is_equipped || check.rows[0].quantity < item.quantity) {
+                    await client.query('ROLLBACK'); cancelTrade(characterId, 'An item is no longer available.'); client.release(); return;
+                }
+            }
+
+            // Re-validate zeny
+            const zenyCheckA = await client.query('SELECT zuzucoin FROM characters WHERE character_id = $1 FOR UPDATE', [aId]);
+            const zenyCheckB = await client.query('SELECT zuzucoin FROM characters WHERE character_id = $1 FOR UPDATE', [bId]);
+            const zenyA = parseInt(zenyCheckA.rows[0]?.zuzucoin) || 0;
+            const zenyB = parseInt(zenyCheckB.rows[0]?.zuzucoin) || 0;
+            if (session.zenyA > zenyA || session.zenyB > zenyB) { await client.query('ROLLBACK'); cancelTrade(characterId, 'Insufficient zeny.'); client.release(); return; }
+
+            const finalZenyA = zenyA - session.zenyA + session.zenyB;
+            const finalZenyB = zenyB - session.zenyB + session.zenyA;
+            if (finalZenyA > 2147483647 || finalZenyB > 2147483647 || finalZenyA < 0 || finalZenyB < 0) {
+                await client.query('ROLLBACK'); cancelTrade(characterId, 'Zeny overflow.'); client.release(); return;
+            }
+
+            // TRANSFER ITEMS A -> B (remove from A before adding to B — anti-dupe)
+            for (const item of session.itemsA) {
+                const srcRow = await client.query('SELECT quantity FROM character_inventory WHERE inventory_id = $1', [item.inventoryId]);
+                if (srcRow.rows[0].quantity <= item.quantity) {
+                    await client.query('DELETE FROM character_inventory WHERE inventory_id = $1', [item.inventoryId]);
+                } else {
+                    await client.query('UPDATE character_inventory SET quantity = quantity - $1 WHERE inventory_id = $2', [item.quantity, item.inventoryId]);
+                }
+                const itemDef = itemDefinitions.get(item.itemId);
+                const isStackable = itemDef && itemDef.stackable && !['weapon', 'armor'].includes(itemDef.item_type);
+                if (isStackable && item.identified !== false) {
+                    const existing = await client.query('SELECT inventory_id FROM character_inventory WHERE character_id = $1 AND item_id = $2 AND is_equipped = false LIMIT 1', [bId, item.itemId]);
+                    if (existing.rows.length > 0) { await client.query('UPDATE character_inventory SET quantity = quantity + $1 WHERE inventory_id = $2', [item.quantity, existing.rows[0].inventory_id]); continue; }
+                }
+                const maxSlot = await client.query('SELECT COALESCE(MAX(slot_index), -1) as max_slot FROM character_inventory WHERE character_id = $1', [bId]);
+                await client.query(
+                    `INSERT INTO character_inventory (character_id, item_id, quantity, slot_index, identified, refine_level, compounded_cards, forged_by, forged_element, forged_star_crumbs)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+                    [bId, item.itemId, item.quantity, maxSlot.rows[0].max_slot + 1, item.identified !== false, item.refineLevel || 0, item.compoundedCards || '[]', item.forgedBy || null, item.forgedElement || null, item.forgedStarCrumbs || 0]);
+            }
+
+            // TRANSFER ITEMS B -> A
+            for (const item of session.itemsB) {
+                const srcRow = await client.query('SELECT quantity FROM character_inventory WHERE inventory_id = $1', [item.inventoryId]);
+                if (srcRow.rows[0].quantity <= item.quantity) {
+                    await client.query('DELETE FROM character_inventory WHERE inventory_id = $1', [item.inventoryId]);
+                } else {
+                    await client.query('UPDATE character_inventory SET quantity = quantity - $1 WHERE inventory_id = $2', [item.quantity, item.inventoryId]);
+                }
+                const itemDef = itemDefinitions.get(item.itemId);
+                const isStackable = itemDef && itemDef.stackable && !['weapon', 'armor'].includes(itemDef.item_type);
+                if (isStackable && item.identified !== false) {
+                    const existing = await client.query('SELECT inventory_id FROM character_inventory WHERE character_id = $1 AND item_id = $2 AND is_equipped = false LIMIT 1', [aId, item.itemId]);
+                    if (existing.rows.length > 0) { await client.query('UPDATE character_inventory SET quantity = quantity + $1 WHERE inventory_id = $2', [item.quantity, existing.rows[0].inventory_id]); continue; }
+                }
+                const maxSlot = await client.query('SELECT COALESCE(MAX(slot_index), -1) as max_slot FROM character_inventory WHERE character_id = $1', [aId]);
+                await client.query(
+                    `INSERT INTO character_inventory (character_id, item_id, quantity, slot_index, identified, refine_level, compounded_cards, forged_by, forged_element, forged_star_crumbs)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+                    [aId, item.itemId, item.quantity, maxSlot.rows[0].max_slot + 1, item.identified !== false, item.refineLevel || 0, item.compoundedCards || '[]', item.forgedBy || null, item.forgedElement || null, item.forgedStarCrumbs || 0]);
+            }
+
+            // TRANSFER ZENY
+            if (session.zenyA > 0 || session.zenyB > 0) {
+                await client.query('UPDATE characters SET zuzucoin = $1 WHERE character_id = $2', [finalZenyA, aId]);
+                await client.query('UPDATE characters SET zuzucoin = $1 WHERE character_id = $2', [finalZenyB, bId]);
+                playerA.zuzucoin = finalZenyA; playerB.zuzucoin = finalZenyB;
+            }
+
+            // LOG TRADE
+            await client.query(
+                `INSERT INTO trade_logs (player_a_id, player_b_id, items_a_gave, items_b_gave, zeny_a_gave, zeny_b_gave, zone_name) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+                [aId, bId, JSON.stringify(session.itemsA.map(i => ({ itemId: i.itemId, name: i.name, qty: i.quantity }))),
+                 JSON.stringify(session.itemsB.map(i => ({ itemId: i.itemId, name: i.name, qty: i.quantity }))),
+                 session.zenyA, session.zenyB, playerA.zone || 'unknown']);
+
+            await client.query('COMMIT');
+
+            // Update weights and clean up
+            playerA.currentWeight = await calculatePlayerCurrentWeight(aId);
+            playerB.currentWeight = await calculatePlayerCurrentWeight(bId);
+            playerA.isTrading = false; playerA.tradePartnerId = null;
+            playerB.isTrading = false; playerB.tradePartnerId = null;
+            activeTrades.delete(aId); activeTrades.delete(bId);
+
+            const socketA = getPlayerSocket(playerA), socketB = getPlayerSocket(playerB);
+            if (socketA) { socketA.emit('trade:completed', { partnerId: bId, partnerName: playerB.characterName }); const invA = await getPlayerInventory(aId); socketA.emit('inventory:data', { items: invA, zuzucoin: finalZenyA }); }
+            if (socketB) { socketB.emit('trade:completed', { partnerId: aId, partnerName: playerA.characterName }); const invB = await getPlayerInventory(bId); socketB.emit('inventory:data', { items: invB, zuzucoin: finalZenyB }); }
+            logger.info(`[TRADE] Trade completed: ${playerA.characterName} <-> ${playerB.characterName}`);
+        } catch (err) {
+            await client.query('ROLLBACK');
+            logger.error(`[TRADE] Trade execution failed: ${err.message}`);
+            cancelTrade(characterId, 'Trade failed due to server error.');
+        } finally {
+            client.release();
+        }
+    });
+
+    // ---- Return to Character Select (ESC menu) ----
+    // Like disconnect but keeps the socket alive. Player can re-join with a different character.
+    // CRITICAL: All in-memory cleanup (connectedPlayers.delete, socket.leave, broadcastToZone,
+    // autoAttack, enemy combat) MUST happen SYNCHRONOUSLY before any await. Otherwise player:join
+    // for the new character can race ahead while DB saves are pending, and zone:ready will still
+    // see the old character in connectedPlayers.
+    socket.on('player:leave', async () => {
+        logger.info(`[RECV] player:leave from ${socket.id}`);
+        const leaveInfo = findPlayerBySocketId(socket.id);
+        if (!leaveInfo) {
+            socket.emit('player:leave_ack', { success: false, error: 'Not in game' });
+            return;
+        }
+        const { characterId: charId, player } = leaveInfo;
+        const leftZone = player.zone || 'prontera_south';
+
+        // ========== PHASE 1: Synchronous in-memory cleanup (NO awaits) ==========
+        // This ensures player:join for the new character will NOT see the old character.
+
+        // Cancel active cast
+        activeCasts.delete(charId);
+        afterCastDelayEnd.delete(charId);
+
+        // Cancel active performance (Bard/Dancer)
+        if (player.performanceState) cancelPerformance(charId, player, 'leave');
+
+        // Cancel active ensemble
+        if (player.ensembleState) {
+            endEnsemble(player.ensembleState.id, player.ensembleState, 'leave');
+        }
+
+        // Clean up sitting state
+        if (player.isSitting) player.isSitting = false;
+
+        // Clean up root_lock
+        if (hasBuff(player, 'root_lock')) {
+            const rlBuff = player.activeBuffs.find(b => b.name === 'root_lock' && b.isPlayer);
+            if (rlBuff && rlBuff.lockedEnemyId) {
+                const lockedEnemy = enemies.get(rlBuff.lockedEnemyId);
+                if (lockedEnemy) {
+                    removeBuff(lockedEnemy, 'root_lock');
+                    broadcastToZone(lockedEnemy.zone || 'prontera_south', 'skill:buff_removed', { targetId: rlBuff.lockedEnemyId, isEnemy: true, buffName: 'root_lock', reason: 'player_leave' });
+                }
+            }
+        }
+
+        // Close storage
+        if (player.isStorageOpen) player.isStorageOpen = false;
+
+        // Capture vending state for async cleanup later
+        const vendingShop = (player.isVending && player.vendingShop) ? { ...player.vendingShop } : null;
+        if (vendingShop) {
+            broadcastToZone(leftZone, 'vending:shop_closed', { characterId: charId, shopId: vendingShop.shopId });
+            player.isVending = false;
+            player.vendingShop = null;
+        }
+
+        // Cancel active trade
+        if (player.isTrading) cancelTrade(charId, 'Player returned to character select.');
+        for (const [targetId, req] of pendingTradeRequests.entries()) {
+            if (req.requesterId === charId) {
+                clearTimeout(req.timer);
+                pendingTradeRequests.delete(targetId);
+            }
+        }
+        if (pendingTradeRequests.has(charId)) {
+            clearTimeout(pendingTradeRequests.get(charId).timer);
+            pendingTradeRequests.delete(charId);
+        }
+
+        // Party: mark offline
+        if (player.partyId) {
+            const party = activeParties.get(player.partyId);
+            if (party) {
+                const member = party.members.get(charId);
+                if (member) { member.online = false; member.socketId = null; }
+                broadcastToParty(player.partyId, 'party:member_offline', { characterId: charId });
+            }
+        }
+
+        // Clear auto-attack state
+        autoAttackState.delete(charId);
+        for (const [attackerId, atkState] of autoAttackState.entries()) {
+            if (atkState.targetCharId === charId && !atkState.isEnemy) {
+                autoAttackState.delete(attackerId);
+                const attackerPlayer = connectedPlayers.get(attackerId);
+                if (attackerPlayer) {
+                    const attackerSocket = io.sockets.sockets.get(attackerPlayer.socketId);
+                    if (attackerSocket) {
+                        attackerSocket.emit('combat:target_lost', { reason: 'Target left', isEnemy: false });
+                    }
+                }
+            }
+        }
+
+        // Remove from enemy combat sets
+        for (const [, enemy] of enemies.entries()) {
+            enemy.inCombatWith.delete(charId);
+            if (enemy.targetPlayerId === charId) {
+                enemy.targetPlayerId = null;
+                if (typeof pickNextTarget === 'function') {
+                    const nextTarget = pickNextTarget(enemy);
+                    if (nextTarget) { enemy.targetPlayerId = nextTarget; }
+                    else { enemy.aiState = AI_STATE.IDLE; enemy.isWandering = false; }
+                } else { enemy.aiState = AI_STATE.IDLE; enemy.isWandering = false; }
+            }
+        }
+
+        // Clean up summoned plants (sync — just remove from maps)
+        const leavePlants = playerPlants.get(charId);
+        if (leavePlants) {
+            for (const pid of leavePlants) {
+                const plant = activePlants.get(pid);
+                if (plant) broadcastToZone(plant.zone, 'summon:plant_removed', { plantId: pid, reason: 'owner_left' });
+                activePlants.delete(pid);
+            }
+            playerPlants.delete(charId);
+        }
+        const leaveSpheres = playerSpheres.get(charId);
+        if (leaveSpheres) {
+            for (const sid of leaveSpheres) {
+                const sphere = activeMarineSpheres.get(sid);
+                if (sphere) broadcastToZone(sphere.zone, 'summon:sphere_removed', { sphereId: sid, reason: 'owner_left' });
+                activeMarineSpheres.delete(sid);
+            }
+            playerSpheres.delete(charId);
+        }
+
+        // Remove companion references from in-memory maps (DB save is async below)
+        const hLeave = activeHomunculi.get(charId);
+        activeHomunculi.delete(charId);
+        const petLeave = activePets.get(charId);
+        activePets.delete(charId);
+
+        // === CRITICAL: Remove from connectedPlayers, leave zone room, broadcast ===
+        connectedPlayers.delete(charId);
+        socket.leave('zone:' + leftZone);
+        if (player.partyId) socket.leave('party:' + player.partyId);
+        broadcastToZone(leftZone, 'player:left', { characterId: charId, characterName: player.characterName || 'Unknown' });
+
+        logger.info(`[LEAVE] Character ${charId} removed from zone=${leftZone} (sync phase done)`);
+        socket.emit('player:leave_ack', { success: true });
+
+        // ========== PHASE 2: Async DB persistence (fire-and-forget) ==========
+        // These can run while the user is on the character select screen.
+        // Errors are logged but don't block the leave flow.
+
+        try {
+            await savePlayerHealthToDB(charId, player.health, player.mana);
+        } catch (err) { logger.error(`[DB] Failed to save health for char ${charId} on leave:`, err.message); }
+
+        if (player.stats) {
+            try {
+                await pool.query(
+                    `UPDATE characters SET str = $1, agi = $2, vit = $3, int_stat = $4, dex = $5, luk = $6, stat_points = $7,
+                     level = $9, job_level = $10, base_exp = $11, job_exp = $12, job_class = $13, skill_points = $14
+                     WHERE character_id = $8`,
+                    [player.stats.str, player.stats.agi, player.stats.vit, player.stats.int, player.stats.dex, player.stats.luk, player.stats.statPoints, charId,
+                     player.stats.level || 1, player.jobLevel || 1, player.baseExp || 0, player.jobExp || 0, player.jobClass || 'novice', player.skillPoints || 0]
+                );
+            } catch (err) { logger.error(`[DB] Failed to save stats for char ${charId} on leave:`, err.message); }
+        }
+
+        try {
+            await pool.query('UPDATE characters SET zone_name = $1, x = $2, y = $3, z = $4 WHERE character_id = $5',
+                [leftZone, player.lastX || 0, player.lastY || 0, player.lastZ || 0, charId]);
+        } catch (zErr) { logger.warn(`[DB] Failed to save zone/position for char ${charId}: ${zErr.message}`); }
+
+        if (vendingShop) {
+            try {
+                await pool.query('DELETE FROM vending_items WHERE shop_id = $1', [vendingShop.shopId]);
+                await pool.query('DELETE FROM vending_shops WHERE shop_id = $1', [vendingShop.shopId]);
+            } catch (e) { logger.warn(`[VENDING] Leave cleanup: ${e.message}`); }
+        }
+
+        if (hLeave) {
+            try {
+                await pool.query(
+                    `UPDATE character_homunculus SET is_summoned = false, hp_current = $2, sp_current = $3,
+                     experience = $4, intimacy = $5, hunger = $6, level = $7,
+                     hp_max = $8, sp_max = $9, str = $10, agi = $11, vit = $12, int_stat = $13, dex = $14, luk = $15,
+                     skill_1_level = $16, skill_2_level = $17, skill_3_level = $18, skill_points = $19,
+                     updated_at = NOW()
+                     WHERE character_id = $1`,
+                    [charId, hLeave.hpCurrent, hLeave.spCurrent, hLeave.experience, hLeave.intimacy, hLeave.hunger,
+                     hLeave.level, hLeave.hpMax, hLeave.spMax, hLeave.str, hLeave.agi, hLeave.vit, hLeave.int_stat, hLeave.dex, hLeave.luk,
+                     hLeave.skill1Level, hLeave.skill2Level, hLeave.skill3Level, hLeave.skillPoints]
+                );
+            } catch (err) { logger.error(`[HOMUNCULUS] Leave save error:`, err.message); }
+        }
+
+        if (petLeave) {
+            try {
+                await pool.query('UPDATE character_pets SET hunger = $1, intimacy = $2, is_active = FALSE WHERE id = $3',
+                    [petLeave.hunger, petLeave.intimacy, petLeave.petId]);
+            } catch (err) { logger.error(`[PET] Leave save error:`, err.message); }
+        }
+
+        if (player.plagiarizedSkill) {
+            try {
+                await pool.query('UPDATE characters SET plagiarized_skill_id = $1, plagiarized_skill_level = $2 WHERE character_id = $3',
+                    [player.plagiarizedSkill.skillId, player.plagiarizedSkill.usableLevel, charId]);
+            } catch (err) { logger.error(`[PLAGIARISM] Leave save error:`, err.message); }
+        }
+
+        logger.info(`[LEAVE] Character ${charId} DB persistence complete`);
+    });
+
     // Disconnect
     socket.on('disconnect', async () => {
         logger.info(`[RECV] disconnect from ${socket.id}`);
@@ -7484,6 +8813,11 @@ io.on('connection', (socket) => {
                     }
                 }
 
+                // Close storage on disconnect
+                if (player.isStorageOpen) {
+                    player.isStorageOpen = false;
+                }
+
                 // Close vending shop on disconnect
                 if (player.isVending && player.vendingShop) {
                     try {
@@ -7493,6 +8827,22 @@ io.on('connection', (socket) => {
                     broadcastToZone(player.zone || 'prontera_south', 'vending:shop_closed', { characterId: charId, shopId: player.vendingShop.shopId });
                     player.isVending = false;
                     player.vendingShop = null;
+                }
+
+                // Cancel active trade on disconnect
+                if (player.isTrading) {
+                    cancelTrade(charId, 'Player disconnected.');
+                }
+                // Clean up pending trade requests
+                for (const [targetId, req] of pendingTradeRequests.entries()) {
+                    if (req.requesterId === charId) {
+                        clearTimeout(req.timer);
+                        pendingTradeRequests.delete(targetId);
+                    }
+                }
+                if (pendingTradeRequests.has(charId)) {
+                    clearTimeout(pendingTradeRequests.get(charId).timer);
+                    pendingTradeRequests.delete(charId);
                 }
 
                 // Save health/mana to DB on disconnect
@@ -7979,6 +9329,9 @@ io.on('connection', (socket) => {
                 const prt = activeParties.get(player.partyId);
                 if (prt) { const mem = prt.members.get(characterId); if (mem) mem.map = saveMap; }
                 broadcastToParty(player.partyId, 'party:member_update', { characterId, map: saveMap });
+                broadcastToParty(player.partyId, 'map:party_positions', {
+                    members: [{ characterId, characterName: player.characterName, map: saveMap, x: saveX, y: saveY, z: saveZ }]
+                });
             }
             await pool.query('UPDATE characters SET zone_name = $1 WHERE character_id = $2', [saveMap, characterId]);
 
@@ -9344,6 +10697,15 @@ io.on('connection', (socket) => {
         if (player.isVending) {
             socket.emit('skill:error', { message: 'Cannot use skills while vending' });
             return;
+        }
+
+        // RO Classic: water-element skills require standing in water
+        // Aqua Benedicta (413) and Water Ball (412) need shallow water
+        if (skillId === 413 || skillId === 412) {
+            if (!player.inWater) {
+                socket.emit('skill:error', { message: 'Must be standing in water to use this skill' });
+                return;
+            }
         }
 
         // Check CC (cannot cast while frozen, stoned, stunned, sleeping, silenced)
@@ -12109,6 +13471,9 @@ io.on('connection', (socket) => {
                                     const tpParty = activeParties.get(player.partyId);
                                     if (tpParty) { const tpMem = tpParty.members.get(characterId); if (tpMem) tpMem.map = destZoneName; }
                                     broadcastToParty(player.partyId, 'party:member_update', { characterId, map: destZoneName });
+                                    broadcastToParty(player.partyId, 'map:party_positions', {
+                                        members: [{ characterId, characterName: player.characterName, map: destZoneName, x: destX, y: destY, z: destZ }]
+                                    });
                                 }
 
                                 logger.info(`[TELEPORT] ${player.characterName} Lv2 cross-zone: ${oldZone} → ${destZoneName}`);
@@ -22422,6 +23787,7 @@ io.on('connection', (socket) => {
         if (!playerInfo) return;
 
         const { characterId, player } = playerInfo;
+        if (player.isTrading) return socket.emit('inventory:error', { message: 'Cannot do this while trading.' });
 
         // RO Classic: cannot use items while under OPT1 statuses or NoConsumeItem statuses
         // rAthena pc_useitem: OPT1 block (Stone/Freeze/Stun/Sleep) except StoneWait(Petrifying) and Burning
@@ -22543,6 +23909,8 @@ io.on('connection', (socket) => {
                     const destLevelName = destZoneData ? destZoneData.levelName : 'L_PrtSouth';
                     const destDisplayName = destZoneData ? destZoneData.displayName : saveMap;
 
+                    // Cancel active trade on Butterfly Wing zone change
+                    if (player.isTrading) cancelTrade(characterId, 'Player changed zones.');
                     // Cancel combat
                     if (player.autoAttackTarget) {
                         player.autoAttackTarget = null;
@@ -22560,6 +23928,9 @@ io.on('connection', (socket) => {
                         const prt = activeParties.get(player.partyId);
                         if (prt) { const mem = prt.members.get(characterId); if (mem) mem.map = saveMap; }
                         broadcastToParty(player.partyId, 'party:member_update', { characterId, map: saveMap });
+                        broadcastToParty(player.partyId, 'map:party_positions', {
+                            members: [{ characterId, characterName: player.characterName, map: saveMap, x: saveX, y: saveY, z: saveZ }]
+                        });
                     }
                     // Save to DB
                     await pool.query(
@@ -22942,8 +24313,9 @@ io.on('connection', (socket) => {
         logger.info(`[RECV] inventory:equip from ${socket.id}: ${JSON.stringify(data)}`);
         const playerInfo = findPlayerBySocketId(socket.id);
         if (!playerInfo) return;
-        
+
         const { characterId, player } = playerInfo;
+        if (player.isTrading) return socket.emit('inventory:error', { message: 'Cannot do this while trading.' });
         const inventoryId = parseInt(data.inventoryId);
         // Handle both boolean false and string "false" from Blueprint's string field emission
         const equip = data.equip === true || data.equip === 'true';
@@ -23754,8 +25126,9 @@ io.on('connection', (socket) => {
         logger.info(`[RECV] inventory:drop from ${socket.id}: ${JSON.stringify(data)}`);
         const playerInfo = findPlayerBySocketId(socket.id);
         if (!playerInfo) return;
-        
+
         const { characterId, player } = playerInfo;
+        if (player.isTrading) return socket.emit('inventory:error', { message: 'Cannot do this while trading.' });
         const inventoryId = parseInt(data.inventoryId);
         const quantity = parseInt(data.quantity) || null; // null = drop all
         
@@ -23969,6 +25342,167 @@ io.on('connection', (socket) => {
         } catch (err) {
             logger.error(`[ITEMS] Merge error: ${err.message}`);
             socket.emit('inventory:error', { message: 'Failed to merge items' });
+        }
+    });
+
+    socket.on('inventory:split', async (data) => {
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { characterId, player } = playerInfo;
+        const { inventoryId, quantity } = data || {};
+        if (!inventoryId || !quantity || quantity < 1) return socket.emit('inventory:error', { message: 'Invalid split request' });
+
+        try {
+            // Lock the source item
+            const result = await pool.query(
+                'SELECT * FROM character_inventory WHERE inventory_id = $1 AND character_id = $2 FOR UPDATE',
+                [inventoryId, characterId]
+            );
+            if (result.rows.length === 0) return socket.emit('inventory:error', { message: 'Item not found' });
+            const item = result.rows[0];
+            if (quantity >= item.quantity) return socket.emit('inventory:error', { message: 'Cannot split entire stack' });
+            if (item.is_equipped) return socket.emit('inventory:error', { message: 'Cannot split equipped item' });
+
+            // Reduce source stack
+            await pool.query('UPDATE character_inventory SET quantity = quantity - $1 WHERE inventory_id = $2', [quantity, inventoryId]);
+
+            // Create new stack
+            const maxSlot = await pool.query('SELECT COALESCE(MAX(slot_index), -1) + 1 as next_slot FROM character_inventory WHERE character_id = $1', [characterId]);
+            await pool.query(
+                `INSERT INTO character_inventory (character_id, item_id, quantity, slot_index, identified, refine_level, compounded_cards, forged_by, forged_element, forged_star_crumbs)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+                [characterId, item.item_id, quantity, maxSlot.rows[0].next_slot,
+                 item.identified !== false, item.refine_level || 0, JSON.stringify(item.compounded_cards || []),
+                 item.forged_by, item.forged_element, item.forged_star_crumbs || 0]
+            );
+
+            // Refresh inventory
+            const freshInv = await getPlayerInventory(characterId);
+            socket.emit('inventory:data', { items: freshInv, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            logger.info(`[INVENTORY] ${player.characterName} split ${quantity} from inventory_id ${inventoryId}`);
+        } catch (err) {
+            logger.error(`[INVENTORY] split error: ${err.message}`);
+            socket.emit('inventory:error', { message: 'Split failed' });
+        }
+    });
+
+    socket.on('inventory:sort', async (data) => {
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { characterId, player } = playerInfo;
+        const sortBy = (data && data.sortBy) || 'type'; // 'type', 'name', 'weight'
+
+        try {
+            // Get all non-equipped items
+            const result = await pool.query(
+                `SELECT ci.inventory_id, ci.item_id, i.item_type, i.name, i.weight
+                 FROM character_inventory ci
+                 JOIN items i ON ci.item_id = i.item_id
+                 WHERE ci.character_id = $1 AND ci.is_equipped = false
+                 ORDER BY CASE
+                    WHEN $2 = 'type' THEN i.item_type
+                    WHEN $2 = 'name' THEN i.name
+                    ELSE i.item_type
+                 END ASC,
+                 CASE WHEN $2 = 'weight' THEN i.weight ELSE 0 END DESC,
+                 i.name ASC`,
+                [characterId, sortBy]
+            );
+
+            // Reassign slot_index in sorted order
+            for (let i = 0; i < result.rows.length; i++) {
+                await pool.query('UPDATE character_inventory SET slot_index = $1 WHERE inventory_id = $2', [i, result.rows[i].inventory_id]);
+            }
+
+            // Refresh inventory
+            const freshInv = await getPlayerInventory(characterId);
+            socket.emit('inventory:data', { items: freshInv, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            logger.info(`[INVENTORY] ${player.characterName} sorted inventory by ${sortBy}`);
+        } catch (err) {
+            logger.error(`[INVENTORY] sort error: ${err.message}`);
+            socket.emit('inventory:error', { message: 'Sort failed' });
+        }
+    });
+
+    socket.on('inventory:auto_stack', async () => {
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { characterId, player } = playerInfo;
+
+        try {
+            // Find stackable items with duplicates (same item_id, not equipped, identified)
+            const result = await pool.query(
+                `SELECT ci.inventory_id, ci.item_id, ci.quantity, ci.identified, i.stackable
+                 FROM character_inventory ci
+                 JOIN items i ON ci.item_id = i.item_id
+                 WHERE ci.character_id = $1 AND ci.is_equipped = false AND i.stackable = true
+                 ORDER BY ci.item_id, ci.inventory_id`,
+                [characterId]
+            );
+
+            // Group by item_id + identified state, merge extras into first
+            const groups = new Map();
+            for (const row of result.rows) {
+                const key = `${row.item_id}_${row.identified}`;
+                if (!groups.has(key)) groups.set(key, []);
+                groups.get(key).push(row);
+            }
+
+            let mergedCount = 0;
+            for (const [, items] of groups) {
+                if (items.length < 2) continue;
+                const primary = items[0];
+                let totalQty = primary.quantity;
+                for (let i = 1; i < items.length; i++) {
+                    totalQty += items[i].quantity;
+                    await pool.query('DELETE FROM character_inventory WHERE inventory_id = $1', [items[i].inventory_id]);
+                    mergedCount++;
+                }
+                await pool.query('UPDATE character_inventory SET quantity = $1 WHERE inventory_id = $2', [totalQty, primary.inventory_id]);
+            }
+
+            // Refresh inventory
+            const freshInv = await getPlayerInventory(characterId);
+            socket.emit('inventory:data', { items: freshInv, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            logger.info(`[INVENTORY] ${player.characterName} auto-stacked (merged ${mergedCount} duplicate stacks)`);
+        } catch (err) {
+            logger.error(`[INVENTORY] auto_stack error: ${err.message}`);
+            socket.emit('inventory:error', { message: 'Auto-stack failed' });
+        }
+    });
+
+    socket.on('storage:sort', async (data) => {
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { player } = playerInfo;
+        if (!player.isStorageOpen) return socket.emit('storage:error', { message: 'Storage is not open' });
+        const sortBy = (data && data.sortBy) || 'type';
+
+        try {
+            const result = await pool.query(
+                `SELECT s.storage_id, s.item_id, i.item_type, i.name, i.weight
+                 FROM account_storage s
+                 JOIN items i ON s.item_id = i.item_id
+                 WHERE s.user_id = $1
+                 ORDER BY CASE
+                    WHEN $2 = 'type' THEN i.item_type
+                    WHEN $2 = 'name' THEN i.name
+                    ELSE i.item_type
+                 END ASC,
+                 CASE WHEN $2 = 'weight' THEN i.weight ELSE 0 END DESC,
+                 i.name ASC`,
+                [player.userId, sortBy]
+            );
+
+            for (let i = 0; i < result.rows.length; i++) {
+                await pool.query('UPDATE account_storage SET slot_index = $1 WHERE storage_id = $2', [i, result.rows[i].storage_id]);
+            }
+
+            await sendStorageContents(socket, player.userId, false);
+            logger.info(`[STORAGE] ${player.characterName} sorted storage by ${sortBy}`);
+        } catch (err) {
+            logger.error(`[STORAGE] sort error: ${err.message}`);
+            socket.emit('storage:error', { message: 'Sort failed' });
         }
     });
 
@@ -32459,6 +33993,33 @@ server.listen(PORT, async () => {
     logger.warn(`[DB] Could not create cart/vending/identify schema: ${err.message}`);
   }
 
+  // Ensure account_storage table exists (Kafra Storage — account-shared, 300 slots)
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS account_storage (
+        storage_id SERIAL PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(user_id) ON DELETE CASCADE,
+        item_id INTEGER NOT NULL REFERENCES items(item_id),
+        quantity INTEGER NOT NULL DEFAULT 1,
+        slot_index INTEGER NOT NULL DEFAULT -1,
+        identified BOOLEAN NOT NULL DEFAULT true,
+        refine_level INTEGER NOT NULL DEFAULT 0,
+        compounded_cards JSONB DEFAULT '[]',
+        forged_by VARCHAR(50) DEFAULT NULL,
+        forged_element VARCHAR(10) DEFAULT NULL,
+        forged_star_crumbs INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (user_id, slot_index)
+      )
+    `);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_storage_user ON account_storage(user_id)`);
+    // Fix: ensure compounded_cards is JSONB (was TEXT in initial version)
+    await pool.query(`ALTER TABLE account_storage ALTER COLUMN compounded_cards TYPE JSONB USING compounded_cards::jsonb`);
+    logger.info('[DB] account_storage table verified/created');
+  } catch (err) {
+    logger.warn(`[DB] Could not create account_storage table: ${err.message}`);
+  }
+
   // Ensure homunculus table exists (Phase 6B + Phase G3 evolution)
   try {
     await pool.query(`
@@ -32870,6 +34431,36 @@ server.listen(PORT, async () => {
     logger.info('[DB] Memo table verified/created');
   } catch (err) {
     logger.warn(`[DB] Memo table issue: ${err.message}`);
+  }
+
+  // Ensure trade_logs table exists
+  try {
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS trade_logs (
+            trade_id SERIAL PRIMARY KEY,
+            player_a_id INTEGER NOT NULL,
+            player_b_id INTEGER NOT NULL,
+            items_a_gave JSONB NOT NULL DEFAULT '[]',
+            items_b_gave JSONB NOT NULL DEFAULT '[]',
+            zeny_a_gave BIGINT NOT NULL DEFAULT 0,
+            zeny_b_gave BIGINT NOT NULL DEFAULT 0,
+            zone_name VARCHAR(50),
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    `);
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_trade_log_a ON trade_logs(player_a_id)');
+    await pool.query('CREATE INDEX IF NOT EXISTS idx_trade_log_b ON trade_logs(player_b_id)');
+    logger.info('[DB] trade_logs table verified/created');
+  } catch (err) {
+    logger.warn(`[DB] trade_logs creation issue: ${err.message}`);
+  }
+
+  // Ensure trade_flag column exists on items table
+  try {
+    await pool.query(`ALTER TABLE items ADD COLUMN IF NOT EXISTS trade_flag INTEGER NOT NULL DEFAULT 0`);
+    logger.info('[DB] items.trade_flag column verified/created');
+  } catch (err) {
+    logger.warn(`[DB] trade_flag column issue: ${err.message}`);
   }
 
   // Ensure Stone item (7049) exists — required by Pick Stone / Throw Stone skills

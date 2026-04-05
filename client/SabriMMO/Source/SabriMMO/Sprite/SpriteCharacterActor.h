@@ -8,6 +8,7 @@
 #include "SpriteCharacterActor.generated.h"
 
 class UMaterialInstanceDynamic;
+class UDecalComponent;
 
 /**
  * A single sprite layer (body, hair, weapon, etc.)
@@ -183,6 +184,10 @@ private:
 	TWeakObjectPtr<AActor> OwnerActor;
 
 public:
+	/** Blob shadow decal projected below the sprite onto the ground */
+	UPROPERTY()
+	UDecalComponent* BlobShadow = nullptr;
+
 	/** Z offset to lower sprite from owner actor's location (set by EnemySubsystem for ground-snap) */
 	float GroundZOffset = 0.f;
 
