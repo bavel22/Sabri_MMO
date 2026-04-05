@@ -285,3 +285,35 @@ secrets/
 private/
 personal/
 local/
+
+# Binary assets (large, tracked separately)
+2D animations/sprites/
+2D animations/3d_models/
+2D animations/_archive/
+3d art/
+image Generation/
+troubleshootin pictures/
+_tools/3d_models/
+_tools/TRELLIS/
+_tools/ground_texture_output/
+_tools/concept_art/
+_tools/blend-ai/
+
+# Editor configs
+.obsidian/
+.claude/worktrees/
+
+# Temp / build artifacts
+_temp_*
+pipeline_v2_*.txt
+*.dump
+
+# Root package files (only server/package.json matters)
+/package.json
+/package-lock.json
+
+# Obsidian canvas
+*.canvas
+
+# Duplicate navmesh copy
+client/server/
