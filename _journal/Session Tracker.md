@@ -10,6 +10,9 @@ All Claude Code sessions with their resume IDs, organized by topic. Use `claude 
 
 | Date | Resume ID | Topic | Notes |
 |------|-----------|-------|-------|
+| 2026-04-03 | `"Storage"` | Kafra Storage — full implementation + QoL | Account-shared 300-slot storage, 10 socket handlers (6 storage + 4 inventory QoL), StorageSubsystem + SStorageWidget, split/sort/auto-stack/search, 40z Kafra fee, JSONB compounded_cards, 4 bugs fixed |
+| 2026-04-03 | `"sabrimmo-trading"` | Player-to-Player Trading — full implementation | TradeSession class, 9 socket handlers, two-step confirm (OK→Trade), 13 cancel paths, atomic transfer, trade_logs audit trail, /trade chat command, STradeWidget (Z=22), 4 bugs fixed |
+| 2026-04-02 | `"map system research and planning"` | Map system — minimap, world map, loading screen, Guide NPC | All 9 phases. MinimapSubsystem (134x134, 5 zoom, 3 opacity, draggable), SWorldMapWidget (12x8 grid, 62 zones), loading screen (Ken Burns, sparkles), Guide NPC marks, /where command, 5 socket events, ro_world_map_data.js. ~1429 lines, 6 new + 2 modified files. |
 | 2026-03-30 to 2026-04-01 | `"ground-texture-and-materials-system"` | Ground textures, materials, decals, grass | Commit `093056d`. 1000+ AI textures, 608 RO originals, 17 material versions, 2700+ variants, DBuffer decals (91 instances), Landscape Grass V3 (60 sprites, 13 zones), paintable grass layers. 3 new skills, 4 new docs, 80 new scripts. |
 | 2026-03-29 | — | Hair sprite layer + render pipeline overhaul | Commit `447edea`. Hair layer (9-color tinting, hides_hair, 5 visibility bugs fixed, parallax fix 0.3→0.01). New render standard: render_blend_all_visible.py + .blend scenes + --cel-shadow 0.92 --cel-mid 0.98. Re-rendered merchant_f/swordsman_f/knight_f/archer_f/novice_f + female bow + hair atlases. Fixed 8 missing server broadcast locations for hair data. |
 | 2026-03-27 | `"enemy server and client navmesh pathfinding"` | NavMesh pathfinding | Server-side recast-navigation v0.42.1, OBJ export from UE5, coordinate conversion, de-aggro system, all enemy movement patched |
@@ -19,9 +22,6 @@ All Claude Code sessions with their resume IDs, organized by topic. Use `claude 
 | 2026-03-26 | `"female archer animations"` | Archer + bow sprites | Archer_f body 1136 sprites + bow weapon overlay 1136 sprites, global depth ordering fix |
 | 2026-03-26 | `"Skeleton Sprite Animations"` | Skeleton enemy sprite | First humanoid monster sprite, Mixamo-rigged, pure C++ actor (no BP_EnemyCharacter) |
 | 2026-03-26 | `"poring sprite animations"` | Poring enemy sprite | First blob monster, shape key anims via render_monster.py, --model-rotation -90 |
-| `"enemy server and client navmesh pathfinding"` | NavMesh pathfinding | Server-side recast-navigation, OBJ export, coordinate conversion, de-aggro |
-| `"Headgear Sprite System"` | Headgear sprite layer | HeadgearTop, holdout occlusion, always_front, multi-slot blocking, Egg Shell Hat |
-| `"hair-sprite-layer-system"` | Hair sprite layer | ESpriteLayer::Hair, 9-color tinting, hides_hair, parallax fix, render pipeline overhaul |
 | 2026-03-26 | — | NavMesh pathfinding plan | Full plan + implementation prompt. Server-side recast-navigation, client unchanged |
 | 2026-03-25 | `"sprite weapon layering system"` | Weapon sprite overlay | SOLVED: dual-pass render + 5 C++ fixes + depth ordering + remote sync. 11 files, +6167 lines |
 | 2026-03-25 | `"swordsman and state dependent sprite atlases"` | Swordsman cleanup + mage pack | Simplified 19→14 anims, packed mage_f atlases, validated in UE5 |
@@ -139,6 +139,25 @@ All Claude Code sessions with their resume IDs, organized by topic. Use `claude 
 | `"female archer animations"` | Archer + bow weapon sprites | Archer_f 1136 + bow 1136 sprites, global depth ordering, depth offset 5.0 |
 | `"Skeleton Sprite Animations"` | Skeleton enemy sprite | First humanoid monster, Mixamo rig, pure C++ sprite actor |
 | `"poring sprite animations"` | Poring enemy sprite | First blob monster, shape key anims, render_monster.py, --model-rotation -90 |
+
+## Map System
+
+| Resume ID | Topic | Notes |
+|-----------|-------|-------|
+| `"map system research and planning"` | Complete map system (9 phases) | Minimap (134x134, SceneCapture, 5 zoom, draggable), World Map (12x8 grid, 62 zones), Loading Screen (Ken Burns, sparkles, progress bar), Guide NPC marks, /where command, preferences persistence. 6 new files, 5 socket events, ~1429 lines |
+
+## Economy Systems
+
+| Resume ID | Topic | Notes |
+|-----------|-------|-------|
+| `"Storage"` | Kafra Storage (account-shared) | 10 socket handlers, StorageSubsystem + SStorageWidget, split/sort/auto-stack/search QoL, 40z fee, JSONB, 4 bugs fixed |
+| `"sabrimmo-trading"` | Player-to-Player Trading | 9 socket handlers, TradeSession class, two-step confirm, 13 cancel paths, atomic transfer, trade_logs, /trade command, 4 bugs fixed |
+
+## 3D World Building
+
+| Resume ID | Topic | Notes |
+|-----------|-------|-------|
+| `"ground-texture-and-materials-system"` | Ground textures + materials + decals + grass | 3-day session (3/30-4/01). 1000+ AI textures, 608 RO originals, 17 material versions, 2700+ variants, DBuffer decals (91), Landscape Grass V3 (60 sprites, 13 zones), 80+ scripts, 3 new skills, 5 _meta guides |
 
 ## Code Audits
 

@@ -52,11 +52,11 @@ taskkill /F /IM node.exe
 3. Rebuild from Visual Studio or re-open UE5 (triggers rebuild)
 
 ### Socket.io events not firing
-1. Check `BP_SocketManager` is spawned in the level
-2. Verify event binding uses `Bind Event to Function` node
-3. Verify function parameter is named exactly `Data` (String type)
-4. Check server logs for `[RECV]` / `[SEND]` messages
-5. Add Print String nodes before and after each binding for debugging
+1. Verify `GI->IsSocketConnected()` returns true (socket lives on GameInstance, not in level actors)
+2. Check `USocketEventRouter` handler registration in the relevant subsystem's `OnWorldBeginPlay`
+3. Check server logs for `[RECV]` / `[SEND]` messages
+4. Add `UE_LOG` in the subsystem's event handler to confirm it fires
+5. Verify the subsystem's `ShouldCreateSubsystem()` returns true for the current world
 
 ### Duplicate character spawning (one at origin, one controlled)
 **Symptom**: Two BP_MMOCharacter instances - one stuck at (0,0,0) and one you can control  
@@ -64,10 +64,10 @@ taskkill /F /IM node.exe
 **Fix**: Set `Default Pawn Class` to `None` in your Game Mode settings. This prevents the automatic spawn at origin, allowing only your custom character spawning logic to create the playable character.
 
 ### Remote players not appearing
-1. Check `BP_OtherPlayerManager` is spawned in the level
-2. Verify `player:moved` event is being received (print in handler)
-3. Check that `SpawnOrUpdatePlayer` function is being called
-4. Verify spawn class reference is set in BP_OtherPlayerManager Details panel
+1. Verify `UOtherPlayerSubsystem` is active (check Output Log for registration messages)
+2. Verify `player:moved` event is being received by the EventRouter
+3. Check that `BP_OtherPlayerCharacter` spawn class exists in Content Browser
+4. Verify the player is in the same zone on the server
 
 ### Click-to-move not working
 1. Check NavMesh is built (press P in editor to visualize)
@@ -120,6 +120,24 @@ Client needs to bind BOTH `combat:auto_attack_stopped` AND `combat:target_lost` 
 ### Enemy walking to world origin on spawn
 `enemy:spawn` handler must use `x/y/z` from the event payload as the Spawn Transform location. Do NOT spawn at (0,0,0) then move.
 
+### Crash on Butterfly Wing / zone transition (EXCEPTION_ACCESS_VIOLATION in TSparseArray::DestroyElements)
+**Symptom**: `EXCEPTION_ACCESS_VIOLATION reading address 0x0000001900000018` in `TSparseArray::DestroyElements()` called from a subsystem's `TMap::Empty()` during zone transition (Butterfly Wing, warp portal, etc.)
+**Root Cause**: `SetTimerForNextTick([this]() { ... })` captures `this` as a raw pointer. During zone transition, the subsystem is destroyed (`Deinitialize` + destructor free TMap memory), but the next-tick timer still fires on the dangling pointer.
+**Fix**: Use `TWeakObjectPtr<UMySubsystem>` in the lambda capture, store the `FTimerHandle`, and clear it in `Deinitialize()`:
+```cpp
+// In event handler:
+TWeakObjectPtr<UMySubsystem> WeakThis(this);
+RefreshTimerHandle = World->GetTimerManager().SetTimerForNextTick([WeakThis]()
+{
+    if (UMySubsystem* Self = WeakThis.Get())
+        Self->DoWork();
+});
+
+// In Deinitialize():
+World->GetTimerManager().ClearTimer(RefreshTimerHandle);
+```
+**Fixed in**: EquipmentSubsystem (2026-03-15). All subsystems using `SetTimerForNextTick` should follow this pattern.
+
 ### Player crash on enemy kill (EXCEPTION_ACCESS_VIOLATION)
 Server sends `enemy:death` broadcast only — does NOT also send `combat:target_lost`. Sending both events causes Blueprint to null the enemy reference (via target_lost) before enemy:death tries to access it.
 
@@ -164,4 +182,76 @@ Use `attackerX/Y/Z` and `targetX/Y/Z` from `combat:damage` payload. Call `FindLo
 
 ---
 
-**Last Updated**: 2026-02-17
+## Recent Bug Fixes
+
+### Back Slide doesn't move character
+**Symptom**: Casting Back Slide does nothing — character stays in place.
+**Root Cause**: Two bugs:
+1. **Server**: `getPlayerPosition()` read from Redis which could return null, silently skipping the teleport.
+2. **Client**: `HandlePlayerTeleport` in `ZoneTransitionSubsystem.cpp` didn't cancel active pathfinding before `SetActorLocation`, so `SimpleMoveToLocation` pathfollowing dragged the pawn back to its previous destination.
+
+**Fix**:
+1. Server: Use in-memory `player.lastX/lastY/lastZ` instead of Redis lookup.
+2. Client: Added `ForceStopAllMovement()` to `PlayerInputSubsystem`, called before teleport.
+
+### Server crash on login (charRow not defined)
+**Symptom**: Server crashes with `ReferenceError: charRow is not defined` during `player:join`.
+**Root Cause**: Cart state initialization referenced `charRow.has_cart` but the variable was `row`, scoped inside an if block and not visible at the cart init code.
+**Fix**: Added `has_cart`/`cart_type` to the SELECT query and extracted values to outer-scope variables `dbHasCart`/`dbCartType`.
+
+### Server crash on death (calculateASPD not defined)
+**Symptom**: Server crashes with `ReferenceError: calculateASPD is not defined` when a player dies.
+**Root Cause**: `applyDeathPenalty` called `calculateASPD(player)` and `calculateDerivedStats()` which don't exist as standalone functions.
+**Fix**: Use `roDerivedStats(effStats)` + `Math.min(COMBAT.ASPD_CAP, derived.aspd + weaponAspdMod)`.
+
+### Death penalty EXP not persisting
+**Symptom**: Player dies and loses EXP, but after relog the EXP is restored to the pre-death value.
+**Root Cause**: DB query used `WHERE id = $3` but the column is `character_id`.
+**Fix**: Changed to `WHERE character_id = $3`.
+
+### Poison DoT stops at 25% HP
+**Symptom**: Poison damage-over-time stops draining HP once the player reaches 25% HP.
+**Root Cause**: `ro_status_effects.js` poison config had `minHpPercent: 0.25`. In RO Classic, poison drains HP all the way down to 1 HP.
+**Fix**: Removed `minHpPercent` from poison config. The DoT now falls through to the default `minHp = 1` floor via `canKill: false`.
+
+### Warp Portal Lv1 shows all memo destinations
+**Symptom**: Casting Warp Portal at Lv1 (should only offer "Random" destination) shows all memorized destinations as if cast at max level.
+**Root Cause**: Cast completion callback didn't pass `skillLevel`, so after cast time the skill handler used the max learned level instead of the selected level.
+**Fix**: Cast completion now includes `skillLevel: cast.learnedLevel` in callback data.
+
+### Teleport Lv2 doesn't teleport to save point
+**Symptom**: Teleport Lv2 (should warp to save point) does nothing or behaves like Lv1.
+**Root Cause**: Two bugs:
+1. Column name `save_zone` doesn't exist — correct column is `save_map`.
+2. Cross-zone teleport only emitted `zone:change` without updating server state (zone rooms, player.zone, enemy aggro).
+
+**Fix**: Full zone transition matching Kafra/Warp Portal pattern (leave old zone room, join new, update `player.zone`, deaggro enemies, emit `zone:change`).
+
+### UseSkillOnGround doesn't send skill level
+**Symptom**: Ground-targeted skills (Warp Portal, Pneuma) always cast at max learned level regardless of which hotbar level was selected.
+**Root Cause**: `UseSkillOnGround` didn't accept or send `skillLevel` — the parameter was missing from the function signature and all call sites.
+**Fix**: Added `skillLevel` parameter to `UseSkillOnGround` and all call sites (hotbar, PlayerInputSubsystem).
+
+### Enemy debuffs not shown in combat log
+**Symptom**: Casting a debuff on an enemy (e.g., Quagmire, Decrease AGI) produces no combat log message.
+**Root Cause**: `HandleBuffApplied` in `ChatSubsystem` returned early for all enemy targets (`if (bIsEnemy) return`), suppressing all enemy debuff messages.
+**Fix**: Now shows "X is affected by Y (Zs)" when the local player casts a debuff on an enemy.
+
+### Increase AGI doesn't increase move speed
+**Symptom**: Casting Increase AGI on a player doesn't visibly increase their movement speed, even though AGI goes up.
+**Root Cause**: `moveSpeed` calculation in `buildFullStatsPayload` used `effectiveStats.moveSpeedBonus` which was always 0 (not populated by `getEffectiveStats`).
+**Fix**: Reads `moveSpeedBonus` from `getCombinedModifiers(player)` directly.
+
+### Cannot cast buffs on other players (PvP disabled)
+**Symptom**: Casting Heal, Blessing, Increase AGI, or other supportive skills on another player does nothing when `PVP_ENABLED=false`.
+**Root Cause**: The `skill:use` handler blocked ALL skills targeting other players when PvP was disabled, with no exception for supportive skills.
+**Fix**: Added a `SUPPORTIVE_SKILLS` whitelist set containing heal, blessing, increase_agi, cure, resurrection, and 14 other supportive skills that bypass the PvP check. Offensive skills remain blocked when PvP is disabled.
+
+### Angelus DEF not reflected in stat window
+**Symptom**: Casting Angelus shows the buff icon but the stat window DEF value doesn't change.
+**Root Cause**: `softDEF` in `buildFullStatsPayload` only applied `buffDefMultiplier`, not the Angelus `defPercent` modifier.
+**Fix**: Now multiplies by `(1 + defPercent/100)`.
+
+---
+
+**Last Updated**: 2026-03-19

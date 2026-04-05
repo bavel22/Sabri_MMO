@@ -1,5 +1,7 @@
 # Global Rules — Sabri_MMO (UE5.7 + Node.js MMO)
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Project Overview](../00_Project_Overview.md) | [System_Architecture](../01_Architecture/System_Architecture.md)
+
 **Role**: Senior Unreal Engine 5 Multiplayer Game Developer & Full-Stack MMO Engineer
 **Goal**: 100% correctness. Verify every change. Never guess. Server-authoritative always.
 
@@ -22,24 +24,196 @@
 ---
 ## SKILL INVOCATION (Mandatory)
 -   **When**: At request START, BEFORE any action.
--   **Minimum**: 1-3 skills per request.
+-   **Minimum**: 1-3 skills per request. For game system tasks, prefer MORE skills over fewer.
 -   **How**: `skill(SkillName="name")`
+-   **Rule**: When uncertain if a skill is needed — **LOAD IT**. A false positive (extra context) is far cheaper than missing context and implementing incorrectly. If two skills might overlap, load BOTH.
 
-| Task Type | Primary Skill | Secondary | When |
-|-----------|---------------|-----------|------|
-| **Bug/Error** | `debugger` | `tester` | Any crash, logic error, failed connection |
-| **UE5 Blueprint/Widget** | `ui-architect` | `project-docs` | UMG widgets, Blueprint event graphs, UI flow |
-| **Server/API/Database** | `full-stack` | `security` | index.js changes, DB schema, REST endpoints |
-| **Socket.io/Multiplayer** | `realtime` | `performance` | Position sync, combat events, chat, interpolation |
-| **Combat/Stats/AI** | `agent-architect` | `full-stack` | Enemy AI, stat formulas, RO-style game systems |
-| **Performance** | `performance` | `debugger` | Tick rate, caching, query optimization, FPS |
-| **Security** | `security` | `full-stack` | JWT, anti-cheat, input validation, server authority |
-| **Planning** | `planner` | `docs` | Development phases, feature roadmap, architecture (docs in `docsNew/`) |
-| **Research** | `deep-research` | `planner` | UE5 API questions, best practices, new tech |
-| **Refactor/Release** | `code-quality` | `docs` | C++ cleanup, JS refactor, pre-release audit |
-| **Documentation** | `docs` | `project-docs` | Updating `docsNew/`, README, changelog |
-| **Complex Reasoning** | `opus-45-thinking` | `debugger` | Multi-system architecture, difficult bugs |
-| **Prompts/Skills** | `prompt-engineer` | `docs` | Creating new skills, rules, workflows |
+### Utility & Infrastructure Skills
+
+| Trigger Keywords | Skill(s) |
+|-----------------|----------|
+| Crash, error, bug, exception, null, NaN, not working, fails, broken, undefined, access violation | `debugger` (+ `tester` if verification needed) |
+| UE5 Blueprint, Widget, WBP_, UMG, event graph, BP_, Details panel | `ui-architect` + `project-docs` |
+| index.js, server code, REST, API, Express, endpoint, DB, SQL, migration, query, column, table, PostgreSQL | `full-stack` (+ `security` if auth/validation) |
+| Socket.io, socket event, emit, broadcast, position sync, multiplayer, real-time, tick loop, interpolation | `realtime` + `sabrimmo-persistent-socket` |
+| Persistent socket, EventRouter, RegisterHandler, UnregisterAllForOwner, K2_EmitSocketEvent, subsystem registration, ConnectSocket, IsSocketConnected, SocketEventRouter, BP bridge | `sabrimmo-persistent-socket` + `realtime` |
+| FPS, lag, optimization, tick rate, caching, bandwidth, profiling, memory, frame drop, slow | `performance` |
+| JWT, auth, token, anti-cheat, exploit, injection, validation, rate limit, sanitize, XSS | `security` + `full-stack` |
+| Plan, roadmap, phase, feature design, architecture decision, development strategy | `planner` |
+| UE5 API question, best practice, how does X work, research topic | `deep-research` |
+| Refactor, cleanup, audit, code review, lint, rename, code quality, naming convention | `code-quality` |
+| Update docs, docsNew/, changelog, README, documentation | `docs` + `project-docs` |
+| Multi-system architecture, difficult analysis, complex tradeoff, deep reasoning | `opus-45-thinking` |
+| Prompt, skill definition, system prompt, agent instruction, workflow design | `prompt-engineer` |
+| Test, verify, Jest, unit test, integration test, validate | `test` or `tester` |
+| Build, compile, UBT, UnrealBuildTool, Live Coding, linker error, compilation error, DLL | `sabrimmo-build-compile` |
+| Art, model, mesh, hair, animation, texture, LOD, costume, skeletal mesh, character appearance, sprite, outfit | `sabrimmo-art` (+ `sabrimmo-ui` if character customization UI) |
+| Audio, BGM, SFX, music, sound, MetaSounds, Sound Class, zone music, ambient, background music | `sabrimmo-audio` (+ `sabrimmo-zone` if per-zone music) |
+| Icon, skill icon, generate icon, Stable Diffusion, icon art, pixel art icon | `sabrimmo-generate-icons` |
+
+### Game System Skills (sabrimmo-*)
+
+| Trigger Keywords | Skill(s) | Always Co-Load |
+|-----------------|----------|-----------------|
+| **Combat/Damage**: ATK, MATK, DEF, MDEF, HIT, FLEE, ASPD, crit, damage formula, damage pipeline, auto-attack, combat tick, element modifier, size penalty, race modifier, forceHit, ignoreDefense, melee, ranged, MISC, ro_damage_formulas, getAttackerInfo, combat:damage, physical/magical damage, weapon element, dual wield hit, damage reduction, knockback | `sabrimmo-combat` | + `sabrimmo-skills` if skill damage; + `sabrimmo-buff`/`sabrimmo-debuff` if status effects |
+| **Stats/Leveling**: STR, AGI, VIT, INT, DEX, LUK, base stat, derived stat, status ATK/MATK/DEF/MDEF/HIT/FLEE, level, base level, job level, EXP, experience, stat point, stat allocation, job class, job change, ro_exp_tables, level up, class change, HP formula, SP formula, transcendent, rebirth | `sabrimmo-stats` | + `sabrimmo-combat` if damage formulas |
+| **Skills (General)**: skill tree, cast time, cooldown, ACD, after cast delay, SP cost, skill level, skill point, prerequisite, targetType, ro_skill_data, ro_skill_data_2nd, skill handler, skill:use, skill:cast, SKILL_CATALYSTS, gem requirement, catalyst, executeCastComplete, skill:cast_start, skill:cast_end, skill reset | `sabrimmo-skills` | + class-specific skill if specific skill names mentioned |
+| **Buffs**: buff, buff bar, stat modifier, stat bonus, positive status, buff icon, buff duration, buff stacking, applyBuff, removeBuff, HasBuff, buffs:update, ro_buff_system, clearBuffsOnDeath, BUFFS_SURVIVE_DEATH, buff cancel, buff expiry, buff persist | `sabrimmo-buff` | + `sabrimmo-debuff` **ALWAYS** (shared status system) |
+| **Debuffs/Status Effects**: debuff, status effect, stun, freeze, stone curse, petrify, petrification, blind, silence, sleep, curse, poison (status), bleeding, confusion, hallucination, burning, coma, CC, crowd control, disable, immobilize, root, ankle_snare, strip, break, weapon break, armor break, helm break, shield break, divest, applyStatusEffect, removeStatusEffect, status resistance, status immunity, boss immune, ro_status_effects, DoT, periodic damage, damage-break | `sabrimmo-debuff` | + `sabrimmo-buff` **ALWAYS** (shared status system) |
+| **Items/Equipment**: item, equipment, equip, unequip, weapon, armor, shield, garment, shoes, accessory, headgear, inventory, drop, loot, item type, weapon type, weapon level, slot, ro_item_mapping, ro_item_effects, ro_item_groups, getPlayerInventory, equip slot, equip position, item description, identified, unidentified, InventorySubsystem, EquipmentSubsystem, FInventoryItem, inventory:update, inventory:equipment_update, addFullItemToInventory | `sabrimmo-items` | + `sabrimmo-weight` if weight/carry; + `sabrimmo-cards` if card/slot; + `sabrimmo-refine` if refine/upgrade; + `sabrimmo-economy` if buy/sell/trade |
+| **Weight**: weight, overweight, weight limit, weight threshold, 50%/90%/100% weight, regen block, attack block, skill block, weight:status, cachedWeight, carry capacity, Enlarge Weight Limit, getWeightRatio, STR*30 | `sabrimmo-weight` | + `sabrimmo-items` |
+| **Refine/Upgrade**: refine, upgrade, overupgrade, safe limit, refine ATK, refine DEF, weapon refine, armor refine, Oridecon, Elunium, Phracon, Emveretarcon, refine:request, +2/+3/+5/+7, refine rate, REFINE_EXCLUDE_SKILLS, overrefine, Shield Boomerang refine | `sabrimmo-refine` | + `sabrimmo-items` + `sabrimmo-combat` |
+| **Cards**: card, compound, card bonus, card slot, card effect, card prefix, card suffix, card naming, cardMods, cardModsRight, cardModsLeft, offensive card, defensive card, armor element card, card drain, card autocast, card status proc, autobonus, SCardCompoundPopup, ro_card_effects, ro_card_prefix_suffix, rebuildCardBonuses, processCard, card:compound, GetDisplayName | `sabrimmo-cards` | + `sabrimmo-items` + `sabrimmo-combat` |
+| **Ammunition**: arrow, ammo, ammunition, quiver, bow damage, ranged element, equippedAmmo, recalcEffectiveWeaponElement, arrow ATK, arrow element, arrow consumption, status arrow, Arrow Dealer, bullet, projectile ammo, ammo slot | `sabrimmo-ammunition` | + `sabrimmo-items` + `sabrimmo-combat` |
+| **Zones/Maps**: zone, map, level, warp, warp portal, zone transition, zone:change, zone:teleport, ZoneTransitionSubsystem, ro_zone_data, spawn point, zone boundary, OpenLevel, loading screen, zone entry, zone exit, map flag, noteleport, noreturn, town, indoor, zone registry | `sabrimmo-zone` | + `sabrimmo-npcs` if NPCs in zone; + `sabrimmo-audio` if zone music |
+| **NPCs/Shops**: NPC, quest, NPC shop, Kafra, tool dealer, weapon dealer, armor dealer, job change NPC, dialogue, conversation, quest giver, quest reward, NPC interaction, NPC spawn, shop:open, shop:buy, shop:sell, ShopSubsystem, SShopWidget, KafraSubsystem, KafraNPC, healer NPC, guide NPC, refine NPC | `sabrimmo-npcs` | + `sabrimmo-economy` if buying/selling; + `sabrimmo-zone` if placement; + `sabrimmo-click-interact` if click setup |
+| **Party**: party, party member, party leader, Even Share, EXP share, party chat, % prefix, party invite, party kick, party leave, party dissolve, party HP sync, party:update, partyId, distributePartyEXP, PartySubsystem, SPartyWidget, FPartyMember, party:member_joined, party:dissolved, party:invite_received, tap bonus | `sabrimmo-party` | + `sabrimmo-chat` if party chat; + `sabrimmo-stats` if EXP sharing; + `sabrimmo-skill-crusader` if Devotion party check |
+| **Guild**: guild, Emperium, guild level, guild rank, guild skill, guild storage, alliance, guild tax, guild emblem, guild master, guild castle, create guild, guild member, guild chat, guild position, guild permission | `sabrimmo-guild` | + `sabrimmo-pvp-woe` if WoE/castle/siege; + `sabrimmo-economy` if guild storage/tax; + `sabrimmo-chat` if guild chat |
+| **PvP/WoE**: PvP, GvG, WoE, War of Emperium, castle siege, battleground, PK, player kill, duel, arena, Emperium break, siege, guardian NPC | `sabrimmo-pvp-woe` | + `sabrimmo-guild` + `sabrimmo-combat` |
+| **Economy/Trading**: zeny, gold, money, trade, trading, vend, vending, buy, sell, storage, Kafra storage, mail, auction, buying store, price, discount, overcharge, vending:start, vending:browse, vending:buy, vending shop, merchant shop, anti-duplication, ground drops | `sabrimmo-economy` | + `sabrimmo-items`; + `sabrimmo-npcs` if NPC shop; + `sabrimmo-skill-merchant` if Merchant skills |
+| **Pets**: pet, taming, pet food, intimacy (pet), hunger (pet), pet egg, pet accessory, pet loyalty, companion | `sabrimmo-companions` | + `sabrimmo-items` if pet items |
+| **Homunculus**: homunculus, Lif, Amistr, Filir, Vanilmirth, Embryo, homunculus:feed, homunculus:command, ro_homunculus_data, character_homunculus, homunculus evolve, homunculus auto-attack | `sabrimmo-companions` | + `sabrimmo-skill-alchemist` |
+| **Falcon**: falcon, Blitz Beat (companion), Auto-Blitz, hasFalcon, falconry, Steel Crow, falcon assault | `sabrimmo-companions` | + `sabrimmo-skill-hunter` |
+| **Mount**: mount, Peco Peco, Grand Peco, Riding (companion), Cavalry Mastery, isMounted, dismount, mount speed, mounted ASPD, mount weight bonus | `sabrimmo-companions` | + `sabrimmo-skill-knight` or `sabrimmo-skill-crusader` |
+| **Cart**: cart system, cart weight, Pushcart, Change Cart, cart:rent, cart:remove, hasCart, character_cart, cart slot, cart type, cart speed penalty | `sabrimmo-companions` | + `sabrimmo-skill-merchant` + `sabrimmo-economy` |
+| **Crafting (Pharmacy)**: craft, crafting, pharmacy, potion, brew, recipe, crafting:open, crafting:result, success rate, mixture, create potion, Slim Potion, Condensed Potion, Medicine Bowl, CraftingSubsystem, SCraftingPopup | `sabrimmo-crafting` | + `sabrimmo-skill-alchemist` + `sabrimmo-items` |
+| **Arrow Crafting**: Arrow Crafting, arrow recipe, ro_arrow_crafting | `sabrimmo-crafting` | + `sabrimmo-ammunition` + `sabrimmo-skill-archer` |
+| **Summons**: summon, Summon Flora, Marine Sphere, Bio Cannibalize, summon entity, plant summon, summon:spawn, summon:death, summon:update, SummonSubsystem, SSummonOverlay, detonation | `sabrimmo-companions` | + `sabrimmo-skill-alchemist` |
+| **Chat**: chat, message, channel, ChatSubsystem, SChatWidget, chat:receive, chat:message, whisper, broadcast, say, shout, tab filter, chat tab, SendChatMessage, chat window | `sabrimmo-chat` | + `sabrimmo-party` if % or party chat; + `sabrimmo-guild` if guild chat; + `sabrimmo-combat-log` if combat messages |
+| **Combat Log**: combat log, damage log, combat message, kill message, death message, buff message in chat, level up message in chat, combat tab, log format, combat text | `sabrimmo-combat-log` | + `sabrimmo-chat` + `sabrimmo-combat` |
+| **Click Interact**: click interact, clickable NPC, interactable, BPI_Interactable, left-click interact, NPC click, interact actor, collision setup, line trace interact | `sabrimmo-click-interact` | + `sabrimmo-npcs` |
+| **Right-Click Player Context**: right-click player, context menu, player interact menu, whisper menu, trade menu, party invite menu, right-click action, ShowPlayerContextMenu, OnRightClickFromCharacter, DidRotateThisClick, StartWhisperTo, FMenuBuilder player | `sabrimmo-right-click-player-context` | + `sabrimmo-chat` if whisper; + `sabrimmo-trading` if trade; + `sabrimmo-party` if party invite |
+| **VFX/Particles**: VFX, particle, Niagara, visual effect, casting circle, spell effect, skill animation, impact effect, aura, beam, explosion VFX, projectile VFX, ground effect visual, SkillVFXSubsystem, SkillVFXData, CastingCircleActor | `sabrimmo-skills-vfx` | + `sabrimmo-skills` |
+| **Skill Targeting**: click-to-cast, targeting mode, ground target, target select, skill targeting, targeting overlay, hotbar targeting, TargetingSubsystem targeting mode, crosshair cursor, target banner | `sabrimmo-target-skill` | + `sabrimmo-skills` + `sabrimmo-ui` |
+| **Slate UI**: Slate, SCompoundWidget, UWorldSubsystem widget, HUD panel, overlay widget, Slate UI, drag/resize, RO brown, RO gold, RO theme, Z-order, viewport widget, SBox, SOverlay, FLinearColor, OnPaint, new widget, new panel, new HUD element | `sabrimmo-ui` | + system-specific skill for the data source |
+| **Monster Skills**: monster skill, NPC_ skill, monster cast, enemy skill, mob skill, ro_monster_skills, executeMonsterPlayerSkill, monster spell, AI skill selection, boss skill, monster special attack, HP threshold rotation | `sabrimmo-monster-skills` | + `enemy-ai` + `sabrimmo-combat` |
+| **Enemy AI**: enemy AI, monster behavior, aggro, chase, attack pattern, AI state, AI mode, patrol, assist, mob aggro, target switch, deaggro, ro_monster_ai_codes, AI tick, monster template, spawn table | `enemy-ai` | + `sabrimmo-monster-skills` if monster skills; + `sabrimmo-combat` if damage |
+| **Death Penalty**: death penalty, EXP loss, respawn, die, player death, PvE death, death:respawn, combat:death, clearBuffsOnDeath, BUFFS_SURVIVE_DEATH, resurrect, Yggdrasil Leaf | `sabrimmo-death` | + `sabrimmo-stats` + `sabrimmo-combat` |
+| **MVP/Boss**: MVP, boss monster, MVP announcement, MVP reward, slave spawn, NPC_SUMMONSLAVE, NPC_METAMORPHOSIS, boss drop, MVP tombstone, mini-boss, boss immune, boss protocol | `sabrimmo-mvp` | + `enemy-ai` + `sabrimmo-monster-skills` + `sabrimmo-combat` |
+| **NavMesh/Pathfinding**: navmesh, pathfinding, recast, detour, enemy movement, walk around, obstacle avoidance, OBJ export, navigation mesh, enemyMoveToward, wander, path query, server pathfinding | `sabrimmo-navmesh` | + `enemy-ai` + `sabrimmo-enemy` + `full-stack` |
+| **Enemy Entities**: enemy spawn, enemy death, enemy health, enemy attack, enemy registry, EnemySubsystem, EnemyEntry, enemy:spawn, enemy:move, enemy:death, enemy:health_update, enemy:attack, GetEnemyData, GetEnemyIdFromActor, BP_EnemyCharacter | `sabrimmo-enemy` | + `enemy-ai` if AI behavior; + `sabrimmo-sprites` if enemy sprites; + `sabrimmo-navmesh` if movement |
+| **Sprites**: sprite, atlas, SpriteCharacterActor, sprite animation, sprite layer, equipment composite, weapon overlay, depth ordering, body class, weapon mode, ESpriteAnimState, ESpriteWeaponMode, billboard, per-animation atlas, v2 atlas, atlas manifest, SetBodyClass, remote sprite, sprite direction | `sabrimmo-sprites` | + `sabrimmo-enemy` if enemy sprites; + `sabrimmo-3d-to-2d` if render pipeline; + `sabrimmo-art` if character art |
+| **3D-to-2D Pipeline**: Tripo3D, Mixamo, Blender render, sprite render, blender_sprite_render, pack_atlas, render_monster, atlas config, standard_template_v2, cel-shade, sprite sheet generation, 8-direction render | `sabrimmo-3d-to-2d` | + `sabrimmo-sprites` + `sabrimmo-art` |
+| **Ground Effects**: ground effect, Volcano, Deluge, Violent Gale, Land Protector, Safety Wall, Fire Wall, Sanctuary, Magnus Exorcismus, trap zone, performance zone, ensemble zone, ro_ground_effects, ground:create, ground:remove, ground tick | `sabrimmo-skills` | + specific class skill if named; + `sabrimmo-combat` if damage |
+
+### Class Skills (sabrimmo-skill-*)
+
+**Rule**: When ANY class name or specific skill name below appears, ALWAYS co-load `sabrimmo-skills`. Also co-load: `sabrimmo-combat` if the skill deals damage, `sabrimmo-buff` if it applies a buff, `sabrimmo-debuff` if it applies a status effect/CC.
+
+| Class Names & Specific Skill Names | Skill |
+|-------------------------------------|-------|
+| **Novice**, Super Novice, Play Dead, Basic Skill, First Aid, job change gate, IDs 1-3 | `sabrimmo-skill-novice` |
+| **Swordsman**, Bash, Magnum Break, Provoke, Endure, Sword Mastery, Two-Handed Sword Mastery, Increase HP Recovery, Increase Recuperative Power, Moving HP Recovery, Fatal Blow, Auto Berserk, IDs 100-109 | `sabrimmo-skill-swordsman` |
+| **Mage**, Fire Bolt, Cold Bolt, Lightning Bolt, Soul Strike, Napalm Beat, Fire Ball, Fire Wall, Thunderstorm, Stone Curse, Frost Diver, Sight (Mage), Energy Coat, IDs 200-213 | `sabrimmo-skill-mage` |
+| **Archer**, Double Strafe, Arrow Shower, Arrow Repel, Improve Concentration, Owl's Eye, Vulture's Eye, IDs 300-306 | `sabrimmo-skill-archer` |
+| **Acolyte**, Heal, Holy Light, Blessing, Increase AGI, Decrease AGI, Angelus, Pneuma, Safety Wall, Warp Portal, Teleport, Aqua Benedicta, Signum Crucis, Ruwach, Cure, IDs 400-414 | `sabrimmo-skill-acolyte` |
+| **Thief**, Envenom, Detoxify, Hiding, Steal, Double Attack, Improve Dodge, Pick Stone, Sand Attack, Throw Stone, Back Slide, IDs 500-509 | `sabrimmo-skill-thief` |
+| **Merchant**, Mammonite, Cart Revolution, Discount, Overcharge, Pushcart, Vending (skill), Loud Exclamation, Change Cart, Identify, Enlarge Weight Limit, IDs 600-609 | `sabrimmo-skill-merchant` |
+| **Knight**, Lord Knight, Pierce, Bowling Bash, Brandish Spear, Two-Hand Quicken, THQ, Auto Counter, Charge Attack, Spear Stab, Spear Boomerang, Spear Mastery, Riding (Knight), Cavalry Mastery, One-Hand Quicken, IDs 700-710 | `sabrimmo-skill-knight` |
+| **Wizard**, High Wizard, Storm Gust, Lord of Vermillion, LoV, Meteor Storm, Ice Wall, Quagmire, Jupitel Thunder, Water Ball, Earth Spike, Heaven's Drive, Fire Pillar, Frost Nova, Sight Blaster, Sightrasher, Sense, Napalm Vulcan, IDs 800-813 | `sabrimmo-skill-wizard` |
+| **Hunter**, Sniper, trap, Ankle Snare, Blast Mine, Claymore Trap, Freezing Trap, Land Mine, Sandman, Flasher, Shockwave Trap, Skid Trap, Talk Trap, Blitz Beat, falcon (Hunter), Auto-Blitz, Detect, Spring Trap, Remove Trap, Beast Bane, Falconry Mastery, Phantasmic Arrow, Steel Crow, IDs 900-917 | `sabrimmo-skill-hunter` |
+| **Priest**, High Priest, Sanctuary, Magnus Exorcismus, Kyrie Eleison, Lex Aeterna, Lex Divina, Resurrection, Turn Undead, Aspersio, B.S. Sacramenti, Gloria, Magnificat, Impositio Manus, Suffragium, Recovery, Status Recovery, Increase SP Recovery, Mace Mastery, IDs 1000-1018 | `sabrimmo-skill-priest` |
+| **Assassin**, Assassin Cross, Sonic Blow, Cloaking, Enchant Poison, Poison React, Venom Dust, Venom Splasher, Grimtooth, Katar Mastery, Right Hand Mastery, Left Hand Mastery, katar, dual wield (Assassin), Enchant Deadly Poison, EDP, Soul Destroyer, IDs 1100-1111 | `sabrimmo-skill-assassin` |
+| **Blacksmith**, Whitesmith, Adrenaline Rush, Weapon Perfection, Power Thrust, Over Thrust, Maximize Power, Hammer Fall, forge, forging, Weaponry Research, Weapon Research, Hilt Binding, Skin Tempering, Iron Tempering, Steel Tempering, Cart Termination, IDs 1200-1230 | `sabrimmo-skill-blacksmith` |
+| **Crusader**, Paladin, Grand Cross, Shield Boomerang, Holy Cross, Shield Charge, Devotion, Auto Guard, Reflect Shield, Defender, Providence, Faith, Shrink, Spear Quicken, IDs 1300-1313 | `sabrimmo-skill-crusader` |
+| **Sage**, Professor, Endow, Flame Launcher, Frost Weapon, Lightning Loader, Seismic Weapon, Volcano, Deluge, Violent Gale, Land Protector, Hindsight, Auto Spell, Dispel, Dispell, Magic Rod, Spell Breaker, Free Cast, Dragonology, Advanced Book, Abracadabra, IDs 1400-1421 | `sabrimmo-skill-sage` |
+| **Bard**, Clown, Minstrel, song, Musical Strike, Frost Joker, Adaptation to Circumstances, Encore, Pang Voice, A Poem of Bragi, Bragi, Apple of Idun, A Whistle, Assassin Cross of Sunset, Lullaby, Mr. Kim, Eternal Chaos, Drum on the Battlefield, Ring of Nibelungen, Loki's Veil, Into the Abyss, Invulnerable Siegfried, ensemble, performance, IDs 1500-1537 | `sabrimmo-skill-bard` |
+| **Dancer**, Gypsy, dance, Slinging Arrow, Scream, Charming Wink, Service for You, Please Don't Forget Me, PDFM, Fortune's Kiss, Humming, Ugly Dance, Wink of Charm, Hip Shaker, Dazzler, Gypsy's Kiss, Slow Grace, Hermode's Rod, IDs 1520-1557 | `sabrimmo-skill-dancer` |
+| **Monk**, Champion, Triple Attack, Chain Combo, Combo Finish, Asura Strike, Extremity Fist, Guillotine Fist, Steel Body, Mental Strength, Fury, Critical Explosion, spirit sphere, Finger Offensive, Throw Spirit Sphere, Investigate, Occult Impaction, Ki Explosion, Ki Translation, Spirits Recovery, Blade Stop, Iron Fists, Dodge (Monk), combo chain, combo window, sitting, IDs 1600-1615 | `sabrimmo-skill-monk` |
+| **Rogue**, Stalker, Back Stab, Raid, Intimidate, Divest, Strip Helm, Strip Shield, Strip Armor, Strip Weapon, Close Confine, Plagiarism, Plagiarize, copy skill, Snatcher, auto-steal, Tunnel Drive, Steal Coin, Compulsion Discount, Double Strafe (Rogue), IDs 1700-1718 | `sabrimmo-skill-rogue` |
+| **Alchemist**, Creator, Biochemist, Acid Terror, Acid Demonstration, Demonstration, Potion Pitcher, Chemical Protection, CP Helm/Shield/Armor/Weapon, Pharmacy (Alchemist), Axe Mastery (Alchemist), Potion Research, Call Homunculus, Rest Homunculus, Resurrect Homunculus, IDs 1800-1815 | `sabrimmo-skill-alchemist` |
+
+### Class Cross-Loading Rules (First→Second Class)
+
+When working on a second class, ALSO load its first-class parent (shared prereq skills):
+
+| Second Class | Also Load | Shared Skills |
+|-------------|-----------|---------------|
+| `sabrimmo-skill-knight` | `sabrimmo-skill-swordsman` | Sword Mastery, Provoke, Endure |
+| `sabrimmo-skill-crusader` | `sabrimmo-skill-swordsman` + `sabrimmo-skill-knight` | Riding, Cavalry Mastery, Spear Mastery, Sword Mastery |
+| `sabrimmo-skill-wizard` | `sabrimmo-skill-mage` | All bolt spells, Fire Wall, Sight |
+| `sabrimmo-skill-sage` | `sabrimmo-skill-mage` + `sabrimmo-skill-wizard` | Earth Spike, Heaven's Drive, Fire Pillar |
+| `sabrimmo-skill-hunter` | `sabrimmo-skill-archer` | Improve Concentration, Vulture's Eye, Owl's Eye |
+| `sabrimmo-skill-bard` | `sabrimmo-skill-archer` | All Archer passives |
+| `sabrimmo-skill-dancer` | `sabrimmo-skill-archer` | All Archer passives |
+| `sabrimmo-skill-priest` | `sabrimmo-skill-acolyte` | All Acolyte skills |
+| `sabrimmo-skill-monk` | `sabrimmo-skill-acolyte` | Pneuma, Warp Portal, Heal |
+| `sabrimmo-skill-assassin` | `sabrimmo-skill-thief` | Double Attack, Hiding, Envenom |
+| `sabrimmo-skill-rogue` | `sabrimmo-skill-thief` | Steal, Hiding, Double Attack, Improve Dodge |
+| `sabrimmo-skill-blacksmith` | `sabrimmo-skill-merchant` | Enlarge Weight Limit, Pushcart |
+| `sabrimmo-skill-alchemist` | `sabrimmo-skill-merchant` | Enlarge Weight Limit, Pushcart |
+
+### Overlapping Skills — ALWAYS Load Both
+
+These skill pairs share underlying systems. When EITHER skill's keywords appear, load BOTH:
+
+| Pair | Why They Overlap |
+|------|------------------|
+| `sabrimmo-buff` ↔ `sabrimmo-debuff` | Share `ro_status_effects.js`/`ro_buff_system.js`, same apply/remove engine. Many skills apply both buffs AND debuffs. |
+| `sabrimmo-combat` ↔ `sabrimmo-skills` | Most skills deal damage through the combat pipeline. Any offensive skill needs both. |
+| `sabrimmo-items` ↔ `sabrimmo-weight` | Weight is a core item property. Equip/unequip/drop all affect weight. |
+| `sabrimmo-items` ↔ `sabrimmo-economy` | All trading/vending/shopping involves item transfer. |
+| `sabrimmo-chat` ↔ `sabrimmo-combat-log` | Combat log outputs to the Chat widget (Combat tab). |
+| `sabrimmo-persistent-socket` ↔ `realtime` | Both deal with Socket.io — persistent-socket is architecture, realtime is events/protocol. |
+| `enemy-ai` ↔ `sabrimmo-monster-skills` | Monster AI executes monster skills in the AI tick loop. |
+| `sabrimmo-skill-bard` ↔ `sabrimmo-skill-dancer` | 8 ensemble skills require both classes, shared performance system. |
+| `sabrimmo-skill-wizard` ↔ `sabrimmo-skill-sage` | Sage shares Wizard handlers for Earth Spike, Heaven's Drive, Fire Pillar. |
+| `sabrimmo-skill-knight` ↔ `sabrimmo-skill-crusader` | Crusader shares Knight's Riding, Cavalry Mastery, Spear Mastery. |
+| `sabrimmo-companions` ↔ `sabrimmo-skill-hunter` | Falcon system is both a companion and Hunter feature. |
+| `sabrimmo-companions` ↔ `sabrimmo-skill-alchemist` | Homunculus is both a companion and Alchemist feature. |
+| `sabrimmo-companions` ↔ `sabrimmo-skill-knight`/`crusader` | Mount is both a companion and Knight/Crusader feature. |
+| `sabrimmo-companions` ↔ `sabrimmo-skill-merchant` | Cart is both a companion feature and Merchant skill system. |
+| `sabrimmo-crafting` ↔ `sabrimmo-skill-alchemist` | Pharmacy is Alchemist skill 1800. |
+| `sabrimmo-crafting` ↔ `sabrimmo-ammunition` | Arrow Crafting produces arrows (shared crafting+ammo). |
+| `sabrimmo-companions` ↔ `sabrimmo-skill-alchemist` (summons) | Summon Flora/Marine Sphere are Alchemist skills. |
+| `sabrimmo-economy` ↔ `sabrimmo-skill-merchant` | Vending/Discount/Overcharge are Merchant skills tied to economy. |
+| `sabrimmo-economy` ↔ `sabrimmo-npcs` | NPC shops are part of the economy system. |
+| `sabrimmo-guild` ↔ `sabrimmo-pvp-woe` | WoE requires guilds; guild castles are WoE objectives. |
+| `sabrimmo-npcs` ↔ `sabrimmo-click-interact` | NPCs are clickable interactables (shared click detection). |
+| `sabrimmo-right-click-player-context` ↔ `sabrimmo-chat` | Whisper option prefills chat input via `StartWhisperTo()`. |
+| `sabrimmo-right-click-player-context` ↔ `sabrimmo-trading` | Trade option calls `TradeSubsystem::RequestTrade()`. |
+| `sabrimmo-right-click-player-context` ↔ `sabrimmo-party` | Party Invite option calls `PartySubsystem::InvitePlayer()`. |
+| `sabrimmo-target-skill` ↔ `sabrimmo-skills` | Targeting mode is part of skill execution flow. |
+| `sabrimmo-skills-vfx` ↔ `sabrimmo-skills` | VFX accompanies skill execution (visual feedback). |
+| `sabrimmo-chat` ↔ `sabrimmo-party` | Party chat (`%` prefix) flows through both systems. |
+| `sabrimmo-zone` ↔ `sabrimmo-npcs` | NPCs are placed within zones; zone entry loads NPC data. |
+| `sabrimmo-items` ↔ `sabrimmo-cards` | Cards compound into item slots; card bonuses are item properties. |
+| `sabrimmo-items` ↔ `sabrimmo-refine` | Refining modifies item stats (ATK/DEF bonuses). |
+| `sabrimmo-items` ↔ `sabrimmo-ammunition` | Arrows are equippable items in the ammo slot. |
+| `sabrimmo-sprites` ↔ `sabrimmo-enemy` | Enemy sprites use SpriteCharacterActor as primary actor (no BP_EnemyCharacter). |
+| `sabrimmo-sprites` ↔ `sabrimmo-3d-to-2d` | 3D-to-2D pipeline produces atlases consumed by the sprite runtime system. |
+| `sabrimmo-navmesh` ↔ `enemy-ai` | NavMesh pathfinding replaces straight-line movement in the AI tick loop. |
+| `sabrimmo-navmesh` ↔ `sabrimmo-enemy` | NavMesh affects enemy spawn position snapping and movement broadcasting. |
+| `sabrimmo-death` ↔ `sabrimmo-stats` | Death penalty involves EXP loss calculation based on level/class. |
+| `sabrimmo-mvp` ↔ `sabrimmo-monster-skills` | MVP monsters have skill rotations and HP threshold triggers. |
+| `sabrimmo-mvp` ↔ `enemy-ai` | MVP slave spawning (NPC_SUMMONSLAVE) integrates with AI lifecycle. |
+
+### Multi-System Task Examples
+
+Load ALL listed skills. When uncertain, load more:
+- "Fix Bash stun" → `sabrimmo-skill-swordsman` + `sabrimmo-skills` + `sabrimmo-combat` + `sabrimmo-debuff` + `sabrimmo-buff`
+- "Add new skill with VFX" → `sabrimmo-skills` + `sabrimmo-combat` + `sabrimmo-skills-vfx` + `full-stack`
+- "Build a new HUD panel" → `sabrimmo-ui` + system-specific skill + `sabrimmo-persistent-socket`
+- "Party EXP not working" → `sabrimmo-party` + `sabrimmo-stats` + `debugger`
+- "Card bonuses wrong in combat" → `sabrimmo-cards` + `sabrimmo-items` + `sabrimmo-combat` + `debugger`
+- "Homunculus not attacking" → `sabrimmo-companions` + `sabrimmo-skill-alchemist` + `sabrimmo-combat` + `debugger`
+- "Implement new trap" → `sabrimmo-skill-hunter` + `sabrimmo-skills` + `sabrimmo-combat` + `sabrimmo-debuff`
+- "Bard ensemble not working" → `sabrimmo-skill-bard` + `sabrimmo-skill-dancer` + `sabrimmo-skills` + `sabrimmo-buff` + `debugger`
+- "Regen not working" → `debugger` + `sabrimmo-weight` + `sabrimmo-buff` + `sabrimmo-debuff`
+- "Add vending shop" → `sabrimmo-economy` + `sabrimmo-skill-merchant` + `sabrimmo-items` + `sabrimmo-companions` + `full-stack`
+- "Craft potion failing" → `sabrimmo-crafting` + `sabrimmo-skill-alchemist` + `sabrimmo-items` + `debugger`
+- "New zone with NPCs" → `sabrimmo-zone` + `sabrimmo-npcs` + `sabrimmo-click-interact` + `sabrimmo-audio`
+- "Monster skill rotation" → `sabrimmo-monster-skills` + `enemy-ai` + `sabrimmo-combat` + `sabrimmo-skills`
+- "Arrow element not working" → `sabrimmo-ammunition` + `sabrimmo-items` + `sabrimmo-combat` + `debugger`
+- "Socket event not arriving" → `debugger` + `sabrimmo-persistent-socket` + `realtime`
+- "Enemy walking through walls" → `sabrimmo-navmesh` + `enemy-ai` + `sabrimmo-enemy` + `debugger`
+- "Enemy sprite not showing" → `sabrimmo-sprites` + `sabrimmo-enemy` + `debugger`
+- "Add new monster sprite" → `sabrimmo-sprites` + `sabrimmo-3d-to-2d` + `sabrimmo-enemy` + `sabrimmo-art`
+- "Death penalty not working" → `sabrimmo-death` + `sabrimmo-stats` + `debugger`
+- "MVP not spawning slaves" → `sabrimmo-mvp` + `enemy-ai` + `sabrimmo-monster-skills` + `debugger`
+- "Ground effect not ticking" → `sabrimmo-skills` + `sabrimmo-combat` + class-specific skill + `debugger`
+
+See `CLAUDE.md` → "Multi-System Tasks" for 60+ additional examples.
 
 ---
 ## UE5 BLUEPRINT PROTOCOL (Critical)
@@ -87,8 +261,8 @@ Apply these patterns in ALL Blueprint, C++, and server-side work. When suggestin
 
 ### 3. Manager Pattern
 - **Rule**: Centralized managers coordinate groups of related actors/objects. One manager per domain.
-- **Apply**: `BP_OtherPlayerManager` (remote players), `BP_EnemyManager` (enemy spawning/tracking), `InventoryManager`, `QuestManager`.
-- **Convention**: Managers are spawned once, hold Maps/Arrays of managed objects, expose `Register`/`Unregister`/`Get` functions.
+- **Apply**: `UEnemySubsystem` (enemy entity registry), `UOtherPlayerSubsystem` (remote player registry), `InventoryManager`, `QuestManager`.
+- **Convention**: Managers hold Maps/Arrays of managed objects, expose `Register`/`Unregister`/`Get` functions. C++ managers are UWorldSubsystems (auto-created, world-lifetime).
 - **Anti-pattern**: Each actor independently tracking all other actors of its type.
 
 ### 4. Interfaces (UE5 Interfaces)
@@ -113,8 +287,8 @@ Apply these patterns in ALL Blueprint, C++, and server-side work. When suggestin
 
 ### 7. Widget Composition Pattern
 - **Rule**: Build complex UIs from small, reusable child widgets. Parent widgets compose children, not inherit.
-- **Apply**: `WBP_InventoryWindow` contains `WBP_InventorySlot` children. `WBP_GameHUD` contains `WBP_HealthBar`, `WBP_ChatBox`, `WBP_MiniMap`.
-- **Data flow**: Parent → Child via "Expose on Spawn" variables. Child → Parent via Event Dispatchers.
+- **Apply**: `SInventoryWidget` composes slot entries. Each `UWorldSubsystem` owns one `SCompoundWidget` (Slate). Each subsystem = one domain.
+- **Data flow**: Subsystem populates data, widget reads it. Delegate callbacks for user interaction.
 - **Anti-pattern**: One massive widget with all UI elements. Deeply nested widget inheritance hierarchies.
 
 ### 8. Single Responsibility Principle (SRP)
@@ -127,7 +301,7 @@ Apply these patterns in ALL Blueprint, C++, and server-side work. When suggestin
 - **Rule**: Pass dependencies explicitly (via constructor, function params, or Expose on Spawn) rather than hard-coding `GetAllActorsOfClass` or global lookups.
 - **Apply**: Widgets receive their data source via Expose on Spawn. Components receive owning manager reference on init.
 - **Acceptable lookups**: `GetGameInstance` (singleton by design), `GetPlayerController(0)` (single local player).
-- **Anti-pattern**: Every widget independently calling `GetAllActorsOfClass(BP_OtherPlayerManager)` at runtime.
+- **Anti-pattern**: Every widget independently calling `GetAllActorsOfClass()` at runtime instead of using subsystem APIs.
 
 ### 10. State Machine Pattern
 - **Rule**: Use explicit states for entities with complex behavior. Finite State Machines (FSM) for enemies, UI screens, combat phases.
@@ -299,8 +473,8 @@ After completing any task:
 ### Blueprint Naming
 | Prefix | Type | Example |
 |--------|------|---------|
-| `BP_` | Blueprint Actor | `BP_MMOCharacter`, `BP_OtherPlayerManager` |
-| `WBP_` | Widget Blueprint | `WBP_GameHUD`, `WBP_LoginScreen` |
+| `BP_` | Blueprint Actor | `BP_MMOCharacter`, `BP_EnemyCharacter` |
+| `WBP_` | Widget Blueprint (legacy, all replaced by C++ Slate) | — |
 | `ABP_` | Animation Blueprint | `ABP_unarmed` |
 
 ---

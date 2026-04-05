@@ -1,8 +1,10 @@
 # Node.js Server Documentation
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [System_Architecture](../01_Architecture/System_Architecture.md) | [Combat_System](Combat_System.md) | [Skill_System](Skill_System.md) | [Enemy_System](Enemy_System.md) | [API_Documentation](API_Documentation.md)
+
 ## Overview
 
-The entire server is a single monolithic file: `server/src/index.js` (~8,471 lines). It handles REST API, Socket.io real-time events, combat tick loop, enemy AI state machine, inventory management, skill system, zone transitions, NPC shops, buff/debuff tracking, and database operations.
+The server is a single monolithic file: `server/src/index.js` (~32,200 lines) plus 11 data modules (~6,000 lines total). It handles REST API (11 endpoints), Socket.io real-time events (79 handlers), combat tick loop, enemy AI state machine, inventory management, skill system, zone transitions, NPC shops, party system, buff/debuff tracking, and database operations.
 
 **Runtime**: Node.js 18+ LTS
 **Port**: 3001 (configurable via `PORT` env var)
@@ -13,14 +15,23 @@ The entire server is a single monolithic file: `server/src/index.js` (~8,471 lin
 ```
 server/
 ├── src/
-│   ├── index.js                  # Main server (~8,471 lines)
+│   ├── index.js                  # Main server (~32,200 lines)
 │   ├── ro_monster_templates.js   # 509 RO monster definitions
 │   ├── ro_item_mapping.js        # RO item name ↔ ID mapping
 │   ├── ro_exp_tables.js          # EXP tables, class config, level caps
-│   ├── ro_skill_data.js          # Skill definitions, trees, prerequisites
+│   ├── ro_skill_data.js          # 69 first-class skill definitions
+│   ├── ro_skill_data_2nd.js      # 224 second-class skill definitions
 │   ├── ro_monster_ai_codes.js    # 1,004 monster AI code mappings
 │   ├── ro_zone_data.js           # Zone registry, warps, spawns, Kafra NPCs
-│   ├── ro_damage_formulas.js     # Physical/magical damage, elements, size
+│   ├── ro_damage_formulas.js     # Physical/magical damage, elements, size (1,079 lines)
+│   ├── ro_buff_system.js         # 95 buff types, apply/expire/modifiers (1,179 lines)
+│   ├── ro_status_effects.js      # 10 status effects, resist/apply/tick (711 lines)
+│   ├── ro_ground_effects.js      # Ground AoE zones: traps, songs, dances (622 lines)
+│   ├── ro_monster_skills.js      # 40+ NPC_ monster skills (548 lines)
+│   ├── ro_item_effects.js        # Consumable use effects, item scripts (520 lines)
+│   ├── ro_card_prefix_suffix.js  # Card naming system (541 lines)
+│   ├── ro_homunculus_data.js     # 4 homunculus types, growth tables (243 lines)
+│   ├── ro_arrow_crafting.js      # 45 arrow crafting recipes (77 lines)
 │   └── test_mode.js              # Test mode routes
 ├── .env                          # Environment variables
 ├── package.json                  # Dependencies

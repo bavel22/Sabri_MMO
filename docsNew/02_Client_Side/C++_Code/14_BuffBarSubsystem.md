@@ -1,5 +1,7 @@
 # UBuffBarSubsystem
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Status_Effect_Buff_System](../../03_Server_Side/Status_Effect_Buff_System.md)
+
 **Files**: `Source/SabriMMO/UI/BuffBarSubsystem.h` (90 lines), `BuffBarSubsystem.cpp` (446 lines)
 **Parent**: `UWorldSubsystem`
 **Purpose**: Tracks active buffs (positive stat modifiers) and status effects (CC/DoT conditions) for the local player. Renders a horizontal icon row via Slate.
@@ -15,10 +17,11 @@
 Standard `UWorldSubsystem` + `SCompoundWidget` pattern:
 
 1. `ShouldCreateSubsystem` -- creates in any game world
-2. `OnWorldBeginPlay` -- starts a 0.5s repeating timer, waits 4 ticks (2s stability delay) before calling `TryWrapSocketEvents`
-3. `TryWrapSocketEvents` -- finds SocketIOClientComponent, waits for `combat:health_update` to exist (confirms BP bindings are ready), wraps 5 events, calls `ShowWidget`
-4. `ShowWidget` -- creates `SBuffBarWidget`, adds to viewport via `AddViewportWidgetContent` at Z=11
-5. `Deinitialize` -- removes widget from viewport, clears all state
+2. `OnWorldBeginPlay` -- registers 5 event handlers with `USocketEventRouter`, calls `ShowWidget` if socket is connected
+3. `ShowWidget` -- creates `SBuffBarWidget`, adds to viewport via `AddViewportWidgetContent` at Z=11
+4. `Deinitialize` -- removes widget from viewport, unregisters from EventRouter, clears all state
+
+> **Historical note:** This subsystem previously used `TryWrapSocketEvents` / `WrapSingleEvent` / `FindSocketIOComponent` patterns. These were replaced by the `EventRouter->RegisterHandler()` pattern in Phase 4.
 
 The widget reads directly from `ActiveBuffs` and `ActiveStatuses` public arrays on the subsystem. The subsystem populates these arrays from socket events; the widget polls them on Tick.
 
@@ -55,7 +58,7 @@ return max(0, remaining)
 
 ## Socket Events
 
-All events are wrapped via `WrapSingleEvent` (preserves the existing handler chain).
+All events are registered via `EventRouter->RegisterHandler()` (multi-handler dispatch).
 
 ### Incoming (Server to Client)
 | Event | Handler | Payload Fields | Description |
@@ -148,7 +151,7 @@ This places it in the wrapping order as follows:
 3. SkillVFXSubsystem -- 6 ticks (3s)
 4. DamageNumberSubsystem -- 10 ticks (5s, wraps LAST)
 
-The delay ensures that earlier subsystems have already wrapped their event handlers before BuffBarSubsystem inserts itself into the chain via `WrapSingleEvent`. The timer is cleared once events are successfully wrapped.
+All subsystems register with the EventRouter in `OnWorldBeginPlay`. The EventRouter dispatches to all registered handlers for a given event -- no ordering or chaining is required.
 
 ---
 

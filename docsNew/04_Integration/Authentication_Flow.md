@@ -1,8 +1,10 @@
 # Authentication Flow
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [API_Documentation](../03_Server_Side/API_Documentation.md) | [Networking_Protocol](Networking_Protocol.md) | [MMOGameInstance](../02_Client_Side/C++_Code/02_MMOGameInstance.md)
+
 ## Overview
 
-Sabri_MMO uses **JWT (JSON Web Tokens)** for authentication. The flow spans three layers: UE5 Blueprints → C++ `UHttpManager` → Node.js server → PostgreSQL.
+Sabri_MMO uses **JWT (JSON Web Tokens)** for authentication. The flow spans three layers: UE5 C++ (`ULoginFlowSubsystem` + `UMMOHttpManager`) → Node.js server → PostgreSQL. JWT tokens are stored on `UMMOGameInstance` and passed to `player:join` socket events for character ownership verification.
 
 ## Complete Login Flow
 

@@ -1,5 +1,8 @@
 # Blueprint Documentation Index
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [C++ Module Overview](../C++_Code/00_Module_Overview.md)
+> **Status**: LEGACY — Most Blueprint actors and ALL UMG widgets (WBP_*) documented here have been **replaced by C++ Slate subsystems** as of the Blueprint-to-C++ migration (Phases 1-4). These docs are kept for historical reference. See [C++ Code docs](../C++_Code/) for current client implementation.
+
 ## Data Source
 
 All Blueprint documentation in this folder was **read directly from the UE5 Editor** using the unrealMCP MCP server tools (`read_blueprint_content`, `get_blueprint_function_details`, `analyze_blueprint_graph`). Every variable, function, node, component, and connection documented here reflects the actual Blueprint state as of 2026-02-17.

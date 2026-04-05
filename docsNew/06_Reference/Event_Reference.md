@@ -1,5 +1,9 @@
 # Socket.io Event Reference — Detailed Payloads
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Networking_Protocol](../04_Integration/Networking_Protocol.md) | [Multiplayer_Architecture](../01_Architecture/Multiplayer_Architecture.md) | [NodeJS_Server](../03_Server_Side/NodeJS_Server.md)
+> **Total**: 79 socket event handlers in `server/src/index.js`
+> **Note**: This reference covers core events (player, combat, enemy, chat, inventory, shop, hotbar, card, loot). Events added in later phases (homunculus, party, vending, cart, crafting, pet, mount, warp portal, identify) are documented in their respective system docs but not yet added to this reference.
+
 ## Player Events
 
 ### player:join (Client → Server)
@@ -16,7 +20,7 @@
 ```json
 { "success": true, "zuzucoin": 1500 }
 ```
-**Client Action**: Parse `zuzucoin` → store in `AC_HUDManager.PlayerZuzucoin` for inventory and shop display.
+**Client Action**: Parse `zuzucoin` → store in `InventorySubsystem` for inventory and shop display.
 
 ### player:position (Client → Server, ~30Hz)
 ```json
@@ -424,7 +428,7 @@ _(Empty payload)_
     "itemName": "Crimson Vial"
 }
 ```
-**Emitted by**: `AC_HUDManager.SendSaveHotbarSlotRequest` (called from `WBP_HotbarSlot.OnDrop`)
+**Emitted by**: `UHotbarSubsystem` (called from SHotbarRowWidget drag-drop)
 **Handler**: Validates slot (0–8), verifies ownership, UPSERTs `character_hotbar`. Pass `inventoryId: 0` to clear a slot.
 
 ### hotbar:alldata (Server → Client)
@@ -456,7 +460,7 @@ _(Renamed from `hotbar:data` to avoid C++ SocketIO `NativeClient->OnEvent` overw
 }
 ```
 **Sent by**: Server automatically after every `inventory:load` response, 0.6s after `player:join`, on `hotbar:request`, and after `hotbar:save_skill`.
-**Handler**: `BP_SocketManager.OnHotbarAllData` → `AC_HUDManager.PopulateHotbarFromServer(Data)`
+**Handler**: `UHotbarSubsystem::HandleHotbarAllData` → populates all 4 hotbar rows from server data
 **Note**: Only occupied slots are included. Slot indices are 1-9. `slot_type` is `"item"` or `"skill"`.
 
 ### hotbar:save_skill (Client → Server)
@@ -485,7 +489,7 @@ _(Empty payload)_
 ```json
 { "shopId": 1 }
 ```
-**Trigger**: `BP_SocketManager.EmitShop(ShopId)` called from `BP_MMOCharacter` on NPC click.
+**Trigger**: `UShopSubsystem` emits when player interacts with `AShopNPC`.
 
 ### shop:data (Server → Client)
 ```json
@@ -507,7 +511,7 @@ _(Empty payload)_
     ]
 }
 ```
-**Client Action**: `AC_HUDManager.OpenShop(Data)` → creates `WBP_Shop`, populates items, sets `PlayerZuzucoin`.
+**Client Action**: `UShopSubsystem::HandleShopData` → creates `SShopWidget`, populates items, sets zuzucoin.
 
 ### shop:buy (Client → Server)
 ```json
@@ -518,7 +522,7 @@ _(Empty payload)_
 ```json
 { "itemId": 1001, "itemName": "Crimson Vial", "quantity": 1, "totalCost": 100, "newZuzucoin": 1400 }
 ```
-**Client Action**: `AC_HUDManager.UpdateZuzucoinEverywhere(newZuzucoin)` → updates `WBP_Shop.ZuzucoinText` + `WBP_InventoryWindow.ZuzucoinText`.
+**Client Action**: `UShopSubsystem` / `UInventorySubsystem` update zuzucoin display in their respective Slate widgets.
 
 ### shop:sell (Client → Server)
 ```json
@@ -535,7 +539,7 @@ _(Empty payload)_
 ```json
 { "message": "Not enough Zuzucoin (need 100, have 50)" }
 ```
-**Client Action**: `AC_HUDManager.ShowShopError(message)` → sets `WBP_Shop.StatusText`.
+**Client Action**: `UShopSubsystem` displays error message in `SShopWidget` status text.
 
 ---
 

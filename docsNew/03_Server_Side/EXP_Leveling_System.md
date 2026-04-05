@@ -1,5 +1,8 @@
 # EXP & Leveling System — Ragnarok Online Classic
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Enemy_System](Enemy_System.md) | [Combat_System](Combat_System.md)
+> **RO Reference**: [RagnaCloneDocs/01_Stats_Leveling_JobSystem.md](../../RagnaCloneDocs/01_Stats_Leveling_JobSystem.md)
+
 ## Overview
 
 Sabri_MMO uses a **dual progression system** identical to Ragnarok Online Pre-Renewal Classic:

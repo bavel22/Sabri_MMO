@@ -1,5 +1,7 @@
 # Configuration Reference
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [NodeJS_Server](../03_Server_Side/NodeJS_Server.md) | [RUNNING Guide](../high-level%20docs/RUNNING.md)
+
 ## Server Environment (.env)
 
 | Variable | Type | Default | Description |

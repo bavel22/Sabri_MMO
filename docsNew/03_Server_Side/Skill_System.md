@@ -1,5 +1,9 @@
 # Skill System — Ragnarok Online Classic
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Combat_System](Combat_System.md) | [Status_Effect_Buff_System](Status_Effect_Buff_System.md) | [Monster_Skill_System](Monster_Skill_System.md)
+> **RO Reference**: [RagnaCloneDocs/03_Skills_Complete.md](../../RagnaCloneDocs/03_Skills_Complete.md)
+> **Class Audits**: See [05_Development/](../05_Development/) for per-class skill audit docs
+
 ## Overview
 
 Server-authoritative skill system implementing RO pre-renewal class skills with full prerequisite chains, SP costs per level, and skill point allocation. Skills are defined in JavaScript data files and synced to PostgreSQL on startup.
@@ -192,7 +196,7 @@ Replaces the old `hotbar:data` event name to avoid C++ SocketIO event binding co
 }
 ```
 **Sent**: After `inventory:load`, 0.6s after `player:join`, on `hotbar:request`, after `hotbar:save_skill`
-**BP Handler**: `BP_SocketManager.OnHotbarAllData` → `AC_HUDManager.PopulateHotbarFromServer`
+**C++ Handler**: `UHotbarSubsystem::HandleHotbarAllData` → populates all 4 hotbar rows from server data
 
 ## Server Files
 
@@ -223,8 +227,8 @@ Replaces the old `hotbar:data` event name to avoid C++ SocketIO event binding co
 | **Thief** | 10 skills (IDs 500-509) |
 | **Merchant** | 10 skills (IDs 600-609) |
 | **First Class Total** | **68 skills** |
-| **Second Classes** (13) | 83 skills |
-| **Grand Total** | **151 skills** |
+| **Second Classes** (13) | 224 skills (IDs 700-1815) |
+| **Grand Total** | **293 skill definitions** |
 
 ## Implemented Skill Handlers (Phase 5)
 

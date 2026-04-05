@@ -1,5 +1,7 @@
 # Networking Protocol
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Multiplayer_Architecture](../01_Architecture/Multiplayer_Architecture.md) | [Event_Reference](../06_Reference/Event_Reference.md) | [Authentication_Flow](Authentication_Flow.md)
+
 ## Overview
 
 Sabri_MMO uses two networking protocols:
@@ -10,7 +12,7 @@ Both communicate over TCP port 3001 to the same Node.js server.
 
 ## JSON Communication Format
 
-All data between client and server is JSON. The UE5 client sends/receives JSON strings which are parsed in Blueprints.
+All data between client and server is JSON. The UE5 client sends/receives JSON via `FSocketIONative` on `UMMOGameInstance` (persistent socket), with C++ subsystems registering handlers through `USocketEventRouter`. REST calls use `UMMOHttpManager` (BlueprintFunctionLibrary).
 
 ### Position Update (Client → Server)
 ```json
@@ -145,6 +147,35 @@ All data between client and server is JSON. The UE5 client sends/receives JSON s
 
 On success, the server also emits `inventory:data` to refresh the client inventory. If the target equipment is currently equipped, a `player:stats` update is also sent to reflect any stat changes from the newly compounded card.
 
+### Homunculus Events
+
+#### Client → Server
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `homunculus:feed` | `{ characterId }` | Feed homunculus its type-specific food item |
+| `homunculus:command` | `{ characterId, command }` | Issue command: `follow`, `attack`, `standby` |
+| `homunculus:skill_up` | `{ characterId, skillId }` | Allocate a skill point to a homunculus skill |
+
+#### Server → Client (owner only)
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `homunculus:summoned` | `{ homunculusId, type, name, level, hp, maxHp, sp, maxSp, ... }` | Homunculus created or re-summoned |
+| `homunculus:vaporized` | `{ homunculusId }` | Homunculus vaporized (Rest skill) |
+| `homunculus:died` | `{ homunculusId }` | Homunculus killed in combat |
+| `homunculus:resurrected` | `{ homunculusId, hp, maxHp }` | Homunculus revived (Resurrect Homunculus skill) |
+| `homunculus:fed` | `{ homunculusId, hunger, intimacy, fullness }` | Feed result with updated hunger/intimacy |
+| `homunculus:leveled_up` | `{ homunculusId, level, stats }` | Homunculus gained a level |
+| `homunculus:hunger_tick` | `{ homunculusId, hunger, intimacy }` | Periodic hunger decay (60s interval) |
+| `homunculus:command_ack` | `{ command, success }` | Acknowledgement of a command |
+| `homunculus:skill_updated` | `{ homunculusId, skillId, level }` | Skill point allocation confirmed |
+
+#### Server → Zone (all players in zone)
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `homunculus:attack` | `{ homunculusId, targetId, damage }` | Homunculus auto-attack damage |
+| `homunculus:other_summoned` | `{ ownerId, homunculusId, type, name, x, y, z }` | Another player's homunculus appeared |
+| `homunculus:other_dismissed` | `{ ownerId, homunculusId }` | Another player's homunculus dismissed |
+
 ### Player Stats (Server → Client)
 ```json
 {
@@ -224,8 +255,8 @@ Combat and inventory errors use dedicated error events:
 
 Combat events (`combat:damage`, `combat:auto_attack_started/stopped`, `combat:target_lost`, `combat:out_of_range`, `combat:death`, `combat:respawn`, `combat:error`, `combat:health_update`, `enemy:health_update`) are handled directly by `UCombatActionSubsystem` (C++) via `USocketEventRouter`. They are NOT bridged through `MultiplayerEventSubsystem` to Blueprints.
 
-All other game events (enemy:spawn/move/death/attack, player:moved/left, inventory/shop/skill/chat/loot/zone events) are bridged from `MultiplayerEventSubsystem` to `BP_SocketManager` via `ProcessEvent` (22 bridges remaining).
+All other game events (enemy:spawn/move/death/attack, player:moved/left, inventory/shop/skill/chat/loot/zone events) are handled by dedicated C++ subsystems via `USocketEventRouter`. All BP_SocketManager bridges have been removed (0 bridges remaining).
 
 ---
 
-**Last Updated**: 2026-03-13 (Added Client-Side Event Routing section documenting CombatActionSubsystem direct handling)
+**Last Updated**: 2026-03-14 (Updated: all BP_SocketManager bridges removed, 0 remaining)

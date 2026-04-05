@@ -1,6 +1,8 @@
 # ID Reference — Sabri_MMO
 
-Comprehensive ID ranges for all game entities. Use these when writing server logic, Blueprint parsers, or database queries.
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Skill_System](../03_Server_Side/Skill_System.md) | [Inventory_System](../03_Server_Side/Inventory_System.md) | [Enemy_System](../03_Server_Side/Enemy_System.md)
+
+Comprehensive ID ranges for all game entities. Use these when writing server logic, C++ subsystems, or database queries.
 
 ---
 

@@ -1,5 +1,7 @@
 # HomunculusSubsystem — Client C++ Documentation
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Pet_System](../../03_Server_Side/Pet_System.md)
+
 **Files**: `UI/HomunculusSubsystem.h`, `UI/HomunculusSubsystem.cpp`
 **Z-Order**: 22
 **Pattern**: UWorldSubsystem + inline SHomunculusWidget (SCompoundWidget)

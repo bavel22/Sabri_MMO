@@ -1,5 +1,8 @@
 # Skill VFX Implementation Plan — Sabri_MMO
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [VFX_Asset_Reference](VFX_Asset_Reference.md) | [Skill_VFX_Execution_Plan](Skill_VFX_Execution_Plan.md) | [Skill_VFX_Research_Findings](Skill_VFX_Research_Findings.md)
+> **Status**: FUTURE PLAN — VFX configs defined in code (97+), asset mapping complete, Niagara build pending
+
 **Created**: 2026-03-05
 **Research Sources**: 60+ (iRO Wiki, rAthena, Ragnarok Research Lab, Epic Documentation, GitHub, Fab, CGHOW, ArtStation, EmberGen, ZibraVDB, MCP repos, community forums, YouTube, Reddit, The Spriters Resource)
 

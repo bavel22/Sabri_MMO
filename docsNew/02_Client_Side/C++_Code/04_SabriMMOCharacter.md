@@ -1,5 +1,7 @@
 # ASabriMMOCharacter
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Module_Overview](00_Module_Overview.md) | [MMOGameInstance](02_MMOGameInstance.md)
+
 **Files**: `Source/SabriMMO/SabriMMOCharacter.h` (97 lines), `SabriMMOCharacter.cpp` (134 lines)  
 **Parent**: `ACharacter`  
 **UCLASS**: `abstract`  

@@ -1,5 +1,7 @@
 # Glossary
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Project Overview](../00_Project_Overview.md)
+
 ## Game Terms
 
 | Term | Definition |
@@ -45,9 +47,9 @@
 | Prefix | Meaning | Example |
 |--------|---------|---------|
 | `BP_` | Blueprint actor | `BP_MMOCharacter` |
-| `WBP_` | Widget Blueprint | `WBP_GameHUD` |
+| `WBP_` | Widget Blueprint (legacy, all replaced by C++ Slate widgets) | — |
 | `ABP_` | Animation Blueprint | `ABP_unarmed` |
-| `AC_` | Actor Component | `AC_HUDManager` |
+| `AC_` | Actor Component (legacy, all replaced by C++ UWorldSubsystems) | — |
 | `BPI_` | Blueprint Interface | `BPI_Damageable` |
 | `A` prefix (C++) | Actor class | `ASabriMMOCharacter` |
 | `U` prefix (C++) | UObject class | `UMMOGameInstance` |

@@ -43,16 +43,11 @@ However, there are two problems:
 
 **Rating: RISKY**
 
-### 2.3 Socket Event Wrapping -- CORRECT (with caveats)
+### 2.3 Socket Event Registration -- CORRECT
 
-The `WrapSingleEvent` pattern is identical to the established pattern in `CastBarSubsystem.cpp` (lines 147-179) and works correctly:
-- Saves the existing callback from `EventFunctionMap`
-- Replaces it with a combined callback that calls the original first, then the VFX handler
-- Uses `ESIOThreadOverrideOption::USE_GAME_THREAD` to ensure UObject access safety
+> **Historical note:** This section originally described the `WrapSingleEvent` chained callback pattern. That pattern was replaced by `USocketEventRouter::RegisterHandler()` in Phase 4. The EventRouter provides proper multi-handler dispatch -- multiple subsystems register independently, and the router calls all handlers on dispatch. No callback chaining, no initialization order dependencies.
 
-**Caveats:**
-- The wrapping order depends on subsystem initialization order. If `SkillVFXSubsystem` wraps before `CastBarSubsystem`, the chain will be `VFX -> original`, not `CastBar -> original -> VFX`. The "gate" check (`EventFunctionMap.Contains("combat:health_update")`) ensures Blueprint events are bound first, but the order between C++ subsystems is not guaranteed.
-- All three subsystems (CastBar, SkillTree, SkillVFX) capture `this` in lambdas stored in the socket callback map. If the subsystem is destroyed before the socket is cleaned up, these become dangling references. The project mitigates this by having the subsystem outlive the socket (subsystem lives for the world lifetime), but there is no explicit safety check.
+All subsystems register via `Router->RegisterHandler(EventName, this, Callback)` in `OnWorldBeginPlay` and unregister via `Router->UnregisterAllForOwner(this)` in `Deinitialize`. Lambda captures use `TSharedPtr<FEntry>` for stable captures; `WeakOwner` checks prevent dangling references.
 
 **Rating: CORRECT**
 
@@ -94,7 +89,7 @@ In practice, the Niagara-based casting circle (`NS_Free_Magic_Circle1`) will be 
 | 826-832 | `SpawnSystemAtLocation` with `bAutoDestroy=true` and `ENCPoolMethod::AutoRelease` -- correct combination for one-shot effects | OK |
 | 840-851 | `SpawnSystemAttached` with `ENCPoolMethod::AutoRelease` -- correct for buff auras that should return to pool when detached | OK |
 | 856 | `SetNiagaraColor()` now tries 8+ parameter names (SpellColor, Color, BaseColor, ParticleColor, User.Color, User.BaseColor, Tint, ColorMultiplier) + `SetColorParameter`. **FIXED 2026-03-06** | ~~High~~ → OK |
-| 870-878 | `FindEnemyActorById` now uses **property reflection** (`FindPropertyByName("EnemyId")`) instead of actor tags. Still O(N) scan but more reliable. **FIXED 2026-03-06** | Moderate (perf) |
+| 870-878 | `FindEnemyActorById` should use `UEnemySubsystem::GetEnemy()` O(1) lookup instead of O(N) actor iteration. Property reflection was a Phase 2 intermediate step; struct-based registry lookups are the current pattern. | Moderate (perf) |
 | 887-889 | `FindPlayerActorById` for the local player uses `GetFirstPlayerController()` -- correct for single-player-per-client architecture | OK |
 
 ### 3.3 `SkillVFXData.h`
@@ -206,7 +201,7 @@ The system follows the project's multiplayer-safe coding rules:
 | Asset Loading | `TSoftObjectPtr` + `FStreamableManager` async loading with callbacks | Synchronous `LoadObject` |
 | Color Parameterization | Custom Niagara systems with exposed User Parameters, or Material Parameter Collections | Calls `SetVariableLinearColor("SpellColor")` which does not match any third-party system |
 | Effect Pooling | Niagara Effect Types with significance handlers, budget limits, distance culling | `ENCPoolMethod::AutoRelease` only (no budgets) |
-| Actor Lookup | Manager pattern with registered maps (BP_EnemyManager has a TMap) | `TActorIterator` brute-force scan |
+| Actor Lookup | Manager pattern with registered maps (UEnemySubsystem has a TMap) | `TActorIterator` brute-force scan (should use UEnemySubsystem::GetEnemy() O(1) lookup) |
 | Socket/Network Events | GameplayAbility System with GameplayCues, or Multicast RPCs | Socket.io event wrapping (appropriate for this project's architecture) |
 | Casting Indicators | Decal + Niagara with proper materials | Decal material missing; Niagara fallback works |
 | Buff Aura Lifecycle | Component-based with proper attach/detach lifecycle | Attached Niagara with broken key tracking |

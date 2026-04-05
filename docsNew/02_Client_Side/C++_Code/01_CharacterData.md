@@ -1,5 +1,7 @@
 # CharacterData.h
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Module_Overview](00_Module_Overview.md) | [MMOGameInstance](02_MMOGameInstance.md)
+
 **File**: `Source/SabriMMO/CharacterData.h` (357 lines)
 **Purpose**: Defines all shared data structures for the MMO client — character data, inventory items, shop items, drag-drop payloads, and server info. Used throughout Blueprints and C++ subsystems.
 

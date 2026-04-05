@@ -1,5 +1,7 @@
 # Damage Numbers Slate UI — RO-Style Floating Combat Text
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Combat_System](../../03_Server_Side/Combat_System.md)
+
 **Files**: `UI/SDamageNumberOverlay.h/.cpp`, `UI/DamageNumberSubsystem.h/.cpp`
 **Purpose**: Display Ragnarok Online-style damage numbers with per-digit fan-out spread, rise animation, outlined text, and color-coded damage types.
 **Status**: Implemented, pending first in-game test
@@ -12,7 +14,7 @@
 ### Component-Based Architecture
 - **SDamageNumberOverlay** (`SLeafWidget`): Fullscreen transparent overlay that renders all active damage numbers via custom `OnPaint` — no child widgets, no UMG
 - **UDamageNumberSubsystem** (`UWorldSubsystem`): Manages overlay lifecycle, wraps `combat:damage` Socket.io events, projects world positions to screen space, feeds damage pops into the overlay
-- **Event Wrapping**: Preserves existing Blueprint + BasicInfoSubsystem handler chain while adding damage number rendering
+- **Event Registration**: Registered via `EventRouter->RegisterHandler()` for `combat:damage` events alongside other subsystems
 
 ### Custom Rendering Architecture
 - All damage numbers rendered in a single `OnPaint` call using `FSlateDrawElement::MakeText`
@@ -361,16 +363,13 @@ for (int32 c = 0; c < NumChars; ++c)
 
 ---
 
-## Coexistence with Blueprint System
+## Blueprint System Replacement
 
-The new C++ Slate damage numbers run **alongside** the existing Blueprint `WBP_DamageNumber` system. Both display damage numbers simultaneously during the transition period.
+> **Historical note:** The old Blueprint `WBP_DamageNumber` + `AC_HUDManager.ShowDamageNumbers` system has been fully replaced. AC_HUDManager and all WBP_ widgets were deleted in the Blueprint-to-C++ migration (Phases 1-6). The C++ Slate `SDamageNumberOverlay` is the sole damage number system.
 
 | System | Technology | Triggered By | Widget Lifecycle |
 |--------|-----------|-------------|-----------------|
-| **Old** (Blueprint) | UMG `WBP_DamageNumber` | `AC_HUDManager.ShowDamageNumbers` via BP event | Create → Animate → Remove from Parent |
-| **New** (C++ Slate) | `SDamageNumberOverlay` OnPaint | `DamageNumberSubsystem` via event wrapping | Persistent overlay, pool entries recycled |
-
-To disable the old system: remove or bypass the `ShowDamageNumbers` call in `AC_HUDManager`'s `OnCombatDamage` event handler in Blueprint.
+| **Current** (C++ Slate) | `SDamageNumberOverlay` OnPaint | `DamageNumberSubsystem` via EventRouter | Persistent overlay, pool entries recycled |
 
 ---
 

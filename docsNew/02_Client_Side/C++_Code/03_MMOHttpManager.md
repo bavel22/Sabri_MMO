@@ -1,5 +1,7 @@
 # UHttpManager (MMOHttpManager)
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Module_Overview](00_Module_Overview.md) | [API_Reference](../../06_Reference/API_Reference.md)
+
 **Files**: `Source/SabriMMO/MMOHttpManager.h` (61 lines), `MMOHttpManager.cpp` (672 lines)
 **Parent**: `UBlueprintFunctionLibrary`
 **Purpose**: Static HTTP API client for REST communication with the Node.js server, plus bridge functions for Blueprint→Subsystem calls. All functions are `BlueprintCallable` with `WorldContext` meta.

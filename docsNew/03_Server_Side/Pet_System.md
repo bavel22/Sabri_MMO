@@ -1,5 +1,8 @@
 # Pet System — Server Documentation
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Inventory_System](Inventory_System.md) | [Combat_System](Combat_System.md)
+> **RO Reference**: [RagnaCloneDocs/12_Pets_Homunculus_Companions.md](../../RagnaCloneDocs/12_Pets_Homunculus_Companions.md)
+
 **Implemented**: 2026-03-18
 **Source**: `server/src/ro_pet_data.js` (pet database), `server/src/index.js` (handlers)
 

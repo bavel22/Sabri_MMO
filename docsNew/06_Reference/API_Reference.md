@@ -1,5 +1,8 @@
 # API Reference — Quick Lookup
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [API_Documentation](../03_Server_Side/API_Documentation.md) | [Authentication_Flow](../04_Integration/Authentication_Flow.md)
+> **Total**: 11 REST endpoints
+
 ## REST Endpoints
 
 | Method | URL | Auth | Purpose |

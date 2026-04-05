@@ -1,5 +1,7 @@
 # UMMOGameInstance
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Module_Overview](00_Module_Overview.md) | [CharacterData](01_CharacterData.md) | [Authentication_Flow](../../04_Integration/Authentication_Flow.md)
+
 **Files**: `Source/SabriMMO/MMOGameInstance.h` (157 lines), `MMOGameInstance.cpp` (149 lines)
 **Parent**: `UGameInstance`
 **Purpose**: Persists authentication state, character data, server selection, zone transition state, and event dispatchers across level loads. Central data hub for the MMO client.

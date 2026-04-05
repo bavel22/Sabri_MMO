@@ -1,5 +1,8 @@
 # Phase 16: Companions System Completion Plan
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Pet_System](../03_Server_Side/Pet_System.md) | [Alchemist_Class_Research](Alchemist_Class_Research.md)
+> **Status**: COMPLETED — Pet taming/feeding/loyalty, homunculus skills/evolution, companion visual actors
+
 **Created**: 2026-03-18
 **Based on**: Full codebase audit, rAthena pre-re source (pet.cpp, pet_db.yml, pet.conf), iRO Wiki Classic, RateMyServer, ro_homunculus_data.js audit
 

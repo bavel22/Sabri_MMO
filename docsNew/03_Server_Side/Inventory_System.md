@@ -1,5 +1,9 @@
 # Inventory & Item System — Server-Side Documentation
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Card_System](Card_System.md) | [Database_Architecture](../01_Architecture/Database_Architecture.md) | [Combat_System](Combat_System.md)
+> **RO Reference**: [RagnaCloneDocs/05_Items_Equipment_Cards.md](../../RagnaCloneDocs/05_Items_Equipment_Cards.md)
+> **Item Database**: See [items/](../items/) for complete item reference
+
 ## Overview
 
 The inventory system manages items, equipment, and consumables for all characters. **6,169 items** from the rAthena pre-renewal database are stored in PostgreSQL with canonical IDs. Item definitions are loaded into memory on server startup via `loadItemDefinitions()`. Per-character inventory uses the `character_inventory` table with support for stacking, equipping, and dropping items. All consumable effects are data-driven via `ro_item_effects.js`.

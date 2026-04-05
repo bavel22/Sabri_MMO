@@ -1,5 +1,8 @@
 # Card Compound & Bonus System
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Inventory_System](Inventory_System.md) | [Combat_System](Combat_System.md) | [Database_Architecture](../01_Architecture/Database_Architecture.md)
+> **Item Reference**: [items/cards_complete_reference.md](../items/cards_complete_reference.md)
+
 Complete documentation for the Sabri_MMO card system: compounding cards into equipment, stat bonus aggregation, offensive/defensive combat modifiers, armor element changes, and percentage-based HP/SP bonuses.
 
 ---

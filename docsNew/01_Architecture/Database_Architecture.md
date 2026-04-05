@@ -13,7 +13,7 @@ const pool = new Pool({
   port: process.env.DB_PORT,      // 5432
   database: process.env.DB_NAME,  // sabri_mmo
   user: process.env.DB_USER,      // postgres
-  password: process.env.DB_PASSWORD // goku22
+  password: process.env.DB_PASSWORD // from .env
 });
 
 // Redis (redis module v5.10.0)
@@ -187,6 +187,80 @@ Persists hotbar slot assignments per character. Supports both **item** and **ski
 
 **Migration:** `database/migrations/add_character_hotbar.sql` + runtime `ALTER TABLE` in `index.js` startup (adds `slot_type`, `skill_id`, `skill_name` columns; makes `inventory_id`/`item_id` nullable).
 
+### `character_cart`
+
+Cart inventory for Merchant-class characters. Created by `database/migrations/add_cart_vending_identify.sql`.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `cart_id` | SERIAL | PRIMARY KEY | Cart entry ID |
+| `character_id` | INTEGER | FK → characters | Owner character |
+| `item_id` | INTEGER | FK → items | Item reference |
+| `quantity` | INTEGER | DEFAULT 1 | Stack count |
+| `inventory_id` | INTEGER | nullable | Source inventory entry |
+
+### `character_homunculus`
+
+Homunculus companion data for Alchemist class. Created by `database/migrations/add_homunculus_table.sql`.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `homunculus_id` | SERIAL | PRIMARY KEY | Homunculus ID |
+| `character_id` | INTEGER | FK → characters, UNIQUE | Owner (1 per character) |
+| `type` | VARCHAR(20) | NOT NULL | lif, amistr, filir, vanilmirth |
+| `name` | VARCHAR(50) | | Custom name |
+| `level` | INTEGER | DEFAULT 1 | Homunculus level |
+| `hp/max_hp/sp/max_sp` | INTEGER | | Current/max HP and SP |
+| `str/agi/vit/int_stat/dex/luk` | INTEGER | | Stats |
+| `base_exp/exp_to_next` | INTEGER | | EXP tracking |
+| `intimacy` | INTEGER | DEFAULT 10 | Intimacy (0-1000) |
+| `hunger` | INTEGER | DEFAULT 50 | Hunger (0-100) |
+| `alive` | BOOLEAN | DEFAULT true | Life status |
+| `evolved` | BOOLEAN | DEFAULT false | Evolution status |
+| `skills` | JSONB | DEFAULT '{}' | Skill levels |
+
+### `parties`
+
+Party system tables. Created by `database/migrations/add_party_system.sql`.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `party_id` | SERIAL | PRIMARY KEY | Party ID |
+| `name` | VARCHAR(50) | NOT NULL | Party name |
+| `leader_id` | INTEGER | FK → characters | Party leader |
+| `exp_share` | BOOLEAN | DEFAULT false | Even Share mode |
+| `created_at` | TIMESTAMP | DEFAULT NOW() | Creation time |
+
+### `party_members`
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `party_id` | INTEGER | FK → parties ON DELETE CASCADE | Party reference |
+| `character_id` | INTEGER | FK → characters, UNIQUE | Member (1 party max) |
+
+### `vending_shops`
+
+Vending shop persistence. Created by `database/migrations/add_cart_vending_identify.sql`.
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `shop_id` | SERIAL | PRIMARY KEY | Shop ID |
+| `character_id` | INTEGER | FK → characters | Vendor character |
+| `title` | VARCHAR(80) | | Shop sign title |
+| `active` | BOOLEAN | DEFAULT true | Shop open status |
+
+### `vending_items`
+
+| Column | Type | Constraints | Description |
+|--------|------|-------------|-------------|
+| `vend_item_id` | SERIAL | PRIMARY KEY | Vending item ID |
+| `shop_id` | INTEGER | FK → vending_shops | Shop reference |
+| `cart_id` | INTEGER | FK → character_cart | Source cart item |
+| `price` | INTEGER | NOT NULL | Selling price |
+| `amount` | INTEGER | DEFAULT 1 | Quantity for sale |
+
+> **Related**: [Inventory_System.md](../03_Server_Side/Inventory_System.md) | [Cart_Vending_System_Plan.md](../05_Development/Cart_Vending_System_Implementation_Plan.md) | [Refine_ATK_And_Party_System_Plan.md](../05_Development/Refine_ATK_And_Party_System_Plan.md)
+
 ## Indexes
 
 ```sql
@@ -261,14 +335,10 @@ CREATE INDEX IF NOT EXISTS idx_ci_equipped_cards ON character_inventory(characte
 
 **Total**: 14 armor items (3 original + 11 RO)
 
-### Monster Cards (item_id 5001–5023)
-| ID | Name | Effect | Price | Type |
-|----|------|--------|-------|------|
-| 5001-5023 | Stat bonuses and special effects | Various | 4500 | card |
+### Monster Cards (538 cards, item_id 4001–4499)
+Cards are now stored using rAthena canonical IDs (4001-4499). Full card database with prefix/suffix naming, combat mods, and compound validation.
 
-**Total**: 23 cards
-
-**Grand Total**: 148 items (22 original + 126 RO)
+**Grand Total**: 6,169 rAthena canonical items (via `scripts/output/canonical_items.sql`)
 
 ## Redis Cache Schema
 
@@ -286,8 +356,8 @@ The server automatically ensures schema completeness on startup:
 4a. **Derived bonus columns**: `ALTER TABLE items ADD COLUMN IF NOT EXISTS hit_bonus/flee_bonus/critical_bonus`
 4. **Inventory table**: `CREATE TABLE IF NOT EXISTS character_inventory (...)`
 5. **Indexes**: `CREATE INDEX IF NOT EXISTS ...`
-6. **Seed data**: If `items` table is empty, insert all 148 base items (22 original + 126 RO items)
-7. **RO items migration**: Apply `database/migrations/add_ro_drop_items.sql` for RO drop items
+6. **Seed data**: Run `scripts/output/canonical_items.sql` for 6,169 rAthena items (uses `ON CONFLICT DO UPDATE`)
+7. **Party/cart/homunculus tables**: Auto-created via server startup `CREATE TABLE IF NOT EXISTS`
 
 ## Key Queries Used by Server
 
@@ -352,4 +422,6 @@ UPDATE character_inventory SET is_equipped=true WHERE inventory_id=$1;
 
 ---
 
-**Last Updated**: 2026-03-09 — Fixed default class (novice, not warrior), added auto-migrated zone/appearance/job columns
+**Last Updated**: 2026-03-20 — Added character_cart, character_homunculus, parties, party_members, vending_shops, vending_items tables. Updated item counts to 6,169 rAthena canonical. Added navigation links.
+
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [System_Architecture](System_Architecture.md) | [Multiplayer_Architecture](Multiplayer_Architecture.md)

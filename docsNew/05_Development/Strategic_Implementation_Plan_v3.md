@@ -1,5 +1,8 @@
 # Sabri_MMO — Strategic Implementation Plan v3
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Project Overview](../00_Project_Overview.md) | [Global_Rules](../00_Global_Rules/Global_Rules.md)
+> **Status**: COMPLETED — All planned phases implemented through second classes, deferred systems, and merchant UI
+
 **Created**: 2026-03-09
 **Last Updated**: 2026-03-14
 **Based on**: Full codebase audit, skills/VFX audit, all RagnaCloneDocs, all docsNew/, complete server + client C++ analysis, external architecture review, Persistent Socket Connection Plan
@@ -26,9 +29,9 @@
 
 ## Executive Summary
 
-The project has a **solid foundation**: auth, 25 C++ UI subsystems (including ChatSubsystem with combat log, loot notification overlay, ItemInspectSubsystem, CardCompoundPopup, TargetingSubsystem), 4 working zones, auto-attack + 43 active skill handlers with 31 VFX configs, RO damage formulas (element table + size penalties verified with 537 tests), 509 monster templates, inventory/equipment/hotbar, NPC shops, complete status effect system (10 statuses) + buff system (24 types), persistent socket surviving zone transitions, all 6 first classes fully playable, complete card system (538/538 cards), dual wield system, and the full Blueprint-to-C++ migration (Phases 1-6 + BP bridge Phases A-F). BP bridge migration is complete (0 bridges remaining, BP_SocketManager is dead code). Struct refactor eliminated property reflection (FEnemyEntry/FPlayerEntry). The architecture (server-authoritative, UWorldSubsystem pattern, persistent socket + SocketEventRouter) is sound.
+The project has a **solid foundation**: auth, 33 C++ UWorldSubsystems, 4 working zones, auto-attack + 180+ active skill handlers with 97 VFX configs, RO damage formulas (element table + size penalties verified with 537 tests), 509 monster templates, inventory/equipment/hotbar, NPC shops, complete status effect system (10 statuses) + buff system (95 types), persistent socket surviving zone transitions, all 6 first classes + 13 second classes fully playable, complete card system (538/538 cards), dual wield system, party system, pet/homunculus companions, cart/vending/identify, and the full Blueprint-to-C++ migration (Phases 1-6 + BP bridge Phases A-F). BP bridge migration is complete (0 bridges remaining, BP_SocketManager is dead code). Struct refactor eliminated property reflection (FEnemyEntry/FPlayerEntry). The architecture (server-authoritative, UWorldSubsystem pattern, persistent socket + SocketEventRouter) is sound.
 
-**Current state**: All 6 first classes are playable with 151 skill definitions, 43 active handlers, 12 passives, and 31 VFX configs. The server is ~10,000 lines (monolithic, working well with AI-assisted dev). Item database migrated to 6,169 canonical rAthena items. Card system complete (538/538 cards, 13/14 deferred systems implemented). Item descriptions audited for pre-renewal compliance. Login flow fully redesigned with 5 Slate widgets. ChatSubsystem provides global chat and combat log (whisper/party channels still needed). **Zero social systems exist** (no party, guild, trading). The game has strong combat, class variety, and a polished UI but is still a single-player experience.
+**Current state (updated 2026-03-20)**: All 6 first classes + 13 second classes fully playable with 293 skill definitions, 180+ active handlers, 33+ passives, and 97 VFX configs. The server is ~32,200 lines + 11 data modules (~6,000 lines). Item database: 6,169 canonical rAthena items. Card system complete (538/538 cards, all deferred systems implemented). 95 buff types, 10 status effects, party system (21/21 RO features), whisper system, cart/vending/identify UI, pet/homunculus companions. 33 C++ UWorldSubsystems. Login flow fully redesigned with 5 Slate widgets.
 
 **The strategy going forward**: Add party play (the #1 feature that converts a tech demo to an MMO), finish chat expansion (whisper/party channels), then build second-class skills for endgame progression. Social systems before more content.
 
@@ -331,8 +334,8 @@ Phase 4a must come first. Phases 4b and 4c can run in parallel. Phase 4d comes l
 > **What was built**:
 > - **Passive engine**: `getPassiveSkillBonuses()` handles 12 passives, `getEffectiveStats()` merges buff+passive bonuses into derived stats
 > - **All 6 first classes fully playable**: Swordsman (10 skills), Mage (14), Archer (7), Acolyte (14), Thief (10), Merchant (10)
-> - **151 total skill definitions** (68 first-class + 83 second-class data-only), **43 active handlers**, **12 passives**, **31 VFX configs**
-> - **24 buff types** (provoke, endure, sight, blessing, increase_agi, decrease_agi, angelus, pneuma, signum_crucis, auto_berserk, hiding, improve_concentration, loud_exclamation, ruwach, energy_coat + 9 future 2nd-class)
+> - **293 total skill definitions** (69 first-class + 224 second-class), **180+ active handlers**, **33+ passives**, **97 VFX configs**
+> - **95 buff types** (provoke, endure, sight, blessing, songs, dances, ensembles, food, potions, strips, and many more)
 > - **Canonical item migration**: 6,169 rAthena canonical items (was 148), `ro_item_effects.js` with 490 consumable effects, `ro_item_mapping.js` DELETED (runtime `itemNameToId` Map from DB)
 > - **Combat formula additions**: Race ATK/DEF (Demon Bane, Divine Protection), weapon element for physical skills, heal-damages-undead (Holy element), `executePhysicalSkillOnEnemy()` shared helper
 > - **Double Attack** in auto-attack tick, **Pneuma** ranged block, **Hidden** AI checks (3 locations)
@@ -697,15 +700,15 @@ Phase 5: Passive Skills + 6 First Classes  2 weeks       ✓ DONE (2026-03-10)
 
 2. **Status effect architecture** ✓ — Generic system built. Any future skill can apply/remove effects with 2-3 lines.
 
-3. **Buff system architecture** ✓ — Generic system built. 24 buff types all use it.
+3. **Buff system architecture** ✓ — Generic system built. 95 buff types all use it.
 
 4. **SP deduction timing** ✓ — Fixed while only 17 skills existed.
 
 5. **Security fixes** ✓ — JWT auth, DB transactions, rate limiting all fixed.
 
-6. **Persistent socket connection** ✓ — Socket on GameInstance survives zone changes. SocketEventRouter for multi-handler dispatch. All 25 subsystems migrated. reconnectBuffCache removed. BP bridge migration complete (14→0 bridges, Phases A-F). BP_SocketManager is dead code.
+6. **Persistent socket connection** ✓ — Socket on GameInstance survives zone changes. SocketEventRouter for multi-handler dispatch. All 33 subsystems migrated. reconnectBuffCache removed. BP bridge migration complete (14→0 bridges, Phases A-F). BP_SocketManager is dead code.
 
-7. **Passive skill engine** ✓ — `getPassiveSkillBonuses()` for 12 passives, `getEffectiveStats()` merges buff+passive bonuses. Race ATK/DEF in damage formula.
+7. **Passive skill engine** ✓ — `getPassiveSkillBonuses()` for 33+ passives, `getEffectiveStats()` merges buff+passive bonuses. Race ATK/DEF in damage formula.
 
 8. **Canonical item migration** ✓ — 6,169 rAthena items (was 148), 490 consumable effects data-driven, NPC shops using canonical IDs.
 
@@ -747,9 +750,9 @@ Phase 5: Passive Skills + 6 First Classes  2 weeks       ✓ DONE (2026-03-10)
 - ✓ Correct element table matching rAthena pre-renewal (Phase 3)
 - ✓ Persistent socket connection, no disconnect on zone change (Phase 4)
 - ✓ 6 fully playable first classes with all skills working (Phase 5)
-- ✓ 151 skill definitions, 43 active handlers, 12 passives, 31 VFX configs (Phase 5)
+- ✓ 293 skill definitions (69 first + 224 second class), 180+ active handlers, 33+ passives, 97 VFX configs
 - ✓ Generic status effect system with 10 core effects (Phase 2)
-- ✓ Generic buff system (24 types) with buff bar UI (Phase 2)
+- ✓ Generic buff system (95 types) with buff bar UI (Phase 2+)
 - ✓ 6,169 canonical rAthena items in database (Phase 5)
 - ✓ Security fixes: JWT auth, DB transactions, rate limiting (Phase 0)
 - ✓ Complete card system: 538/538 cards, 13/14 deferred systems (Phase 12 early)

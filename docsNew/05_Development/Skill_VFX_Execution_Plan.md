@@ -1025,7 +1025,7 @@ Same pattern for Safety Wall (skillId 211).
 - [x] Phase 5 partial — Python script for M_CastingCircle written (user must run in editor)
 - [ ] Phase 6 pending — Niagara templates need editor (MCP or manual)
 - [ ] Phase 7 pending — Texture generation (MCP or AI tools)
-- [x] Phase 8 complete — Socket events self-wrap via WrapSingleEvent pattern (no manual wiring needed)
+- [x] Phase 8 complete — Socket events registered via EventRouter->RegisterHandler() (no manual wiring needed)
 - [x] Phase 9 complete — All 15 skill VFX configs defined in SkillVFXData.h
 - [x] Phase 10 complete — WarpPortal.h/.cpp updated with NiagaraComponent
 - [ ] Phase 11 pending — Testing requires editor

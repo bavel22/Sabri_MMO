@@ -1,5 +1,7 @@
 # World Health Bar System (Floating HP/SP Bars)
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Combat_System](../../03_Server_Side/Combat_System.md)
+
 ## Overview
 
 RO-style floating health and mana bars rendered below player and enemy characters in world space. Uses screen-space projection to position bars at entity feet, with OnPaint rendering for maximum performance.
@@ -140,13 +142,13 @@ SlateLocalPos = ScreenPixelPos * InvScale
 | Event-Driven | Socket event wrapping, no Tick polling for data |
 | OnPaint Overlay | Single widget renders all bars — efficient for many enemies |
 | World-to-Screen Projection | `ProjectWorldLocationToScreen` each frame per entity |
-| Event Chaining | `WrapSingleEvent` preserves Blueprint handlers, adds C++ handler on top |
+| Event Registration | `EventRouter->RegisterHandler()` multi-handler dispatch (replaces WrapSingleEvent chain) |
 
 ## Related Files
 
 | File | Purpose |
 |------|---------|
-| `UI/BasicInfoSubsystem.*` | Reference: same WrapSingleEvent pattern, HP/SP event handling |
+| `UI/BasicInfoSubsystem.*` | Reference: same EventRouter pattern, HP/SP event handling |
 | `UI/DamageNumberSubsystem.*` | Reference: overlay pattern, world-to-screen projection |
 | `UI/SDamageNumberOverlay.*` | Reference: OnPaint rendering, active timer, DPI scaling |
 | `server/src/index.js` | Socket event sources (combat:*, enemy:*, player:stats) |

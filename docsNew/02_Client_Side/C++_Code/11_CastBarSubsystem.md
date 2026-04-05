@@ -1,5 +1,7 @@
 # UCastBarSubsystem
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Skill_System](../../03_Server_Side/Skill_System.md)
+
 **Files**: `Source/SabriMMO/UI/CastBarSubsystem.h` (69 lines), `CastBarSubsystem.cpp` (336 lines)
 **Parent**: `UWorldSubsystem`
 **Purpose**: Tracks skill casts for all visible players and renders cast bars via an always-on overlay.

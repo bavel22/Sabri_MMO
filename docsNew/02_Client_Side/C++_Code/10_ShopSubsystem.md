@@ -1,5 +1,7 @@
 # UShopSubsystem
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Inventory_System](../../03_Server_Side/Inventory_System.md)
+
 **Files**: `Source/SabriMMO/UI/ShopSubsystem.h` (111 lines), `ShopSubsystem.cpp` (637 lines)
 **Parent**: `UWorldSubsystem`
 **Purpose**: NPC shop buy/sell interface with cart system, Discount/Overcharge skill integration, and inventory weight tracking.

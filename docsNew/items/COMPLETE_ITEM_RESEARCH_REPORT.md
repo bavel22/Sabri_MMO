@@ -1,5 +1,9 @@
 # Ragnarok Online Classic (Pre-Renewal) — Complete Item Research Report
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Inventory_System](../03_Server_Side/Inventory_System.md) | [Card_System](../03_Server_Side/Card_System.md) | [Database_Architecture](../01_Architecture/Database_Architecture.md)
+> **RO Reference**: [RagnaCloneDocs/05_Items_Equipment_Cards.md](../../RagnaCloneDocs/05_Items_Equipment_Cards.md)
+> **Related Item Docs**: [weapons_complete_database](weapons_complete_database.md) | [cards_complete_reference](cards_complete_reference.md) | [consumables](consumables.md) | [armor](armor.md)
+
 Generated: 2026-03-11
 
 ## Executive Summary

@@ -1,5 +1,8 @@
 # Phase 7, 9, 12 Completion Plan
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Combat_System](../03_Server_Side/Combat_System.md) | [Enemy_System](../03_Server_Side/Enemy_System.md) | [Pet_System](../03_Server_Side/Pet_System.md)
+> **Status**: COMPLETED — Whisper system, MVP system, death penalty, pet system all implemented
+
 **Created**: 2026-03-17
 **Last Updated**: 2026-03-18
 **Based on**: Full codebase audit of index.js (~27,000 lines), ro_monster_skills.js, ro_damage_formulas.js, ChatSubsystem.h/.cpp, MEMORY.md, RagnaCloneDocs, rAthena pre-re source cross-reference

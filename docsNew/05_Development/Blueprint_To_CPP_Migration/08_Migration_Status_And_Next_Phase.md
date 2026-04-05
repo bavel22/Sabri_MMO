@@ -1,7 +1,7 @@
 # Blueprint-to-C++ Migration — Full Status & Next Phase Plan
 
 **Last Updated:** 2026-03-14
-**Status:** Phases 1-4 COMPLETE. Phase 5 (Name Tags + Interaction) is next.
+**Status:** Phases 1-6 COMPLETE. BP Bridge Migration (Phases A-F) COMPLETE. 0 bridges remaining.
 
 ---
 
@@ -31,17 +31,19 @@ Replace Blueprint-based gameplay systems with pure C++ UWorldSubsystems and Slat
 | **Phase 1** | Camera, input, movement | **COMPLETE** | 2026-03-14 | CameraSubsystem, PlayerInputSubsystem |
 | **Phase 2** | Targeting, combat actions | **COMPLETE** | 2026-03-13 | TargetingSubsystem, CombatActionSubsystem |
 | **Phase 3** | Entity management | **COMPLETE** | 2026-03-14 | EnemySubsystem, OtherPlayerSubsystem |
+| **Struct Refactor** | Entity struct registries | **COMPLETE** | 2026-03-14 | EnemySubsystem (FEnemyEntry), OtherPlayerSubsystem (FPlayerEntry), TargetingSubsystem, SkillVFXSubsystem, WorldHealthBarSubsystem |
 | **Phase 5** | Name tags (RO Classic) | **COMPLETE** | 2026-03-14 | NameTagSubsystem, SNameTagOverlay |
-| **Phase 6** | Dead BP code removal | **PLANNED** | — | Remove BP managers, dead event graph nodes |
+| **Phase 6** | Dead BP code removal | **COMPLETE** | 2026-03-14 | Removed BP_OtherPlayerManager, BP_EnemyManager from levels, 17 dead functions from BP_SocketManager, WBP_PlayerNameTag, NameTagWidget WidgetComponents, AC_TargetingSystem, AC_CameraController |
 
 ### Metrics
 
-| Metric | Before Migration | After Phase 4 |
-|--------|-----------------|---------------|
-| BP_SocketManager bridges | 31 events | 14 events |
-| C++ subsystems | 15 | 24 |
+| Metric | Before Migration | After All Phases |
+|--------|-----------------|-----------------|
+| BP_SocketManager bridges | 31 events | 0 events (Phases A-F removed all 14 remaining) |
+| C++ subsystems | 15 | 25 |
 | BP event graph nodes replaced | 0 | ~700+ (OnCombatDamage 215, BP managers ~300, input ~200) |
 | Entity management | Blueprint (BP_EnemyManager, BP_OtherPlayerManager) | C++ (UEnemySubsystem, UOtherPlayerSubsystem) |
+| Chat system | Blueprint (BP_SocketManager → AC_HUDManager → WBP_Chat) | C++ (ChatSubsystem + SChatWidget) |
 
 ---
 
@@ -85,8 +87,8 @@ Replace Blueprint-based gameplay systems with pure C++ UWorldSubsystems and Slat
 **Problem:** BP_EnemyManager and BP_OtherPlayerManager managed entity lifecycle. CombatActionSubsystem resolved actors via ProcessEvent on these BP managers (temporary Phase 2 bridge).
 
 **Solution:**
-- `UEnemySubsystem` — TMap registry, 5 event handlers (spawn/move/death/health/attack), spawns BP_EnemyCharacter via LoadClass + SpawnActor, calls InitializeEnemy/UpdateEnemyHealth/OnEnemyDeath/PlayAttackAnimation via ProcessEvent
-- `UOtherPlayerSubsystem` — TMap registry, 2 event handlers (moved/left), spawns BP_OtherPlayerCharacter, filters local player, 200-unit snap threshold for teleports
+- `UEnemySubsystem` — `TMap<int32, FEnemyEntry>` registry, 5 event handlers (spawn/move/death/health/attack), spawns BP_EnemyCharacter via LoadClass + SpawnActor, calls InitializeEnemy/UpdateEnemyHealth/OnEnemyDeath/PlayAttackAnimation via ProcessEvent
+- `UOtherPlayerSubsystem` — `TMap<int32, FPlayerEntry>` registry, 2 event handlers (moved/left), spawns BP_OtherPlayerCharacter, filters local player, 200-unit snap threshold for teleports
 - `CombatActionSubsystem` — FindEnemyActor/FindPlayerActor now use direct subsystem TMap lookups
 - `MultiplayerEventSubsystem` — 7 bridges removed (22→14)
 
@@ -96,11 +98,30 @@ Replace Blueprint-based gameplay systems with pure C++ UWorldSubsystems and Slat
 - Remote player snap on teleport/zone transition (200-unit threshold)
 - **Critical crash fix:** CallBPFunction uses Memzero + explicit FString placement new (NOT InitializeStruct/DestroyStruct — caused 0xc0000409 stack buffer overrun)
 
+### Struct Refactor: Entity Struct Registries (COMPLETE)
+
+**Problem:** All subsystems used UE5 property reflection (`FindPropertyByName`, `GetPropertyValue_InContainer`) to read enemy/player data from Blueprint actor variables. This was slow (trying 4 different property name spellings), fragile, and had a bug: BP_OtherPlayerCharacter lacked `CharacterId` and `PlayerName` BP variables, making other players untargetable.
+
+**Solution:**
+- Added C++ structs (`FEnemyEntry`, `FPlayerEntry`) to the subsystem TMap registries
+- `FEnemyEntry`: Actor, EnemyId, EnemyName, EnemyLevel, Health, MaxHealth, bIsDead
+- `FPlayerEntry`: Actor, CharacterId, PlayerName
+- Added `ActorToEnemyId` / `ActorToPlayerId` reverse lookup TMaps for O(1) actor-to-ID resolution
+- Public APIs: `GetEnemyData()`, `GetEnemyIdFromActor()`, `GetAllEnemies()`, `GetPlayerData()`, `GetPlayerIdFromActor()`, `GetPlayerNameFromActor()`
+- All consumers refactored to use struct lookups instead of property reflection: TargetingSubsystem, PlayerInputSubsystem, SkillTreeSubsystem, SkillVFXSubsystem, WorldHealthBarSubsystem
+- BP actors still receive writes via `SetBPVector`/`SetBPBool` for Tick interpolation — no Blueprint changes needed
+
+**Bug fixed:** Other players are now targetable. `CharacterId` and `PlayerName` are stored in the C++ `FPlayerEntry` struct.
+
+**Performance improvement:** `SkillVFXSubsystem::FindEnemyActorById()` went from O(N) TActorIterator scan to O(1) TMap lookup.
+
+**Files changed (10):** EnemySubsystem.h/.cpp, OtherPlayerSubsystem.h/.cpp, TargetingSubsystem.cpp, PlayerInputSubsystem.cpp, SkillTreeSubsystem.cpp, SkillVFXSubsystem.cpp, WorldHealthBarSubsystem.cpp
+
 ---
 
 ## 3. Current Architecture (Post Phase 4)
 
-### 24 C++ Subsystems
+### 25 C++ Subsystems
 
 | Subsystem | Z-Order | Events | Role |
 |-----------|---------|--------|------|
@@ -110,9 +131,10 @@ Replace Blueprint-based gameplay systems with pure C++ UWorldSubsystems and Slat
 | BasicInfoSubsystem | 10 | 2 | HP/SP/EXP bars |
 | BuffBarSubsystem | 11 | 3 | Status/buff icons with countdown |
 | CombatStatsSubsystem | 12 | 1 | F8 stats panel |
-| InventorySubsystem | 14 | 6 | F6 inventory, drag state |
+| ChatSubsystem | 13 | 9 | Chat window (chat:receive + 8 combat log events), SendChatMessage() |
+| InventorySubsystem | 14 | 8 | F6 inventory, drag state, item use + loot handlers |
 | EquipmentSubsystem | 15 | 2 | F7 equipment |
-| HotbarSubsystem | 16, keybind=30 | 3 | F5 cycle, 4×9 slots |
+| HotbarSubsystem | 16, keybind=30 | 4 | F5 cycle, 4×9 slots (hotbar:alldata + hotbar:data) |
 | ShopSubsystem | 18 | 4 | NPC shop buy/sell |
 | KafraSubsystem | 19 | — | Kafra NPC dialog |
 | SkillTreeSubsystem | 20 | 4 | Skill tree UI + targeting mode |
@@ -121,10 +143,10 @@ Replace Blueprint-based gameplay systems with pure C++ UWorldSubsystems and Slat
 | CastBarSubsystem | 25 | 2 | Cast bar overlay |
 | ZoneTransitionSubsystem | 50 | 3 | Zone transitions, loading overlay |
 | SkillVFXSubsystem | n/a | 2 | Niagara VFX for skills |
-| MultiplayerEventSubsystem | n/a | 14 bridges | BP_SocketManager event bridge |
+| MultiplayerEventSubsystem | n/a | 0 | Outbound emit helpers only (EmitCombatAttack, EmitStopAttack, RequestRespawn, EmitChatMessage) |
 | PositionBroadcastSubsystem | n/a | — | 30Hz position broadcast |
-| EnemySubsystem | n/a | 5 | Enemy entity registry + lifecycle |
-| OtherPlayerSubsystem | n/a | 2 | Other player entity registry + lifecycle |
+| EnemySubsystem | n/a | 5 | Enemy entity registry (`TMap<int32, FEnemyEntry>`) + lifecycle. Struct stores Actor+ID+Name+Level+Health+bIsDead. Reverse lookup `ActorToEnemyId`. |
+| OtherPlayerSubsystem | n/a | 2 | Other player entity registry (`TMap<int32, FPlayerEntry>`) + lifecycle. Struct stores Actor+CharacterId+PlayerName. Reverse lookup `ActorToPlayerId`. |
 | TargetingSubsystem | n/a | — | 30Hz hover trace, cursor switching |
 | PlayerInputSubsystem | n/a | — | Click-to-move/attack/interact |
 | CameraSubsystem | n/a | — | Right-click rotation, scroll zoom |
@@ -141,44 +163,43 @@ USocketEventRouter (multi-handler dispatch)
     ├── CombatActionSubsystem (10 combat events)
     ├── EnemySubsystem (5 enemy events)
     ├── OtherPlayerSubsystem (2 player events)
-    ├── InventorySubsystem (5 inventory events + card:result)
+    ├── InventorySubsystem (5 inventory events + card:result + inventory:used + loot:drop)
     ├── BasicInfoSubsystem (player:joined, combat:health_update)
     ├── CombatStatsSubsystem (player:stats)
     ├── DamageNumberSubsystem (combat:damage, skill:effect_damage)
     ├── BuffBarSubsystem (buff:list, buff:update, status:update)
-    ├── HotbarSubsystem (hotbar:data, hotbar:alldata, hotbar:request)
+    ├── ChatSubsystem (chat:receive + 8 combat log events)
+    ├── HotbarSubsystem (hotbar:data, hotbar:alldata)
     ├── SkillTreeSubsystem (skill:data, skill:learn_result, skill:effect_damage, skill:cast_start)
     ├── CastBarSubsystem (skill:cast_start, skill:cast_complete)
     ├── SkillVFXSubsystem (skill:effect_damage, skill:cast_start)
     ├── ZoneTransitionSubsystem (zone:change, zone:error, zone:teleport)
-    ├── WorldHealthBarSubsystem (combat:damage, combat:health_update)
-    └── MultiplayerEventSubsystem (14 events → BP_SocketManager via ProcessEvent)
+    └── WorldHealthBarSubsystem (combat:damage, combat:health_update)
 ```
 
 ---
 
-## 4. Remaining 14 BP Bridges
+## 4. BP Bridges — ALL REMOVED (was 14 — all removed in Phases A-F)
 
-These events are still forwarded from `MultiplayerEventSubsystem` to `BP_SocketManager` via ProcessEvent:
+All 14 bridges have been removed from `MultiplayerEventSubsystem`. BP_SocketManager is now fully dead code. `MultiplayerEventSubsystem` only provides outbound emit helpers (EmitCombatAttack, EmitStopAttack, RequestRespawn, EmitChatMessage).
 
-| # | Socket Event | BP Function | Category | Notes |
-|---|-------------|-------------|----------|-------|
-| 1 | `inventory:data` | `OnInventoryData` | Inventory | Full inventory refresh |
-| 2 | `inventory:used` | `OnItemUsed` | Inventory | Item use feedback |
-| 3 | `inventory:equipped` | `OnItemEquipped` | Inventory | Equipment visual update (65 nodes!) |
-| 4 | `inventory:dropped` | `OnItemDropped` | Inventory | Item drop feedback |
-| 5 | `inventory:error` | `OnInventoryError` | Inventory | Error display |
-| 6 | `loot:drop` | `OnLootDrop` | Loot | Loot pickup notification |
-| 7 | `chat:receive` | `OnChatReceived` | Chat | Chat message display |
-| 8 | `player:stats` | `OnPlayerStats` | Stats | Stats HUD update |
-| 9 | `hotbar:data` | `OnHotbarData` | Hotbar | Single slot update |
-| 10 | `hotbar:alldata` | `OnHotbarAllData` | Hotbar | Full hotbar refresh |
-| 11 | `shop:data` | `OnShopData` | Shop | Shop inventory display |
-| 12 | `shop:bought` | `OnShopBought` | Shop | Purchase result |
-| 13 | `shop:sold` | `OnShopSold` | Shop | Sell result |
-| 14 | `shop:error` | `OnShopError` | Shop | Shop error display |
-
-**Note:** Many of these are already partially handled by C++ subsystems (InventorySubsystem, ShopSubsystem, etc.) which register directly with the EventRouter. The BP bridges exist for legacy BP_SocketManager functions that update equipment visuals, loot VFX, chat UI, etc. These will be removed when the C++ subsystems fully replace the BP handler logic.
+### All Bridges Removed (Phases A-F, 2026-03-14)
+| Event | Removed In | C++ Handler |
+|-------|-----------|-------------|
+| `inventory:data` | Phase A | InventorySubsystem + EquipmentSubsystem + BasicInfoSubsystem |
+| `inventory:equipped` | Phase A | InventorySubsystem + EquipmentSubsystem |
+| `inventory:dropped` | Phase A | InventorySubsystem |
+| `inventory:error` | Phase A | InventorySubsystem |
+| `player:stats` | Phase A | CombatStatsSubsystem + BasicInfoSubsystem + WorldHealthBarSubsystem |
+| `hotbar:alldata` | Phase A | HotbarSubsystem + SkillTreeSubsystem |
+| `shop:data` | Phase A | ShopSubsystem |
+| `shop:bought` | Phase A | ShopSubsystem + BasicInfoSubsystem |
+| `shop:sold` | Phase A | ShopSubsystem + BasicInfoSubsystem |
+| `shop:error` | Phase A | ShopSubsystem |
+| `hotbar:data` | Phase B | HotbarSubsystem (new HandleHotbarData handler) |
+| `inventory:used` | Phase C | InventorySubsystem (new HandleItemUsed handler) |
+| `loot:drop` | Phase D | InventorySubsystem (new HandleLootDrop + SLootNotificationOverlay) |
+| `chat:receive` | Phase E | ChatSubsystem (new UChatSubsystem + SChatWidget + combat log) |
 
 ---
 
@@ -400,7 +421,9 @@ Remove dead Blueprint code that has been fully replaced by C++ subsystems:
 - Zoom uses `MouseScrollUp` + `MouseScrollDown` with Negate modifier (NOT `MouseWheelAxis`)
 
 ### Entity Management
-- BP reflection helpers: `SetBPInt/Double/Bool/String/Vector`, `GetBPBool` — anonymous namespace in each .cpp
+- **C++ struct registries** — `FEnemyEntry`/`FPlayerEntry` store entity data alongside actor pointer. All reads use struct fields, never BP property reflection. BP actors still receive writes via `SetBPVector`/`SetBPBool` for Tick interpolation.
+- **Reverse lookup TMaps** — `ActorToEnemyId`/`ActorToPlayerId` provide O(1) actor-to-ID resolution. Maintained in spawn/death/leave handlers.
+- BP reflection helpers for writes only: `SetBPInt/Double/Bool/String/Vector`, `GetBPBool` — anonymous namespace in each .cpp
 - `CallBPFunction` with params: Memzero + FString placement new (see EnemySubsystem.cpp)
 - `bReadyToProcess` one-frame defer via `SetTimerForNextTick` prevents ProcessEvent during PostLoad
 - TWeakObjectPtr for actor registries — auto-nulls on destroy

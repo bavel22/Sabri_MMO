@@ -1,5 +1,7 @@
 # Monster Skill System
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Enemy_System](Enemy_System.md) | [Skill_System](Skill_System.md) | [Combat_System](Combat_System.md)
+
 **Implemented:** 2026-03-17
 **Status:** ACTIVE — 23 monster templates with skill data, 7 execution functions, Plagiarism integration
 

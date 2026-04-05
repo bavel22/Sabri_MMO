@@ -1,5 +1,8 @@
 # Zone System — UE5 Editor Setup Guide
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Project Overview](../00_Project_Overview.md)
+> **RO Reference**: [RagnaCloneDocs/06_World_Maps_Zones.md](../../RagnaCloneDocs/06_World_Maps_Zones.md) | [Implementation/08_Zone_World_System.md](../../RagnaCloneDocs/Implementation/08_Zone_World_System.md)
+
 ## Overview
 
 This guide covers the manual UE5 editor steps required to complete the zone/warp system. The server code, C++ subsystems, and L_Prontera blockout geometry are already implemented. This guide walks through saving levels, placing required actors, and configuring each zone.
@@ -42,7 +45,7 @@ The current level contains the Prontera town blockout geometry (castle, gates, b
 2. Set **GameMode Override** to `GM_MMOGameMode`
 3. Open `GM_MMOGameMode` Blueprint → **Class Defaults** → verify **Default Pawn Class** = **None**
 
-**DefaultPawnClass must be None.** `BP_SocketManager` is responsible for spawning `BP_MMOCharacter` after the socket connection is established. If the GameMode also has a DefaultPawnClass set, it will spawn a duplicate pawn at the PlayerStart/world origin.
+**DefaultPawnClass must be None.** The Level Blueprint is responsible for spawning `BP_MMOCharacter` after login. If the GameMode also has a DefaultPawnClass set, it will spawn a duplicate pawn at the PlayerStart/world origin.
 
 ### 1.3: Level Blueprint (CRITICAL — Character Spawn)
 
@@ -69,15 +72,9 @@ The Level Blueprint has 3 sections:
 
 > **TIP**: Always duplicate an existing game level instead of creating a new empty one. This copies the Level Blueprint, World Settings, and placed actors automatically.
 
-### 1.4: Add Required Blueprint Actors
+### 1.4: Required Actors (Auto-Created by C++ Subsystems)
 
-Place these in L_Prontera (drag from Content Browser):
-
-| Blueprint | Location | Notes |
-|-----------|----------|-------|
-| `BP_SocketManager` | (0, 0, 0) | Socket.io connection hub |
-| `BP_OtherPlayerManager` | (0, 0, 0) | Remote player spawning |
-| `BP_EnemyManager` | (0, 0, 0) | Enemy spawning (empty in town) |
+> **Note:** BP_SocketManager, BP_OtherPlayerManager, and BP_EnemyManager are no longer needed in levels. Remote player spawning is handled by `UOtherPlayerSubsystem` and enemy spawning by `UEnemySubsystem` -- both are C++ UWorldSubsystems that auto-create when the level loads. No manual actor placement is required for these systems.
 
 ### 1.4: Add NavMesh
 
@@ -110,7 +107,7 @@ The existing `L_Game` level becomes the Prontera South Field.
 1. In Content Browser, navigate to the level `L_Game`
 2. Right-click → Rename → `L_PrtSouth`
 3. Move it to `Content/SabriMMO/Levels/` if not already there
-4. This level already has: ground plane, landscape, lighting, BP_SocketManager, BP_OtherPlayerManager, BP_EnemyManager, NavMesh
+4. This level already has: ground plane, landscape, lighting, NavMesh (BP_SocketManager, BP_OtherPlayerManager, BP_EnemyManager were removed in Phase 6 -- C++ subsystems handle these automatically)
 
 ### 2.1: Add Warp Portals to L_PrtSouth
 
@@ -152,12 +149,11 @@ If using Option B (blank level), create a ground plane:
 
 | Actor | Location | Properties |
 |-------|----------|------------|
-| `BP_SocketManager` | (0, 0, 0) | — |
-| `BP_OtherPlayerManager` | (0, 0, 0) | — |
-| `BP_EnemyManager` | (0, 0, 0) | — |
 | Nav Mesh Bounds Volume | (0, 0, 300) | Scale ~(80, 80, 10) |
 | Directional Light | — | For outdoor lighting |
 | Sky Atmosphere + Sky Light | — | Ambient lighting |
+
+> **Note:** BP_SocketManager, BP_OtherPlayerManager, and BP_EnemyManager are no longer needed. C++ UWorldSubsystems handle these automatically.
 
 ### 3.4: Add Warp Portal
 
@@ -202,9 +198,6 @@ Build an enclosed underground environment:
 
 | Actor | Location | Properties |
 |-------|----------|------------|
-| `BP_SocketManager` | (0, 0, 0) | — |
-| `BP_OtherPlayerManager` | (0, 0, 0) | — |
-| `BP_EnemyManager` | (0, 0, 0) | — |
 | Nav Mesh Bounds Volume | (0, 0, 300) | Scale to cover dungeon area |
 
 ### 4.4: Add Warp Portal
@@ -325,13 +318,12 @@ Every game level (NOT L_Startup) must have these configured:
 
 - [ ] **Level Blueprint** — Spawn + Possess BP_MMOCharacter, SaveCharacterPosition timer, EndPlay cleanup (see Step 1.3). **Easiest: duplicate an existing level.**
 - [ ] **GameMode Override** — World Settings → use `GM_MMOGameMode` (Default Pawn Class must be **None**)
-- [ ] `BP_SocketManager` — Socket.io connection
-- [ ] `BP_OtherPlayerManager` — remote player spawning
-- [ ] `BP_EnemyManager` — enemy spawning
 - [ ] `Nav Mesh Bounds Volume` — covering the playable area
 - [ ] Lighting (Directional + Sky for outdoor, Point Lights for dungeon)
 - [ ] `AWarpPortal` actors at zone edges (one per warp in ro_zone_data.js)
 - [ ] `AKafraNPC` actors if the zone has Kafra NPCs in ro_zone_data.js
+
+> **Note:** BP_SocketManager, BP_OtherPlayerManager, and BP_EnemyManager are NOT needed. Socket connection, remote player spawning, and enemy spawning are all handled by C++ UWorldSubsystems that auto-create per level.
 
 ---
 
@@ -378,6 +370,6 @@ Characters now load into their saved level directly, without going through L_Prt
 
 ---
 
-**Last Updated**: 2026-03-05
-**Version**: 1.3
-**Status**: Complete
+**Last Updated**: 2026-03-14
+**Version**: 1.4
+**Status**: Complete (Updated: removed BP_SocketManager/BP_OtherPlayerManager/BP_EnemyManager from required actors -- C++ subsystems handle these automatically)

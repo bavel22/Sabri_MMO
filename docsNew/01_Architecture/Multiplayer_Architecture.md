@@ -1,5 +1,7 @@
 # Multiplayer Architecture
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [System_Architecture](System_Architecture.md) | [Database_Architecture](Database_Architecture.md) | [Networking_Protocol](../04_Integration/Networking_Protocol.md) | [Event_Reference](../06_Reference/Event_Reference.md)
+
 ## Overview
 
 Sabri_MMO uses a **server-authoritative** multiplayer model where the Node.js server is the single source of truth for all game state. Clients send inputs and requests; the server validates, processes, and broadcasts results to all relevant clients via Socket.io.
@@ -307,11 +309,11 @@ Router->DispatchEvent("combat:damage", Payload);
 // → Iterates all handlers, skips expired WeakOwner entries
 ```
 
-### MultiplayerEventSubsystem (Blueprint Bridge)
+### MultiplayerEventSubsystem (Outbound Emit Helpers Only)
 
-Bridges ~30 inbound Socket.io events to `BP_SocketManager` handler functions. On `Initialize()`, registers with the `SocketEventRouter` for all events that `BP_SocketManager` previously bound directly. Each handler finds the BP_SocketManager actor and calls its handler function via `FindFunction()` + `ProcessEvent()`.
+> **Historical note:** This subsystem originally bridged ~31 inbound socket events to `BP_SocketManager` handler functions via `FindFunction()`/`ProcessEvent()`. All bridges were removed in Phases A-F (2026-03-14). All inbound events are now handled by dedicated C++ subsystems.
 
-**BlueprintCallable emit methods** for Blueprints that need to send events:
+Provides `BlueprintCallable` emit methods for Blueprints that need to send events:
 - `EmitCombatAttack(TargetId, IsEnemy)` — starts auto-attack
 - `EmitStopAttack()` — stops auto-attack
 - `RequestRespawn()` — respawn after death
@@ -337,37 +339,34 @@ Get SocketIO Component → Emit(EventName, SIOJsonObject)
 Get Game Instance → Cast To MMOGameInstance → Emit Socket Event(EventName, SIOJsonObject*)
 ```
 
-### BP_SocketManager (Handler Shell Status)
+### BP_SocketManager — FULLY DEAD CODE
 
-`BP_SocketManager` still exists as an actor in game levels but its role has changed:
+> **Historical note:** BP_SocketManager was the original Blueprint actor that owned the Socket.io connection and handled all inbound events. It was progressively replaced:
+> - Phase 4 moved the socket connection to GameInstance
+> - Phases A-F removed all 31 inbound event bridges from MultiplayerEventSubsystem
+> - Phase 6 deleted all 17 handler functions from the Blueprint
+> - BP_SocketManager actor instances were removed from all levels in Phase 6
+>
+> The Blueprint asset may still exist in the Content Browser but has zero active functionality.
 
-| Aspect | Pre-Phase 4 | Phase 4 |
-|--------|-------------|---------|
-| **SocketIO Component** | Connected, binds events | Present but NOT connected |
-| **BeginPlay** | Connect + Bind + Start Timer | Set auth vars + actor refs + HUD init |
-| **Event Binding** | Direct Blueprint bindings | Handlers called by MultiplayerEventSubsystem |
-| **Event Emit** | Via SocketIO component | Via `K2_EmitSocketEvent` on GameInstance |
-| **Position Timer** | Event Tick at variable rate | Removed (PositionBroadcastSubsystem handles) |
-| **Destroyed on OpenLevel** | Yes (and socket dies) | Yes (but socket survives on GI) |
-
-### BP_OtherPlayerManager
-- Maintains `Map<characterId, BP_OtherPlayerCharacter>`
-- `SpawnOrUpdatePlayer(charId, name, x, y, z)` — creates or updates remote actors
-- `RemovePlayer(charId)` — destroys remote player actor
-- Called from BP_SocketManager on `player:moved` and `player:left` events
+### UOtherPlayerSubsystem (C++ — replaced BP_OtherPlayerManager)
+- Maintains `TMap<int32, FPlayerEntry>` registry
+- `HandlePlayerMoved` — spawns `BP_OtherPlayerCharacter` or updates position
+- `HandlePlayerLeft` — removes player actor from registry
+- Registered via `USocketEventRouter` for `player:moved` and `player:left`
 
 ### BP_OtherPlayerCharacter
 - Represents a remote player in the world
-- Uses `CharacterMovementComponent` for smooth interpolation
+- Uses `UOtherCharacterMovementComponent` for smooth interpolation
 - Sets `TargetPosition` from server data
 - Interpolates toward target on Tick
-- Displays `WBP_PlayerNameTag` widget component
+- Name tag rendered by `UNameTagSubsystem` (C++ OnPaint overlay)
 
-### BP_EnemyManager
-- Maintains `Map<enemyId, BP_EnemyCharacter>`
-- Spawns enemies from `enemy:spawn` events
-- Updates positions from `enemy:move` events
-- Handles death/respawn lifecycle
+### UEnemySubsystem (C++ — replaced BP_EnemyManager)
+- Maintains `TMap<int32, FEnemyEntry>` registry
+- 5 event handlers: `enemy:spawn`, `enemy:move`, `enemy:death`, `enemy:health_update`, `enemy:attack`
+- Spawns `BP_EnemyCharacter` actors via ProcessEvent reflection
+- `GetEnemy()`, `GetEnemyData()`, `GetEnemyIdFromActor()`, `GetAllEnemies()` O(1) lookups
 
 ## Zone Transition Flow (Socket Perspective)
 
@@ -405,4 +404,4 @@ Socket on BP_SocketManager            Socket on GameInstance
 
 ---
 
-**Last Updated**: 2026-03-10
+**Last Updated**: 2026-03-14 (Updated: replaced stale BP_OtherPlayerManager/BP_EnemyManager/BP_SocketManager sections with current C++ subsystem architecture)

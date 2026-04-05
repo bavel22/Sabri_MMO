@@ -206,7 +206,7 @@ Run after every feature change before committing:
 | Issue | Severity | Status | Notes |
 |-------|----------|--------|-------|
 | Mosswort HP = 5 (likely typo, should be 50–80) | Low | Open | In ENEMY_TEMPLATES server code |
-| `HoeveredTargetEnemyRef` typo in AC_TargetingSystem | Low | Open | Variable name typo, no functional impact |
+| ~~`HoeveredTargetEnemyRef` typo in AC_TargetingSystem~~ | Low | Resolved | AC_TargetingSystem deleted in Phase 6; replaced by UTargetingSubsystem (C++) |
 
 ---
 

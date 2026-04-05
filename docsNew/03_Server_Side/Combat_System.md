@@ -1,5 +1,8 @@
 # Combat System — Server-Side Documentation
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Skill_System](Skill_System.md) | [Status_Effect_Buff_System](Status_Effect_Buff_System.md) | [Enemy_System](Enemy_System.md) | [Card_System](Card_System.md)
+> **RO Reference**: [RagnaCloneDocs/02_Combat_System.md](../../RagnaCloneDocs/02_Combat_System.md)
+
 ## Overview
 
 The combat system is **server-authoritative** and inspired by Ragnarok Online. Players click a target once to initiate auto-attack; the server processes attacks at ASPD-based intervals via a 50ms tick loop. Supports both Player-vs-Player (PvP) and Player-vs-Enemy (PvE) combat.

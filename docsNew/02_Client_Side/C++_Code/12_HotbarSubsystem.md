@@ -1,5 +1,7 @@
 # UHotbarSubsystem
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Skill_System](../../03_Server_Side/Skill_System.md)
+
 **Files**: `Source/SabriMMO/UI/HotbarSubsystem.h` (205 lines), `HotbarSubsystem.cpp` (908 lines)
 **Parent**: `UWorldSubsystem`
 **Purpose**: 4-row × 9-slot hotbar with item/skill assignment, customizable keybinds, and F5 visibility cycling.

@@ -7,7 +7,7 @@ Quick start guide for running the development environment.
 - **Node.js** (v18+) - [Download](https://nodejs.org/)
 - **PostgreSQL** (v14+) - [Download](https://www.postgresql.org/download/)
 - **Redis** (v7+) - [Download](https://github.com/microsoftarchive/redis/releases)
-- **Unreal Engine 5.4+** - Epic Games Launcher
+- **Unreal Engine 5.7** - Epic Games Launcher
 - **Git** - [Download](https://git-scm.com/)
 
 ---
@@ -30,7 +30,7 @@ psql -U postgres -d sabri_mmo -c "SELECT version();"
 
 Default credentials (development only):
 - **User:** postgres
-- **Password:** goku22
+- **Password:** (see `server/.env`)
 - **Database:** sabri_mmo
 - **Port:** 5432
 
@@ -86,7 +86,8 @@ start-server.bat
 ```bash
 cd server
 npm install        # First time only
-node src/index.js
+npm run dev        # Development (nodemon auto-restart)
+# or: npm start   # Production
 ```
 
 ### Verify Server is Running
@@ -143,7 +144,7 @@ JOIN users u ON c.user_id = u.user_id;
 ## 5. Open Unreal Engine Project
 
 1. Launch Epic Games Launcher
-2. Open Unreal Engine 5.4
+2. Open Unreal Engine 5.7
 3. Select "Browse" and navigate to:
    ```
    client/SabriMMO/SabriMMO.uproject
@@ -235,8 +236,9 @@ DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=sabri_mmo
 DB_USER=postgres
-DB_PASSWORD=goku22
+DB_PASSWORD=your_password_here
 JWT_SECRET=your_secret_key_here
+REDIS_URL=redis://localhost:6379
 LOG_LEVEL=INFO
 ```
 
@@ -244,7 +246,7 @@ LOG_LEVEL=INFO
 
 ## Documentation
 
-- `README.md` - Project overview and features
-- `docs/` - Detailed feature documentation
-- `docs/Server_API.md` - API reference
-- `docs/Database_Schema.md` - Database documentation
+- [INDEX.md](DocsNewINDEX.md) — Master documentation index
+- [00_Project_Overview.md](../00_Project_Overview.md) — Full system inventory
+- [README.md](README.md) — Project overview and quick start
+- [Global_Rules.md](../00_Global_Rules/Global_Rules.md) — Design standards

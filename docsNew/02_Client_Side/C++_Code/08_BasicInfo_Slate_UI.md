@@ -1,5 +1,7 @@
 # BasicInfo Slate UI — Draggable & Resizable HUD Panel
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [UI_Style_Guide](../../UI/ro_classic_ui_slate_style_guide.md)
+
 **Files**: `UI/SBasicInfoWidget.h/.cpp`, `UI/BasicInfoSubsystem.h/.cpp`  
 **Purpose**: Display local player's basic information (name, job, HP/SP, EXP, weight, zuzucoin) in a draggable, resizable Slate widget.  
 **Status**: ✅ Implemented, compiling, and fully functional  

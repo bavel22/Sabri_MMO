@@ -9,13 +9,13 @@
 - [Global Rules](../docsNew/00_Global_Rules/Global_Rules.md) — Design standards
 - [CLAUDE.md](../CLAUDE.md) — Claude Code project instructions
 
-## Current Stats (2026-03-29)
+## Current Stats (2026-04-04)
 | Metric | Count |
 |--------|-------|
-| Server lines | ~32,200 + 11 modules (~6,000) |
-| Socket events | 79 |
+| Server lines | ~34,500 + 12 modules (~6,300) |
+| Socket events | 103 |
 | REST endpoints | 11 |
-| C++ Subsystems | 33 |
+| C++ Subsystems | 36 |
 | Skill definitions | 293 (69 + 224) |
 | Buff types | 95 |
 | Status effects | 10 |
@@ -26,6 +26,11 @@
 | Zones | 4 |
 | VFX configs | 97 |
 | Classes | 19 (6 first + 13 second) |
+| Textures | 1,061 (AI + RO originals) |
+| Material variants | 2,700+ |
+| Decal instances | 91 |
+| Scatter meshes | 135 (75 V1 + 60 V3) |
+| Environment scripts | 80+ |
 
 ## What's Implemented
 - [x] All 6 first classes + 13 second classes
@@ -53,8 +58,19 @@
 - [x] Archer_f + bow weapon overlay sprites (2272 total)
 - [x] Skeleton enemy sprite (humanoid, Mixamo-rigged, pure C++ actor)
 - [x] Poring enemy sprite (blob, shape key anims, render_monster.py)
-- [x] NavMesh pathfinding plan (implementation prompt ready)
+- [x] NavMesh pathfinding implemented (server-side recast-navigation, enemy AI movement)
 - [x] Hair sprite layer system (separate layer, 9-color tinting, hides_hair headgear flag, female atlas done)
+- [x] Headgear sprite layer (holdout occlusion, always_front depth, multi-slot blocking, Egg Shell Hat)
+- [x] Render pipeline standardized (render_blend_all_visible.py + .blend + --cel-shadow 0.92/0.98)
+- [x] Shared armature system (base_m/base_f for all classes, ~5 min per new class)
+- [x] Ground texture system (1061 textures, 17 material versions, 2700+ variants, ComfyUI pipeline)
+- [x] DBuffer decal system (5 parent materials, 91 RO-texture instances)
+- [x] Landscape Grass V3 (60 AI sprites, 13 zone GrassTypes, paintable + random placement)
+- [x] 3D world building guides (5 _meta docs: landscape, materials, scatter, decals, lighting)
+- [x] Map system — minimap (134x134, 5 zoom, draggable, SceneCapture), world map (12x8 grid, 62 zones), loading screen (Ken Burns, sparkles), Guide NPC marks, /where command, preferences persistence
+- [x] Kafra Storage — account-shared 300-slot storage, 10 socket handlers, split/sort/auto-stack/search QoL, 40z fee
+- [x] Player-to-Player Trading — 10 items + zeny, two-step confirm (OK/Trade), 13 cancel paths, atomic transfer, /trade command, trade logs
+- [x] Right-click player context menu — Trade/Party Invite/Whisper, camera drag vs quick-click detection, FMenuBuilder popup
 
 ## What's Next
 
@@ -72,7 +88,7 @@
 - [ ] Alchemist (IDs 1800-1815)
 
 **Systems to test:**
-- [ ] Account creation (register, login, character create/delete, JWT auth)
+- [x] Account creation (register, login, character create/delete, JWT auth)
 - [x] Party (EXP share, chat, HP sync, invites)
 - [ ] Dual wield (Assassin left-hand, per-hand cards, mastery penalties)
 - [ ] MVP (announcements, rewards, slave spawning)
@@ -124,19 +140,45 @@ See [Skill_VFX_Execution_Plan](../docsNew/05_Development/Skill_VFX_Execution_Pla
 - [x] **Monster sprite — humanoid** (Skeleton: Mixamo-rigged, pure C++ sprite actor)
 - [x] **Monster sprite — non-humanoid** (Poring: shape key anims via render_monster.py, --model-rotation -90)
 - [x] **Enemy sprite integration** (EnemySubsystem: sprite enemies as pure C++ actors, no BP_EnemyCharacter)
-- [ ] **Re-render swordsman_m + mage_f** with new 17-animation standard set
+- [x] **Re-render swordsman_m + mage_f** with new 17-animation standard set
 - [ ] **More weapon .blend templates** (sword, staff, rod, katar, spear, mace, axe — dagger + bow done)
-  - [ ] Figure out weapon positioning across different classes/genders
-- [ ] **NavMesh pathfinding** — implement server-side (plan + prompt ready)
-- [ ] Equipment layer system (hair, headgear, shield, garment atlas swapping)
+  - [x] Figure out weapon positioning across different classes/genders
+- [x] **NavMesh pathfinding** — implemented server-side (recast-navigation, de-aggro, all movement patched)
+- [ ] Equipment layer system — headgear + hair DONE, shield + garment remaining
 - [ ] Scale production: batch remaining classes through Tripo3D+Mixamo+render
-- [ ] Hair color tint system
+- [x] Hair color tint system (9 RO colors, material TintColor multiply)
+- [x] Headgear sprite layer (holdout occlusion, Egg Shell Hat)
+- [ ] Male hair style 1 atlas (female done, male not yet)
 - [ ] More enemy sprites (additional monsters)
+
+### 3D World — Next Steps
+- [ ] Apply materials and decals to Prontera zone (first complete zone)
+- [ ] Posterized lighting (top improvement from UE5 material research)
+- [ ] Material Parameter Collection for global tint/time-of-day
+- [ ] Test grass density at scale (performance check)
+- [ ] Build additional zone landscapes (Payon, Geffen, Morroc, etc.)
 
 ### Audit Follow-ups
 - [ ] Review audit results in `_audit/` and triage fixes (43 files, 2 master reports)
 
+### Map System — Next Steps
+- [ ] Generate world map illustration (prompt ready: `_prompts/world_map_generation_prompt.md`)
+- [ ] Generate loading screen art (12 prompts ready: `_prompts/loading_screen_generation_prompts.md`)
+- [ ] Commit map system code (6 new + 2 modified files, untracked)
+
+### Economy Systems
+- [x] Kafra Storage — implemented 2026-04-03 (prompt: `_prompts/implement_kafra_storage.md`)
+- [x] Player-to-Player Trading — implemented 2026-04-03 (prompt: `_prompts/implement_player_trading.md`)
+- [ ] Right-click context menu on other players (trade, party invite, whisper — requires PlayerInputSubsystem right-click routing)
+
+### UX / Polish
+- [ ] ESC → character select screen
+- [ ] Fix character floating off ground / terrain clipping when moving north
+- [ ] Attack impact effects / damage number improvements (make combat more exciting)
+- [ ] Right-click context menu on other players (trade, party invite, whisper)
+
 ### Remaining Features
+- [ ] Sound effects / music system (needs research + implementation plan)
 - [ ] Client-side homunculus actor + position broadcast
 - [ ] PvP system
 - [ ] War of Emperium / Guild system
@@ -148,6 +190,11 @@ See [Skill_VFX_Execution_Plan](../docsNew/05_Development/Skill_VFX_Execution_Pla
 
 ## Recent Sessions
 <!-- Add links to session logs here, newest first -->
+- **2026-04-03** — Kafra Storage (account-shared 300-slot, 10 handlers, split/sort/search QoL) + Player-to-Player Trading (two-step confirm, 13 cancel paths, atomic transfer, /trade command). 8 bugs found and fixed. ([daily note](2026-04-03.md))
+- **2026-04-02** — Complete map system: minimap (134x134, 5 zoom, draggable), world map (12x8 grid, 62 zones), loading screen (Ken Burns, sparkles), Guide NPC marks, /where command. Planned Kafra Storage + Player Trading (prompts created). ([daily note](2026-04-02.md))
+- **2026-03-30 to 2026-04-01** — Ground texture & material system: 1000+ AI textures, 608 RO originals, 17 material versions, 2700+ variants, DBuffer decals (91), Landscape Grass V3 (60 sprites, 13 zones), 80+ scripts, 3 new skills, 5 _meta guides ([daily note](2026-03-30.md))
+- **2026-03-29** — Hair sprite layer committed, render pipeline overhaul (--cel-shadow 0.92), parallax fix (0.3→0.01), 5 hair visibility bugs fixed, 5 female classes re-rendered ([daily note](2026-03-29.md))
+- **2026-03-27** — NavMesh pathfinding implemented (recast-navigation), headgear sprite layer (holdout occlusion, Egg Shell Hat), hair sprite layer started, 5 female class + weapon re-renders, shared armature system ([daily note](2026-03-27.md))
 - **2026-03-26** — Animation standardization (17-anim standard for ALL classes), archer_f + bow weapon sprites, skeleton + poring enemy sprites (pure C++ actors), NavMesh pathfinding planned ([daily note](2026-03-26.md))
 - **2026-03-25** — Weapon sprite overlay system SOLVED (dual-pass render + 5 C++ fixes + depth ordering + remote sync), swordsman anims simplified 19→14, mage atlases packed & validated ([daily note](2026-03-25.md))
 - **2026-03-24** — Swordsman v2 atlases validated in-game, Mage v2 config built (34 anims, 2336 sprites rendered), standardized fighter vs mage animation sets ([daily note](2026-03-24.md))

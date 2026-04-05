@@ -1,5 +1,7 @@
 # Skills & VFX System Audit — Comprehensive Findings & Recommendations
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Skill_System](../03_Server_Side/Skill_System.md) | [VFX_Asset_Reference](../05_Development/VFX_Asset_Reference.md) | [Skill_VFX_Implementation_Plan](../05_Development/Skill_VFX_Implementation_Plan.md)
+
 **Date**: 2026-03-09
 **Scope**: Full audit of server-side skill logic, client-side SkillTreeSubsystem, SkillVFXSubsystem, SkillVFXData, targeting system, ground AoE indicators, and comparison against RO Classic pre-renewal reference.
 
@@ -176,7 +178,7 @@ The current architecture follows sound patterns:
 ### What Should Stay As-Is
 
 - `FSkillVFXConfig` struct and template enum — extensible, clean
-- Socket event wrapping via `WrapSingleEvent` — preserves existing handlers
+- Socket event registration via `EventRouter->RegisterHandler()` — proper multi-handler dispatch
 - Casting circle lifecycle (spawn on cast_start, destroy on complete/interrupt)
 - Ground AoE indicator with DrawDebugCircle — lightweight, no actor overhead
 - Bolt/Projectile/AoE spawning patterns — all 5 templates work correctly

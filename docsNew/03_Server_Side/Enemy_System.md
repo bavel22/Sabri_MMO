@@ -1,5 +1,8 @@
 # Enemy System — Server-Side Documentation
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Monster_Skill_System](Monster_Skill_System.md) | [Combat_System](Combat_System.md) | [EXP_Leveling_System](EXP_Leveling_System.md)
+> **RO Reference**: [RagnaCloneDocs/04_Monsters_EnemyAI.md](../../RagnaCloneDocs/04_Monsters_EnemyAI.md)
+
 ## Overview
 
 The enemy system manages AI-controlled monsters with Ragnarok Online pre-renewal stats and behaviors. All enemy state (health, position, combat) is tracked server-side. Enemies spawn on server startup, wander randomly within their spawn radius, and respawn after being killed.
@@ -585,3 +588,71 @@ New fields added to support RO monster data on client:
 | `server/src/index.js` | Enemy system runtime (adapter, spawn, AI state machine, combat, drops) |
 
 **Last Updated**: 2026-03-04 — RO Classic AI system: state machine, aggro, assist, target switching, enemy attacks, per-monster AI codes
+
+## Enemy Sprite System
+
+### Overview
+
+Enemies can use the same `SpriteCharacterActor` 3D-to-2D sprite system as player characters. The server sends sprite metadata in `enemy:spawn` events, and the client's `EnemySubsystem` creates animated sprite actors for enemies that have sprite data configured.
+
+### Template Fields
+
+Two optional fields on monster templates in `ro_monster_templates.js`:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `spriteClass` | string | `undefined` | Atlas manifest name (e.g., `'skeleton'`). Maps to `Body/enemies/{name}/` in UE5 Content. If absent or empty, the enemy uses the default BP mesh. |
+| `weaponMode` | number | `0` | Weapon animation set: 0=unarmed, 1=onehand, 2=twohand, 3=bow. Selects which weapon group animations to play from the atlas config. |
+
+### Adapter
+
+The `ENEMY_TEMPLATES` adapter in `index.js` (~line 4308) copies these fields from `RO_MONSTER_TEMPLATES`:
+
+```javascript
+spriteClass: ro.spriteClass || '',
+weaponMode: ro.weaponMode || 0,
+```
+
+### enemy:spawn Emit Locations
+
+All 4 `enemy:spawn` emit locations include `spriteClass` and `weaponMode`:
+
+| Location | When | Notes |
+|----------|------|-------|
+| `spawnEnemy()` | Server startup, enemy first created | Initial broadcast to all connected clients |
+| `respawnEnemy()` | After respawn timer fires | Broadcast to all clients in zone |
+| `player:join` zone loop | New player joins, receives existing enemies | **Dropped during OpenLevel** -- subsystems not registered yet |
+| `zone:ready` zone loop | Client signals subsystems are ready | **This is the emit clients actually receive** |
+
+**CRITICAL**: The `zone:ready` emit is the one that matters. During `player:join`, the client is performing `OpenLevel()` -- all subsystems are destroyed and recreated, so socket events are silently dropped. By `zone:ready`, all C++ subsystem handlers are registered and will process the spawn data including sprite fields.
+
+### enemy:spawn Payload (updated)
+
+```javascript
+{
+    enemyId, templateId, name, level, health, maxHealth,
+    monsterClass, size, race, element,
+    x, y, z,
+    spriteClass,   // NEW: atlas manifest name (e.g., 'skeleton')
+    weaponMode     // NEW: 0=unarmed, 1=onehand, 2=twohand, 3=bow
+}
+```
+
+### Weapon Variant System
+
+One atlas config can define multiple weapon groups (unarmed, onehand, twohand, bow). Different monster templates sharing the same `spriteClass` can use different `weaponMode` values to select different animation sets from the same atlas. This allows a single set of atlas files to serve multiple monster variants (e.g., unarmed skeleton, skeleton archer, skeleton knight).
+
+### Adding Sprite Support to a New Monster
+
+1. Create 3D model, rig in Mixamo, render sprites, pack atlases (see `sabrimmo-3d-to-2d` skill)
+2. Import atlas PNGs + JSONs + manifest into UE5 at `Content/SabriMMO/Sprites/Atlases/Body/enemies/{name}/`
+3. Add `spriteClass: '{name}', weaponMode: 0` to the monster's entry in `ro_monster_templates.js`
+4. No server code changes needed -- adapter and all 4 emit paths already handle the fields
+
+### Monsters with Sprites
+
+| Monster | Template ID | spriteClass | weaponMode |
+|---------|------------|-------------|------------|
+| Skeleton | 1028 | `skeleton` | 0 (unarmed) |
+
+**Last Updated**: 2026-03-26 -- Enemy sprite system: spriteClass/weaponMode fields, 4 emit locations, weapon variant system

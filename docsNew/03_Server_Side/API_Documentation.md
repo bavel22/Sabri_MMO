@@ -1,5 +1,7 @@
 # REST API Documentation
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Authentication_Flow](../04_Integration/Authentication_Flow.md) | [API_Reference](../06_Reference/API_Reference.md) | [NodeJS_Server](NodeJS_Server.md)
+
 ## Base URL
 
 ```

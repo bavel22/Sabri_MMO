@@ -51,7 +51,7 @@ Sabri_MMO includes a comprehensive automated UI testing framework to prevent vis
 ```cpp
 bool Test_GameInstanceValid();           // UMMOGameInstance validation
 bool Test_PlayerCharacterValid();        // BP_MMOCharacter spawn check  
-bool Test_HUDManagerFound();             // AC_HUDManager component detection
+bool Test_HUDManagerFound();             // Legacy test (AC_HUDManager replaced by C++ Slate subsystems)
 bool Test_InventoryToggle();             // ToggleInventory() + bIsInventoryOpen
 bool Test_ZuzucoinUpdate();              // UpdateZuzucoinEverywhere() propagation
 ```
@@ -105,7 +105,7 @@ TakeScreenshot(TestName) → String
 |--------|------|--------|----------|
 | GameInstance | UMMOGameInstance validation | ✅ PASS | 100% |
 | Player Character | BP_MMOCharacter spawn | ✅ PASS | 100% |
-| HUD Manager | AC_HUDManager detection | ✅ PASS | 100% |
+| HUD Manager | Legacy AC_HUDManager detection (now replaced by C++ subsystems) | ⚠️ STALE | Needs rewrite |
 | Inventory | ToggleInventory() function | ✅ PASS | 100% |
 | Currency | Zuzucoin display updates | ✅ PASS | 100% |
 
@@ -273,8 +273,7 @@ bool ASabriMMOUITests::Test_Example()
 
 **Issue**: "HUD Manager not found"
 **Solution**:
-- Verify BP_MMOCharacter has AC_HUDManager component
-- Check component name spelling matches exactly
+- AC_HUDManager has been replaced by 33 C++ UWorldSubsystems. This test needs to be updated to check for subsystem availability instead (e.g., `GetWorld()->GetSubsystem<UBasicInfoSubsystem>()`)
 - Ensure player character spawned successfully
 
 **Issue**: Tests don't appear in Automation tab

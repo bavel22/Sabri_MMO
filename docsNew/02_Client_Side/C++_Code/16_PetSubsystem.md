@@ -1,5 +1,7 @@
 # PetSubsystem — Client C++ Documentation
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Pet_System](../../03_Server_Side/Pet_System.md)
+
 **Files**: `UI/PetSubsystem.h`, `UI/PetSubsystem.cpp`
 **Z-Order**: 21
 **Pattern**: UWorldSubsystem + inline SPetWidget (SCompoundWidget)

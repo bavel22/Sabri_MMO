@@ -1,7 +1,10 @@
 # Ragnarok Classic UI Style Specification
-**Target Engine:** Unreal Engine 5  
-**Framework:** Slate (C++)  
-**Visual Era:** Pre-Renewal Classic  
+
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Module_Overview](../02_Client_Side/C++_Code/00_Module_Overview.md) | [Project Overview](../00_Project_Overview.md)
+
+**Target Engine:** Unreal Engine 5.7
+**Framework:** Slate (C++)
+**Visual Era:** Pre-Renewal Classic
 **Theme:** Brown & Gold Ornamental Fantasy UI
 
 ---

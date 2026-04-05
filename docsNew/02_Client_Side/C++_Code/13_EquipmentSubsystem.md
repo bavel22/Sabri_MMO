@@ -1,5 +1,7 @@
 # UEquipmentSubsystem
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Inventory_System](../../03_Server_Side/Inventory_System.md)
+
 **Files**: `Source/SabriMMO/UI/EquipmentSubsystem.h` (106 lines), `EquipmentSubsystem.cpp` (290 lines)
 **Parent**: `UWorldSubsystem`
 **Purpose**: Equipment slot management with 10 RO Classic equip positions, F7 toggle, and dual-accessory support.

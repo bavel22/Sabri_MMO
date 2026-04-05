@@ -1,5 +1,8 @@
 # Status Effect & Buff System
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Combat_System](Combat_System.md) | [Skill_System](Skill_System.md)
+> **Source Files**: `server/src/ro_buff_system.js` (95 buff types, 1,179 lines) | `server/src/ro_status_effects.js` (10 status effects, 711 lines)
+
 ## 1. Overview
 
 The server implements two separate modifier systems that affect combat, movement, and stats:

@@ -1,7 +1,9 @@
 # Card Deferred Systems — Full Implementation Plan
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Card_System](../03_Server_Side/Card_System.md) | [Combat_System](../03_Server_Side/Combat_System.md)
+
 **Date:** 2026-03-13
-**Status:** RESEARCH COMPLETE — Ready for implementation
+**Status:** COMPLETED — All 20 deferred card effect types implemented (auto-spell, drain, status procs, etc.)
 **Scope:** All 20 deferred card effect types (parsed + stored, awaiting game system hooks)
 **Excludes:** PvP-only systems (deferred separately)
 

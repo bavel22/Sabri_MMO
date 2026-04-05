@@ -1,8 +1,11 @@
 # Sabri_MMO — Full Codebase Audit Report
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Project Overview](../00_Project_Overview.md)
+> **Status**: HISTORICAL — This audit was from 2026-03-08 when the server was ~8,455 lines. The server is now ~32,200 lines with 79 socket handlers, 293 skill definitions, and 95 buff types. Many findings have been addressed in subsequent development.
+
 **Date**: 2026-03-08
 **Revision**: 2 (triple-verified — all findings cross-checked by 5 independent verification agents)
-**Scope**: Server (`server/src/index.js` ~8,455 lines), Client C++ (all subsystems), Database (`init.sql` + auto-migrations)
+**Scope**: Server (`server/src/index.js` ~8,455 lines at time of audit), Client C++ (all subsystems), Database (`init.sql` + auto-migrations)
 **Method**: 3-agent initial audit → manual line-by-line verification → 5-agent deep re-verification of every finding
 
 ---
@@ -237,25 +240,15 @@ The function is defined but **never invoked** — zero callers exist. It uses th
 
 ---
 
-### H8. Code Duplication: FindSocketIOComponent (13 files) ✅ CONFIRMED
+### H8. Code Duplication: FindSocketIOComponent (13 files) -- RESOLVED
 
-**Location**: All UWorldSubsystem `.cpp` files
-**Severity**: MEDIUM (Tech Debt)
-
-The exact same ~15-line function is copy-pasted across 13 subsystem files. Implementations are functionally identical (only cosmetic variable name differences like `Comp` vs `SIO` in SkillVFXSubsystem).
-
-**Fix**: Extract to a shared utility header or base class.
+> **Fixed in Phase 4.** All `FindSocketIOComponent()` calls were replaced by `EventRouter->RegisterHandler()` pattern. The `USocketEventRouter` on GameInstance provides centralized event dispatch. No actor iteration needed.
 
 ---
 
-### H9. Code Duplication: WrapSingleEvent / WrapExistingEvent (13 files) ✅ CONFIRMED
+### H9. Code Duplication: WrapSingleEvent / WrapExistingEvent (13 files) -- RESOLVED
 
-**Location**: Same 13 subsystem files as H8
-**Severity**: MEDIUM (Tech Debt)
-
-`WrapSingleEvent()` in 11 files + `WrapExistingEvent()` in 2 files (HotbarSubsystem, SkillTreeSubsystem). Functionally identical — different name, same code.
-
-**Fix**: Extract alongside H8 into shared utility.
+> **Fixed in Phase 4.** All `WrapSingleEvent()` / `WrapExistingEvent()` calls were replaced by `EventRouter->RegisterHandler()`. The EventRouter provides proper multi-handler dispatch with owner-based lifecycle management.
 
 ---
 

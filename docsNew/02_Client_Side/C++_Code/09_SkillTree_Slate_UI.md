@@ -1,5 +1,7 @@
 # Skill Tree Slate UI — C++ Documentation
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Skill_System](../../03_Server_Side/Skill_System.md)
+
 ## Overview
 
 Pure C++ Slate implementation of the Skill Tree window. Follows the `UWorldSubsystem` + `SCompoundWidget` pattern. RO Classic brown/gold theme, draggable, with class tabs, grid layout, compact skill cells, and rich hover tooltips with per-level data.

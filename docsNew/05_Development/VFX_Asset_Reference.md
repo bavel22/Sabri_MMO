@@ -1,5 +1,7 @@
 # VFX Asset Reference for Sabri_MMO
 
+> **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Skill_VFX_Implementation_Plan](Skill_VFX_Implementation_Plan.md) | [Skills_VFX_System_Audit](../06_Audit/Skills_VFX_System_Audit.md)
+
 > Generated 2026-03-05. Comprehensive inventory of all available VFX assets across disk locations,
 > mapped to Ragnarok Online skills for the Sabri_MMO project.
 
