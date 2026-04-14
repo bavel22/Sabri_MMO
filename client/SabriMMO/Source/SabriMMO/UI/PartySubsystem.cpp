@@ -7,6 +7,7 @@
 #include "ChatSubsystem.h"
 #include "MMOGameInstance.h"
 #include "SocketEventRouter.h"
+#include "Audio/AudioSubsystem.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
@@ -225,6 +226,8 @@ void UPartySubsystem::HandlePartyUpdate(const TSharedPtr<FJsonValue>& Data)
 	LeaderId = (int32)LeaderIdD;
 
 	Obj->TryGetStringField(TEXT("expShare"), ExpShare);
+	Obj->TryGetStringField(TEXT("itemShare"), ItemShare);
+	Obj->TryGetStringField(TEXT("itemDistribute"), ItemDistribute);
 
 	// Parse members array
 	Members.Empty();
@@ -404,6 +407,18 @@ void UPartySubsystem::HandleInviteReceived(const TSharedPtr<FJsonValue>& Data)
 	Obj->TryGetStringField(TEXT("partyName"), PendingInvitePartyName);
 	Obj->TryGetStringField(TEXT("inviterName"), PendingInviterName);
 
+	// Auto-decline if option enabled
+	if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance()))
+	{
+		if (GI->bOptionAutoDeclineParty)
+		{
+			UE_LOG(LogParty, Log, TEXT("[Party] Auto-declined invite from %s (option enabled)"), *PendingInviterName);
+			PendingInvitePartyId = (int32)InvPartyIdD;
+			RespondToInvite(false);
+			return;
+		}
+	}
+
 	bHasPendingInvite = true;
 	++DataVersion;
 
@@ -441,6 +456,7 @@ void UPartySubsystem::CreateParty(const FString& Name, bool bPartyShare)
 {
 	UWorld* World = GetWorld();
 	if (!World) return;
+	UAudioSubsystem::PlayUIClickStatic(World);
 	UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance());
 	if (!GI || !GI->IsSocketConnected()) return;
 
@@ -456,6 +472,7 @@ void UPartySubsystem::InvitePlayer(const FString& TargetName)
 {
 	UWorld* World = GetWorld();
 	if (!World) return;
+	UAudioSubsystem::PlayUIClickStatic(World);
 	UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance());
 	if (!GI || !GI->IsSocketConnected()) return;
 
@@ -470,6 +487,8 @@ void UPartySubsystem::RespondToInvite(bool bAccept)
 {
 	UWorld* World = GetWorld();
 	if (!World) return;
+	if (bAccept) UAudioSubsystem::PlayUIClickStatic(World);
+	else         UAudioSubsystem::PlayUICancelStatic(World);
 	UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance());
 	if (!GI || !GI->IsSocketConnected()) return;
 
@@ -494,6 +513,7 @@ void UPartySubsystem::LeaveParty()
 {
 	UWorld* World = GetWorld();
 	if (!World) return;
+	UAudioSubsystem::PlayUIClickStatic(World);
 	UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance());
 	if (!GI || !GI->IsSocketConnected()) return;
 
@@ -505,6 +525,7 @@ void UPartySubsystem::KickMember(int32 TargetCharId)
 {
 	UWorld* World = GetWorld();
 	if (!World) return;
+	UAudioSubsystem::PlayUIClickStatic(World);
 	UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance());
 	if (!GI || !GI->IsSocketConnected()) return;
 
@@ -541,6 +562,30 @@ void UPartySubsystem::ChangeExpShare(const FString& Mode)
 
 	GI->EmitSocketEvent(TEXT("party:change_exp_share"), Payload);
 	UE_LOG(LogParty, Log, TEXT("[Party] Change exp share: %s"), *Mode);
+}
+
+void UPartySubsystem::ChangeItemShare(const FString& Mode)
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance());
+	if (!GI || !GI->IsSocketConnected()) return;
+
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+	Payload->SetStringField(TEXT("mode"), Mode);
+	GI->EmitSocketEvent(TEXT("party:change_item_share"), Payload);
+}
+
+void UPartySubsystem::ChangeItemDistribute(const FString& Mode)
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance());
+	if (!GI || !GI->IsSocketConnected()) return;
+
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+	Payload->SetStringField(TEXT("mode"), Mode);
+	GI->EmitSocketEvent(TEXT("party:change_item_distribute"), Payload);
 }
 
 void UPartySubsystem::SendPartyChat(const FString& Message)

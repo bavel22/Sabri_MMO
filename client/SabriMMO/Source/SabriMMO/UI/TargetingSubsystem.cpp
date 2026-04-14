@@ -4,6 +4,8 @@
 #include "TargetingSubsystem.h"
 #include "EnemySubsystem.h"
 #include "OtherPlayerSubsystem.h"
+#include "GroundItemSubsystem.h"
+#include "GroundItemActor.h"
 #include "MMOGameInstance.h"
 #include "ShopNPC.h"
 #include "KafraNPC.h"
@@ -89,6 +91,10 @@ void UTargetingSubsystem::PerformHoverTrace()
 		if (HoveredActor.IsValid())
 		{
 			HideHoverIndicator(HoveredActor.Get());
+			if (AGroundItemActor* OldGI = Cast<AGroundItemActor>(HoveredActor.Get()))
+			{
+				OldGI->SetNameVisible(false);
+			}
 			HoveredActor.Reset();
 			HoveredTargetType = ETargetType::None;
 			HoveredTargetId = 0;
@@ -110,12 +116,24 @@ void UTargetingSubsystem::PerformHoverTrace()
 		if (HoveredActor.IsValid())
 		{
 			HideHoverIndicator(HoveredActor.Get());
+
+			// Hide ground item name label on old target
+			if (AGroundItemActor* OldGI = Cast<AGroundItemActor>(HoveredActor.Get()))
+			{
+				OldGI->SetNameVisible(false);
+			}
 		}
 
 		// Show new indicator
 		if (HitActor && NewType != ETargetType::None)
 		{
 			ShowHoverIndicator(HitActor);
+		}
+
+		// Show ground item name label on new target
+		if (AGroundItemActor* NewGI = Cast<AGroundItemActor>(HitActor))
+		{
+			NewGI->SetNameVisible(true);
 		}
 
 		HoveredActor = HitActor;
@@ -155,7 +173,18 @@ ETargetType UTargetingSubsystem::ClassifyActor(AActor* Actor, int32& OutId) cons
 		}
 	}
 
-	// Priority 3: Other players (C++ struct lookup — fixes targeting bug)
+	// Priority 3: Ground items (C++ struct lookup)
+	if (UGroundItemSubsystem* GIS = World->GetSubsystem<UGroundItemSubsystem>())
+	{
+		int32 GItemId = GIS->GetGroundItemIdFromActor(Actor);
+		if (GItemId > 0)
+		{
+			OutId = GItemId;
+			return ETargetType::GroundItem;
+		}
+	}
+
+	// Priority 4: Other players (C++ struct lookup — fixes targeting bug)
 	if (UOtherPlayerSubsystem* PS = World->GetSubsystem<UOtherPlayerSubsystem>())
 	{
 		int32 PlayerId = PS->GetPlayerIdFromActor(Actor);

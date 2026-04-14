@@ -12,6 +12,7 @@ class UCameraComponent;
 class UInputAction;
 class UInputMappingContext;
 class UHotbarSubsystem;
+class ASpriteCharacterActor;
 struct FInputActionValue;
 
 DECLARE_LOG_CATEGORY_EXTERN(LogTemplateCharacter, Log, All);
@@ -59,6 +60,7 @@ public:
 protected:
 
 	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaTime) override;
 
 	/** Initialize input action bindings */
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
@@ -198,5 +200,9 @@ public:
 
 	/** Returns FollowCamera subobject **/
 	FORCEINLINE class UCameraComponent* GetFollowCamera() const { return FollowCamera; }
+
+	/** The local player's sprite actor (for UI position tracking) */
+	UPROPERTY()
+	TWeakObjectPtr<ASpriteCharacterActor> LocalSprite;
 };
 

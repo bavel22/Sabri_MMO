@@ -6,6 +6,7 @@
 #include "SCastBarOverlay.h"
 #include "MMOGameInstance.h"
 #include "SocketEventRouter.h"
+#include "Audio/AudioSubsystem.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
@@ -14,6 +15,8 @@
 #include "Widgets/SWeakWidget.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogCastBar, Log, All);
 
@@ -174,6 +177,42 @@ void UCastBarSubsystem::HandleCastStart(const TSharedPtr<FJsonValue>& Data)
 		if (FreeCastPct > 0 && FreeCastPct < 100)
 		{
 			ApplyFreeCastSpeed((float)FreeCastPct);
+		}
+	}
+
+	// Play universal cast windup sound (RO Classic ef_beginspell.wav). Falls through
+	// to PlaySkillCastSound which uses DefaultSkillCastSoundPath unless this skill ID
+	// has a custom override in SkillCastSoundMap. Position from caster's pawn.
+	if (UWorld* World = GetWorld())
+	{
+		if (UAudioSubsystem* Audio = World->GetSubsystem<UAudioSubsystem>())
+		{
+			FVector CasterLoc = FVector::ZeroVector;
+			// Local player: use controlled pawn directly
+			if (CasterId == LocalCharacterId)
+			{
+				if (APlayerController* PC = World->GetFirstPlayerController())
+				{
+					if (APawn* Pawn = PC->GetPawn())
+					{
+						CasterLoc = Pawn->GetActorLocation();
+					}
+				}
+			}
+			// Remote casters: fall back to local pawn location (sound is 3D so it
+			// will attenuate appropriately even if not perfectly positioned).
+			// Future: look up via OtherPlayerSubsystem / EnemySubsystem.
+			if (CasterLoc.IsNearlyZero())
+			{
+				if (APlayerController* PC = World->GetFirstPlayerController())
+				{
+					if (APawn* Pawn = PC->GetPawn())
+					{
+						CasterLoc = Pawn->GetActorLocation();
+					}
+				}
+			}
+			Audio->PlaySkillCastSound(Entry.SkillId, CasterLoc);
 		}
 	}
 

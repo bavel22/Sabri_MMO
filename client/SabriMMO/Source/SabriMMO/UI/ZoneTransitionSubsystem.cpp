@@ -5,6 +5,7 @@
 #include "ZoneTransitionSubsystem.h"
 #include "MMOGameInstance.h"
 #include "SocketEventRouter.h"
+#include "Audio/AudioSubsystem.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
@@ -416,6 +417,13 @@ void UZoneTransitionSubsystem::CheckTransitionComplete()
 		UE_LOG(LogZoneTransition, Log, TEXT("Emitted zone:ready for zone: %s"), *CurrentZoneName);
 	}
 
+	// Switch ambient bed + BGM for the new zone (idempotent — same zone is a no-op)
+	if (UAudioSubsystem* Audio = World->GetSubsystem<UAudioSubsystem>())
+	{
+		Audio->PlayZoneAmbient(CurrentZoneName);
+		Audio->PlayZoneBgm(CurrentZoneName);
+	}
+
 	// Clear timer
 	World->GetTimerManager().ClearTimer(TransitionCheckTimer);
 
@@ -450,6 +458,13 @@ void UZoneTransitionSubsystem::ForceCompleteTransition()
 		ReadyPayload->SetStringField(TEXT("zone"), CurrentZoneName);
 		GI->EmitSocketEvent(TEXT("zone:ready"), ReadyPayload);
 		UE_LOG(LogZoneTransition, Log, TEXT("Emitted zone:ready (forced) for zone: %s"), *CurrentZoneName);
+	}
+
+	// Switch ambient bed + BGM for the new zone (forced path)
+	if (UAudioSubsystem* Audio = World->GetSubsystem<UAudioSubsystem>())
+	{
+		Audio->PlayZoneAmbient(CurrentZoneName);
+		Audio->PlayZoneBgm(CurrentZoneName);
 	}
 
 	// Clear timer and hide loading

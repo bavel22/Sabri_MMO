@@ -6,6 +6,7 @@
 #include "InventorySubsystem.h"
 #include "MMOGameInstance.h"
 #include "SocketEventRouter.h"
+#include "Audio/AudioSubsystem.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "TimerManager.h"
@@ -254,6 +255,7 @@ void UShopSubsystem::RequestOpenShop(int32 ShopId)
 void UShopSubsystem::SubmitBuyCart()
 {
 	if (BuyCart.Num() == 0) return;
+	UAudioSubsystem::PlayCoinPickupStatic(GetWorld());  // zeny exchanged on buy
 	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
 	if (!GI) return;
 
@@ -277,6 +279,7 @@ void UShopSubsystem::SubmitBuyCart()
 void UShopSubsystem::SubmitSellCart()
 {
 	if (SellCart.Num() == 0) return;
+	UAudioSubsystem::PlayCoinPickupStatic(GetWorld());  // zeny received on sell
 	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
 	if (!GI) return;
 
@@ -298,6 +301,7 @@ void UShopSubsystem::SubmitSellCart()
 
 void UShopSubsystem::CloseShop()
 {
+	UAudioSubsystem::PlayUICancelStatic(GetWorld());
 	CurrentMode = EShopMode::Closed;
 	BuyCart.Empty();
 	SellCart.Empty();

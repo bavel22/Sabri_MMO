@@ -12,6 +12,7 @@ void UMMOGameInstance::Init()
 {
     Super::Init();
     LoadRememberedUsername();
+    LoadGameOptions();
 
     // Create the event router (persists for the lifetime of the game instance)
     EventRouter = NewObject<USocketEventRouter>(this);
@@ -111,36 +112,124 @@ FString UMMOGameInstance::GetServerSocketUrl() const
 
 // ---- Remember Username ----
 
+// ============================================================
+// Persistence via UE5 SaveGame system (reliable in all modes)
+// Saves to: {Saved}/SaveGames/SabriMMO_Options.sav
+// ============================================================
+
+static const FString OptionsSaveSlot = TEXT("SabriMMO_Options");
+
 void UMMOGameInstance::SaveRememberedUsername()
 {
-    const FString IniPath = FPaths::GeneratedConfigDir() + TEXT("SabriMMO.ini");
-
-    if (bRememberUsername && !Username.IsEmpty())
-    {
-        GConfig->SetBool(TEXT("LoginSettings"), TEXT("bRememberUsername"), true, IniPath);
-        GConfig->SetString(TEXT("LoginSettings"), TEXT("RememberedUsername"), *Username, IniPath);
-    }
-    else
-    {
-        GConfig->SetBool(TEXT("LoginSettings"), TEXT("bRememberUsername"), false, IniPath);
-        GConfig->SetString(TEXT("LoginSettings"), TEXT("RememberedUsername"), TEXT(""), IniPath);
-    }
-    GConfig->Flush(false, IniPath);
+    SaveGameOptions(); // All settings saved together
 }
 
 void UMMOGameInstance::LoadRememberedUsername()
 {
-    const FString IniPath = FPaths::GeneratedConfigDir() + TEXT("SabriMMO.ini");
+    // No-op — LoadGameOptions() in Init() loads everything including username
+}
 
-    GConfig->GetBool(TEXT("LoginSettings"), TEXT("bRememberUsername"), bRememberUsername, IniPath);
+// ---- Game Options ----
+
+void UMMOGameInstance::SaveGameOptions()
+{
+    UOptionsSaveGame* Save = NewObject<UOptionsSaveGame>();
+    // Display
+    Save->bShowFPS = bOptionShowFPS;
+    Save->bSkillEffects = bOptionSkillEffects;
+    Save->bShowMissText = bOptionShowMissText;
+    Save->fBrightness = fOptionBrightness;
+    // Interface
+    Save->bShowDamageNumbers = bOptionShowDamageNumbers;
+    Save->bShowEnemyHPBars = bOptionShowEnemyHPBars;
+    Save->bShowPlayerNames = bOptionShowPlayerNames;
+    Save->bShowEnemyNames = bOptionShowEnemyNames;
+    // Camera
+    Save->fCameraSensitivity = fOptionCameraSensitivity;
+    Save->fCameraZoomSpeed = fOptionCameraZoomSpeed;
+    // Gameplay
+    Save->bNoCtrl = bOptionNoCtrl;
+    Save->bNoShift = bOptionNoShift;
+    Save->bAutoDeclineTrades = bOptionAutoDeclineTrades;
+    Save->bAutoDeclineParty = bOptionAutoDeclineParty;
+    // Interface (extended)
+    Save->bShowCastBars = bOptionShowCastBars;
+    Save->bShowNPCNames = bOptionShowNPCNames;
+    Save->bShowChatTimestamps = bOptionShowChatTimestamps;
+    Save->fChatOpacity = fOptionChatOpacity;
+    Save->fDamageNumberScale = fOptionDamageNumberScale;
+    // Drop Sounds
+    Save->bDropSoundMvp    = bOptionDropSoundMvp;
+    Save->bDropSoundCard   = bOptionDropSoundCard;
+    Save->bDropSoundEquip  = bOptionDropSoundEquip;
+    Save->bDropSoundHeal   = bOptionDropSoundHeal;
+    Save->bDropSoundUsable = bOptionDropSoundUsable;
+    Save->bDropSoundMisc   = bOptionDropSoundMisc;
+    // Audio
+    Save->bMuteWhenMinimized = bOptionMuteWhenMinimized;
+    Save->fMasterVolume  = fOptionMasterVolume;
+    Save->fBgmVolume     = fOptionBgmVolume;
+    Save->fSfxVolume     = fOptionSfxVolume;
+    Save->fAmbientVolume = fOptionAmbientVolume;
+    // Login
+    Save->bRememberUsername = bRememberUsername;
+    Save->RememberedUsername = (bRememberUsername && !Username.IsEmpty()) ? Username : FString();
+
+    UGameplayStatics::SaveGameToSlot(Save, OptionsSaveSlot, 0);
+}
+
+void UMMOGameInstance::LoadGameOptions()
+{
+    if (!UGameplayStatics::DoesSaveGameExist(OptionsSaveSlot, 0))
+        return;
+
+    UOptionsSaveGame* Save = Cast<UOptionsSaveGame>(
+        UGameplayStatics::LoadGameFromSlot(OptionsSaveSlot, 0));
+    if (!Save) return;
+
+    // Display
+    bOptionShowFPS = Save->bShowFPS;
+    bOptionSkillEffects = Save->bSkillEffects;
+    bOptionShowMissText = Save->bShowMissText;
+    fOptionBrightness = Save->fBrightness;
+    // Interface
+    bOptionShowDamageNumbers = Save->bShowDamageNumbers;
+    bOptionShowEnemyHPBars = Save->bShowEnemyHPBars;
+    bOptionShowPlayerNames = Save->bShowPlayerNames;
+    bOptionShowEnemyNames = Save->bShowEnemyNames;
+    // Camera
+    fOptionCameraSensitivity = Save->fCameraSensitivity;
+    fOptionCameraZoomSpeed = Save->fCameraZoomSpeed;
+    // Gameplay
+    bOptionNoCtrl = Save->bNoCtrl;
+    bOptionNoShift = Save->bNoShift;
+    bOptionAutoDeclineTrades = Save->bAutoDeclineTrades;
+    bOptionAutoDeclineParty = Save->bAutoDeclineParty;
+    // Interface (extended)
+    bOptionShowCastBars = Save->bShowCastBars;
+    bOptionShowNPCNames = Save->bShowNPCNames;
+    bOptionShowChatTimestamps = Save->bShowChatTimestamps;
+    fOptionChatOpacity = Save->fChatOpacity;
+    fOptionDamageNumberScale = Save->fDamageNumberScale;
+    // Drop Sounds
+    bOptionDropSoundMvp    = Save->bDropSoundMvp;
+    bOptionDropSoundCard   = Save->bDropSoundCard;
+    bOptionDropSoundEquip  = Save->bDropSoundEquip;
+    bOptionDropSoundHeal   = Save->bDropSoundHeal;
+    bOptionDropSoundUsable = Save->bDropSoundUsable;
+    bOptionDropSoundMisc   = Save->bDropSoundMisc;
+    // Audio
+    bOptionMuteWhenMinimized = Save->bMuteWhenMinimized;
+    fOptionMasterVolume  = Save->fMasterVolume;
+    fOptionBgmVolume     = Save->fBgmVolume;
+    fOptionSfxVolume     = Save->fSfxVolume;
+    fOptionAmbientVolume = Save->fAmbientVolume;
+    // Login
+    bRememberUsername = Save->bRememberUsername;
     if (bRememberUsername)
-    {
-        GConfig->GetString(TEXT("LoginSettings"), TEXT("RememberedUsername"), RememberedUsername, IniPath);
-    }
+        RememberedUsername = Save->RememberedUsername;
     else
-    {
         RememberedUsername.Empty();
-    }
 }
 
 // ---- Logout ----

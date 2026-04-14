@@ -160,6 +160,207 @@ setInterval(() => {
     }
 }, 60000);
 
+// ── Ground Item System (RO Classic pre-renewal) ──
+// Items dropped by monsters or players exist on the ground for 60s with ownership priority
+const groundItems = new Map();         // Map<groundItemId, GroundItem>
+const zoneGroundItems = new Map();     // Map<zoneName, Set<groundItemId>>
+let nextGroundItemId = 1;
+
+const GROUND_ITEM_LIFETIME     = 60000;  // 60 seconds before despawn
+const GROUND_ITEM_CHECK_INTERVAL = 5000; // check despawns every 5s
+const OWNERSHIP_PHASE_1        = 3000;   // 0-3s: #1 damage dealer only
+const OWNERSHIP_PHASE_2        = 5000;   // 3-5s: top 2 damage dealers
+const OWNERSHIP_PHASE_3        = 7000;   // 5-7s: top 3 damage dealers
+const MVP_OWNERSHIP_PHASE_1    = 10000;  // 0-10s: MVP winner only
+const MVP_OWNERSHIP_PHASE_2    = 20000;  // 10-20s: top 2
+const MVP_OWNERSHIP_PHASE_3    = 22000;  // 20-22s: top 3
+const PICKUP_RANGE             = 250;    // UE units — generous to account for 30Hz position broadcast delay
+const DROP_SCATTER_DISTANCE    = 50;     // UE units (~1 cell)
+
+// Scatter direction cycle: SE, W, N (repeating) — matches rAthena mob.cpp
+const SCATTER_OFFSETS = [
+    { x:  35, y:  35 },  // SE
+    { x: -50, y:   0 },  // W
+    { x:   0, y: -50 },  // N
+];
+
+function createGroundItem(data) {
+    const gid = nextGroundItemId++;
+    const now = Date.now();
+    const gItem = {
+        groundItemId: gid,
+        itemId: data.itemId,
+        itemName: data.itemName || 'Unknown',
+        quantity: data.quantity || 1,
+        zone: data.zone,
+        x: data.x, y: data.y, z: data.z || 300,
+        dropTime: now,
+        despawnTime: now + GROUND_ITEM_LIFETIME,
+        tierColor: data.tierColor || 'pink',
+        icon: data.icon || 'default_item',
+        itemType: data.itemType || 'etc',
+        identified: data.identified !== false,
+        refineLevel: data.refineLevel || 0,
+        compoundedCards: data.compoundedCards || null,
+        forgedBy: data.forgedBy || null,
+        forgedElement: data.forgedElement || 0,
+        forgedStarCrumbs: data.forgedStarCrumbs || 0,
+        ownerCharId: data.ownerCharId || null,
+        damageRanking: data.damageRanking || [],
+        isMvpDrop: data.isMvpDrop || false,
+        partyId: data.partyId || null,
+        sourceType: data.sourceType || 'monster',
+        sourceId: data.sourceId || null,
+        sourceX: data.sourceX, sourceY: data.sourceY, sourceZ: data.sourceZ,
+    };
+    groundItems.set(gid, gItem);
+    if (!zoneGroundItems.has(data.zone)) zoneGroundItems.set(data.zone, new Set());
+    zoneGroundItems.get(data.zone).add(gid);
+    return gItem;
+}
+
+function buildGroundItemPayload(gItem) {
+    return {
+        groundItemId: gItem.groundItemId,
+        itemId: gItem.itemId,
+        itemName: gItem.itemName,
+        quantity: gItem.quantity,
+        icon: gItem.icon,
+        tierColor: gItem.tierColor,
+        itemType: gItem.itemType,
+        x: gItem.x, y: gItem.y, z: gItem.z,
+        identified: gItem.identified,
+        ownerCharId: gItem.ownerCharId,
+        isMvpDrop: gItem.isMvpDrop,
+        sourceX: gItem.sourceX != null ? gItem.sourceX : gItem.x,
+        sourceY: gItem.sourceY != null ? gItem.sourceY : gItem.y,
+        sourceZ: gItem.sourceZ != null ? gItem.sourceZ : gItem.z,
+        sourceType: gItem.sourceType,
+    };
+}
+
+function canPickupGroundItem(gItem, characterId, player) {
+    const elapsed = Date.now() - gItem.dropTime;
+    const ranking = gItem.damageRanking || [];
+
+    // Player-dropped items have no ownership restriction
+    if (gItem.sourceType === 'player') return true;
+
+    // Party Share mode — any party member can loot immediately
+    if (gItem.partyId && player.partyId === gItem.partyId) {
+        const party = activeParties.get(player.partyId);
+        if (party && party.itemShare === 'party_share') return true;
+    }
+
+    // If no damage ranking recorded, free-for-all
+    if (ranking.length === 0) return true;
+
+    const p1 = gItem.isMvpDrop ? MVP_OWNERSHIP_PHASE_1 : OWNERSHIP_PHASE_1;
+    const p2 = gItem.isMvpDrop ? MVP_OWNERSHIP_PHASE_2 : OWNERSHIP_PHASE_2;
+    const p3 = gItem.isMvpDrop ? MVP_OWNERSHIP_PHASE_3 : OWNERSHIP_PHASE_3;
+
+    if (elapsed < p1) return ranking[0] === characterId;
+    if (elapsed < p2) return ranking.slice(0, 2).includes(characterId);
+    if (elapsed < p3) return ranking.slice(0, 3).includes(characterId);
+    return true; // free-for-all
+}
+
+function calculateScatterPositions(deathX, deathY, deathZ, count) {
+    const positions = [];
+    for (let i = 0; i < count; i++) {
+        if (i === 0) {
+            positions.push({ x: deathX, y: deathY, z: deathZ });
+        } else {
+            const offset = SCATTER_OFFSETS[(i - 1) % SCATTER_OFFSETS.length];
+            positions.push({
+                x: deathX + offset.x,
+                y: deathY + offset.y,
+                z: deathZ
+            });
+        }
+    }
+    return positions;
+}
+
+// Get damage ranking from enemy.inCombatWith — sorted by totalDamage descending
+function getDamageRanking(inCombatWith) {
+    if (!inCombatWith || inCombatWith.size === 0) return [];
+    const entries = [];
+    for (const [charId, data] of inCombatWith.entries()) {
+        // Skip homunculus entries (prefixed with 'hom_')
+        if (typeof charId === 'string' && charId.startsWith('hom_')) continue;
+        entries.push({ charId, totalDamage: data.totalDamage || 0 });
+    }
+    entries.sort((a, b) => b.totalDamage - a.totalDamage);
+    return entries.slice(0, 3).map(e => e.charId);
+}
+
+// Create ground items from a monster death drop list
+// combatSnapshot: pass the inCombatWith Map snapshot taken BEFORE clear() for correct damage ranking
+function spawnMonsterGroundDrops(droppedItems, enemy, attackerId, attacker, combatSnapshot) {
+    if (droppedItems.length === 0) return;
+    const zone = enemy.zone || 'prontera_south';
+    const deathX = enemy.x || 0;
+    const deathY = enemy.y || 0;
+    const deathZ = enemy.z || 300;
+    const positions = calculateScatterPositions(deathX, deathY, deathZ, droppedItems.length);
+    const damageRanking = getDamageRanking(combatSnapshot || enemy.inCombatWith);
+    const partyId = attacker ? attacker.partyId || null : null;
+
+    const spawnedPayloads = [];
+    for (let i = 0; i < droppedItems.length; i++) {
+        const drop = droppedItems[i];
+        if (!drop.itemId) continue;
+        const itemDef = itemDefinitions.get(drop.itemId);
+        const dropIdentified = !itemDef || !['weapon', 'armor'].includes(itemDef.item_type);
+        const pos = positions[i];
+
+        const gItem = createGroundItem({
+            itemId: drop.itemId,
+            itemName: drop.itemName || (itemDef ? itemDef.name : `Item#${drop.itemId}`),
+            quantity: drop.quantity || 1,
+            zone,
+            x: pos.x, y: pos.y, z: pos.z,
+            tierColor: getDropTierColor(itemDef, drop.isMvpDrop || false),
+            icon: itemDef ? itemDef.icon : 'default_item',
+            itemType: itemDef ? itemDef.item_type : 'etc',
+            identified: dropIdentified,
+            ownerCharId: damageRanking[0] || attackerId,
+            damageRanking,
+            isMvpDrop: false,
+            partyId,
+            sourceType: 'monster',
+            sourceId: enemy.enemyId,
+            sourceX: deathX, sourceY: deathY, sourceZ: deathZ,
+        });
+        spawnedPayloads.push(buildGroundItemPayload(gItem));
+    }
+
+    // Broadcast all ground items to zone
+    if (spawnedPayloads.length > 0) {
+        broadcastToZone(zone, 'item:spawned_batch', { items: spawnedPayloads });
+        logger.info(`[GROUND] Spawned ${spawnedPayloads.length} ground items in ${zone} from ${enemy.name}: ${spawnedPayloads.map(p => p.itemName).join(', ')}`);
+    }
+}
+
+// Despawn timer — check every 5 seconds for expired ground items
+setInterval(() => {
+    const now = Date.now();
+    const despawnedByZone = new Map(); // zone -> [groundItemId]
+    for (const [gid, item] of groundItems.entries()) {
+        if (now >= item.despawnTime) {
+            groundItems.delete(gid);
+            const zoneSet = zoneGroundItems.get(item.zone);
+            if (zoneSet) zoneSet.delete(gid);
+            if (!despawnedByZone.has(item.zone)) despawnedByZone.set(item.zone, []);
+            despawnedByZone.get(item.zone).push(gid);
+        }
+    }
+    for (const [zone, ids] of despawnedByZone.entries()) {
+        broadcastToZone(zone, 'item:despawned_batch', { groundItemIds: ids });
+    }
+}, GROUND_ITEM_CHECK_INTERVAL);
+
 // PvP toggle — set to false to disable all player-vs-player damage
 const PVP_ENABLED = false;
 
@@ -216,9 +417,8 @@ async function consumeSkillCatalysts(characterId, skillName, learnedLevel, playe
     }
     // Refresh client inventory so consumed items update immediately
     await updatePlayerWeightCache(characterId, player);
-    const freshInv = await getPlayerInventory(characterId);
     const sock = io.sockets.sockets.get(player.socketId);
-    if (sock) sock.emit('inventory:data', { items: freshInv, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+    if (sock) await emitInventoryToPlayer(sock, characterId, player);
 }
 
 // Broadcast equipment visual changes to other players in the zone
@@ -241,7 +441,7 @@ async function broadcastEquipAppearance(characterId, player) {
             }
             // Weapon mode detection (works even if weapon has no sprite atlas yet)
             if ((pos === 'weapon' || row.equip_slot === 'weapon') && pos !== 'ammo') {
-                weaponMode = row.weapon_type === 'bow' ? 3 : row.two_handed ? 2 : 1;
+                weaponMode = row.weapon_type === 'bow' ? 3 : (row.weapon_type === 'katar' || !row.two_handed) ? 1 : 2;
             }
         }
         player.equipVisuals = ev;
@@ -2400,21 +2600,46 @@ async function processEnemyDeathFromSkill(enemy, attacker, attackerId, io) {
             logger.info(`[MVP] ${mvpPlayer.characterName} won MVP for ${enemy.name}! Bonus EXP: ${mvpExpReward}, Total damage: ${mvpDamage}`);
         }
 
-        // Roll 3 MVP drops for the winner
+        // Roll 3 MVP drops for the winner (direct to inventory; overflow to ground if full)
         if (mvpPlayer && enemy.mvpDrops && enemy.mvpDrops.length > 0) {
             for (const mvpDrop of enemy.mvpDrops) {
                 const roll = Math.random() * 10000;
                 if (roll < (mvpDrop.chance || 0)) {
                     const mvpItemDef = itemDefinitions.get(mvpDrop.itemId);
-                    const added = await addItemToInventory(mvpCharId, mvpDrop.itemId, 1);
+                    // Weight/inventory check — overflow to ground if can't add
+                    const mvpDropWeight = mvpItemDef ? (mvpItemDef.weight || 0) : 0;
+                    const canCarry = (mvpPlayer.currentWeight || 0) + mvpDropWeight <= getPlayerMaxWeight(mvpPlayer);
+                    const added = canCarry ? await addItemToInventory(mvpCharId, mvpDrop.itemId, 1) : null;
                     if (added && mvpSocket) {
                         mvpSocket.emit('loot:drop', {
                             items: [{ itemId: mvpDrop.itemId, itemName: mvpItemDef ? mvpItemDef.name : `Item ${mvpDrop.itemId}`,
                                 quantity: 1, icon: mvpItemDef ? mvpItemDef.icon : 'default_item',
-                                itemType: mvpItemDef ? mvpItemDef.item_type : 'etc' }]
+                                itemType: mvpItemDef ? mvpItemDef.item_type : 'etc',
+                                tierColor: getDropTierColor(mvpItemDef, true) }]
                         });
+                        logger.info(`[MVP DROP] ${mvpPlayer.characterName} received ${mvpItemDef ? mvpItemDef.name : mvpDrop.itemId} from ${enemy.name} MVP`);
+                    } else {
+                        // Overflow to ground — MVP extended ownership
+                        const mvpZone = enemy.zone || 'prontera_south';
+                        const gItem = createGroundItem({
+                            itemId: mvpDrop.itemId,
+                            itemName: mvpItemDef ? mvpItemDef.name : `Item ${mvpDrop.itemId}`,
+                            quantity: 1, zone: mvpZone,
+                            x: enemy.x || 0, y: enemy.y || 0, z: enemy.z || 300,
+                            tierColor: getDropTierColor(mvpItemDef, true),
+                            icon: mvpItemDef ? mvpItemDef.icon : 'default_item',
+                            itemType: mvpItemDef ? mvpItemDef.item_type : 'etc',
+                            identified: true,
+                            ownerCharId: mvpCharId,
+                            damageRanking: getDamageRanking(mvpCombatData),
+                            isMvpDrop: true,
+                            partyId: mvpPlayer.partyId || null,
+                            sourceType: 'monster', sourceId: enemy.enemyId,
+                            sourceX: enemy.x, sourceY: enemy.y, sourceZ: enemy.z,
+                        });
+                        broadcastToZone(mvpZone, 'item:spawned_batch', { items: [buildGroundItemPayload(gItem)] });
+                        logger.info(`[MVP DROP] ${mvpPlayer.characterName} overweight/full — ${mvpItemDef ? mvpItemDef.name : mvpDrop.itemId} dropped to ground`);
                     }
-                    logger.info(`[MVP DROP] ${mvpPlayer.characterName} received ${mvpItemDef ? mvpItemDef.name : mvpDrop.itemId} from ${enemy.name} MVP`);
                 }
             }
         }
@@ -2469,65 +2694,30 @@ async function processEnemyDeathFromSkill(enemy, attacker, attackerId, io) {
         enemyId: enemy.enemyId, enemyName: enemy.name,
         killerId: attackerId, killerName: attacker.characterName,
         isEnemy: true, isDead: true,
+        isMvp: !!((enemy.mvpExp && enemy.mvpExp > 0) || (enemy.mvpDrops && enemy.mvpDrops.length > 0)),
         baseExp: baseExpReward, jobExp: jobExpReward, exp: enemy.exp,
         timestamp: Date.now()
     });
 
-    // Roll and award loot (including Phase 8 card bonus drops)
-    const droppedItems = rollEnemyDrops(enemy);
+    // Roll loot and spawn as ground items (RO Classic: items drop on ground, not directly to inventory)
+    const droppedItems = rollEnemyDrops(enemy, attacker);
     if (cardExtraDrops.length > 0) {
         for (const cd of cardExtraDrops) {
             droppedItems.push(cd);
         }
     }
+    // Looter monsters: drop their looted items alongside normal drops
+    if (enemy._lootedItems && enemy._lootedItems.length > 0) {
+        for (const looted of enemy._lootedItems) {
+            droppedItems.push(looted);
+        }
+        enemy._lootedItems = [];
+    }
     if (droppedItems.length > 0) {
-        const lootItems = [];
-        let addedToDb = false;
-        const lootPlayer = connectedPlayers.get(attackerId);
-        for (const drop of droppedItems) {
-            if (drop.itemId) {
-                // RO Classic: skip pickup if player would exceed max weight
-                if (lootPlayer) {
-                    const dropDef = itemDefinitions.get(drop.itemId);
-                    const dropWeight = dropDef ? (dropDef.weight || 0) * drop.quantity : 0;
-                    if ((lootPlayer.currentWeight || 0) + dropWeight > getPlayerMaxWeight(lootPlayer)) {
-                        logger.info(`[WEIGHT] ${lootPlayer.characterName} overweight — skipped ${drop.quantity}x ${drop.itemName}`);
-                        continue;
-                    }
-                }
-                // RO Classic: equipment drops as unidentified (weapons, armor)
-                const dropItemDef = itemDefinitions.get(drop.itemId);
-                const dropIdentified = !dropItemDef || !['weapon', 'armor'].includes(dropItemDef.item_type);
-                const added = await addItemToInventory(attackerId, drop.itemId, drop.quantity, null, dropIdentified);
-                if (added) {
-                    const itemDef = dropItemDef;
-                    lootItems.push({ itemId: drop.itemId, itemName: drop.itemName, quantity: drop.quantity,
-                        icon: itemDef ? itemDef.icon : 'default_item', itemType: itemDef ? itemDef.item_type : 'etc',
-                        identified: dropIdentified });
-                    addedToDb = true;
-                    // Update cached weight so subsequent drops in same loop check correctly
-                    if (lootPlayer) {
-                        const dropDef = itemDefinitions.get(drop.itemId);
-                        lootPlayer.currentWeight = (lootPlayer.currentWeight || 0) + (dropDef ? (dropDef.weight || 0) * drop.quantity : 0);
-                    }
-                }
-            } else {
-                lootItems.push({ itemId: null, itemName: drop.itemName, quantity: drop.quantity,
-                    icon: 'default_item', itemType: 'etc' });
-            }
-        }
-        if (lootItems.length > 0 && killerSocket) {
-            killerSocket.emit('loot:drop', { enemyId: enemy.enemyId, enemyName: enemy.name, items: lootItems });
-            if (addedToDb) {
-                const killerInventory = await getPlayerInventory(attackerId);
-                killerSocket.emit('inventory:data', { items: killerInventory, zuzucoin: attacker.zuzucoin, currentWeight: attacker.currentWeight || 0, maxWeight: getPlayerMaxWeight(attacker) });
-                // Update weight cache from DB (authoritative) after loot
-                if (lootPlayer) await updatePlayerWeightCache(attackerId, lootPlayer);
-            }
-        }
+        spawnMonsterGroundDrops(droppedItems, enemy, attackerId, attacker, mvpCombatData);
     }
 
-    // Ore Discovery passive (Blacksmith) — extra ore drop on kill
+    // Ore Discovery passive (Blacksmith) — extra ore drop on kill (also goes to ground)
     if (attacker && attacker.learnedSkills) {
         const oreDiscoveryLv = attacker.learnedSkills[1208] || (Array.isArray(attacker.learnedSkills) ? (attacker.learnedSkills.find(s => s.id === 1208) ? 1 : 0) : 0);
         if (oreDiscoveryLv > 0) {
@@ -2553,26 +2743,19 @@ async function processEnemyDeathFromSkill(enemy, attacker, attackerId, io) {
                 { itemId: 969, name: 'Gold', rate: 75 },
                 { itemId: 714, name: 'Emperium', rate: 38 },
             ];
-            // Pick random item from group (equal chance), then check that item's individual rate
             const picked = IG_ORE[Math.floor(Math.random() * IG_ORE.length)];
             if (Math.random() < (picked.rate * 2 + 1) / 20001) {
-                // Weight check before adding ore
                 const oreDef = itemDefinitions.get(picked.itemId);
-                const oreWeight = oreDef ? (oreDef.weight || 0) : 0;
-                if ((attacker.currentWeight || 0) + oreWeight <= getPlayerMaxWeight(attacker)) {
-                    const oreAdded = await addItemToInventory(attackerId, picked.itemId, 1);
-                    if (oreAdded && killerSocket) {
-                        killerSocket.emit('chat:receive', JSON.stringify({
-                            type: 'system', message: `Ore Discovery: Found ${picked.name}!`
-                        }));
-                        killerSocket.emit('loot:drop', { enemyId: enemy.enemyId, enemyName: enemy.name, items: [{ itemId: picked.itemId, itemName: picked.name, quantity: 1, icon: oreDef ? oreDef.icon : 'default_item', itemType: oreDef ? oreDef.item_type : 'etc' }] });
-                        // Refresh inventory after ore drop
-                        const oreInventory = await getPlayerInventory(attackerId);
-                        killerSocket.emit('inventory:data', { items: oreInventory, zuzucoin: attacker.zuzucoin, currentWeight: attacker.currentWeight || 0, maxWeight: getPlayerMaxWeight(attacker) });
-                        await updatePlayerWeightCache(attackerId, attacker);
-                    }
-                    logger.info(`[ORE_DISCOVERY] ${attacker.characterName} found ${picked.name} from ${enemy.name}`);
+                spawnMonsterGroundDrops([{
+                    itemId: picked.itemId, itemName: picked.name, quantity: 1
+                }], enemy, attackerId, attacker, mvpCombatData);
+                if (killerSocket) {
+                    killerSocket.emit('chat:receive', {
+                        type: 'chat:receive', channel: 'SYSTEM', senderId: 0, senderName: 'SYSTEM',
+                        message: `Ore Discovery: Found ${picked.name}!`, timestamp: Date.now()
+                    });
                 }
+                logger.info(`[ORE_DISCOVERY] ${attacker.characterName} found ${picked.name} from ${enemy.name}`);
             }
         }
     }
@@ -4513,7 +4696,7 @@ function spawnEnemy(spawnConfig) {
     // Compute RO Classic mode flags from AI code lookup
     const roId = template.id || 0;
     const aiCode = (MONSTER_AI_CODES && MONSTER_AI_CODES[roId]) || getDefaultAiCode(template.aiType);
-    const hexMode = AI_TYPE_MODES[aiCode] || 0x0081;
+    const hexMode = AI_TYPE_MODES[aiCode] ?? 0x0081;
     const modeFlags = parseModeFlags(hexMode);
 
     // Boss/MVP protocol: add knockback immunity, status immunity, detector
@@ -4893,6 +5076,7 @@ function getWeightStatus(player) {
 
 /**
  * Calculate a player's current weight from the DB (SUM of inventory item weights).
+ * Used only for initial load and periodic sanity checks — NOT on every mutation.
  */
 async function calculatePlayerCurrentWeight(characterId) {
     try {
@@ -4909,7 +5093,20 @@ async function calculatePlayerCurrentWeight(characterId) {
 }
 
 /**
+ * Adjust cached weight incrementally (no DB query).
+ * itemId is used to look up weight from itemDefinitions Map.
+ * quantityDelta is positive for adds, negative for removes.
+ */
+function adjustPlayerWeight(player, itemId, quantityDelta) {
+    const def = itemDefinitions.get(itemId);
+    if (!def) return;
+    player.currentWeight = Math.max(0, (player.currentWeight || 0) + def.weight * quantityDelta);
+}
+
+/**
  * Recalculate weight from DB, update cache, and emit weight:status if a threshold boundary was crossed.
+ * Always does a full DB recalc to ensure correctness (removeItemFromInventory can't track incrementally).
+ * The SUM query is fast (~1ms) — the real perf wins are in getPlayerInventoryLight and client caching.
  */
 async function updatePlayerWeightCache(characterId, player) {
     const oldWeight = player.currentWeight || 0;
@@ -4963,18 +5160,52 @@ async function loadItemDefinitions() {
 }
 
 // Roll enemy drops — itemIds resolved from itemNameToId (built from DB-loaded itemDefinitions)
-function rollEnemyDrops(enemy) {
+// Map an item to its loot drop tier color (used by the client to play
+// drop_<color>.wav from /Game/SabriMMO/Audio/SFX/Drops/).
+// Order of precedence: MVP > equipment > healing > usable > etc.
+function getDropTierColor(itemDef, isMvpDrop) {
+    if (isMvpDrop) return 'red';                              // MVP exclusive drops
+    if (!itemDef) return 'blue';                              // unknown -> default
+    const t = itemDef.item_type;
+    if (t === 'card') return 'purple';                        // cards (rare)
+    if (t === 'weapon' || t === 'armor') return 'blue';       // equipment
+    if (t === 'healing') return 'green';                      // potions, herbs
+    if (t === 'usable') return 'yellow';                      // scrolls, fly wings
+    if (t === 'ammo') return 'yellow';                        // arrows, bullets
+    return 'pink';                                            // etc / materials / misc
+}
+
+// DROP_RATE_CAP: Maximum boosted drop rate (90%) — matches rAthena drop_rate_cap
+const DROP_RATE_CAP = 0.90;
+
+function rollEnemyDrops(enemy, killerPlayer) {
     const template = ENEMY_TEMPLATES[enemy.templateId];
     if (!template || !template.drops) return [];
 
+    // Calculate drop rate bonus from killer's buffs (Bubble Gum, HE Bubble Gum)
+    let dropRateMultiplier = 1.0;
+    if (killerPlayer && killerPlayer.activeBuffs) {
+        const buffs = Array.isArray(killerPlayer.activeBuffs) ? killerPlayer.activeBuffs : [];
+        for (const buff of buffs) {
+            if (buff.name === 'item_boost' && buff.dropRateBonus) {
+                dropRateMultiplier += buff.dropRateBonus / 100; // 100 = +100% = x2
+            }
+        }
+    }
+
     const droppedItems = [];
     for (const drop of template.drops) {
-        if (Math.random() < drop.chance) {
+        // Apply drop rate modifier with 90% cap
+        let effectiveChance = drop.chance;
+        if (dropRateMultiplier > 1.0) {
+            effectiveChance = Math.min(drop.chance * dropRateMultiplier, DROP_RATE_CAP);
+        }
+
+        if (Math.random() < effectiveChance) {
             const qty = drop.minQty && drop.maxQty
                 ? drop.minQty + Math.floor(Math.random() * (drop.maxQty - drop.minQty + 1))
                 : 1;
 
-            // itemId resolved from itemNameToId (populated by resolveDropItemIds after DB load)
             const itemId = drop.itemId || (drop.itemName ? itemNameToId.get(drop.itemName) : null);
             const itemDef = itemId ? itemDefinitions.get(itemId) : null;
             const itemName = drop.itemName || (itemDef ? itemDef.name : null);
@@ -4989,7 +5220,7 @@ function rollEnemyDrops(enemy) {
         }
     }
 
-    // Also roll MVP drops if this is an MVP monster
+    // Also roll MVP drops if this is an MVP monster (NOT affected by drop rate boosters)
     if (template.mvpDrops && template.mvpDrops.length > 0 && enemy.monsterClass === 'mvp') {
         for (const drop of template.mvpDrops) {
             if (Math.random() < drop.chance) {
@@ -5026,11 +5257,15 @@ async function addItemToInventory(characterId, itemId, quantity = 1, dbClient = 
             );
 
             if (existing.rows.length > 0) {
-                const newQty = Math.min(existing.rows[0].quantity + quantity, itemDef.max_stack);
+                const actualAdded = Math.min(existing.rows[0].quantity + quantity, itemDef.max_stack) - existing.rows[0].quantity;
+                const newQty = existing.rows[0].quantity + actualAdded;
                 await db.query(
                     'UPDATE character_inventory SET quantity = $1 WHERE inventory_id = $2',
                     [newQty, existing.rows[0].inventory_id]
                 );
+                // Incremental weight update
+                const p = connectedPlayers.get(characterId);
+                if (p) adjustPlayerWeight(p, itemId, actualAdded);
                 logger.info(`[ITEMS] Stacked ${quantity}x ${itemDef.name} for char ${characterId} (now ${newQty})`);
                 return { inventoryId: existing.rows[0].inventory_id, itemId, quantity: newQty, isEquipped: false };
             }
@@ -5048,6 +5283,9 @@ async function addItemToInventory(characterId, itemId, quantity = 1, dbClient = 
             'INSERT INTO character_inventory (character_id, item_id, quantity, slot_index, identified) VALUES ($1, $2, $3, $4, $5) RETURNING inventory_id',
             [characterId, itemId, quantity, nextSlot, identified]
         );
+        // Incremental weight update
+        const p = connectedPlayers.get(characterId);
+        if (p) adjustPlayerWeight(p, itemId, quantity);
         logger.info(`[ITEMS] Added ${quantity}x ${itemDef.name} to char ${characterId} inventory`);
         return { inventoryId: result.rows[0].inventory_id, itemId, quantity, isEquipped: false };
     } catch (err) {
@@ -5151,7 +5389,76 @@ async function sendStorageContents(socket, userId, isOpenEvent = false, newZuzuc
     }
 }
 
-// Get full inventory for a character
+// Get light inventory for a character (dynamic fields only, no JOIN — used for all mutations)
+async function getPlayerInventoryLight(characterId) {
+    try {
+        const result = await pool.query(
+            `SELECT inventory_id, item_id, quantity, is_equipped, slot_index,
+                    equipped_position, refine_level, compounded_cards, identified
+             FROM character_inventory
+             WHERE character_id = $1
+             ORDER BY slot_index ASC, created_at ASC`,
+            [characterId]
+        );
+        return result.rows;
+    } catch (err) {
+        logger.error(`[ITEMS] Failed to load light inventory for char ${characterId}: ${err.message}`);
+        return [];
+    }
+}
+
+// Emit light inventory:data to a socket (used by all mutation sites)
+// Always includes item definitions so the client can resolve icons/names
+// for item types acquired after the initial inventory:load.
+async function emitInventoryToPlayer(socket, characterId, player) {
+    const items = await getPlayerInventoryLight(characterId);
+    const payload = {
+        items,
+        zuzucoin: player.zuzucoin || player.zeny,
+        currentWeight: player.currentWeight || 0,
+        maxWeight: getPlayerMaxWeight(player)
+    };
+    // Include definitions for all unique item types in inventory
+    const seenIds = new Set();
+    for (const item of items) {
+        seenIds.add(item.item_id);
+    }
+    if (seenIds.size > 0) {
+        const newDefs = {};
+        for (const id of seenIds) {
+            const def = itemDefinitions.get(id);
+            if (def) newDefs[id] = def;
+        }
+        if (Object.keys(newDefs).length > 0) {
+            payload.newDefs = newDefs;
+        }
+    }
+    socket.emit('inventory:data', payload);
+}
+
+// Emit light inventory:data with new item definitions for item_ids the client may not have cached
+async function emitInventoryWithNewDefs(socket, characterId, player, newItemIds) {
+    const items = await getPlayerInventoryLight(characterId);
+    const payload = {
+        items,
+        zuzucoin: player.zuzucoin || player.zeny,
+        currentWeight: player.currentWeight || 0,
+        maxWeight: getPlayerMaxWeight(player)
+    };
+    if (newItemIds && newItemIds.length > 0) {
+        const newDefs = {};
+        for (const id of newItemIds) {
+            const def = itemDefinitions.get(id);
+            if (def) newDefs[id] = def;
+        }
+        if (Object.keys(newDefs).length > 0) {
+            payload.newDefs = newDefs;
+        }
+    }
+    socket.emit('inventory:data', payload);
+}
+
+// Get full inventory for a character (used only for initial load — includes all static fields)
 async function getPlayerInventory(characterId) {
     try {
         const result = await pool.query(
@@ -5272,6 +5579,53 @@ function findPlayerBySocketId(socketId) {
 // ============================================================
 // Zone-scoped broadcasting helpers
 // ============================================================
+
+// Skills that deal MAGICAL damage and should NOT layer the weapon hit "thwack" sound
+// on the client when they damage a target. Everything not in this set is treated as
+// physical and the client plays the attacker's weapon hit sound on top of the skill
+// impact sound. Used by the broadcastToZone enrichment for skill:effect_damage.
+//
+// Sources cross-checked against ro_skill_data.js + ro_skill_data_2nd.js. If a new
+// magic skill is added, add its id here so the client doesn't play "thwack" on it.
+const MAGICAL_DAMAGE_SKILL_IDS = new Set([
+    // Mage damage spells (200-213)
+    200, // cold_bolt
+    201, // fire_bolt
+    202, // lightning_bolt
+    203, // napalm_beat
+    206, // stone_curse
+    207, // fire_ball
+    208, // frost_diver
+    209, // fire_wall (ground burn ticks)
+    210, // soul_strike
+    212, // thunderstorm
+    // Acolyte damage spells (heal damages undead, holy_light)
+    400, // heal (vs undead)
+    414, // holy_light
+    // Wizard (800-813) — all magic damage
+    800, // jupitel_thunder
+    801, // lord_of_vermilion
+    802, // meteor_storm
+    803, // storm_gust
+    804, // earth_spike
+    805, // heavens_drive
+    807, // water_ball
+    810, // fire_pillar
+    811, // frost_nova
+    813, // sight_blaster
+    // Priest damage spells
+    1005, // magnus_exorcismus
+    1006, // turn_undead
+    // Crusader Grand Cross (holy magical AoE)
+    1303, // grand_cross
+    // Sage shared earth/heaven's drive
+    1417, // earth_spike_sage
+    1418, // heavens_drive_sage
+    // Alchemist Acid Terror is acid-element physical-ish but uses magic damage formula
+    // — keeping it as physical so the bottle "thwack" plays. Demonstration is fire AoE.
+    // Bard frost_joker / scream are status, no damage. Skip.
+]);
+
 function broadcastToZone(zone, event, data) {
     // Auto-enrich skill:effect_damage with element modifier for combat log effectiveness display
     if (event === 'skill:effect_damage' && data.isEnemy && data.element && data.targetId) {
@@ -5282,6 +5636,20 @@ function broadcastToZone(zone, event, data) {
             if (data.element !== 'neutral' || tgtEle !== 'neutral') {
                 data.eleMod = getElementModifier(data.element, tgtEle, tgtEleLv);
             }
+        }
+    }
+    // Auto-enrich skill:effect_damage with attackerWeaponType + skillCategory so the
+    // client can layer the weapon hit "thwack" sound on top of the skill SFX for
+    // physical skills (Double Strafe → bow hit, Bash → sword hit, Sonic Blow → dagger hit, etc.).
+    // The client uses skillCategory='physical' as the gate — magical skills (bolts,
+    // walls, balls, beams) skip the weapon hit sound entirely.
+    if (event === 'skill:effect_damage' && data.attackerId && data.skillId !== undefined) {
+        const atkPlayer = connectedPlayers.get(data.attackerId);
+        if (atkPlayer && data.attackerWeaponType === undefined) {
+            data.attackerWeaponType = atkPlayer.weaponType || 'bare_hand';
+        }
+        if (data.skillCategory === undefined) {
+            data.skillCategory = MAGICAL_DAMAGE_SKILL_IDS.has(data.skillId) ? 'magical' : 'physical';
         }
     }
     // Auto-enrich status:removed / status:applied on enemies with targetName for combat log
@@ -5580,7 +5948,7 @@ io.on('connection', (socket) => {
                             earlyEquipViz[vpos] = vr.view_sprite;
                         }
                         if ((vpos === 'weapon' || vr.equip_slot === 'weapon') && vpos !== 'ammo') {
-                            earlyWeaponMode = vr.weapon_type === 'bow' ? 3 : vr.two_handed ? 2 : 1;
+                            earlyWeaponMode = vr.weapon_type === 'bow' ? 3 : (vr.weapon_type === 'katar' || !vr.two_handed) ? 1 : 2;
                         }
                     }
                 } catch (vizErr) {
@@ -5806,7 +6174,7 @@ io.on('connection', (socket) => {
                     equipVisuals[pos] = row.view_sprite;
                 }
                 if ((pos === 'weapon' || row.equip_slot === 'weapon') && pos !== 'ammo') {
-                    initialWeaponMode = row.weapon_type === 'bow' ? 3 : row.two_handed ? 2 : 1;
+                    initialWeaponMode = row.weapon_type === 'bow' ? 3 : (row.weapon_type === 'katar' || !row.two_handed) ? 1 : 2;
                 }
             }
             // NOTE: player object doesn't exist yet — weaponMode is set via connectedPlayers.set() later
@@ -6826,6 +7194,19 @@ io.on('connection', (socket) => {
             }
         }
 
+        // Send all ground items in this zone to this client
+        const zoneGItems = zoneGroundItems.get(zone);
+        if (zoneGItems && zoneGItems.size > 0) {
+            const groundItemPayloads = [];
+            for (const gid of zoneGItems) {
+                const gItem = groundItems.get(gid);
+                if (gItem) groundItemPayloads.push(buildGroundItemPayload(gItem));
+            }
+            if (groundItemPayloads.length > 0) {
+                socket.emit('item:ground_list', { items: groundItemPayloads });
+            }
+        }
+
         // Send all other players in this zone to this client
         for (const [existingCharId, existingPlayer] of connectedPlayers.entries()) {
             if (existingCharId !== characterId && existingPlayer.zone === zone) {
@@ -7198,8 +7579,7 @@ io.on('connection', (socket) => {
         await sendStorageContents(socket, player.userId, true, player.zuzucoin);
 
         // Refresh inventory (ticket or zeny consumed)
-        const freshInv = await getPlayerInventory(characterId);
-        socket.emit('inventory:data', { items: freshInv, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+        await emitInventoryToPlayer(socket, characterId, player);
 
         logger.info(`[STORAGE] ${player.characterName} opened Kafra storage (user_id=${player.userId})`);
     });
@@ -7292,8 +7672,7 @@ io.on('connection', (socket) => {
 
             // Update weight cache and refresh both views
             player.currentWeight = await calculatePlayerCurrentWeight(characterId);
-            const freshInv = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: freshInv, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
             await sendStorageContents(socket, player.userId, false);
 
         } catch (err) {
@@ -7351,8 +7730,7 @@ io.on('connection', (socket) => {
 
             // Update weight cache and refresh both views
             player.currentWeight = await calculatePlayerCurrentWeight(characterId);
-            const freshInv = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: freshInv, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
             await sendStorageContents(socket, player.userId, false);
 
         } catch (err) {
@@ -7760,8 +8138,7 @@ io.on('connection', (socket) => {
             player.cartWeight = cartReload.rows.reduce((w, it) => w + (it.weight || 0) * it.quantity, 0);
 
             socket.emit('cart:data', { items: player.cartItems, cartWeight: player.cartWeight, cartMaxWeight: player.cartMaxWeight });
-            const inv = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: inv, currentWeight: player.currentWeight, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
             logger.info(`[CART] ${player.characterName} moved ${amount}x ${item.name} to cart`);
         } catch (e) {
             logger.error(`[CART] move_to_cart error: ${e.message}`);
@@ -7823,8 +8200,7 @@ io.on('connection', (socket) => {
             player.currentWeight = await calculatePlayerCurrentWeight(characterId);
 
             socket.emit('cart:data', { items: player.cartItems, cartWeight: player.cartWeight, cartMaxWeight: player.cartMaxWeight });
-            const inv = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: inv, currentWeight: player.currentWeight, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
             logger.info(`[CART] ${player.characterName} moved ${amount}x ${item.name} from cart to inventory`);
         } catch (e) {
             logger.error(`[CART] move_to_inventory error: ${e.message}`);
@@ -7853,9 +8229,8 @@ io.on('connection', (socket) => {
 
             await pool.query('UPDATE character_inventory SET identified = true WHERE inventory_id = $1', [inventoryId]);
 
-            const inv = await getPlayerInventory(characterId);
             socket.emit('identify:result', { success: true, inventoryId, itemName: result.rows[0].name });
-            socket.emit('inventory:data', { items: inv, currentWeight: player.currentWeight, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
             logger.info(`[IDENTIFY] ${player.characterName} identified ${result.rows[0].name}`);
         } catch (e) {
             logger.error(`[IDENTIFY] Error: ${e.message}`);
@@ -8102,8 +8477,7 @@ io.on('connection', (socket) => {
 
             // Reload buyer inventory
             player.currentWeight = await calculatePlayerCurrentWeight(characterId);
-            const inv = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: inv, currentWeight: player.currentWeight, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
             socket.emit('inventory:zeny_update', { zeny: player.zeny });
             socket.emit('vending:buy_result', { success: true, totalCost, message: 'Purchase successful!' });
 
@@ -8544,8 +8918,8 @@ io.on('connection', (socket) => {
             activeTrades.delete(aId); activeTrades.delete(bId);
 
             const socketA = getPlayerSocket(playerA), socketB = getPlayerSocket(playerB);
-            if (socketA) { socketA.emit('trade:completed', { partnerId: bId, partnerName: playerB.characterName }); const invA = await getPlayerInventory(aId); socketA.emit('inventory:data', { items: invA, zuzucoin: finalZenyA }); }
-            if (socketB) { socketB.emit('trade:completed', { partnerId: aId, partnerName: playerA.characterName }); const invB = await getPlayerInventory(bId); socketB.emit('inventory:data', { items: invB, zuzucoin: finalZenyB }); }
+            if (socketA) { socketA.emit('trade:completed', { partnerId: bId, partnerName: playerB.characterName }); await emitInventoryToPlayer(socketA, aId, playerA); }
+            if (socketB) { socketB.emit('trade:completed', { partnerId: aId, partnerName: playerA.characterName }); await emitInventoryToPlayer(socketB, bId, playerB); }
             logger.info(`[TRADE] Trade completed: ${playerA.characterName} <-> ${playerB.characterName}`);
         } catch (err) {
             await client.query('ROLLBACK');
@@ -10220,6 +10594,68 @@ io.on('connection', (socket) => {
         }
     });
 
+    // Change party item share mode (Each Take / Party Share)
+    socket.on('party:change_item_share', async (data) => {
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { characterId, player } = playerInfo;
+        const { mode } = data || {};
+
+        if (!player.partyId) return;
+        const party = activeParties.get(player.partyId);
+        if (!party || party.leaderId !== characterId) {
+            socket.emit('party:error', { message: 'Only the leader can change settings' }); return;
+        }
+
+        const newItemShare = mode === 'party_share' ? 1 : 0;
+        try {
+            party.itemShare = mode === 'party_share' ? 'party_share' : 'each_take';
+            await pool.query('UPDATE parties SET item_share = $1 WHERE party_id = $2', [newItemShare, party.partyId]);
+            broadcastToParty(party.partyId, 'party:update', buildPartyPayload(party));
+
+            const modeLabel = newItemShare === 1 ? 'Party Share' : 'Each Take';
+            broadcastToParty(party.partyId, 'chat:receive', {
+                type: 'chat:receive', channel: 'PARTY', senderId: 0, senderName: 'SYSTEM',
+                message: `Item pickup changed to ${modeLabel} by ${player.characterName}.`,
+                timestamp: Date.now()
+            });
+            logger.info(`[PARTY] "${party.name}" item share changed to ${modeLabel}`);
+        } catch (err) {
+            logger.error(`[PARTY] Change item share error: ${err.message}`);
+        }
+    });
+
+    // Change party item distribution mode (Individual / Shared)
+    socket.on('party:change_item_distribute', async (data) => {
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { characterId, player } = playerInfo;
+        const { mode } = data || {};
+
+        if (!player.partyId) return;
+        const party = activeParties.get(player.partyId);
+        if (!party || party.leaderId !== characterId) {
+            socket.emit('party:error', { message: 'Only the leader can change settings' }); return;
+        }
+
+        const newItemDistribute = mode === 'shared' ? 1 : 0;
+        try {
+            party.itemDistribute = mode === 'shared' ? 'shared' : 'individual';
+            await pool.query('UPDATE parties SET item_distribute = $1 WHERE party_id = $2', [newItemDistribute, party.partyId]);
+            broadcastToParty(party.partyId, 'party:update', buildPartyPayload(party));
+
+            const modeLabel = newItemDistribute === 1 ? 'Shared' : 'Individual';
+            broadcastToParty(party.partyId, 'chat:receive', {
+                type: 'chat:receive', channel: 'PARTY', senderId: 0, senderName: 'SYSTEM',
+                message: `Item distribution changed to ${modeLabel} by ${player.characterName}.`,
+                timestamp: Date.now()
+            });
+            logger.info(`[PARTY] "${party.name}" item distribute changed to ${modeLabel}`);
+        } catch (err) {
+            logger.error(`[PARTY] Change item distribute error: ${err.message}`);
+        }
+    });
+
     socket.on('party:chat', (data) => {
         const playerInfo = findPlayerBySocketId(socket.id);
         if (!playerInfo) return;
@@ -10485,13 +10921,34 @@ io.on('connection', (socket) => {
     // Inventory Events
     // ============================================================
     
-    // Load full inventory
+    // Load full inventory — sends item definitions once, then full inventory data
     socket.on('inventory:load', async () => {
         logger.info(`[RECV] inventory:load from ${socket.id}`);
         const playerInfo = findPlayerBySocketId(socket.id);
         if (!playerInfo) return;
-        
+
         const inventory = await getPlayerInventory(playerInfo.characterId);
+
+        // Send item definitions for all unique item_ids (including compounded card ids)
+        // Client caches these and uses them for subsequent light payloads
+        const neededIds = new Set();
+        for (const item of inventory) {
+            neededIds.add(item.item_id);
+            const cards = item.compounded_cards;
+            if (cards && Array.isArray(cards)) {
+                for (const cid of cards) {
+                    if (cid && cid > 0) neededIds.add(cid);
+                }
+            }
+        }
+        const definitions = {};
+        for (const id of neededIds) {
+            const def = itemDefinitions.get(id);
+            if (def) definitions[id] = def;
+        }
+        socket.emit('itemDefs:data', { definitions });
+        logger.info(`[SEND] itemDefs:data to ${socket.id}: ${Object.keys(definitions).length} definitions`);
+
         socket.emit('inventory:data', { items: inventory, zuzucoin: playerInfo.player.zuzucoin, currentWeight: playerInfo.player.currentWeight || 0, maxWeight: getPlayerMaxWeight(playerInfo.player) });
         logger.info(`[SEND] inventory:data to ${socket.id}: ${inventory.length} items, zuzucoin=${playerInfo.player.zuzucoin}`);
 
@@ -14060,8 +14517,7 @@ io.on('connection', (socket) => {
                             const addResult = await addItemToInventory(characterId, stolenItemId, 1);
                             if (addResult) {
                                 player.currentWeight = (player.currentWeight || 0) + stolenWeight;
-                                const stealInv = await getPlayerInventory(characterId);
-                                socket.emit('inventory:data', { items: stealInv, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+                                await emitInventoryToPlayer(socket, characterId, player);
                                 socket.emit('chat:receive', { type: 'chat:receive', channel: 'SYSTEM', senderId: 0, senderName: 'SYSTEM', message: `Stole ${stolenItemName} from ${enemy.name}!`, timestamp: Date.now() });
                             } else {
                                 socket.emit('chat:receive', { type: 'chat:receive', channel: 'SYSTEM', senderId: 0, senderName: 'SYSTEM', message: `Stole an item from ${enemy.name} but failed to store it.`, timestamp: Date.now() });
@@ -14460,8 +14916,7 @@ io.on('connection', (socket) => {
             if (enemy.health <= 0) await processEnemyDeathFromSkill(enemy, player, characterId, io);
 
             // Send updated inventory after stone consumption
-            const tsInv = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: tsInv, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
             socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
             return;
@@ -14483,8 +14938,7 @@ io.on('connection', (socket) => {
             const addResult = await addItemToInventory(characterId, 7049, 1);
             if (addResult) {
                 player.currentWeight = (player.currentWeight || 0) + 3;
-                const psInv = await getPlayerInventory(characterId);
-                socket.emit('inventory:data', { items: psInv, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+                await emitInventoryToPlayer(socket, characterId, player);
                 socket.emit('chat:receive', { type: 'chat:receive', channel: 'SYSTEM', senderId: 0, senderName: 'SYSTEM', message: 'Picked up 1 Stone.', timestamp: Date.now() });
             } else {
                 socket.emit('chat:receive', { type: 'chat:receive', channel: 'SYSTEM', senderId: 0, senderName: 'SYSTEM', message: 'Failed to pick up stone.', timestamp: Date.now() });
@@ -18015,7 +18469,7 @@ io.on('connection', (socket) => {
 
             // Check which recipes the player can craft
             try {
-                const inv = await getPlayerInventory(characterId);
+                const inv = await getPlayerInventoryLight(characterId);
                 const craftable = [];
                 for (const recipe of CONVERTER_RECIPES) {
                     let canCraft = true;
@@ -18140,8 +18594,7 @@ io.on('connection', (socket) => {
 
             // Refresh inventory for caster (converter consumed)
             await updatePlayerWeightCache(characterId, player);
-            const freshInv = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: freshInv, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
 
             logger.info(`[SKILL] Elemental Change: ${ecTarget.name} -> ${playerElement} Lv1 by ${player.characterName} (rate: ${ecSuccessRate}%)`);
             return;
@@ -21782,8 +22235,7 @@ io.on('connection', (socket) => {
                 socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
 
                 // Refresh caster inventory (material consumed)
-                const updatedInventory = await getPlayerInventory(characterId);
-                socket.emit('inventory:data', { items: updatedInventory, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+                await emitInventoryToPlayer(socket, characterId, player);
                 await updatePlayerWeightCache(characterId, player);
 
                 // Send equipment/stats refresh to the repaired target
@@ -21821,9 +22273,85 @@ io.on('connection', (socket) => {
             return;
         }
 
-        // --- GREED (ID 1210) --- Deferred (requires ground loot system)
+        // --- GREED (ID 1210) --- AoE ground item pickup (Blacksmith quest skill)
         if (skill.name === 'greed') {
-            socket.emit('skill:error', { message: 'Greed requires ground loot system (not yet implemented)' });
+            const GREED_RANGE = 200; // 5x5 cells ≈ 200 UE units radius
+            const GREED_SP = 10;
+            const zone = player.zone || 'prontera_south';
+
+            // SP cost
+            if ((player.mana || 0) < GREED_SP) {
+                socket.emit('skill:error', { message: 'Not enough SP' }); return;
+            }
+            player.mana = Math.max(0, (player.mana || 0) - GREED_SP);
+            socket.emit('combat:health_update', {
+                characterId, health: player.health, maxHealth: player.maxHealth,
+                mana: player.mana, maxMana: player.maxMana
+            });
+
+            // Cannot use in towns (check zone flags)
+            const zoneData = getZone(zone);
+            if (zoneData && zoneData.flags && (zoneData.flags.town || zoneData.flags.pvp || zoneData.flags.gvg)) {
+                socket.emit('skill:error', { message: 'Cannot use Greed here' }); return;
+            }
+
+            const zoneSet = zoneGroundItems.get(zone);
+            if (!zoneSet || zoneSet.size === 0) {
+                socket.emit('skill:error', { message: 'No items nearby' }); return;
+            }
+
+            const playerX = player.lastX || player.x || 0;
+            const playerY = player.lastY || player.y || 0;
+            let pickedUpCount = 0;
+
+            // Collect eligible items first (avoid mutating Set during iteration)
+            const eligible = [];
+            for (const gid of zoneSet) {
+                const gItem = groundItems.get(gid);
+                if (!gItem) continue;
+                const dx = playerX - gItem.x;
+                const dy = playerY - gItem.y;
+                if (Math.sqrt(dx * dx + dy * dy) <= GREED_RANGE) {
+                    if (canPickupGroundItem(gItem, characterId, player)) {
+                        eligible.push(gItem);
+                    }
+                }
+            }
+
+            for (const gItem of eligible) {
+                // Weight check
+                const itemDef = itemDefinitions.get(gItem.itemId);
+                const itemWeight = itemDef ? (itemDef.weight || 0) * gItem.quantity : 0;
+                if ((player.currentWeight || 0) + itemWeight > getPlayerMaxWeight(player)) continue;
+
+                // Atomic pickup
+                groundItems.delete(gItem.groundItemId);
+                zoneSet.delete(gItem.groundItemId);
+
+                const added = await addItemToInventory(characterId, gItem.itemId, gItem.quantity, null, gItem.identified);
+                if (added) {
+                    await updatePlayerWeightCache(characterId, player);
+                    broadcastToZone(zone, 'item:picked_up', {
+                        groundItemId: gItem.groundItemId,
+                        pickedUpBy: characterId, pickedUpByName: player.characterName
+                    });
+                    socket.emit('chat:receive', {
+                        type: 'chat:receive', channel: 'SYSTEM', senderId: 0, senderName: 'SYSTEM',
+                        message: `Obtained ${gItem.quantity}x ${gItem.itemName}`, timestamp: Date.now()
+                    });
+                    pickedUpCount++;
+                } else {
+                    // Put back on failure
+                    groundItems.set(gItem.groundItemId, gItem);
+                    zoneSet.add(gItem.groundItemId);
+                }
+            }
+
+            if (pickedUpCount > 0) {
+                await emitInventoryToPlayer(socket, characterId, player);
+            }
+
+            logger.info(`[GREED] ${player.characterName} picked up ${pickedUpCount} items via Greed`);
             return;
         }
 
@@ -21897,15 +22425,16 @@ io.on('connection', (socket) => {
             const sourceInvId = parseInt(data.targetId || data.sourceInventoryId || 0);
             if (!sourceInvId) {
                 // No source specified — send available recipes so client can show selection
-                const inv = await getPlayerInventory(characterId);
+                const inv = await getPlayerInventoryLight(characterId);
                 const craftable = [];
                 for (const item of inv) {
                     const recipe = ARROW_CRAFTING_RECIPES[item.item_id];
                     if (recipe) {
                         const arrowDef = itemDefinitions.get(recipe.arrowId);
+                        const srcDef = itemDefinitions.get(item.item_id);
                         craftable.push({
                             inventoryId: item.inventory_id, itemId: item.item_id,
-                            itemName: item.name, quantity: item.quantity,
+                            itemName: srcDef ? srcDef.name : `Item ${item.item_id}`, quantity: item.quantity,
                             arrowId: recipe.arrowId, arrowName: arrowDef ? arrowDef.name : 'Arrow',
                             arrowQty: recipe.qty
                         });
@@ -21946,9 +22475,7 @@ io.on('connection', (socket) => {
             player.currentWeight = Math.max(0, player.currentWeight - srcWeight + arrowWeight * recipe.qty);
 
             // Refresh inventory — emit updated item list so client sees the new arrows
-            const inv = await getPlayerInventory(characterId);
-            logger.info(`[ARROW_CRAFT] Refreshing inventory for ${player.characterName}: ${inv.length} items`);
-            socket.emit('inventory:data', { items: inv, zuzucoin: player.zuzucoin || player.zeny || 0, currentWeight: player.currentWeight, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost: 0, remainingMana: player.mana, maxMana: player.maxMana });
             socket.emit('arrow_crafting:result', {
                 success: true, sourceName: srcItem.name,
@@ -22078,10 +22605,9 @@ io.on('connection', (socket) => {
             }
 
             // Send inventory update after Acid Bottle consumption
-            const atInv = await getPlayerInventory(characterId);
             const atItemDef = itemDefinitions.get(7136);
             if (atItemDef) player.currentWeight = Math.max(0, (player.currentWeight || 0) - (atItemDef.weight || 0));
-            socket.emit('inventory:data', { items: atInv, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
 
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
             socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
@@ -22140,8 +22666,7 @@ io.on('connection', (socket) => {
             // Send inventory update after Bottle Grenade consumption
             const demoItemDef = itemDefinitions.get(7135);
             if (demoItemDef) player.currentWeight = Math.max(0, (player.currentWeight || 0) - (demoItemDef.weight || 0));
-            const demoInv = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: demoInv, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
 
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
             socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
@@ -22257,8 +22782,7 @@ io.on('connection', (socket) => {
                 }
             }
 
-            const ppInv = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: ppInv, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
             socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
             logger.info(`[SKILLS] ${player.characterName} used Potion Pitcher Lv${learnedLevel} on ${ppTarget.characterName || 'self'} — ${potionInfo.resource === 'hp' ? 'healed' : 'recovered'} ${finalHeal}`);
@@ -22317,8 +22841,7 @@ io.on('connection', (socket) => {
                 if (tSock) tSock.emit('combat:health_update', { characterId: cpTargetId, health: cpTarget.health, maxHealth: cpTarget.maxHealth, mana: cpTarget.mana, maxMana: cpTarget.maxMana });
             }
 
-            const cpInv = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: cpInv, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
             socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
             logger.info(`[SKILLS] ${player.characterName} used ${skill.displayName} Lv${learnedLevel} on ${cpTarget.characterName || 'self'} — protecting ${protectedSlot} for ${cpDuration / 1000}s`);
@@ -22333,7 +22856,7 @@ io.on('connection', (socket) => {
             applySkillDelays(characterId, player, skillId, levelData, socket);
 
             // Check which recipes the player can craft
-            const inv = await getPlayerInventory(characterId);
+            const inv = await getPlayerInventoryLight(characterId);
             const craftable = [];
             for (const [outputId, recipe] of Object.entries(PHARMACY_RECIPES)) {
                 // Check guide in inventory
@@ -22441,10 +22964,9 @@ io.on('connection', (socket) => {
                 hp: plantHP, maxHp: plantHP, duration: plantData.duration
             });
 
-            const floraInv = await getPlayerInventory(characterId);
             const floraDef = itemDefinitions.get(7137);
             if (floraDef) player.currentWeight = Math.max(0, (player.currentWeight || 0) - (floraDef.weight || 0));
-            socket.emit('inventory:data', { items: floraInv, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
             socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
             logger.info(`[SKILLS] ${player.characterName} summoned ${plantData.name} (plantId=${plantId}) HP=${plantHP} duration=${plantData.duration / 1000}s`);
@@ -22490,10 +23012,9 @@ io.on('connection', (socket) => {
                 hp: sphereHP, maxHp: sphereHP
             });
 
-            const sphereInv = await getPlayerInventory(characterId);
             const sphereDef = itemDefinitions.get(7138);
             if (sphereDef) player.currentWeight = Math.max(0, (player.currentWeight || 0) - (sphereDef.weight || 0));
-            socket.emit('inventory:data', { items: sphereInv, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
             socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
             logger.info(`[SKILLS] ${player.characterName} summoned Marine Sphere (id=${sphereId}) HP=${sphereHP} at (${Math.round(groundX)},${Math.round(groundY)})`);
@@ -22594,8 +23115,7 @@ io.on('connection', (socket) => {
                 hState.homunculusId = insertResult.rows[0].homunculus_id;
 
                 // Send inventory update (Embryo consumed)
-                const callInv = await getPlayerInventory(characterId);
-                socket.emit('inventory:data', { items: callInv, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+                await emitInventoryToPlayer(socket, characterId, player);
                 logger.info(`[HOMUNCULUS] ${player.characterName} created ${hState.name} (${chosenType}) — Homunculus ID ${hState.homunculusId}`);
             }
 
@@ -22733,7 +23253,7 @@ io.on('connection', (socket) => {
         if (!recipe) { socket.emit('pharmacy:result', { success: false, message: 'Unknown recipe' }); return; }
 
         try {
-            const inv = await getPlayerInventory(characterId);
+            const inv = await getPlayerInventoryLight(characterId);
             // Verify guide
             if (!inv.some(item => item.item_id === recipe.guide)) {
                 socket.emit('pharmacy:result', { success: false, message: 'Missing creation guide' }); return;
@@ -22802,8 +23322,7 @@ io.on('connection', (socket) => {
 
             // Refresh inventory + weight
             await updatePlayerWeightCache(characterId, player);
-            const freshInv = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: freshInv, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
         } catch (err) {
             logger.error(`[PHARMACY] Error: ${err.message}`);
             socket.emit('pharmacy:result', { success: false, message: 'Crafting failed' });
@@ -22839,7 +23358,7 @@ io.on('connection', (socket) => {
         }
 
         try {
-            const inv = await getPlayerInventory(characterId);
+            const inv = await getPlayerInventoryLight(characterId);
 
             // Verify all ingredients
             for (const mat of recipe.materials) {
@@ -22874,8 +23393,7 @@ io.on('connection', (socket) => {
 
             // Refresh inventory + weight
             await updatePlayerWeightCache(characterId, player);
-            const freshInv = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: freshInv, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
         } catch (err) {
             logger.error(`[CRAFTING] Converter error: ${err.message}`);
             socket.emit('crafting:converter_result', { success: false, message: 'Crafting failed' });
@@ -22981,8 +23499,7 @@ io.on('connection', (socket) => {
         socket.emit('homunculus:fed', { hunger: hState.hunger, intimacy: hState.intimacy, intimacyLevel: bracket });
 
         // Send inventory update
-        const feedInv = await getPlayerInventory(characterId);
-        socket.emit('inventory:data', { items: feedInv, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+        await emitInventoryToPlayer(socket, characterId, player);
 
         logger.info(`[HOMUNCULUS] Fed ${hState.name}: hunger=${hState.hunger}, intimacy=${hState.intimacy} (${bracket}), change=${intimacyChange}`);
     });
@@ -23513,8 +24030,7 @@ io.on('connection', (socket) => {
             message: `Your ${hom.name} has evolved! Intimacy has been reset.`, timestamp: Date.now() });
 
         // Send inventory update (Stone of Sage consumed)
-        const evolveInv = await getPlayerInventory(characterId);
-        socket.emit('inventory:data', { items: evolveInv, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+        await emitInventoryToPlayer(socket, characterId, player);
 
         logger.info(`[HOMUNCULUS] ${player.characterName}'s ${hom.name} (${hom.type}) EVOLVED! Bonuses: ${JSON.stringify(bonuses)}`);
     });
@@ -23598,8 +24114,7 @@ io.on('connection', (socket) => {
             }
 
             // Refresh inventory
-            const inv = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: inv, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
         } catch (err) {
             logger.error(`[PET] Tame error: ${err.message}`);
         }
@@ -23656,8 +24171,7 @@ io.on('connection', (socket) => {
             socket.emit('chat:receive', { type: 'chat:receive', channel: 'SYSTEM', senderId: 0, senderName: 'SYSTEM', message: `${petState.name} has hatched!`, timestamp: Date.now() });
             logger.info(`[PET] ${player.characterName} hatched ${petState.name} (mob ${petRow.mob_id})`);
 
-            const inv = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: inv, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
         } catch (err) {
             logger.error(`[PET] Incubate error: ${err.message}`);
         }
@@ -23741,8 +24255,7 @@ io.on('connection', (socket) => {
                 emote: isOverfed ? 'hmm' : 'ok',
             });
 
-            const inv = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: inv, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
             logger.info(`[PET] ${player.characterName} fed ${petState.name}: hunger=${petState.hunger}, intimacy=${petState.intimacy} (${intimacyChange > 0 ? '+' : ''}${intimacyChange})`);
         } catch (err) {
             logger.error(`[PET] Feed error: ${err.message}`);
@@ -23871,8 +24384,7 @@ io.on('connection', (socket) => {
                     health: player.health, maxHealth: player.maxHealth,
                     mana: player.mana, maxMana: player.maxMana
                 });
-                const invFW = await getPlayerInventory(characterId);
-                socket.emit('inventory:data', { items: invFW, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+                await emitInventoryToPlayer(socket, characterId, player);
                 await updatePlayerWeightCache(characterId, player);
                 logger.info(`[ITEMS] ${player.characterName} used Fly Wing → (${Math.round(newX)}, ${Math.round(newY)}, ${newZ})`);
                 return;
@@ -23962,8 +24474,7 @@ io.on('connection', (socket) => {
                     health: player.health, maxHealth: player.maxHealth,
                     mana: player.mana, maxMana: player.maxMana
                 });
-                const invBW = await getPlayerInventory(characterId);
-                socket.emit('inventory:data', { items: invBW, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+                await emitInventoryToPlayer(socket, characterId, player);
                 await updatePlayerWeightCache(characterId, player);
                 logger.info(`[ITEMS] ${player.characterName} used Butterfly Wing → ${saveMap} (${Math.round(saveX)}, ${Math.round(saveY)})`);
                 return;
@@ -24225,15 +24736,55 @@ io.on('connection', (socket) => {
                             break;
                         }
 
+                        // Bubble Gum / HE Bubble Gum — drop rate boost
+                        if (scStatus === 'SC_ITEMBOOST') {
+                            applyBuff(player, {
+                                name: 'item_boost', casterId: characterId, casterName: player.characterName,
+                                duration: scDuration, dropRateBonus: scValue || 100 // 100 = +100%
+                            });
+                            socket.emit('chat:receive', {
+                                type: 'chat:receive', channel: 'SYSTEM', senderId: 0, senderName: 'SYSTEM',
+                                message: `Drop rate increased by ${scValue || 100}% for ${Math.floor(scDuration / 60000)} minutes.`,
+                                timestamp: Date.now()
+                            });
+                            break;
+                        }
+
                         logger.info(`[ITEMS] Unhandled sc_start status: ${scStatus} value=${scValue} duration=${scDuration}`);
                         break;
                     }
                     case 'getitem': {
-                        // Arrow quivers, box items — grant items to inventory
+                        // Arrow quivers, box items — grant items to inventory (overflow to ground)
                         if (eff.itemId && eff.quantity > 0) {
-                            addItemToInventory(characterId, eff.itemId, eff.quantity);
                             const giDef = itemDefinitions.get(eff.itemId);
-                            logger.info(`[ITEMS] getitem: ${eff.quantity}x ${giDef ? giDef.name : eff.itemId} granted to ${player.characterName}`);
+                            const giWeight = giDef ? (giDef.weight || 0) * eff.quantity : 0;
+                            const giCanCarry = (player.currentWeight || 0) + giWeight <= getPlayerMaxWeight(player);
+                            if (giCanCarry) {
+                                addItemToInventory(characterId, eff.itemId, eff.quantity);
+                                logger.info(`[ITEMS] getitem: ${eff.quantity}x ${giDef ? giDef.name : eff.itemId} granted to ${player.characterName}`);
+                            } else {
+                                // Overflow to ground
+                                const giZone = player.zone || 'prontera_south';
+                                const giGItem = createGroundItem({
+                                    itemId: eff.itemId,
+                                    itemName: giDef ? giDef.name : `Item ${eff.itemId}`,
+                                    quantity: eff.quantity, zone: giZone,
+                                    x: player.lastX || 0, y: player.lastY || 0, z: player.lastZ || 300,
+                                    tierColor: getDropTierColor(giDef, false),
+                                    icon: giDef ? giDef.icon : 'default_item',
+                                    itemType: giDef ? giDef.item_type : 'etc',
+                                    identified: true, ownerCharId: null, damageRanking: [],
+                                    isMvpDrop: false, partyId: null,
+                                    sourceType: 'player', sourceId: characterId,
+                                });
+                                broadcastToZone(giZone, 'item:spawned_batch', { items: [buildGroundItemPayload(giGItem)] });
+                                socket.emit('chat:receive', {
+                                    type: 'chat:receive', channel: 'SYSTEM', senderId: 0, senderName: 'SYSTEM',
+                                    message: `Overweight! ${giDef ? giDef.name : 'Item'} dropped to the ground.`,
+                                    timestamp: Date.now()
+                                });
+                                logger.info(`[ITEMS] getitem overflow: ${eff.quantity}x ${giDef ? giDef.name : eff.itemId} dropped to ground for ${player.characterName}`);
+                            }
                         }
                         break;
                     }
@@ -24298,10 +24849,9 @@ io.on('connection', (socket) => {
             logger.info(`[ITEMS] ${player.characterName} used ${item.name}: +${healed}HP +${spRestored}SP`);
 
             // Refresh inventory + weight
-            const inventory = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
             await updatePlayerWeightCache(characterId, player);
-            
+
         } catch (err) {
             logger.error(`[ITEMS] Use item error: ${err.message}`);
             socket.emit('inventory:error', { message: 'Failed to use item' });
@@ -24432,8 +24982,7 @@ io.on('connection', (socket) => {
                 const effStats = getEffectiveStats(player);
                 const derived = roDerivedStats(effStats);
                 socket.emit('player:stats', buildFullStatsPayload(characterId, player, effStats, derived, Math.min(COMBAT.ASPD_CAP, derived.aspd + (player.weaponAspdMod || 0))));
-                const inv = await getPlayerInventory(characterId);
-                socket.emit('inventory:data', { items: inv, zuzucoin: player.zuzucoin || player.zeny, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+                await emitInventoryToPlayer(socket, characterId, player);
                 socket.emit(equip ? 'ammo:equipped' : 'ammo:unequipped', player.equippedAmmo ? {
                     itemId: player.equippedAmmo.itemId, name: player.equippedAmmo.name,
                     atk: player.equippedAmmo.atk, element: player.equippedAmmo.element,
@@ -24909,8 +25458,7 @@ io.on('connection', (socket) => {
             socket.emit('player:stats', buildFullStatsPayload(characterId, player, finalEffStats, finalDerived, finalAspd));
 
             // Send updated inventory
-            const inventory = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
             
             socket.emit('inventory:equipped', {
                 inventoryId, itemId: item.item_id, itemName: item.name,
@@ -25111,8 +25659,7 @@ io.on('connection', (socket) => {
             });
 
             // Refresh inventory + weight (card was consumed)
-            const inventory = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
             await updatePlayerWeightCache(characterId, player);
 
         } catch (err) {
@@ -25121,7 +25668,7 @@ io.on('connection', (socket) => {
         }
     });
 
-    // Drop/discard an item
+    // Drop an item from inventory to the ground (creates ground item)
     socket.on('inventory:drop', async (data) => {
         logger.info(`[RECV] inventory:drop from ${socket.id}: ${JSON.stringify(data)}`);
         const playerInfo = findPlayerBySocketId(socket.id);
@@ -25129,41 +25676,238 @@ io.on('connection', (socket) => {
 
         const { characterId, player } = playerInfo;
         if (player.isTrading) return socket.emit('inventory:error', { message: 'Cannot do this while trading.' });
+        if (player.isDead) return socket.emit('inventory:error', { message: 'Cannot drop items while dead.' });
+        if (player.isSitting) return socket.emit('inventory:error', { message: 'Stand up first.' });
+        if (player.isVending) return socket.emit('inventory:error', { message: 'Cannot drop items while vending.' });
+
         const inventoryId = parseInt(data.inventoryId);
         const quantity = parseInt(data.quantity) || null; // null = drop all
-        
+
         try {
-            // Verify ownership
             const result = await pool.query(
-                `SELECT ci.inventory_id, ci.item_id, ci.quantity, i.name
+                `SELECT ci.inventory_id, ci.item_id, ci.quantity, ci.is_equipped, ci.refine_level,
+                        ci.compounded_cards, ci.forged_by, ci.forged_element, ci.forged_star_crumbs,
+                        ci.identified, i.name, i.item_type, i.icon, i.weight, i.trade_flag
                  FROM character_inventory ci JOIN items i ON ci.item_id = i.item_id
                  WHERE ci.inventory_id = $1 AND ci.character_id = $2`,
                 [inventoryId, characterId]
             );
-            
+
             if (result.rows.length === 0) {
                 socket.emit('inventory:error', { message: 'Item not found' });
                 return;
             }
-            
+
             const item = result.rows[0];
-            const dropQty = quantity || item.quantity;
-            
+
+            // Cannot drop equipped items
+            if (item.is_equipped) {
+                socket.emit('inventory:error', { message: 'Unequip the item first.' });
+                return;
+            }
+
+            // NoDrop flag (trade_flag bit 0x001 = NoDrop in rAthena)
+            if ((item.trade_flag || 0) & 0x001) {
+                socket.emit('inventory:error', { message: 'This item cannot be dropped.' });
+                return;
+            }
+
+            const dropQty = Math.min(quantity || item.quantity, item.quantity);
+            if (dropQty <= 0) return;
+
             await removeItemFromInventory(inventoryId, dropQty);
-            logger.info(`[ITEMS] ${player.characterName} dropped ${dropQty}x ${item.name}`);
-            
-            socket.emit('inventory:dropped', {
-                inventoryId, itemId: item.item_id, itemName: item.name, quantity: dropQty
+            logger.info(`[GROUND] ${player.characterName} dropped ${dropQty}x ${item.name} on the ground`);
+
+            // Create ground item at player's position (use client-supplied pos if available)
+            const zone = player.zone || 'prontera_south';
+            const itemDef = itemDefinitions.get(item.item_id);
+            const dropX = (data.px != null ? data.px : player.lastX) || 0;
+            const dropY = (data.py != null ? data.py : player.lastY) || 0;
+            // Player Z is capsule center (~96 above ground). Subtract to get feet level.
+            const rawZ = (data.pz != null ? data.pz : player.lastZ) || 300;
+            const dropZ = rawZ - 96;
+            const gItem = createGroundItem({
+                itemId: item.item_id,
+                itemName: item.name,
+                quantity: dropQty,
+                zone,
+                x: dropX,
+                y: dropY,
+                z: dropZ,
+                tierColor: getDropTierColor(itemDef, false),
+                icon: item.icon || 'default_item',
+                itemType: item.item_type || 'etc',
+                identified: item.identified !== false,
+                refineLevel: item.refine_level || 0,
+                compoundedCards: item.compounded_cards || null,
+                forgedBy: item.forged_by || null,
+                forgedElement: item.forged_element || 0,
+                forgedStarCrumbs: item.forged_star_crumbs || 0,
+                ownerCharId: null,        // No ownership on player drops
+                damageRanking: [],
+                isMvpDrop: false,
+                partyId: null,
+                sourceType: 'player',
+                sourceId: characterId,
             });
 
+            // Broadcast to zone
+            broadcastToZone(zone, 'item:spawned_batch', { items: [buildGroundItemPayload(gItem)] });
+
             // Refresh inventory + weight
-            const inventory = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
             await updatePlayerWeightCache(characterId, player);
-            
+
         } catch (err) {
-            logger.error(`[ITEMS] Drop error: ${err.message}`);
+            logger.error(`[GROUND] Drop error: ${err.message}`);
             socket.emit('inventory:error', { message: 'Failed to drop item' });
+        }
+    });
+
+    // Pick up a ground item
+    socket.on('item:pickup', async (data) => {
+        const { groundItemId } = data || {};
+        const playerInfo = findPlayerBySocketId(socket.id);
+        if (!playerInfo) return;
+        const { characterId, player } = playerInfo;
+
+        // Validate ground item exists
+        const gItem = groundItems.get(groundItemId);
+        if (!gItem) {
+            socket.emit('item:pickup_error', { message: 'Item no longer exists.' });
+            return;
+        }
+
+        // Zone check
+        if (gItem.zone !== (player.zone || 'prontera_south')) {
+            socket.emit('item:pickup_error', { message: 'Item not in your zone.' });
+            return;
+        }
+
+        // Range check — use client-supplied position if available (fresher than 30Hz broadcast)
+        const playerX = (data.px != null ? data.px : player.lastX) || 0;
+        const playerY = (data.py != null ? data.py : player.lastY) || 0;
+        const dx = playerX - gItem.x;
+        const dy = playerY - gItem.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > PICKUP_RANGE) {
+            socket.emit('item:pickup_error', { message: 'Too far away.' });
+            return;
+        }
+
+        // State checks
+        if (player.isDead) { socket.emit('item:pickup_error', { message: 'Cannot pick up while dead.' }); return; }
+        if (player.isSitting) { socket.emit('item:pickup_error', { message: 'Stand up first.' }); return; }
+        if (player.isVending) { socket.emit('item:pickup_error', { message: 'Cannot pick up while vending.' }); return; }
+        if (player.isTrading || player._activeTradeId) { socket.emit('item:pickup_error', { message: 'Cannot pick up while trading.' }); return; }
+
+        // Overweight check (90% blocks pickup)
+        const maxWeight = getPlayerMaxWeight(player);
+        const weightPct = ((player.currentWeight || 0) / maxWeight) * 100;
+        if (weightPct >= 90) {
+            socket.emit('item:pickup_error', { message: 'You are overweight.' });
+            return;
+        }
+
+        // Weight check for this item
+        const itemDef = itemDefinitions.get(gItem.itemId);
+        const itemWeight = itemDef ? (itemDef.weight || 0) * gItem.quantity : 0;
+        if ((player.currentWeight || 0) + itemWeight > maxWeight) {
+            socket.emit('item:pickup_error', { message: 'Item is too heavy.' });
+            return;
+        }
+
+        // Ownership check
+        if (!canPickupGroundItem(gItem, characterId, player)) {
+            socket.emit('item:pickup_error', { message: 'You cannot pick this up yet.' });
+            return;
+        }
+
+        // === ATOMIC PICKUP — remove from ground FIRST to prevent race conditions ===
+        groundItems.delete(groundItemId);
+        const zoneSet = zoneGroundItems.get(gItem.zone);
+        if (zoneSet) zoneSet.delete(groundItemId);
+
+        // Determine recipient (party item distribution — shared mode)
+        let recipientCharId = characterId;
+        let recipientPlayer = player;
+        let recipientSocket = socket;
+
+        if (player.partyId) {
+            const party = activeParties.get(player.partyId);
+            if (party && party.itemDistribute === 'shared') {
+                const eligible = [];
+                const pickerLevel = player.stats?.level || player.level || 1;
+                for (const [memId] of party.members.entries()) {
+                    const numMemId = typeof memId === 'string' ? parseInt(memId) : memId;
+                    const memPlayer = connectedPlayers.get(numMemId);
+                    if (memPlayer && memPlayer.zone === player.zone) {
+                        // RO Classic: item distribution has no level gap restriction
+                        // (level gap only applies to EXP sharing)
+                        eligible.push({ charId: numMemId, player: memPlayer });
+                    }
+                }
+                if (eligible.length > 1) {
+                    const pick = eligible[Math.floor(Math.random() * eligible.length)];
+                    recipientCharId = pick.charId;
+                    recipientPlayer = pick.player;
+                    // Get recipient's ACTUAL socket — don't fall back to picker's socket
+                    const recipientSock = io.sockets.sockets.get(pick.player.socketId);
+                    if (recipientSock) {
+                        recipientSocket = recipientSock;
+                    }
+                    logger.info(`[PARTY LOOT] Shared distribution: ${player.characterName} picked up → assigned to ${recipientPlayer.characterName} (${eligible.length} eligible, socket=${recipientSock ? 'found' : 'MISSING'})`);
+                }
+            }
+        }
+
+        // Add to inventory
+        try {
+            const added = await addItemToInventory(recipientCharId, gItem.itemId, gItem.quantity, null, gItem.identified);
+            if (!added) {
+                // Failed — put item back on ground
+                groundItems.set(groundItemId, gItem);
+                if (zoneSet) zoneSet.add(groundItemId);
+                socket.emit('item:pickup_error', { message: 'Inventory full.' });
+                return;
+            }
+
+            await updatePlayerWeightCache(recipientCharId, recipientPlayer);
+
+            // Broadcast removal to zone
+            broadcastToZone(gItem.zone, 'item:picked_up', {
+                groundItemId,
+                pickedUpBy: recipientCharId,
+                pickedUpByName: recipientPlayer.characterName
+            });
+
+            // Pickup notification to recipient
+            recipientSocket.emit('item:pickup_success', {
+                groundItemId,
+                itemId: gItem.itemId,
+                itemName: gItem.itemName,
+                quantity: gItem.quantity,
+                icon: gItem.icon,
+                tierColor: gItem.tierColor
+            });
+
+            // Chat message
+            recipientSocket.emit('chat:receive', {
+                type: 'chat:receive', channel: 'SYSTEM', senderId: 0, senderName: 'SYSTEM',
+                message: `Obtained ${gItem.quantity}x ${gItem.itemName}`,
+                timestamp: Date.now()
+            });
+
+            // Refresh inventory
+            await emitInventoryToPlayer(recipientSocket, recipientCharId, recipientPlayer);
+
+            logger.info(`[GROUND] ${recipientPlayer.characterName} picked up ${gItem.quantity}x ${gItem.itemName}`);
+        } catch (err) {
+            // Failed — put item back on ground
+            groundItems.set(groundItemId, gItem);
+            if (zoneSet) zoneSet.add(groundItemId);
+            logger.error(`[GROUND] Pickup error: ${err.message}`);
+            socket.emit('item:pickup_error', { message: 'Failed to pick up item.' });
         }
     });
 
@@ -25270,8 +26014,7 @@ io.on('connection', (socket) => {
             logger.info(`[ITEMS] Char ${characterId} moved inv_id ${inventoryId} to slot ${newSlotIndex}`);
 
             // Refresh inventory for client
-            const inventory = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: inventory, zuzucoin: playerInfo.player.zuzucoin, currentWeight: playerInfo.player.currentWeight || 0, maxWeight: getPlayerMaxWeight(playerInfo.player) });
+            await emitInventoryToPlayer(socket, characterId, playerInfo.player);
         } catch (err) {
             logger.error(`[ITEMS] Move error: ${err.message}`);
             socket.emit('inventory:error', { message: 'Failed to move item' });
@@ -25337,8 +26080,7 @@ io.on('connection', (socket) => {
 
             logger.info(`[ITEMS] Char ${characterId} merged ${source.name}: ${source.quantity}+${target.quantity}→${targetNewQty}${sourceRemaining > 0 ? ' (overflow: ' + sourceRemaining + ')' : ' (source consumed)'}`);
 
-            const inventory = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin || player.zeny || 0, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
         } catch (err) {
             logger.error(`[ITEMS] Merge error: ${err.message}`);
             socket.emit('inventory:error', { message: 'Failed to merge items' });
@@ -25377,8 +26119,7 @@ io.on('connection', (socket) => {
             );
 
             // Refresh inventory
-            const freshInv = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: freshInv, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
             logger.info(`[INVENTORY] ${player.characterName} split ${quantity} from inventory_id ${inventoryId}`);
         } catch (err) {
             logger.error(`[INVENTORY] split error: ${err.message}`);
@@ -25415,8 +26156,7 @@ io.on('connection', (socket) => {
             }
 
             // Refresh inventory
-            const freshInv = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: freshInv, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
             logger.info(`[INVENTORY] ${player.characterName} sorted inventory by ${sortBy}`);
         } catch (err) {
             logger.error(`[INVENTORY] sort error: ${err.message}`);
@@ -25462,8 +26202,7 @@ io.on('connection', (socket) => {
             }
 
             // Refresh inventory
-            const freshInv = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: freshInv, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
             logger.info(`[INVENTORY] ${player.characterName} auto-stacked (merged ${mergedCount} duplicate stacks)`);
         } catch (err) {
             logger.error(`[INVENTORY] auto_stack error: ${err.message}`);
@@ -25658,9 +26397,8 @@ io.on('connection', (socket) => {
 
             logger.info(`[SHOP] ${player.characterName} bought ${quantity}x ${itemDef.name} for ${totalCost}z (remaining: ${newZeny}z)`);
 
-            const inventory = await getPlayerInventory(characterId);
             socket.emit('shop:bought', { itemId, itemName: itemDef.name, quantity, totalCost, newZuzucoin: newZeny });
-            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
             await updatePlayerWeightCache(characterId, player);
             logger.info(`[SEND] shop:bought + inventory:data to ${socket.id}`);
         } catch (err) {
@@ -25733,9 +26471,8 @@ io.on('connection', (socket) => {
 
             logger.info(`[SHOP] ${player.characterName} sold ${sellQty}x ${item.name} for ${sellPrice}z (total: ${newZeny}z)`);
 
-            const inventory = await getPlayerInventory(characterId);
             socket.emit('shop:sold', { inventoryId, itemName: item.name, quantity: sellQty, sellPrice, newZuzucoin: newZeny });
-            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
             await updatePlayerWeightCache(characterId, player);
             logger.info(`[SEND] shop:sold + inventory:data to ${socket.id}`);
         } catch (err) {
@@ -25885,9 +26622,8 @@ io.on('connection', (socket) => {
 
             logger.info(`[SHOP] ${player.characterName} batch-bought: ${boughtItems.map(i => `${i.quantity}x ${i.itemName}`).join(', ')} for ${totalCost}z (remaining: ${newZeny}z)`);
 
-            const inventory = await getPlayerInventory(characterId);
             socket.emit('shop:bought', { items: boughtItems, totalCost, newZuzucoin: newZeny });
-            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
             await updatePlayerWeightCache(characterId, player);
             logger.info(`[SEND] shop:bought + inventory:data to ${socket.id}`);
         } catch (err) {
@@ -26001,9 +26737,8 @@ io.on('connection', (socket) => {
 
             logger.info(`[SHOP] ${player.characterName} batch-sold: ${soldItems.map(i => `${i.quantity}x ${i.itemName}`).join(', ')} for ${totalRevenue}z (total: ${newZeny}z)`);
 
-            const inventory = await getPlayerInventory(characterId);
             socket.emit('shop:sold', { items: soldItems, totalRevenue, newZuzucoin: newZeny });
-            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
             await updatePlayerWeightCache(characterId, player);
             logger.info(`[SEND] shop:sold + inventory:data to ${socket.id}`);
         } catch (err) {
@@ -26144,8 +26879,7 @@ io.on('connection', (socket) => {
 
             // Refresh inventory + stats
             socket.emit('zeny:update', { zeny: player.zeny });
-            const inventory = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin || player.zeny, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
             if (item.is_equipped) {
                 // If it was equipped and destroyed, recalculate stats
                 socket.emit('player:stats', buildFullStatsPayload(player, characterId));
@@ -26373,8 +27107,7 @@ io.on('connection', (socket) => {
 
             // Refresh inventory + weight
             await updatePlayerWeightCache(characterId, player);
-            const inventory = await getPlayerInventory(characterId);
-            socket.emit('inventory:data', { items: inventory, zuzucoin: player.zuzucoin || player.zeny, currentWeight: player.currentWeight || 0, maxWeight: getPlayerMaxWeight(player) });
+            await emitInventoryToPlayer(socket, characterId, player);
         } catch (err) {
             logger.error(`[FORGE] Error: ${err.message}`);
             socket.emit('forge:result', { success: false, message: 'Forge failed — server error' });
@@ -26897,6 +27630,7 @@ setInterval(async () => {
                 const damagePayload = {
                     attackerId,
                     attackerName: attacker.characterName,
+                    attackerWeaponType: attacker.weaponType || 'bare_hand', // for client-side weapon swing/hit SFX
                     targetId: enemy.enemyId,
                     targetName: enemy.name,
                     isEnemy: true,
@@ -27297,12 +28031,7 @@ setInterval(async () => {
                                                             if (sSocket) {
                                                                 sSocket.emit('chat:receive', { type: 'chat:receive', channel: 'SYSTEM', senderId: 0, senderName: 'SYSTEM', message: `Snatcher: Stole ${sName} from ${enemy.name}!`, timestamp: Date.now() });
                                                                 // Refresh client inventory after Snatcher steal
-                                                                const snatchInv = await getPlayerInventory(attackerId);
-                                                                sSocket.emit('inventory:data', {
-                                                                    items: snatchInv,
-                                                                    currentWeight: attacker.currentWeight || 0,
-                                                                    maxWeight: getPlayerMaxWeight(attacker)
-                                                                });
+                                                                await emitInventoryToPlayer(sSocket, attackerId, attacker);
                                                             }
                                                         }
                                                     }
@@ -27686,6 +28415,7 @@ setInterval(async () => {
                         killerName: attacker.characterName,
                         isEnemy: true,
                         isDead: true,
+                        isMvp: !!((enemy.mvpExp && enemy.mvpExp > 0) || (enemy.mvpDrops && enemy.mvpDrops.length > 0)),
                         baseExp: baseExpReward,
                         jobExp: jobExpReward,
                         exp: enemy.exp,
@@ -27713,8 +28443,32 @@ setInterval(async () => {
                             for (const mvpDrop of enemy.mvpDrops) {
                                 if (Math.random() * 10000 < (mvpDrop.chance || 0)) {
                                     const mvpItemDef = itemDefinitions.get(mvpDrop.itemId);
-                                    await addItemToInventory(aaMvpCharId, mvpDrop.itemId, 1);
-                                    if (aaMvpSocket) aaMvpSocket.emit('loot:drop', { items: [{ itemId: mvpDrop.itemId, itemName: mvpItemDef ? mvpItemDef.name : `Item ${mvpDrop.itemId}`, quantity: 1, icon: mvpItemDef ? mvpItemDef.icon : 'default_item', itemType: mvpItemDef ? mvpItemDef.item_type : 'etc' }] });
+                                    const aaMvpDropWeight = mvpItemDef ? (mvpItemDef.weight || 0) : 0;
+                                    const aaCanCarry = (aaMvpPlayer.currentWeight || 0) + aaMvpDropWeight <= getPlayerMaxWeight(aaMvpPlayer);
+                                    const aaAdded = aaCanCarry ? await addItemToInventory(aaMvpCharId, mvpDrop.itemId, 1) : null;
+                                    if (aaAdded && aaMvpSocket) {
+                                        aaMvpSocket.emit('loot:drop', { items: [{ itemId: mvpDrop.itemId, itemName: mvpItemDef ? mvpItemDef.name : `Item ${mvpDrop.itemId}`, quantity: 1, icon: mvpItemDef ? mvpItemDef.icon : 'default_item', itemType: mvpItemDef ? mvpItemDef.item_type : 'etc', tierColor: getDropTierColor(mvpItemDef, true) }] });
+                                    } else if (!aaAdded) {
+                                        // MVP drop overflow to ground
+                                        const aaZone = enemy.zone || 'prontera_south';
+                                        const aaGItem = createGroundItem({
+                                            itemId: mvpDrop.itemId,
+                                            itemName: mvpItemDef ? mvpItemDef.name : `Item ${mvpDrop.itemId}`,
+                                            quantity: 1, zone: aaZone,
+                                            x: enemy.x || 0, y: enemy.y || 0, z: enemy.z || 300,
+                                            tierColor: getDropTierColor(mvpItemDef, true),
+                                            icon: mvpItemDef ? mvpItemDef.icon : 'default_item',
+                                            itemType: mvpItemDef ? mvpItemDef.item_type : 'etc',
+                                            identified: true,
+                                            ownerCharId: aaMvpCharId,
+                                            damageRanking: getDamageRanking(aaMvpCombatData),
+                                            isMvpDrop: true,
+                                            partyId: aaMvpPlayer.partyId || null,
+                                            sourceType: 'monster', sourceId: enemy.enemyId,
+                                            sourceX: enemy.x, sourceY: enemy.y, sourceZ: enemy.z,
+                                        });
+                                        broadcastToZone(aaZone, 'item:spawned_batch', { items: [buildGroundItemPayload(aaGItem)] });
+                                    }
                                 }
                             }
                         }
@@ -27726,70 +28480,18 @@ setInterval(async () => {
                     broadcastToZone(enemyDeathZone, 'enemy:death', deathPayload);
                     logger.info(`[BROADCAST] enemy:death: ${JSON.stringify(deathPayload)}`);
 
-                    // Roll item drops for the killer (including Phase 8 card bonus drops)
-                    const droppedItems = rollEnemyDrops(enemy);
+                    // Roll loot and spawn as ground items (RO Classic: items drop on ground)
+                    const droppedItems = rollEnemyDrops(enemy, attacker);
                     if (cardExtraDrops2.length > 0) {
                         for (const cd of cardExtraDrops2) droppedItems.push(cd);
                     }
+                    // Looter monsters: drop their looted items alongside normal drops
+                    if (enemy._lootedItems && enemy._lootedItems.length > 0) {
+                        for (const looted of enemy._lootedItems) droppedItems.push(looted);
+                        enemy._lootedItems = [];
+                    }
                     if (droppedItems.length > 0) {
-                        const lootItems = [];
-                        let addedToDb = false;
-                        for (const drop of droppedItems) {
-                            if (drop.itemId) {
-                                // RO Classic: skip pickup if player would exceed max weight
-                                const dropDef = itemDefinitions.get(drop.itemId);
-                                const dropWeight = dropDef ? (dropDef.weight || 0) * drop.quantity : 0;
-                                if ((attacker.currentWeight || 0) + dropWeight > getPlayerMaxWeight(attacker)) {
-                                    logger.info(`[WEIGHT] ${attacker.characterName} overweight — skipped ${drop.quantity}x ${drop.itemName}`);
-                                    continue;
-                                }
-                                // Item exists in DB — add to inventory
-                                const added = await addItemToInventory(attackerId, drop.itemId, drop.quantity);
-                                if (added) {
-                                    const itemDef = itemDefinitions.get(drop.itemId);
-                                    lootItems.push({
-                                        itemId: drop.itemId,
-                                        itemName: drop.itemName,
-                                        quantity: drop.quantity,
-                                        icon: itemDef ? itemDef.icon : 'default_item',
-                                        itemType: itemDef ? itemDef.item_type : 'etc',
-                                        isMvpDrop: drop.isMvpDrop || false
-                                    });
-                                    addedToDb = true;
-                                    // Update cached weight for subsequent drops in same loop
-                                    attacker.currentWeight = (attacker.currentWeight || 0) + dropWeight;
-                                }
-                            } else {
-                                // RO drop not yet in items DB — still notify client for display
-                                lootItems.push({
-                                    itemId: null,
-                                    itemName: drop.itemName,
-                                    quantity: drop.quantity,
-                                    icon: 'default_item',
-                                    itemType: 'etc',
-                                    isMvpDrop: drop.isMvpDrop || false
-                                });
-                            }
-                        }
-                        if (lootItems.length > 0) {
-                            const killerSocket = io.sockets.sockets.get(attacker.socketId);
-                            if (killerSocket) {
-                                const lootPayload = {
-                                    enemyId: enemy.enemyId,
-                                    enemyName: enemy.name,
-                                    items: lootItems
-                                };
-                                killerSocket.emit('loot:drop', lootPayload);
-                                logger.info(`[LOOT] ${attacker.characterName} received ${lootItems.length} items from ${enemy.name}: ${lootItems.map(i => `${i.quantity}x ${i.itemName}${i.isMvpDrop ? ' (MVP)' : ''}`).join(', ')}`);
-                                // Refresh inventory if any items were actually added to DB
-                                if (addedToDb) {
-                                    const killerInventory = await getPlayerInventory(attackerId);
-                                    killerSocket.emit('inventory:data', { items: killerInventory, zuzucoin: attacker.zuzucoin, currentWeight: attacker.currentWeight || 0, maxWeight: getPlayerMaxWeight(attacker) });
-                                    // Update weight cache from DB (authoritative) after loot
-                                    await updatePlayerWeightCache(attackerId, attacker);
-                                }
-                            }
-                        }
+                        spawnMonsterGroundDrops(droppedItems, enemy, attackerId, attacker, aaMvpCombatData);
                     }
 
                     // Ore Discovery passive (Blacksmith) — extra ore drop on kill (combat tick path)
@@ -27820,24 +28522,17 @@ setInterval(async () => {
                             ];
                             const picked2 = IG_ORE2[Math.floor(Math.random() * IG_ORE2.length)];
                             if (Math.random() < (picked2.rate * 2 + 1) / 20001) {
-                                const oreDef2 = itemDefinitions.get(picked2.itemId);
-                                const oreWeight2 = oreDef2 ? (oreDef2.weight || 0) : 0;
-                                if ((attacker.currentWeight || 0) + oreWeight2 <= getPlayerMaxWeight(attacker)) {
-                                    const oreAdded2 = await addItemToInventory(attackerId, picked2.itemId, 1);
-                                    if (oreAdded2) {
-                                        const oreKillerSocket = io.sockets.sockets.get(attacker.socketId);
-                                        if (oreKillerSocket) {
-                                            oreKillerSocket.emit('chat:receive', JSON.stringify({
-                                                type: 'system', message: `Ore Discovery: Found ${picked2.name}!`
-                                            }));
-                                            oreKillerSocket.emit('loot:drop', { enemyId: enemy.enemyId, enemyName: enemy.name, items: [{ itemId: picked2.itemId, itemName: picked2.name, quantity: 1, icon: oreDef2 ? oreDef2.icon : 'default_item', itemType: oreDef2 ? oreDef2.item_type : 'etc' }] });
-                                            const oreInv2 = await getPlayerInventory(attackerId);
-                                            oreKillerSocket.emit('inventory:data', { items: oreInv2, zuzucoin: attacker.zuzucoin, currentWeight: attacker.currentWeight || 0, maxWeight: getPlayerMaxWeight(attacker) });
-                                            await updatePlayerWeightCache(attackerId, attacker);
-                                        }
-                                        logger.info(`[ORE_DISCOVERY] ${attacker.characterName} found ${picked2.name} from ${enemy.name}`);
-                                    }
+                                spawnMonsterGroundDrops([{
+                                    itemId: picked2.itemId, itemName: picked2.name, quantity: 1
+                                }], enemy, attackerId, attacker, aaMvpCombatData);
+                                const oreKillerSocket = io.sockets.sockets.get(attacker.socketId);
+                                if (oreKillerSocket) {
+                                    oreKillerSocket.emit('chat:receive', {
+                                        type: 'chat:receive', channel: 'SYSTEM', senderId: 0, senderName: 'SYSTEM',
+                                        message: `Ore Discovery: Found ${picked2.name}!`, timestamp: Date.now()
+                                    });
                                 }
+                                logger.info(`[ORE_DISCOVERY] ${attacker.characterName} found ${picked2.name} from ${enemy.name}`);
                             }
                         }
                     }
@@ -32100,6 +32795,65 @@ setInterval(async () => {
                 enemy._castTargetPlayerId = null;
             }
 
+            // Looter monsters: detect nearby ground items, move toward them, pick up when in range
+            if (enemy.modeFlags && enemy.modeFlags.looter && !inHitStun && enemy.modeFlags.canMove) {
+                const lootZoneSet = zoneGroundItems.get(enemy.zone);
+                if (lootZoneSet && lootZoneSet.size > 0) {
+                    // Find nearest ground item within detection range (500 UE units)
+                    let nearestGid = null, nearestDist = Infinity, nearestItem = null;
+                    for (const gid of lootZoneSet) {
+                        const gItem = groundItems.get(gid);
+                        if (!gItem) continue;
+                        const dx = enemy.x - gItem.x;
+                        const dy = enemy.y - gItem.y;
+                        const dist = Math.sqrt(dx * dx + dy * dy);
+                        if (dist < nearestDist && dist <= 500) {
+                            nearestDist = dist;
+                            nearestGid = gid;
+                            nearestItem = gItem;
+                        }
+                    }
+
+                    if (nearestItem) {
+                        if (nearestDist <= 80) {
+                            // In range — pick up the item
+                            if (!enemy._lootedItems) enemy._lootedItems = [];
+                            enemy._lootedItems.push({
+                                itemId: nearestItem.itemId, itemName: nearestItem.itemName,
+                                quantity: nearestItem.quantity, identified: nearestItem.identified
+                            });
+                            groundItems.delete(nearestGid);
+                            lootZoneSet.delete(nearestGid);
+                            broadcastToZone(enemy.zone, 'item:picked_up', {
+                                groundItemId: nearestGid, pickedUpBy: 0, pickedUpByName: enemy.name
+                            });
+                            logger.info(`[LOOTER] ${enemy.name}(${enemy.enemyId}) picked up ${nearestItem.itemName}`);
+                        } else {
+                            // Move toward the item
+                            const moveSpeed = enemy.moveSpeed || 150;
+                            const dx = nearestItem.x - enemy.x;
+                            const dy = nearestItem.y - enemy.y;
+                            const dist = Math.sqrt(dx * dx + dy * dy);
+                            const step = moveSpeed * (ENEMY_AI.TICK_MS / 1000);
+                            const moveRatio = Math.min(step / dist, 1.0);
+                            enemy.x += dx * moveRatio;
+                            enemy.y += dy * moveRatio;
+                            enemy.isWandering = false;
+
+                            // Broadcast movement to clients
+                            if (now - (enemy.lastMoveBroadcast || 0) >= 200) {
+                                enemy.lastMoveBroadcast = now;
+                                broadcastToZone(enemy.zone, 'enemy:move', {
+                                    enemyId: enemy.enemyId,
+                                    x: enemy.x, y: enemy.y, z: enemy.z,
+                                    isMoving: true
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+
             // No aggro target: wander normally
             if (!inHitStun) {
                 processWander(enemy, now);
@@ -34461,6 +35215,14 @@ server.listen(PORT, async () => {
     logger.info('[DB] items.trade_flag column verified/created');
   } catch (err) {
     logger.warn(`[DB] trade_flag column issue: ${err.message}`);
+  }
+
+  // Ensure headgear_view_id column exists on items table (maps headgear items to visual sprites)
+  try {
+    await pool.query(`ALTER TABLE items ADD COLUMN IF NOT EXISTS headgear_view_id INTEGER DEFAULT NULL`);
+    logger.info('[DB] items.headgear_view_id column verified/created');
+  } catch (err) {
+    logger.warn(`[DB] headgear_view_id column issue: ${err.message}`);
   }
 
   // Ensure Stone item (7049) exists — required by Pick Stone / Throw Stone skills

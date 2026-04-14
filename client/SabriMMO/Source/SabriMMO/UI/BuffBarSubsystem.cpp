@@ -4,6 +4,9 @@
 #include "SBuffBarWidget.h"
 #include "MMOGameInstance.h"
 #include "SocketEventRouter.h"
+#include "Audio/AudioSubsystem.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
@@ -236,6 +239,24 @@ void UBuffBarSubsystem::HandleBuffApplied(const TSharedPtr<FJsonValue>& Data)
 
 	UE_LOG(LogTemp, Log, TEXT("[BuffBar] Buff applied: %s abbrev=%s (%.1fs) — total buffs: %d, total statuses: %d"),
 		*BuffName, *Info.Abbrev, DurationD / 1000.0, ActiveBuffs.Num(), ActiveStatuses.Num());
+
+	// Cloaking on/off SFX — fires when Hiding (503) or Cloaking (1103) buff is
+	// applied, mirroring RO Classic's assasin_cloaking.wav transition cue.
+	if (BuffNameLower == TEXT("hiding") || BuffNameLower == TEXT("cloaking"))
+	{
+		if (UAudioSubsystem* Audio = GetWorld()->GetSubsystem<UAudioSubsystem>())
+		{
+			FVector PlayerLoc = FVector::ZeroVector;
+			if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+			{
+				if (APawn* Pawn = PC->GetPawn())
+				{
+					PlayerLoc = Pawn->GetActorLocation();
+				}
+			}
+			Audio->PlayCloakingSound(PlayerLoc);
+		}
+	}
 }
 
 void UBuffBarSubsystem::HandleBuffRemoved(const TSharedPtr<FJsonValue>& Data)
@@ -257,6 +278,23 @@ void UBuffBarSubsystem::HandleBuffRemoved(const TSharedPtr<FJsonValue>& Data)
 	ActiveBuffs.RemoveAll([&BuffNameLower](const FActiveBuffInfo& B) { return B.Name == BuffNameLower; });
 	// Also remove from statuses (backward compat: server sends buff_removed for expired status effects)
 	ActiveStatuses.RemoveAll([&BuffNameLower](const FActiveStatusInfo& S) { return S.Type == BuffNameLower; });
+
+	// Cloaking on/off SFX (off transition)
+	if (BuffNameLower == TEXT("hiding") || BuffNameLower == TEXT("cloaking"))
+	{
+		if (UAudioSubsystem* Audio = GetWorld()->GetSubsystem<UAudioSubsystem>())
+		{
+			FVector PlayerLoc = FVector::ZeroVector;
+			if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+			{
+				if (APawn* Pawn = PC->GetPawn())
+				{
+					PlayerLoc = Pawn->GetActorLocation();
+				}
+			}
+			Audio->PlayCloakingSound(PlayerLoc);
+		}
+	}
 }
 
 void UBuffBarSubsystem::HandleBuffList(const TSharedPtr<FJsonValue>& Data)

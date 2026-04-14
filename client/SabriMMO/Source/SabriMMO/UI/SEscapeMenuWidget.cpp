@@ -132,6 +132,26 @@ void SEscapeMenuWidget::Construct(const FArguments& InArgs)
 							]
 						]
 
+						// ---- Option (alive only) ----
+						+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)
+						[
+							SNew(SBox)
+							.Visibility_Lambda([this]()
+							{
+								UEscapeMenuSubsystem* Sub = OwningSubsystem.Get();
+								return (Sub && !Sub->IsPlayerDead()) ? EVisibility::Visible : EVisibility::Collapsed;
+							})
+							[
+								BuildButton(FText::FromString(TEXT("Option")),
+									FOnClicked::CreateLambda([this]() -> FReply
+									{
+										if (UEscapeMenuSubsystem* Sub = OwningSubsystem.Get())
+											Sub->OnOptionPressed();
+										return FReply::Handled();
+									}))
+							]
+						]
+
 						// ---- Exit (always visible) ----
 						+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)
 						[

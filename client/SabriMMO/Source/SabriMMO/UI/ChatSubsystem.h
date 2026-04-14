@@ -54,6 +54,10 @@ public:
 	TArray<FChatMessage> Messages;
 	uint32 MessageVersion = 0;
 
+	// ---- options flags (set by OptionsSubsystem) ----
+	bool bShowTimestamps = false;
+	float ChatPanelOpacity = 0.90f;
+
 	// ---- lifecycle ----
 	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;

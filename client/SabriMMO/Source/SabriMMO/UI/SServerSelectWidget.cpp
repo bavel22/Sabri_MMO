@@ -2,6 +2,8 @@
 
 #include "SServerSelectWidget.h"
 #include "LoginFlowSubsystem.h"
+#include "Audio/AudioSubsystem.h"
+#include "Engine/World.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SScrollBox.h"
@@ -366,6 +368,7 @@ void SServerSelectWidget::SelectServer(int32 Index)
 // ============================================================
 FReply SServerSelectWidget::OnConnectClicked()
 {
+	UAudioSubsystem::PlayUIClickStatic(OwningSubsystem.IsValid() ? OwningSubsystem->GetWorld() : nullptr);
 	if (SelectedIndex >= 0 && SelectedIndex < CachedServers.Num())
 	{
 		if (ULoginFlowSubsystem* Subsystem = OwningSubsystem.Get())
@@ -378,6 +381,7 @@ FReply SServerSelectWidget::OnConnectClicked()
 
 FReply SServerSelectWidget::OnCancelClicked()
 {
+	UAudioSubsystem::PlayUICancelStatic(OwningSubsystem.IsValid() ? OwningSubsystem->GetWorld() : nullptr);
 	if (ULoginFlowSubsystem* Subsystem = OwningSubsystem.Get())
 	{
 		Subsystem->OnBackToLogin();

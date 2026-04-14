@@ -147,6 +147,7 @@ public:
 
 	// ---- refresh item quantities from inventory data ----
 	void RefreshItemQuantities();
+	bool CheckAndRefreshIfInventoryChanged();
 
 private:
 	// ---- event handlers ----
@@ -163,6 +164,7 @@ private:
 	int32 LocalCharacterId = 0;
 	FTimerHandle HotbarRequestTimer;
 	FTimerHandle ViewportCheckTimer;
+	uint32 LastInvDataVersion = UINT32_MAX;  // Tracks InventorySubsystem::DataVersion for event-driven refresh
 
 	// ---- keybind storage (4 rows x 9 slots) ----
 	FHotbarKeybind Keybinds[NUM_ROWS][SLOTS_PER_ROW];

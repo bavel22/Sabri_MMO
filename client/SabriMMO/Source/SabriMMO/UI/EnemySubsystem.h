@@ -9,6 +9,8 @@
 #include "Subsystems/WorldSubsystem.h"
 #include "Sprite/SpriteAtlasData.h"
 #include "Dom/JsonValue.h"
+#include "Engine/EngineTypes.h"
+#include "Engine/TimerHandle.h"
 #include "Widgets/SWidget.h"
 #include "EnemySubsystem.generated.h"
 
@@ -31,6 +33,11 @@ struct FEnemyEntry
 	double Health = 0.0;
 	double MaxHealth = 0.0;
 	bool bIsDead = false;
+
+	// Periodic stand-sound timer (RO Classic monsters with idle ambient,
+	// e.g. Pharaoh, Baphomet — Poring/Skeleton are no-op since their stand path is empty).
+	// Set on spawn if AudioSubsystem reports HasStandSound(SpriteClass).
+	FTimerHandle StandSoundTimer;
 };
 
 UCLASS()

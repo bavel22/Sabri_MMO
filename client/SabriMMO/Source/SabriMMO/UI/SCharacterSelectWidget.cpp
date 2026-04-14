@@ -3,6 +3,8 @@
 
 #include "SCharacterSelectWidget.h"
 #include "LoginFlowSubsystem.h"
+#include "Audio/AudioSubsystem.h"
+#include "Engine/World.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/SOverlay.h"
@@ -1185,6 +1187,7 @@ void SCharacterSelectWidget::ShowStatusMessage(const FString& Message)
 // ============================================================
 FReply SCharacterSelectWidget::OnPlayClicked()
 {
+	UAudioSubsystem::PlayUIClickStatic(OwningSubsystem.IsValid() ? OwningSubsystem->GetWorld() : nullptr);
 	if (SelectedIndex >= 0 && SelectedIndex < CachedCharacters.Num())
 	{
 		if (ULoginFlowSubsystem* Subsystem = OwningSubsystem.Get())
@@ -1197,6 +1200,7 @@ FReply SCharacterSelectWidget::OnPlayClicked()
 
 FReply SCharacterSelectWidget::OnDeleteClicked()
 {
+	UAudioSubsystem::PlayUIClickStatic(OwningSubsystem.IsValid() ? OwningSubsystem->GetWorld() : nullptr);
 	if (SelectedIndex >= 0 && SelectedIndex < CachedCharacters.Num())
 	{
 		ShowDeleteConfirmation();
@@ -1206,6 +1210,7 @@ FReply SCharacterSelectWidget::OnDeleteClicked()
 
 FReply SCharacterSelectWidget::OnBackClicked()
 {
+	UAudioSubsystem::PlayUICancelStatic(OwningSubsystem.IsValid() ? OwningSubsystem->GetWorld() : nullptr);
 	if (ULoginFlowSubsystem* Subsystem = OwningSubsystem.Get())
 	{
 		Subsystem->OnBackToServerSelect();
@@ -1215,6 +1220,7 @@ FReply SCharacterSelectWidget::OnBackClicked()
 
 FReply SCharacterSelectWidget::OnConfirmDeleteClicked()
 {
+	UAudioSubsystem::PlayUIClickStatic(OwningSubsystem.IsValid() ? OwningSubsystem->GetWorld() : nullptr);
 	if (!DeletePasswordField.IsValid())
 	{
 		return FReply::Handled();
@@ -1248,6 +1254,7 @@ FReply SCharacterSelectWidget::OnConfirmDeleteClicked()
 
 FReply SCharacterSelectWidget::OnCancelDeleteClicked()
 {
+	UAudioSubsystem::PlayUICancelStatic(OwningSubsystem.IsValid() ? OwningSubsystem->GetWorld() : nullptr);
 	HideDeleteConfirmation();
 	return FReply::Handled();
 }

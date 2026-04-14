@@ -5,11 +5,19 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialExpressionTextureSampleParameter2D.h"
 #include "Materials/MaterialExpressionVectorParameter.h"
+#include "Materials/MaterialExpressionScalarParameter.h"
 #include "Materials/MaterialExpressionMultiply.h"
+#include "Materials/MaterialExpressionCameraVectorWS.h"
+#include "Materials/MaterialExpressionConstant.h"
+#include "Materials/MaterialExpressionSceneColor.h"
+#include "Materials/MaterialExpressionPixelDepth.h"
+#include "Materials/MaterialExpressionSceneDepth.h"
 #include "Engine/Texture2D.h"
 #include "Kismet/GameplayStatics.h"
 #include "Camera/PlayerCameraManager.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/Character.h"
+#include "Components/CapsuleComponent.h"
 #include "Misc/FileHelper.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
@@ -68,6 +76,25 @@ void ASpriteCharacterActor::DisableClickCollision()
 	if (Body.MeshComp)
 	{
 		Body.MeshComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	}
+}
+
+void ASpriteCharacterActor::PlayHitFlash()
+{
+	if (bHitFlashing) return;
+	bHitFlashing = true;
+	HitFlashTimer = 0.0f;
+	SavedLayerTints.Empty();
+
+	// Save original tints and flash all active layers to bright white
+	for (int32 i = 0; i < static_cast<int32>(ESpriteLayer::MAX); ++i)
+	{
+		if (Layers[i].bActive && Layers[i].MaterialInst)
+		{
+			SavedLayerTints.Add(i, Layers[i].TintColor);
+			Layers[i].MaterialInst->SetVectorParameterValue(
+				TEXT("TintColor"), FLinearColor(3.0f, 3.0f, 3.0f, 1.0f));
+		}
 	}
 }
 
@@ -157,6 +184,11 @@ void ASpriteCharacterActor::BeginPlay()
 // Procedural Quad — one per layer, UVs updated per frame
 // ============================================================
 
+// Use shared constant from SpriteAtlasData.h (GSpriteCameraDepthOffset)
+// so GetSpriteScreenBounds projects from the same offset position
+static constexpr float SpriteDepthOffset = GSpriteCameraDepthOffset;
+
+
 void ASpriteCharacterActor::CreateLayerQuad(int32 LayerIndex)
 {
 	FSpriteLayerState& Layer = Layers[LayerIndex];
@@ -178,10 +210,10 @@ void ASpriteCharacterActor::CreateLayerQuad(int32 LayerIndex)
 	float HalfH = SpriteSize.Y * 0.5f;
 
 	TArray<FVector> Vertices;
-	Vertices.Add(FVector(0.f, -HalfW, 0.f));       // Bottom-left
-	Vertices.Add(FVector(0.f, HalfW, 0.f));         // Bottom-right
-	Vertices.Add(FVector(0.f, HalfW, HalfH * 2.f)); // Top-right
-	Vertices.Add(FVector(0.f, -HalfW, HalfH * 2.f));// Top-left
+	Vertices.Add(FVector(SpriteDepthOffset, -HalfW, 0.f));       // Bottom-left
+	Vertices.Add(FVector(SpriteDepthOffset, HalfW, 0.f));         // Bottom-right
+	Vertices.Add(FVector(SpriteDepthOffset, HalfW, HalfH * 2.f)); // Top-right
+	Vertices.Add(FVector(SpriteDepthOffset, -HalfW, HalfH * 2.f));// Top-left
 
 	TArray<int32> Triangles;
 	Triangles.Add(0); Triangles.Add(1); Triangles.Add(2);
@@ -207,10 +239,12 @@ void ASpriteCharacterActor::CreateLayerQuad(int32 LayerIndex)
 	Layer.MeshComp->CreateMeshSection(0, Vertices, Triangles, Normals,
 	                                   UVs, Colors, Tangents, true);
 
-	// Tiny depth offset per layer — enough to prevent Z-fighting,
-	// small enough to avoid parallax drift at screen edges
-	float LayerOffset = static_cast<float>(LayerIndex) * 0.01f;
-	Layer.MeshComp->SetRelativeLocation(FVector(LayerOffset, 0.f, 0.f));
+	// Back-to-front layer ordering via translucent sort distance offset.
+	// Higher layer index = more negative offset = appears closer = drawn LAST (on top).
+	// All 9 layers share the actor position, so this is the only ordering discriminator.
+	// Small magnitudes (-0.1 per layer) avoid corrupting cross-character sort.
+	Layer.MeshComp->TranslucencySortPriority = 0;
+	Layer.MeshComp->TranslucencySortDistanceOffset = -0.1f * static_cast<float>(LayerIndex);
 }
 
 void ASpriteCharacterActor::UpdateQuadUVs(FSpriteLayerState& Layer)
@@ -281,24 +315,26 @@ void ASpriteCharacterActor::UpdateQuadUVs(FSpriteLayerState& Layer)
 		ZOffset = -HalfH * 0.6f;
 	}
 
-	// Per-frame depth ordering for equipment layers
-	// Tiny offset prevents Z-fighting without parallax drift at screen edges
+	// Per-frame depth ordering for equipment layers via translucent sort distance
 	if (Layer.bUsingLayerV2 && Layer.MeshComp)
 	{
-		float DepthX = 0.05f; // default: in front of body
+		bool bFront = true; // default: in front of body
 		if (Layer.ActiveLayerAtlas && Layer.ActiveLayerAtlas->DepthFront.Num() > 0)
 		{
-			bool bFront = Layer.ActiveLayerAtlas->IsDepthFront(CurrentDirection, CurrentFrame);
-			DepthX = bFront ? 0.05f : -0.05f;
+			bFront = Layer.ActiveLayerAtlas->IsDepthFront(CurrentDirection, CurrentFrame);
 		}
-		Layer.MeshComp->SetRelativeLocation(FVector(DepthX, 0.f, 0.f));
+		// Base per-layer offset (-0.1 * index) ± equipment front/back adjustment (0.5)
+		int32 LayerIdx = static_cast<int32>(&Layer - Layers);
+		float BaseOffset = -0.1f * static_cast<float>(LayerIdx);
+		float FrontBackAdj = bFront ? -0.5f : 0.5f;
+		Layer.MeshComp->TranslucencySortDistanceOffset = BaseOffset + FrontBackAdj;
 	}
 
 	TArray<FVector> Vertices;
-	Vertices.Add(FVector(0.f, -HalfW, ZOffset));
-	Vertices.Add(FVector(0.f, HalfW, ZOffset));
-	Vertices.Add(FVector(0.f, HalfW, HalfH * 2.f + ZOffset));
-	Vertices.Add(FVector(0.f, -HalfW, HalfH * 2.f + ZOffset));
+	Vertices.Add(FVector(SpriteDepthOffset, -HalfW, ZOffset));
+	Vertices.Add(FVector(SpriteDepthOffset, HalfW, ZOffset));
+	Vertices.Add(FVector(SpriteDepthOffset, HalfW, HalfH * 2.f + ZOffset));
+	Vertices.Add(FVector(SpriteDepthOffset, -HalfW, HalfH * 2.f + ZOffset));
 
 	TArray<FVector> Normals;
 	Normals.Init(FVector(1, 0, 0), 4);
@@ -391,10 +427,10 @@ void ASpriteCharacterActor::UpdateBodyQuadUVs()
 	}
 
 	TArray<FVector> Vertices;
-	Vertices.Add(FVector(0.f, -HalfW, ZOffset));
-	Vertices.Add(FVector(0.f, HalfW, ZOffset));
-	Vertices.Add(FVector(0.f, HalfW, HalfH * 2.f + ZOffset));
-	Vertices.Add(FVector(0.f, -HalfW, HalfH * 2.f + ZOffset));
+	Vertices.Add(FVector(SpriteDepthOffset, -HalfW, ZOffset));
+	Vertices.Add(FVector(SpriteDepthOffset, HalfW, ZOffset));
+	Vertices.Add(FVector(SpriteDepthOffset, HalfW, HalfH * 2.f + ZOffset));
+	Vertices.Add(FVector(SpriteDepthOffset, -HalfW, HalfH * 2.f + ZOffset));
 
 	TArray<FVector> Normals;
 	Normals.Init(FVector(1, 0, 0), 4);
@@ -413,9 +449,14 @@ UMaterialInstanceDynamic* ASpriteCharacterActor::CreateSpriteMaterial(UTexture2D
 
 	UMaterial* Mat = NewObject<UMaterial>(GetTransientPackage(), NAME_None, RF_Transient);
 	Mat->MaterialDomain = MD_Surface;
-	Mat->BlendMode = BLEND_Masked;
+	Mat->BlendMode = BLEND_Translucent;                  // Required for bDisableDepthTest
 	Mat->SetShadingModel(MSM_Unlit);
 	Mat->TwoSided = true;
+	Mat->bDisableDepthTest = 1;                          // Ignore scene depth — always render on top
+	Mat->AllowTranslucentCustomDepthWrites = 1;          // Keep custom depth stencil = 1 pipeline
+	Mat->TranslucencyLightingMode = TLM_VolumetricNonDirectional;
+	Mat->OpacityMaskClipValue = 0.333f;
+	Mat->bEnableResponsiveAA = 1;                        // Reduce TAA smoothing on sharp alpha edges
 
 	UMaterialExpressionTextureSampleParameter2D* TexSample =
 		NewObject<UMaterialExpressionTextureSampleParameter2D>(Mat);
@@ -438,8 +479,78 @@ UMaterialInstanceDynamic* ASpriteCharacterActor::CreateSpriteMaterial(UTexture2D
 	Multiply->B.Connect(0, TintParam);
 	Mat->GetExpressionCollection().AddExpression(Multiply);
 
-	Mat->GetEditorOnlyData()->EmissiveColor.Connect(0, Multiply);
-	Mat->GetEditorOnlyData()->OpacityMask.Connect(4, TexSample);
+	// FeetOccluded — line trace from camera to actor feet. 1 = feet behind a wall.
+	UMaterialExpressionScalarParameter* FeetOccluded =
+		NewObject<UMaterialExpressionScalarParameter>(Mat);
+	FeetOccluded->ParameterName = TEXT("FeetOccluded");
+	FeetOccluded->DefaultValue = 0.f;
+	Mat->GetExpressionCollection().AddExpression(FeetOccluded);
+
+	// HeadOccluded — line trace from camera to top of sprite. 1 = head also behind a wall.
+	UMaterialExpressionScalarParameter* HeadOccluded =
+		NewObject<UMaterialExpressionScalarParameter>(Mat);
+	HeadOccluded->ParameterName = TEXT("HeadOccluded");
+	HeadOccluded->DefaultValue = 0.f;
+	Mat->GetExpressionCollection().AddExpression(HeadOccluded);
+
+	// SceneColor: opaque scene color at the current pixel UV (the wall behind sprite)
+	UMaterialExpressionSceneColor* SceneColorNode =
+		NewObject<UMaterialExpressionSceneColor>(Mat);
+	Mat->GetExpressionCollection().AddExpression(SceneColorNode);
+
+	// PixelDepth and SceneDepth for per-pixel "is this pixel behind a wall" check
+	// (used in the partial-occlusion case where feet are blocked but head isn't)
+	UMaterialExpressionPixelDepth* PixelDepthNode = NewObject<UMaterialExpressionPixelDepth>(Mat);
+	Mat->GetExpressionCollection().AddExpression(PixelDepthNode);
+
+	UMaterialExpressionSceneDepth* SceneDepthNode = NewObject<UMaterialExpressionSceneDepth>(Mat);
+	Mat->GetExpressionCollection().AddExpression(SceneDepthNode);
+
+	// Opacity: just the binary alpha. Always write the sprite stencil, regardless
+	// of occlusion (so the post-process can read it).
+	UMaterialExpressionCustom* OpacityCompute = NewObject<UMaterialExpressionCustom>(Mat);
+	OpacityCompute->OutputType = CMOT_Float1;
+	OpacityCompute->Code = TEXT("return InAlpha > 0.333 ? 1.0 : 0.0;");
+	FCustomInput& AlphaIn = OpacityCompute->Inputs.AddDefaulted_GetRef();
+	AlphaIn.InputName = TEXT("InAlpha");
+	AlphaIn.Input.Connect(4, TexSample);
+	Mat->GetExpressionCollection().AddExpression(OpacityCompute);
+
+	// Emissive: combines feet/head trace results with per-pixel depth check.
+	// - Both head and feet occluded → entire sprite is silhouette (scene color)
+	// - Only feet occluded → per-pixel: pixels behind walls = silhouette, above = sprite art
+	// - Neither occluded → full sprite color
+	UMaterialExpressionCustom* EmissiveCompute = NewObject<UMaterialExpressionCustom>(Mat);
+	EmissiveCompute->OutputType = CMOT_Float3;
+	EmissiveCompute->Code = TEXT(
+		"float Behind = InPixelDepth - InSceneDepth;\n"
+		"float PixelBehindWall = (Behind > 50.0) ? 1.0 : 0.0;\n"
+		"// FinalOccluded = HeadOccluded ? 1 : (FeetOccluded ? PixelBehindWall : 0)\n"
+		"float FinalOccluded = max(InHeadOccluded, InFeetOccluded * PixelBehindWall);\n"
+		"return lerp(InSpriteColor.rgb, InSceneColor.rgb, FinalOccluded);"
+	);
+	FCustomInput& SpriteColIn = EmissiveCompute->Inputs.AddDefaulted_GetRef();
+	SpriteColIn.InputName = TEXT("InSpriteColor");
+	SpriteColIn.Input.Connect(0, Multiply);
+	FCustomInput& SceneColIn = EmissiveCompute->Inputs.AddDefaulted_GetRef();
+	SceneColIn.InputName = TEXT("InSceneColor");
+	SceneColIn.Input.Connect(0, SceneColorNode);
+	FCustomInput& FeetIn = EmissiveCompute->Inputs.AddDefaulted_GetRef();
+	FeetIn.InputName = TEXT("InFeetOccluded");
+	FeetIn.Input.Connect(0, FeetOccluded);
+	FCustomInput& HeadIn = EmissiveCompute->Inputs.AddDefaulted_GetRef();
+	HeadIn.InputName = TEXT("InHeadOccluded");
+	HeadIn.Input.Connect(0, HeadOccluded);
+	FCustomInput& PixDepthIn = EmissiveCompute->Inputs.AddDefaulted_GetRef();
+	PixDepthIn.InputName = TEXT("InPixelDepth");
+	PixDepthIn.Input.Connect(0, PixelDepthNode);
+	FCustomInput& SceneDepthIn = EmissiveCompute->Inputs.AddDefaulted_GetRef();
+	SceneDepthIn.InputName = TEXT("InSceneDepth");
+	SceneDepthIn.Input.Connect(0, SceneDepthNode);
+	Mat->GetExpressionCollection().AddExpression(EmissiveCompute);
+
+	Mat->GetEditorOnlyData()->EmissiveColor.Connect(0, EmissiveCompute);
+	Mat->GetEditorOnlyData()->Opacity.Connect(0, OpacityCompute);
 
 	Mat->PreEditChange(nullptr);
 	Mat->PostEditChange();
@@ -565,6 +676,11 @@ void ASpriteCharacterActor::UpdateAnimation(float DeltaTime)
 			{
 				SelectRandomVariant(CurrentAnimState);
 			}
+
+			// Frame-sync hook: fire whenever a looping animation cycle wraps.
+			// EnemySubsystem listens for this on Walk to play the per-hop monster move sound
+			// (RO Classic ACT-style "boing" cadence) in exact sync with the visual hop.
+			OnAnimCycleComplete.Broadcast(CurrentAnimState);
 		}
 		else
 		{
@@ -822,6 +938,26 @@ void ASpriteCharacterActor::Tick(float DeltaTime)
 	UpdateBillboard();
 	UpdateDirection();
 	UpdateAnimation(DeltaTime);
+
+	// Hit flash: restore original tints after flash duration
+	if (bHitFlashing)
+	{
+		HitFlashTimer += DeltaTime;
+		if (HitFlashTimer >= HIT_FLASH_DURATION)
+		{
+			for (auto& Pair : SavedLayerTints)
+			{
+				if (Pair.Key >= 0 && Pair.Key < static_cast<int32>(ESpriteLayer::MAX)
+					&& Layers[Pair.Key].MaterialInst)
+				{
+					Layers[Pair.Key].MaterialInst->SetVectorParameterValue(
+						TEXT("TintColor"), Pair.Value);
+					Layers[Pair.Key].TintColor = Pair.Value;
+				}
+			}
+			bHitFlashing = false;
+		}
+	}
 }
 
 void ASpriteCharacterActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -1100,6 +1236,7 @@ FString ASpriteCharacterActor::GetClassNameFromId(int32 ClassId)
 	case 16: return TEXT("monk");
 	case 17: return TEXT("rogue");
 	case 18: return TEXT("alchemist");
+	case 19: return TEXT("dancer");
 	default: return TEXT("novice");
 	}
 }
@@ -1943,7 +2080,7 @@ int32 ASpriteCharacterActor::JobClassToId(const FString& JobClass)
 		{TEXT("monk"),     1600},
 		{TEXT("rogue"),    1700},
 		{TEXT("alchemist"),1800},
-		{TEXT("dancer"),   1520},
+		{TEXT("dancer"),   1900},
 	};
 	const int32* Found = Map.Find(JobClass.ToLower());
 	return Found ? *Found : 0;
@@ -1956,6 +2093,7 @@ int32 ASpriteCharacterActor::JobClassToId(const FString& JobClass)
 void ASpriteCharacterActor::AttachToOwnerActor(AActor* Actor, bool bIsLocalPlayer, int32 CharacterId)
 {
 	OwnerActor = Actor;
+	bIsLocalPlayerSprite = bIsLocalPlayer;
 	if (Actor)
 	{
 		SetActorLocation(Actor->GetActorLocation());
@@ -2002,10 +2140,10 @@ void ASpriteCharacterActor::AttachToOwnerActor(AActor* Actor, bool bIsLocalPlaye
 				{
 					if (Weapon.WeaponType == TEXT("bow"))
 						NewMode = ESpriteWeaponMode::Bow;
-					else if (Weapon.bTwoHanded)
-						NewMode = ESpriteWeaponMode::TwoHand;
-					else
+					else if (Weapon.WeaponType == TEXT("katar") || !Weapon.bTwoHanded)
 						NewMode = ESpriteWeaponMode::OneHand;
+					else
+						NewMode = ESpriteWeaponMode::TwoHand;
 				}
 
 				SetWeaponMode(NewMode);
@@ -2042,7 +2180,7 @@ void ASpriteCharacterActor::AttachToOwnerActor(AActor* Actor, bool bIsLocalPlaye
 			if (!Weapon.Name.IsEmpty() && Weapon.EquipSlot == TEXT("weapon"))
 			{
 				ESpriteWeaponMode InitMode = Weapon.WeaponType == TEXT("bow") ? ESpriteWeaponMode::Bow
-				: Weapon.bTwoHanded ? ESpriteWeaponMode::TwoHand : ESpriteWeaponMode::OneHand;
+				: (Weapon.WeaponType == TEXT("katar") || !Weapon.bTwoHanded) ? ESpriteWeaponMode::OneHand : ESpriteWeaponMode::TwoHand;
 				SetWeaponMode(InitMode);
 			}
 
@@ -2094,14 +2232,15 @@ void ASpriteCharacterActor::UpdateOwnerTracking()
 
 		// Ground snap via line trace (replaces CharacterMovementComponent gravity)
 		{
-			FVector Start = GetActorLocation() + FVector(0, 0, 50.f);
-			FVector End = Start - FVector(0, 0, 500.f);
+			FVector Loc = GetActorLocation();
+			FVector Start = FVector(Loc.X, Loc.Y, Loc.Z + 500.f);
+			FVector End = FVector(Loc.X, Loc.Y, Loc.Z - 2000.f);
 			FHitResult Hit;
 			FCollisionQueryParams Params;
 			Params.AddIgnoredActor(this);
 			if (GetWorld()->LineTraceSingleByChannel(Hit, Start, End, ECC_WorldStatic, Params))
 			{
-				FVector Snapped = GetActorLocation();
+				FVector Snapped = Loc;
 				Snapped.Z = Hit.ImpactPoint.Z;
 				SetActorLocation(Snapped);
 			}
@@ -2115,9 +2254,55 @@ void ASpriteCharacterActor::UpdateOwnerTracking()
 	if (!OwnerActor.IsValid())
 		return;
 
+	// Position sprite at ground level (capsule bottom)
+	// All player positions are at capsule center (96 above ground)
+	static constexpr float PlayerCapsuleHalfHeight = 96.f;
 	FVector Loc = OwnerActor->GetActorLocation();
+	Loc.Z -= PlayerCapsuleHalfHeight;
 	Loc.Z -= GroundZOffset;
 	SetActorLocation(Loc);
+
+	// Two line traces from camera: one to the sprite's feet, one to the sprite's head.
+	// - Both blocked → entire sprite renders as silhouette
+	// - Only feet blocked → per-pixel depth check (parts above the wall stay sprite art)
+	// - Neither blocked → full sprite art
+	// The custom depth pass always writes stencil so the post-process can mask the area.
+	{
+		float FeetVal = 0.f;
+		float HeadVal = 0.f;
+		if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+		{
+			if (PC->PlayerCameraManager)
+			{
+				FVector CamLoc = PC->PlayerCameraManager->GetCameraLocation();
+				FVector FeetLoc = Loc + FVector(0, 0, 8.f);             // just above ground
+				FVector HeadLoc = Loc + FVector(0, 0, SpriteSize.Y);    // top of sprite quad
+				FHitResult Hit;
+				FCollisionQueryParams Params(SCENE_QUERY_STAT(SpriteOcclusionTrace), false, this);
+				Params.AddIgnoredActor(OwnerActor.Get());
+				if (GetWorld()->LineTraceSingleByChannel(Hit, CamLoc, FeetLoc, ECC_Visibility, Params))
+				{
+					FeetVal = 1.f;
+				}
+				if (GetWorld()->LineTraceSingleByChannel(Hit, CamLoc, HeadLoc, ECC_Visibility, Params))
+				{
+					HeadVal = 1.f;
+				}
+			}
+		}
+		for (int32 i = 0; i < static_cast<int32>(ESpriteLayer::MAX); i++)
+		{
+			if (Layers[i].MeshComp)
+			{
+				if (UMaterialInstanceDynamic* MID =
+					Cast<UMaterialInstanceDynamic>(Layers[i].MeshComp->GetMaterial(0)))
+				{
+					MID->SetScalarParameterValue(TEXT("FeetOccluded"), FeetVal);
+					MID->SetScalarParameterValue(TEXT("HeadOccluded"), HeadVal);
+				}
+			}
+		}
+	}
 
 	FVector Velocity = OwnerActor->GetVelocity();
 	float Speed = Velocity.Size();

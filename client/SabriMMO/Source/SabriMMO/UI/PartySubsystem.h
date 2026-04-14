@@ -47,6 +47,8 @@ public:
 	FString PartyName;
 	int32 LeaderId = 0;
 	FString ExpShare;          // "each_take" or "even_share"
+	FString ItemShare;         // "each_take" or "party_share"
+	FString ItemDistribute;    // "individual" or "shared"
 	TArray<FPartyMember> Members;
 	uint32 DataVersion = 0;
 	bool bInParty = false;
@@ -65,6 +67,8 @@ public:
 	void KickMember(int32 TargetCharId);
 	void DelegateLeader(int32 TargetCharId);
 	void ChangeExpShare(const FString& Mode);
+	void ChangeItemShare(const FString& Mode);
+	void ChangeItemDistribute(const FString& Mode);
 	void SendPartyChat(const FString& Message);
 	void ShowWidget();
 	void HideWidget();

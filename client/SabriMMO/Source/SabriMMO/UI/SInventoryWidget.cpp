@@ -7,6 +7,8 @@
 #include "ItemInspectSubsystem.h"
 #include "ItemTooltipBuilder.h"
 #include "Engine/Engine.h"
+#include "Engine/GameViewportClient.h"
+#include "Widgets/SWindow.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SScrollBox.h"
@@ -18,6 +20,7 @@
 #include "Widgets/Input/SButton.h"
 #include "Widgets/Input/SEditableTextBox.h"
 #include "Widgets/SToolTip.h"
+#include "Widgets/SWeakWidget.h"
 #include "Widgets/Images/SImage.h"
 #include "Styling/SlateTypes.h"
 #include "Styling/CoreStyle.h"
@@ -136,14 +139,59 @@ void SInventoryWidget::Tick(const FGeometry& AllottedGeometry, const double InCu
 	UInventorySubsystem* Sub = OwningSubsystem.Get();
 	if (!Sub) return;
 
-	// Rebuild grid when data version or tab changes (catches moves, equips, drops, etc.)
+	// Detect drag release outside any widget — mouse capture was released when drag started,
+	// so OnMouseButtonUp won't fire on this widget. Poll the mouse button state instead.
+	if (Sub->bIsDragging && Sub->DragState.Source == EItemDragSource::Inventory)
+	{
+		if (!FSlateApplication::Get().GetPressedMouseButtons().Contains(EKeys::LeftMouseButton))
+		{
+			// Left mouse released while dragging — show drop confirmation popup
+			FInventoryItem* Item = Sub->FindItemByInventoryId(Sub->DragState.InventoryId);
+			if (Item)
+			{
+				ShowDropPopup(Item->InventoryId, Item->Name, Item->bStackable, Item->Quantity);
+			}
+			Sub->CancelDrag(); // Cancel the visual drag, popup handles the actual drop
+		}
+	}
+
+	// Check if inventory data or tab changed
 	uint32 CurrentVersion = Sub->DataVersion;
 	int32 CurrentTabId = Sub->CurrentTab;
 	if (CurrentVersion != LastDataVersion || CurrentTabId != LastTabId)
 	{
+		const bool bTabChanged = (CurrentTabId != LastTabId);
 		LastDataVersion = CurrentVersion;
 		LastTabId = CurrentTabId;
-		RebuildGrid();
+
+		// Compare the filtered item set — if only quantities changed, skip the
+		// full rebuild.  The per-frame lambdas (quantity badge, "?" indicator)
+		// already read live data from the cached filtered array, so they
+		// update automatically without recreating widgets.
+		const TArray<FInventoryItem>& Filtered = Sub->GetFilteredItems();
+		bool bNeedsRebuild = bTabChanged || (Filtered.Num() != LastFilteredInventoryIds.Num());
+		if (!bNeedsRebuild)
+		{
+			for (int32 i = 0; i < Filtered.Num(); ++i)
+			{
+				if (Filtered[i].InventoryId != LastFilteredInventoryIds[i])
+				{
+					bNeedsRebuild = true;
+					break;
+				}
+			}
+		}
+
+		if (bNeedsRebuild)
+		{
+			RebuildGrid();
+			// Snapshot current filtered IDs for next comparison
+			LastFilteredInventoryIds.Empty(Filtered.Num());
+			for (const FInventoryItem& Item : Filtered)
+			{
+				LastFilteredInventoryIds.Add(Item.InventoryId);
+			}
+		}
 	}
 
 	// Update drag cursor position to follow mouse
@@ -318,7 +366,8 @@ TSharedRef<SWidget> SInventoryWidget::BuildGridArea()
 		[
 			SAssignNew(SplitPopupBox, SBox)
 			.Visibility(EVisibility::Collapsed)
-		];
+		]
+		;
 }
 
 void SInventoryWidget::RebuildGrid()
@@ -329,7 +378,7 @@ void SInventoryWidget::RebuildGrid()
 	UInventorySubsystem* Sub = OwningSubsystem.Get();
 	if (!Sub) return;
 
-	TArray<FInventoryItem> FilteredItems = Sub->GetFilteredItems();
+	const TArray<FInventoryItem>& FilteredItems = Sub->GetFilteredItems();
 
 	// Build rows of GridColumns cells each
 	int32 NumRows = FMath::CeilToInt32((float)FMath::Max(FilteredItems.Num(), GridColumns * 4) / (float)GridColumns);
@@ -369,6 +418,13 @@ void SInventoryWidget::RebuildGrid()
 				];
 			}
 		}
+	}
+
+	// Snapshot filtered IDs so Tick can detect quantity-only changes
+	LastFilteredInventoryIds.Empty(FilteredItems.Num());
+	for (const FInventoryItem& Item : FilteredItems)
+	{
+		LastFilteredInventoryIds.Add(Item.InventoryId);
 	}
 }
 
@@ -657,7 +713,7 @@ FInventoryItem SInventoryWidget::GetItemAtSlot(int32 SlotIndex) const
 	UInventorySubsystem* Sub = OwningSubsystem.Get();
 	if (!Sub) return FInventoryItem();
 
-	TArray<FInventoryItem> Filtered = Sub->GetFilteredItems();
+	const TArray<FInventoryItem>& Filtered = Sub->GetFilteredItems();
 	if (SlotIndex >= 0 && SlotIndex < Filtered.Num())
 		return Filtered[SlotIndex];
 	return FInventoryItem();
@@ -827,6 +883,162 @@ void SInventoryWidget::ConfirmSplit()
 }
 
 // ============================================================
+// Drop confirmation popup (RO Classic)
+// Non-stackable: "Drop [Item Name]?" with OK/Cancel
+// Stackable: quantity input + OK/Cancel
+// ============================================================
+
+void SInventoryWidget::ShowDropPopup(int32 InventoryId, const FString& ItemName, bool bStackable, int32 MaxQty)
+{
+	HideDropPopup(); // Clean up any previous popup
+
+	DropSourceInventoryId = InventoryId;
+	DropMaxQuantity = MaxQty;
+	bDropIsStackable = bStackable;
+	DropItemName = ItemName;
+	bDropPopupActive = true;
+
+	// Build popup content
+	TSharedRef<SVerticalBox> Content = SNew(SVerticalBox);
+
+	Content->AddSlot().AutoHeight().Padding(4.f, 2.f)
+	[
+		SNew(STextBlock)
+		.Text(FText::FromString(bStackable
+			? FString::Printf(TEXT("Drop how many %s?"), *ItemName)
+			: FString::Printf(TEXT("Drop %s?"), *ItemName)))
+		.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
+		.ColorAndOpacity(FSlateColor(InvColors::TextBright))
+		.Justification(ETextJustify::Center)
+	];
+
+	if (bStackable)
+	{
+		Content->AddSlot().AutoHeight().Padding(4.f, 2.f).HAlign(HAlign_Center)
+		[
+			SNew(SBox).WidthOverride(50.f)
+			[
+				SAssignNew(DropQuantityInput, SEditableTextBox)
+				.Font(FCoreStyle::GetDefaultFontStyle("Regular", 9))
+				.Text(FText::AsNumber(MaxQty))
+				.SelectAllTextWhenFocused(true)
+				.Justification(ETextJustify::Center)
+				.OnTextCommitted_Lambda([this](const FText&, ETextCommit::Type CommitType) {
+					if (CommitType == ETextCommit::OnEnter) ConfirmDrop();
+				})
+			]
+		];
+	}
+
+	Content->AddSlot().AutoHeight().Padding(4.f, 4.f).HAlign(HAlign_Center)
+	[
+		SNew(SHorizontalBox)
+		+ SHorizontalBox::Slot().AutoWidth().Padding(2.f, 0.f)
+		[
+			SNew(SBorder)
+			.BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
+			.BorderBackgroundColor(FLinearColor(0.20f, 0.45f, 0.20f, 1.f))
+			.Padding(FMargin(10.f, 3.f))
+			.Cursor(EMouseCursor::Hand)
+			.OnMouseButtonDown_Lambda([this](const FGeometry&, const FPointerEvent& E) -> FReply {
+				if (E.GetEffectingButton() == EKeys::LeftMouseButton) { ConfirmDrop(); return FReply::Handled(); }
+				return FReply::Unhandled();
+			})
+			[
+				SNew(STextBlock).Text(FText::FromString(TEXT("OK")))
+				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 8))
+				.ColorAndOpacity(FSlateColor(InvColors::TextBright))
+			]
+		]
+		+ SHorizontalBox::Slot().AutoWidth().Padding(2.f, 0.f)
+		[
+			SNew(SBorder)
+			.BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
+			.BorderBackgroundColor(FLinearColor(0.45f, 0.20f, 0.20f, 1.f))
+			.Padding(FMargin(10.f, 3.f))
+			.Cursor(EMouseCursor::Hand)
+			.OnMouseButtonDown_Lambda([this](const FGeometry&, const FPointerEvent& E) -> FReply {
+				if (E.GetEffectingButton() == EKeys::LeftMouseButton) { HideDropPopup(); return FReply::Handled(); }
+				return FReply::Unhandled();
+			})
+			[
+				SNew(STextBlock).Text(FText::FromString(TEXT("Cancel")))
+				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 8))
+				.ColorAndOpacity(FSlateColor(InvColors::TextBright))
+			]
+		]
+	];
+
+	// Position popup at cursor
+	FVector2D CursorPos = FSlateApplication::Get().GetCursorPos();
+
+	DropPopupBox = SNew(SBox)
+	[
+		SNew(SBorder)
+		.BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
+		.BorderBackgroundColor(InvColors::GoldTrim)
+		.Padding(FMargin(1.f))
+		[
+			SNew(SBorder)
+			.BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
+			.BorderBackgroundColor(InvColors::PanelDark)
+			.Padding(FMargin(4.f))
+			[
+				Content
+			]
+		]
+	];
+
+	// Use FSlateApplication::PushMenu — positions at absolute cursor coords natively
+	FVector2D AbsCursor = FSlateApplication::Get().GetCursorPos();
+
+	TSharedPtr<SWindow> ParentWindow = FSlateApplication::Get().GetActiveTopLevelRegularWindow();
+	if (ParentWindow.IsValid())
+	{
+		FSlateApplication::Get().PushMenu(
+			ParentWindow.ToSharedRef(),
+			FWidgetPath(),
+			DropPopupBox.ToSharedRef(),
+			AbsCursor,
+			FPopupTransitionEffect(FPopupTransitionEffect::ContextMenu)
+		);
+	}
+}
+
+void SInventoryWidget::HideDropPopup()
+{
+	bDropPopupActive = false;
+	bPendingDropFromDrag = false;
+	DropSourceInventoryId = 0;
+	DropMaxQuantity = 0;
+	DropQuantityInput.Reset();
+
+	if (DropPopupBox.IsValid())
+	{
+		FSlateApplication::Get().DismissAllMenus();
+	}
+	DropPopupBox.Reset();
+	DropPopupAlignWrapper.Reset();
+	DropPopupViewportOverlay.Reset();
+}
+
+void SInventoryWidget::ConfirmDrop()
+{
+	if (DropSourceInventoryId == 0) { HideDropPopup(); return; }
+
+	int32 DropQty = DropMaxQuantity;
+	if (bDropIsStackable && DropQuantityInput.IsValid())
+	{
+		DropQty = FCString::Atoi(*DropQuantityInput->GetText().ToString().TrimStartAndEnd());
+		if (DropQty < 1 || DropQty > DropMaxQuantity) { HideDropPopup(); return; }
+	}
+
+	UInventorySubsystem* Sub = OwningSubsystem.Get();
+	if (Sub) Sub->DropItem(DropSourceInventoryId, DropQty);
+	HideDropPopup();
+}
+
+// ============================================================
 // Mouse input
 // ============================================================
 
@@ -971,12 +1183,16 @@ FReply SInventoryWidget::OnMouseButtonUp(const FGeometry& MyGeometry, const FPoi
 				}
 				else if (!Sub->DragState.EquipSlot.IsEmpty())
 				{
-					// Equippable item dragged outside inventory = equip it
-					Sub->CompleteDrop(EItemDropTarget::EquipmentSlot);
+					// Equippable item dragged outside — show drop confirmation
+					FInventoryItem* DItem = Sub->FindItemByInventoryId(Sub->DragState.InventoryId);
+					if (DItem) ShowDropPopup(DItem->InventoryId, DItem->Name, DItem->bStackable, DItem->Quantity);
+					Sub->CancelDrag();
 				}
 				else
 				{
-					// Non-equippable item dragged outside = cancel (safety)
+					// Non-equippable item dragged outside — show drop confirmation
+					FInventoryItem* DItem = Sub->FindItemByInventoryId(Sub->DragState.InventoryId);
+					if (DItem) ShowDropPopup(DItem->InventoryId, DItem->Name, DItem->bStackable, DItem->Quantity);
 					Sub->CancelDrag();
 				}
 			}

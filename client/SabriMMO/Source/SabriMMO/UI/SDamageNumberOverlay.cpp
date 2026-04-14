@@ -1,5 +1,6 @@
-// SDamageNumberOverlay.cpp — RO-style damage number rendering overlay
-// Renders individual digits with fan-out spread, rise animation, fade, and outline.
+// SDamageNumberOverlay.cpp — RO Classic damage number rendering overlay
+// Renders per-digit numbers with parabolic sine arc, scale shrink, diagonal drift,
+// and immediate linear alpha fade — faithful to roBrowser's Damage.js implementation.
 
 #include "SDamageNumberOverlay.h"
 #include "Rendering/DrawElements.h"
@@ -8,6 +9,8 @@
 #include "Styling/CoreStyle.h"
 #include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
+
+float SDamageNumberOverlay::FontScaleMultiplier = 1.0f;
 #include "Widgets/SNullWidget.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogDamageOverlay, Log, All);
@@ -18,13 +21,13 @@ DEFINE_LOG_CATEGORY_STATIC(LogDamageOverlay, Log, All);
 namespace RODamageColors
 {
 	// Fill colors — bright, saturated, RO-faithful
-	static const FLinearColor NormalYellow  (1.00f, 0.92f, 0.23f, 1.0f);  // Yellow/gold auto-attack
-	static const FLinearColor CritWhite    (1.00f, 1.00f, 0.95f, 1.0f);  // Warm white for crits
-	static const FLinearColor PlayerRed    (1.00f, 0.20f, 0.20f, 1.0f);  // Red for player-received
+	static const FLinearColor NormalWhite   (1.00f, 1.00f, 1.00f, 1.0f);  // White — normal damage (RO Classic)
+	static const FLinearColor CritYellow    (0.90f, 0.90f, 0.15f, 1.0f);  // Yellow — critical hits (RO Classic)
+	static const FLinearColor PlayerRed    (1.00f, 0.00f, 0.00f, 1.0f);  // Pure red — player-received
 	static const FLinearColor PlayerCritRed(1.00f, 0.35f, 0.55f, 1.0f);  // Magenta-red for player crit
 	static const FLinearColor SkillOrange  (1.00f, 0.65f, 0.15f, 1.0f);  // Orange for skill damage
 	static const FLinearColor MissBlue     (0.50f, 0.70f, 1.00f, 1.0f);  // Light blue for miss
-	static const FLinearColor HealGreen    (0.30f, 1.00f, 0.40f, 1.0f);  // Bright green for heals
+	static const FLinearColor HealGreen    (0.00f, 1.00f, 0.00f, 1.0f);  // Pure green — heals (RO Classic)
 	static const FLinearColor DodgeGreen   (0.40f, 0.90f, 0.50f, 1.0f);  // Green for FLEE dodge
 	static const FLinearColor PerfDodgeGold(0.95f, 0.85f, 0.20f, 1.0f);  // Gold for Lucky Dodge
 	static const FLinearColor BlockSilver  (0.85f, 0.90f, 1.00f, 1.0f);  // Silver/white for shield block
@@ -52,6 +55,14 @@ void SDamageNumberOverlay::Construct(const FArguments& InArgs)
 {
 	SetVisibility(EVisibility::SelfHitTestInvisible);
 
+	// Init critical starburst brush
+	if (InArgs._CritStarburstTexture)
+	{
+		CritStarburstBrush.SetResourceObject(InArgs._CritStarburstTexture);
+		CritStarburstBrush.ImageSize = FVector2D(128, 128);
+		CritStarburstBrush.DrawAs = ESlateBrushDrawType::Image;
+	}
+
 	// SCompoundWidget requires a ChildSlot — use an invisible null widget
 	ChildSlot
 	[
@@ -69,7 +80,7 @@ void SDamageNumberOverlay::Construct(const FArguments& InArgs)
 // Add a new damage pop-up
 // ============================================================
 
-void SDamageNumberOverlay::AddDamagePop(int32 Value, EDamagePopType Type, FVector2D ScreenPosition, const FString& Element)
+void SDamageNumberOverlay::AddDamagePop(int32 Value, EDamagePopType Type, FVector2D ScreenPosition, const FString& Element, const FLinearColor* CustomColor)
 {
 	const double Now = FPlatformTime::Seconds();
 
@@ -98,6 +109,40 @@ void SDamageNumberOverlay::AddDamagePop(int32 Value, EDamagePopType Type, FVecto
 	Entry.SpawnTime = Now;
 	Entry.RandomXBias = FMath::FRandRange(-RANDOM_X_RANGE, RANDOM_X_RANGE);
 	Entry.Element = Element;
+	Entry.TextLabel.Empty();
+	if (CustomColor)
+	{
+		Entry.CustomColor = *CustomColor;
+		Entry.bHasCustomColor = true;
+	}
+	else
+	{
+		Entry.bHasCustomColor = false;
+	}
+
+	// RO Classic: per-type lifetime and drift direction
+	if (Type == EDamagePopType::Miss || Type == EDamagePopType::Dodge ||
+		Type == EDamagePopType::PerfectDodge || Type == EDamagePopType::Block)
+	{
+		Entry.Lifetime = LIFETIME_MISS;
+		Entry.DriftDirection = 0.0f;
+	}
+	else if (Type == EDamagePopType::Heal)
+	{
+		Entry.Lifetime = LIFETIME_HEAL;
+		Entry.DriftDirection = 0.0f;
+	}
+	else if (Type == EDamagePopType::ComboTotal)
+	{
+		Entry.Lifetime = LIFETIME_COMBO;
+		Entry.DriftDirection = 0.0f;
+	}
+	else
+	{
+		Entry.Lifetime = LIFETIME_DAMAGE;
+		// Alternate left/right drift with slight random magnitude variation
+		Entry.DriftDirection = ((NextEntryIndex % 2 == 0) ? 1.0f : -1.0f) * FMath::FRandRange(0.7f, 1.0f);
+	}
 
 	NextEntryIndex = (NextEntryIndex + 1) % MAX_ENTRIES;
 	++ActiveCount;
@@ -135,6 +180,8 @@ void SDamageNumberOverlay::AddTextPop(const FString& Text, const FLinearColor& C
 	Entry.TextLabel = Text;
 	Entry.CustomColor = Color;
 	Entry.bHasCustomColor = true;
+	Entry.Lifetime = LIFETIME_MISS;
+	Entry.DriftDirection = 0.0f;
 
 	NextEntryIndex = (NextEntryIndex + 1) % MAX_ENTRIES;
 	++ActiveCount;
@@ -154,7 +201,7 @@ EActiveTimerReturnType SDamageNumberOverlay::OnAnimationTick(double InCurrentTim
 	{
 		FDamagePopEntry& E = Entries[i];
 		if (!E.bActive) continue;
-		if ((Now - E.SpawnTime) >= LIFETIME)
+		if ((Now - E.SpawnTime) >= E.Lifetime)
 		{
 			E.bActive = false;
 		}
@@ -198,8 +245,8 @@ FLinearColor SDamageNumberOverlay::GetFillColor(EDamagePopType Type)
 {
 	switch (Type)
 	{
-	case EDamagePopType::NormalDamage:   return RODamageColors::NormalYellow;
-	case EDamagePopType::CriticalDamage: return RODamageColors::CritWhite;
+	case EDamagePopType::NormalDamage:   return RODamageColors::NormalWhite;
+	case EDamagePopType::CriticalDamage: return RODamageColors::CritYellow;
 	case EDamagePopType::PlayerHit:      return RODamageColors::PlayerRed;
 	case EDamagePopType::PlayerCritHit:  return RODamageColors::PlayerCritRed;
 	case EDamagePopType::SkillDamage:    return RODamageColors::SkillOrange;
@@ -208,7 +255,8 @@ FLinearColor SDamageNumberOverlay::GetFillColor(EDamagePopType Type)
 	case EDamagePopType::Dodge:          return RODamageColors::DodgeGreen;
 	case EDamagePopType::PerfectDodge:   return RODamageColors::PerfDodgeGold;
 	case EDamagePopType::Block:          return RODamageColors::BlockSilver;
-	default:                             return RODamageColors::NormalYellow;
+	case EDamagePopType::ComboTotal:     return RODamageColors::CritYellow;
+	default:                             return RODamageColors::NormalWhite;
 	}
 }
 
@@ -219,18 +267,21 @@ FLinearColor SDamageNumberOverlay::GetOutlineColor(EDamagePopType Type)
 
 int32 SDamageNumberOverlay::GetFontSize(EDamagePopType Type)
 {
+	int32 Base;
 	switch (Type)
 	{
-	case EDamagePopType::CriticalDamage: return CRIT_FONT_SIZE;
-	case EDamagePopType::PlayerCritHit:  return CRIT_FONT_SIZE;
-	case EDamagePopType::SkillDamage:    return SKILL_FONT_SIZE;
-	case EDamagePopType::Miss:           return MISS_FONT_SIZE;
-	case EDamagePopType::Heal:           return HEAL_FONT_SIZE;
-	case EDamagePopType::Dodge:          return DODGE_FONT_SIZE;
-	case EDamagePopType::PerfectDodge:   return DODGE_FONT_SIZE;
-	case EDamagePopType::Block:          return DODGE_FONT_SIZE;
-	default:                             return NORMAL_FONT_SIZE;
+	case EDamagePopType::CriticalDamage: Base = CRIT_FONT_SIZE; break;
+	case EDamagePopType::PlayerCritHit:  Base = CRIT_FONT_SIZE; break;
+	case EDamagePopType::SkillDamage:    Base = SKILL_FONT_SIZE; break;
+	case EDamagePopType::Miss:           Base = MISS_FONT_SIZE; break;
+	case EDamagePopType::Heal:           Base = HEAL_FONT_SIZE; break;
+	case EDamagePopType::Dodge:          Base = DODGE_FONT_SIZE; break;
+	case EDamagePopType::PerfectDodge:   Base = DODGE_FONT_SIZE; break;
+	case EDamagePopType::Block:          Base = DODGE_FONT_SIZE; break;
+	case EDamagePopType::ComboTotal:     Base = CRIT_FONT_SIZE; break;
+	default:                             Base = NORMAL_FONT_SIZE; break;
 	}
+	return FMath::RoundToInt((float)Base * FontScaleMultiplier);
 }
 
 float SDamageNumberOverlay::GetOutlineSize(EDamagePopType Type)
@@ -239,6 +290,7 @@ float SDamageNumberOverlay::GetOutlineSize(EDamagePopType Type)
 	{
 	case EDamagePopType::CriticalDamage: return OUTLINE_SIZE_CRIT;
 	case EDamagePopType::PlayerCritHit:  return OUTLINE_SIZE_CRIT;
+	case EDamagePopType::ComboTotal:     return OUTLINE_SIZE_CRIT;
 	default:                             return OUTLINE_SIZE_NORMAL;
 	}
 }
@@ -259,8 +311,8 @@ FLinearColor SDamageNumberOverlay::GetElementTint(const FString& Element)
 
 // ============================================================
 // OnPaint — the core rendering loop
-// Draws all active damage numbers with RO-style per-digit
-// fan-out, rise animation, alpha fade, and outlined text.
+// Draws all active damage numbers with RO Classic parabolic sine arc,
+// scale shrink, diagonal drift, and per-type animation curves.
 // ============================================================
 
 int32 SDamageNumberOverlay::OnPaint(
@@ -300,46 +352,81 @@ int32 SDamageNumberOverlay::OnPaint(
 		if (!Entry.bActive) continue;
 
 		const float Elapsed = (float)(Now - Entry.SpawnTime);
-		const float LifeAlpha = FMath::Clamp(Elapsed / LIFETIME, 0.0f, 1.0f);
-		if (LifeAlpha >= 1.0f) continue;
+		const float t = FMath::Clamp(Elapsed / Entry.Lifetime, 0.0f, 1.0f);
+		if (t >= 1.0f) continue;
 
-		// ---- Animation curves ----
+		// ---- Determine animation category ----
+		const bool bIsHeal = (Entry.Type == EDamagePopType::Heal);
+		const bool bIsMissType = (Entry.Type == EDamagePopType::Miss ||
+		                          Entry.Type == EDamagePopType::Dodge ||
+		                          Entry.Type == EDamagePopType::PerfectDodge ||
+		                          Entry.Type == EDamagePopType::Block ||
+		                          !Entry.TextLabel.IsEmpty());
 
-		// Rise: ease-out deceleration (fast at start, slows down)
-		const float RiseProgress = FMath::InterpEaseOut(0.0f, 1.0f, LifeAlpha, 3.0f);
-		const float RiseY = -RISE_DISTANCE * RiseProgress;
+		// ---- Per-type animation curves (RO Classic) ----
+		float OffsetX = 0.0f;
+		float OffsetY = 0.0f;
+		float Scale = 1.0f;
+		float Alpha = FMath::Max(0.0f, 1.0f - t);  // Immediate linear fade
 
-		// Digit spread: ease-out, reaches max at ~50% lifetime
-		const float SpreadT = FMath::Clamp(LifeAlpha * 2.0f, 0.0f, 1.0f);
-		const float SpreadFactor = FMath::InterpEaseOut(0.0f, 1.0f, SpreadT, 2.0f);
-
-		// Alpha fade: full opacity until FADE_START, then linear fade to 0
-		float Alpha = 1.0f;
-		if (LifeAlpha > FADE_START)
+		if (Entry.Type == EDamagePopType::ComboTotal)
 		{
-			Alpha = 1.0f - (LifeAlpha - FADE_START) / (1.0f - FADE_START);
+			// Combo total: rapid pop-in (0→3.5x in ~50ms), then hold. High position, slow rise.
+			const float PopT = FMath::Clamp(t / 0.017f, 0.0f, 1.0f);
+			Scale = PopT * 3.5f;
+			OffsetY = -(50.0f + 20.0f * t);
+			OffsetX = 0.0f;
+			Alpha = FMath::Max(0.0f, 1.0f - t * 0.8f);
 		}
-		Alpha = FMath::Clamp(Alpha, 0.0f, 1.0f);
+		else if (bIsHeal)
+		{
+			// Heal: stationary for 40%, then rise. Quick shrink to floor then hold.
+			if (t < HEAL_STATIONARY_PCT)
+			{
+				OffsetY = -ARC_BASE_OFFSET;
+			}
+			else
+			{
+				const float RiseT = (t - HEAL_STATIONARY_PCT) / (1.0f - HEAL_STATIONARY_PCT);
+				OffsetY = -(ARC_BASE_OFFSET + HEAL_RISE_SPEED * Entry.Lifetime * RiseT);
+			}
+			Scale = FMath::Max(HEAL_SCALE_FLOOR, (1.0f - t * 2.0f) * HEAL_SCALE_START);
+		}
+		else if (bIsMissType)
+		{
+			// Miss/Dodge/Block/Status text: straight rise, fixed scale, no drift
+			OffsetY = -(MISS_BASE_OFFSET + MISS_RISE_DISTANCE * t);
+			Scale = MISS_SCALE;
+		}
+		else
+		{
+			// Damage: parabolic sine arc + horizontal drift + linear shrink (RO Classic)
+			OffsetX = Entry.DriftDirection * DRIFT_DISTANCE * t;
+			const float SineInput = -PI / 2.0f + PI * (0.5f + t * 1.5f);
+			OffsetY = -(ARC_BASE_OFFSET + FMath::Sin(SineInput) * ARC_AMPLITUDE);
+			Scale = FMath::Max(0.01f, (1.0f - t) * SCALE_START);
+		}
 
-		// ---- Font setup ----
-		const int32 FontSize = Entry.bHasCustomColor ? STATUS_TEXT_FONT_SIZE : GetFontSize(Entry.Type);
+		// ---- Font setup with dynamic scale ----
+		const int32 BaseFontSize = Entry.bHasCustomColor
+			? FMath::RoundToInt((float)STATUS_TEXT_FONT_SIZE * FontScaleMultiplier)
+			: GetFontSize(Entry.Type);
+		const int32 ScaledFontSz = FMath::Max(6, FMath::RoundToInt((float)BaseFontSize * Scale));
 		const float OutlineSz = GetOutlineSize(Entry.Type);
 
-		FSlateFontInfo DigitFont = FCoreStyle::GetDefaultFontStyle("Bold", FontSize);
-		DigitFont.OutlineSettings.OutlineSize = (int32)OutlineSz;
+		FSlateFontInfo DigitFont = FCoreStyle::GetDefaultFontStyle("Bold", ScaledFontSz);
+		DigitFont.OutlineSettings.OutlineSize = FMath::Max(1, (int32)OutlineSz);
 		DigitFont.OutlineSettings.OutlineColor = GetOutlineColor(Entry.Type);
 
-		// Measure a single digit in this font size
 		const FVector2D DigitMeasure = FontMeasure->Measure(TEXT("0"), DigitFont);
 		const float DigitW = (float)DigitMeasure.X;
 		const float DigitH = (float)DigitMeasure.Y;
 
 		// ---- Build display text ----
 		FString DisplayText;
-		bool bIsTextLabel = false; // True for "Miss", "Dodge", status text — render as single block
+		bool bIsTextLabel = false;
 		if (!Entry.TextLabel.IsEmpty())
 		{
-			// Custom text label (e.g. "Poisoned!", "Stunned!")
 			DisplayText = Entry.TextLabel;
 			bIsTextLabel = true;
 		}
@@ -372,29 +459,49 @@ int32 SDamageNumberOverlay::OnPaint(
 		// ---- Tint color with alpha ----
 		FLinearColor TintColor = Entry.bHasCustomColor ? Entry.CustomColor : GetFillColor(Entry.Type);
 
-		// Apply element tinting for non-neutral elemental attacks (blend toward element color)
 		if (!Entry.Element.IsEmpty() && Entry.Element != TEXT("neutral") && !bIsTextLabel && Entry.Type != EDamagePopType::Heal)
 		{
 			const FLinearColor EleTint = GetElementTint(Entry.Element);
 			if (EleTint != FLinearColor::White)
 			{
-				// Blend: 60% base type color + 40% element color for subtle but visible tint
 				TintColor = FLinearColor::LerpUsingHSV(TintColor, EleTint, 0.4f);
 			}
 		}
 		TintColor.A = Alpha;
 
-		// ---- Base screen position (with rise and random bias) ----
-		// Convert from screen-pixel coordinates to Slate local coordinates (DPI-adjusted)
+		// ---- Screen position with animation offsets ----
 		const FVector2D BasePos(
-			(Entry.ScreenAnchor.X + Entry.RandomXBias) * InvScale,
-			(Entry.ScreenAnchor.Y + RiseY) * InvScale
+			(Entry.ScreenAnchor.X + Entry.RandomXBias + OffsetX) * InvScale,
+			(Entry.ScreenAnchor.Y + OffsetY) * InvScale
 		);
 
-		// ---- Render each character individually with fan-out spread ----
+		// ---- Critical starburst background (render BEFORE digits, centered on number) ----
+		const bool bIsCrit = (Entry.Type == EDamagePopType::CriticalDamage ||
+		                      Entry.Type == EDamagePopType::PlayerCritHit);
+		if (bIsCrit && CritStarburstBrush.GetResourceObject())
+		{
+			// Size proportional to digit group — large enough to frame the number
+			const float BurstSize = DigitH * 4.0f;
+			// Center exactly on BasePos (which is the center of the digit group)
+			const FVector2f BurstPos(
+				(float)(BasePos.X - BurstSize * 0.5f),
+				(float)(BasePos.Y - BurstSize * 0.5f));
+			// Full color — texture is already the desired red/orange
+			const FLinearColor BurstColor(1.0f, 1.0f, 1.0f, Alpha);
+			FSlateDrawElement::MakeBox(
+				OutDrawElements,
+				OutLayerId,
+				AllottedGeometry.ToPaintGeometry(
+					FVector2D(BurstSize, BurstSize),
+					FSlateLayoutTransform(BurstPos)),
+				&CritStarburstBrush,
+				DrawEffects,
+				BurstColor);
+		}
+
+		// ---- Render ----
 		if (bIsTextLabel)
 		{
-			// "Miss"/"Dodge"/"Lucky Dodge" rendered as a single text block (no digit spread)
 			const FVector2D TextMeasure = FontMeasure->Measure(DisplayText, DigitFont);
 			const float TextW = (float)TextMeasure.X;
 
@@ -418,13 +525,11 @@ int32 SDamageNumberOverlay::OnPaint(
 		}
 		else
 		{
-			// Per-digit rendering with horizontal fan-out
-			const float SpreadExtra = SpreadFactor * SPREAD_PER_DIGIT;
-			const float EffectiveDigitSpacing = DigitW + DIGIT_BASE_GAP + SpreadExtra;
+			// Per-digit rendering (scaling handles visual interest, no time-based spread)
+			const float EffectiveDigitSpacing = DigitW + DIGIT_BASE_GAP;
 
 			for (int32 c = 0; c < NumChars; ++c)
 			{
-				// Center the digit group around BasePos.X
 				const float DigitCenterOffset = (c - (NumChars - 1) * 0.5f) * EffectiveDigitSpacing;
 
 				const FVector2f DrawPos(

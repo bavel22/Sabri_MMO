@@ -378,13 +378,8 @@ void SHotbarRowWidget::Tick(const FGeometry& AllottedGeometry, const double InCu
 		// Slots auto-refresh via lambdas, but we can trigger a full rebuild if needed
 	}
 
-	// Refresh item quantities periodically (inventory changes don't trigger hotbar events)
-	QuantityRefreshTimer += InDeltaTime;
-	if (QuantityRefreshTimer > 1.0f)
-	{
-		QuantityRefreshTimer = 0.f;
-		Sub->RefreshItemQuantities();
-	}
+	// Refresh item quantities when inventory data changes (event-driven via DataVersion)
+	Sub->CheckAndRefreshIfInventoryChanged();
 
 	// Update skill drag cursor to follow mouse (same pattern as inventory drag cursor)
 	{

@@ -56,6 +56,10 @@ void UDamageNumberSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 			[this](const TSharedPtr<FJsonValue>& D) { HandleStatusApplied(D); });
 	}
 
+	// Load critical starburst texture
+	CritStarburstTexture = LoadObject<UTexture2D>(nullptr,
+		TEXT("/Game/SabriMMO/UI/Textures/T_CritStarburst.T_CritStarburst"));
+
 	// Only show overlay when socket is connected (game level)
 	if (GI->IsSocketConnected())
 	{
@@ -102,7 +106,8 @@ void UDamageNumberSubsystem::ShowOverlay()
 		return;
 	}
 
-	OverlayWidget = SNew(SDamageNumberOverlay);
+	OverlayWidget = SNew(SDamageNumberOverlay)
+		.CritStarburstTexture(CritStarburstTexture);
 
 	ViewportOverlay =
 		SNew(SWeakWidget)
@@ -212,6 +217,37 @@ void UDamageNumberSubsystem::HandleCombatDamage(const TSharedPtr<FJsonValue>& Da
 
 	// ---- Spawn damage number for ALL combat in view (RO-style) ----
 	SpawnDamagePop(DisplayValue, bIsCritical, bIsEnemy, AttackerId, TargetId, TargetWorldPos, HitType, Element);
+
+	// ---- Combo total tracking for multi-hit skills ----
+	double HitNumberD = 0, TotalHitsD = 0, SkillIdD = 0;
+	Obj->TryGetNumberField(TEXT("hitNumber"), HitNumberD);
+	Obj->TryGetNumberField(TEXT("totalHits"), TotalHitsD);
+	Obj->TryGetNumberField(TEXT("skillId"), SkillIdD);
+	const int32 HitNumber = (int32)HitNumberD;
+	const int32 TotalHits = (int32)TotalHitsD;
+	const int32 SkillId = (int32)SkillIdD;
+
+	if (TotalHits > 1 && SkillId > 0 && HitType != TEXT("heal"))
+	{
+		FString ComboKey = FString::Printf(TEXT("%d_%d_%d"), AttackerId, TargetId, SkillId);
+		FComboTracker& C = ActiveCombos.FindOrAdd(ComboKey);
+		if (HitNumber == 1)
+		{
+			C = FComboTracker();
+			C.ExpectedHits = TotalHits;
+		}
+		C.TotalDamage += DisplayValue;
+		C.HitsReceived++;
+		C.TargetId = TargetId;
+		C.bIsEnemy = bIsEnemy;
+		C.LastTargetPos = TargetWorldPos;
+
+		if (HitNumber >= TotalHits)
+		{
+			SpawnComboTotal(C.TotalDamage, C.bIsEnemy, C.TargetId, C.LastTargetPos);
+			ActiveCombos.Remove(ComboKey);
+		}
+	}
 
 	// ---- Dual Wield: second damage number for left-hand hit ----
 	double Damage2D = 0;
@@ -368,14 +404,10 @@ void UDamageNumberSubsystem::HandleStatusTick(const TSharedPtr<FJsonValue>& Data
 	FVector TargetPos;
 	if (!ResolveTargetPosition(bIsEnemy, TargetId, TargetPos)) return;
 
-	// Map status type to element for color tinting
-	FString Element = TEXT("neutral");
-	if (StatusType == TEXT("poison")) Element = TEXT("poison");
-	else if (StatusType == TEXT("stone")) Element = TEXT("earth");
-	else if (StatusType == TEXT("bleeding")) Element = TEXT("fire");
-
+	// Use full status color directly (not subtle element tinting)
+	FLinearColor StatusColor = GetStatusColor(StatusType);
 	SpawnDamagePop(Drain, false, bIsEnemy, 0, TargetId, TargetPos,
-		TEXT("normal"), Element);
+		TEXT("normal"), TEXT("neutral"), &StatusColor);
 }
 
 // ============================================================
@@ -462,6 +494,17 @@ void UDamageNumberSubsystem::SpawnTextPop(
 }
 
 // ============================================================
+// Spawn combo total — big yellow number after multi-hit skill
+// ============================================================
+
+void UDamageNumberSubsystem::SpawnComboTotal(
+	int32 TotalDamage, bool bIsEnemy, int32 TargetId, const FVector& TargetWorldPos)
+{
+	SpawnDamagePop(TotalDamage, false, bIsEnemy, 0, TargetId, TargetWorldPos,
+		TEXT("combo_total"), TEXT("neutral"));
+}
+
+// ============================================================
 // Spawn a damage pop-up from parsed event data
 // ============================================================
 
@@ -473,8 +516,11 @@ void UDamageNumberSubsystem::SpawnDamagePop(
 	int32 TargetId,
 	const FVector& TargetWorldPos,
 	const FString& HitType,
-	const FString& Element)
+	const FString& Element,
+	const FLinearColor* CustomColor)
 {
+	if (!bDamageNumbersEnabled) return;
+
 	if (!OverlayWidget.IsValid())
 	{
 		UE_LOG(LogDamageNumbers, Warning, TEXT("SpawnDamagePop: OverlayWidget is invalid!"));
@@ -512,7 +558,11 @@ void UDamageNumberSubsystem::SpawnDamagePop(
 	// Determine damage pop type from server hitType
 	EDamagePopType PopType;
 
-	if (HitType == TEXT("heal"))
+	if (HitType == TEXT("combo_total"))
+	{
+		PopType = EDamagePopType::ComboTotal;
+	}
+	else if (HitType == TEXT("heal"))
 	{
 		PopType = EDamagePopType::Heal;
 	}
@@ -550,8 +600,12 @@ void UDamageNumberSubsystem::SpawnDamagePop(
 		PopType = EDamagePopType::NormalDamage;
 	}
 
+	// Hide miss/dodge text if option disabled
+	if (!bShowMissText && (PopType == EDamagePopType::Miss || PopType == EDamagePopType::Dodge || PopType == EDamagePopType::PerfectDodge))
+		return;
+
 	UE_LOG(LogDamageNumbers, Log, TEXT("SpawnDamagePop: dmg=%d type=%d hitType=%s ele=%s screen=(%.0f,%.0f)"),
 		Damage, (int32)PopType, *HitType, *Element, ScreenPos.X, ScreenPos.Y);
 
-	OverlayWidget->AddDamagePop(Damage, PopType, ScreenPos, Element);
+	OverlayWidget->AddDamagePop(Damage, PopType, ScreenPos, Element, CustomColor);
 }

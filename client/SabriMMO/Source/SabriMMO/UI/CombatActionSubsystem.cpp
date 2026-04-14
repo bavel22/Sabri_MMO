@@ -4,6 +4,10 @@
 
 #include "CombatActionSubsystem.h"
 #include "EnemySubsystem.h"
+#include "Sprite/SpriteCharacterActor.h"
+#include "Sprite/SpriteAtlasData.h"
+#include "VFX/SkillVFXSubsystem.h"
+#include "Audio/AudioSubsystem.h"
 #include "OtherPlayerSubsystem.h"
 #include "MMOGameInstance.h"
 #include "SocketEventRouter.h"
@@ -18,6 +22,8 @@
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Blueprint/AIBlueprintHelperLibrary.h"
 #include "NavigationSystem.h"
+#include "Kismet/GameplayStatics.h"
+#include "Sound/SoundBase.h"
 #include "TimerManager.h"
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/Layout/SBox.h"
@@ -32,6 +38,58 @@
 #include "Components/CapsuleComponent.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogCombatAction, Log, All);
+
+namespace
+{
+	// Resolve a player character ID to its job class string ("swordman", "knight", etc.).
+	// Returns empty string for enemies (id >= 2000000) or unknown players.
+	// Used by HandleCombatDamage to drive per-class player swing/hit/body sounds.
+	FString LookupPlayerJobClass(UWorld* World, int32 CharacterId, int32 LocalCharacterId)
+	{
+		if (!World || CharacterId <= 0) return FString();
+		if (CharacterId >= 2000000) return FString(); // enemy, not a player
+
+		if (CharacterId == LocalCharacterId)
+		{
+			if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance()))
+				return GI->GetSelectedCharacter().JobClass;
+			return FString();
+		}
+
+		if (UOtherPlayerSubsystem* OPS = World->GetSubsystem<UOtherPlayerSubsystem>())
+		{
+			if (const FPlayerEntry* E = OPS->GetPlayerData(CharacterId))
+				return E->JobClass;
+		}
+		return FString();
+	}
+
+	// Returns true if the player's gender is female. Defaults to male when unknown.
+	bool LookupPlayerIsFemale(UWorld* World, int32 CharacterId, int32 LocalCharacterId)
+	{
+		if (!World || CharacterId <= 0) return false;
+		if (CharacterId >= 2000000) return false;
+
+		if (CharacterId == LocalCharacterId)
+		{
+			if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance()))
+			{
+				const FString& G = GI->GetSelectedCharacter().Gender;
+				return G.Equals(TEXT("F"), ESearchCase::IgnoreCase) || G.Equals(TEXT("female"), ESearchCase::IgnoreCase);
+			}
+			return false;
+		}
+
+		if (UOtherPlayerSubsystem* OPS = World->GetSubsystem<UOtherPlayerSubsystem>())
+		{
+			if (const FPlayerEntry* E = OPS->GetPlayerData(CharacterId))
+			{
+				return E->Gender.Equals(TEXT("F"), ESearchCase::IgnoreCase) || E->Gender.Equals(TEXT("female"), ESearchCase::IgnoreCase);
+			}
+		}
+		return false;
+	}
+}
 
 // ============================================================
 // RO Classic colors (matches existing widgets)
@@ -266,6 +324,19 @@ void UCombatActionSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	Router->RegisterHandler(TEXT("enemy:health_update"), this,
 		[this](const TSharedPtr<FJsonValue>& D) { HandleEnemyHealthUpdate(D); });
 
+	// Load hit sound assets
+	auto TryLoadSound = [](const TCHAR* Path) -> USoundBase*
+	{
+		return LoadObject<USoundBase>(nullptr, Path);
+	};
+	if (USoundBase* S1 = TryLoadSound(TEXT("/Game/SabriMMO/Audio/HitSounds/Normal/Hit_Normal_01.Hit_Normal_01")))
+		NormalHitSounds.Add(S1);
+	if (USoundBase* S2 = TryLoadSound(TEXT("/Game/SabriMMO/Audio/HitSounds/Normal/Hit_Normal_02.Hit_Normal_02")))
+		NormalHitSounds.Add(S2);
+	if (USoundBase* S3 = TryLoadSound(TEXT("/Game/SabriMMO/Audio/HitSounds/Normal/Hit_Normal_03.Hit_Normal_03")))
+		NormalHitSounds.Add(S3);
+	CritHitSound = TryLoadSound(TEXT("/Game/SabriMMO/Audio/HitSounds/Critical/Hit_Crit_01.Hit_Crit_01"));
+
 	// Defer readiness by one frame (prevents ProcessEvent during PostLoad)
 	bReadyToProcess = false;
 	InWorld.GetTimerManager().SetTimerForNextTick([this]()
@@ -326,6 +397,14 @@ void UCombatActionSubsystem::HandleCombatDamage(const TSharedPtr<FJsonValue>& Da
 	FString HitType;
 	Obj->TryGetStringField(TEXT("hitType"), HitType);
 
+	// Server-supplied attacker weapon type (for player attackers — drives weapon-type
+	// swing/hit SFX path; falls back to per-class sound if missing or unmapped).
+	FString AttackerWeaponType;
+	Obj->TryGetStringField(TEXT("attackerWeaponType"), AttackerWeaponType);
+
+	FString DamageElement;
+	Obj->TryGetStringField(TEXT("element"), DamageElement);
+
 	// Update target frame HP from damage events
 	if (bTargetFrameVisible)
 	{
@@ -344,6 +423,10 @@ void UCombatActionSubsystem::HandleCombatDamage(const TSharedPtr<FJsonValue>& Da
 	// Skip animation for misses
 	if (HitType == TEXT("miss") || HitType == TEXT("dodge") || HitType == TEXT("perfectDodge"))
 		return;
+
+	// Heal events flow through the same handler — track separately so we play the heal
+	// sound at the target instead of the hit/body reaction sounds.
+	const bool bIsHeal = (HitType == TEXT("heal"));
 
 	// Resolve attacker actor
 	AActor* Attacker = nullptr;
@@ -402,6 +485,151 @@ void UCombatActionSubsystem::HandleCombatDamage(const TSharedPtr<FJsonValue>& Da
 	{
 		FVector TargetPos = Target ? Target->GetActorLocation() : Attacker->GetActorLocation();
 		PlayAttackAnimationOnActor(Attacker, TargetPos);
+	}
+
+	// ---- Player attacker swing sound ----
+	// RO Classic two-tier resolution:
+	//   1. Per-weapon-type sound (sword/dagger/axe/bow/etc.) — primary path
+	//   2. Per-class unarmed sound (swordman/archer/etc.) — fallback when weapon
+	//      type is missing, bare_hand, or has no wav mapping (knuckle/whip/instrument).
+	// Skipped for heal events and enemy attackers.
+	UAudioSubsystem* Audio = GetWorld()->GetSubsystem<UAudioSubsystem>();
+	if (!bIsHeal && Audio && Attacker && AttackerId < 2000000)
+	{
+		const FVector AtkLoc = Attacker->GetActorLocation();
+		const bool bWeaponPlayed = Audio->PlayWeaponAttackSound(AttackerWeaponType, AtkLoc);
+		if (!bWeaponPlayed)
+		{
+			const FString AtkClass = LookupPlayerJobClass(GetWorld(), AttackerId, LocalCharacterId);
+			if (!AtkClass.IsEmpty())
+				Audio->PlayPlayerAttackSound(AtkClass, AtkLoc);
+		}
+	}
+
+	// Parse crit flag (used by particles + sound)
+	bool bIsCritical = false;
+	Obj->TryGetBoolField(TEXT("isCritical"), bIsCritical);
+
+	// ---- Hit / heal / body reaction sounds at target ----
+	if (Target && Audio)
+	{
+		const FVector TargetLoc = Target->GetActorLocation();
+		const bool bTargetIsPlayer = !bIsEnemy && TargetId < 2000000 && TargetId > 0;
+
+		if (bIsHeal)
+		{
+			// Heal: single heal_effect.wav at target location, no hit/body reaction.
+			Audio->PlayHealSound(TargetLoc);
+		}
+		else
+		{
+			// Hit sound — RO Classic two-tier:
+			//   1. Per-weapon-type hit (hit_sword/hit_arrow/hit_axe/etc.) — primary
+			//   2. Per-class hit reaction — fallback when weapon type is missing/unmapped
+			if (AttackerId > 0 && AttackerId < 2000000)
+			{
+				const bool bWeaponHitPlayed = Audio->PlayWeaponHitSound(AttackerWeaponType, TargetLoc);
+				if (!bWeaponHitPlayed)
+				{
+					const FString AtkClass = LookupPlayerJobClass(GetWorld(), AttackerId, LocalCharacterId);
+					if (!AtkClass.IsEmpty())
+						Audio->PlayPlayerHitSound(AtkClass, TargetLoc);
+				}
+			}
+
+			// Element-typed hit overlay — adds fire/wind/etc. flavor on elemental
+			// attacks. Layered ON TOP of the weapon hit, not a replacement. Skipped
+			// for plain neutral hits to avoid noise.
+			if (!DamageElement.IsEmpty() && DamageElement != TEXT("neutral") && DamageElement != TEXT("normal"))
+			{
+				Audio->PlayElementHitSound(DamageElement, TargetLoc);
+			}
+
+			// Body reaction + voice grunt: target is a player -> play class body
+			// material sound (cloth/wood/metal) AND a voice grunt for the third audio
+			// layer (per RO Classic, players have 3 layers of damage feedback: weapon
+			// hit + body material + voice grunt).
+			if (bTargetIsPlayer)
+			{
+				const FString TgtClass = LookupPlayerJobClass(GetWorld(), TargetId, LocalCharacterId);
+				if (!TgtClass.IsEmpty())
+				{
+					Audio->PlayPlayerBodyReaction(TgtClass, TargetLoc);
+					const bool bIsFemale = LookupPlayerIsFemale(GetWorld(), TargetId, LocalCharacterId);
+					Audio->PlayPlayerDamageVoice(TgtClass, bIsFemale, TargetLoc);
+				}
+			}
+
+			// Legacy fallback hit sound for enemy targets (since the monster's own
+			// damage sound covers most of it but the original NormalHitSounds add weight).
+			// Routed through the SFX volume bus so the Options slider controls it.
+			if (bIsEnemy || TargetId >= 2000000)
+			{
+				USoundBase* HitSound = nullptr;
+				if (bIsCritical && CritHitSound)
+					HitSound = CritHitSound;
+				else if (NormalHitSounds.Num() > 0)
+					HitSound = NormalHitSounds[FMath::RandRange(0, NormalHitSounds.Num() - 1)];
+				if (HitSound)
+				{
+					const float SfxVol = Audio ? Audio->GetEffectiveSfxVolume() : 1.0f;
+					UGameplayStatics::PlaySoundAtLocation(GetWorld(), HitSound,
+						TargetLoc, SfxVol, FMath::FRandRange(0.95f, 1.05f));
+				}
+			}
+		}
+	}
+
+	// Hit flash + flinch on target sprite
+	// For enemies, use SpriteActor from EnemyEntry (GetEnemy returns generic AActor)
+	ASpriteCharacterActor* TargetSprite = nullptr;
+	if (bIsEnemy || TargetId >= 2000000)
+	{
+		if (UEnemySubsystem* ES = GetWorld()->GetSubsystem<UEnemySubsystem>())
+		{
+			const FEnemyEntry* Entry = ES->GetEnemyData(TargetId);
+			if (Entry && Entry->SpriteActor.IsValid())
+				TargetSprite = Entry->SpriteActor.Get();
+		}
+	}
+	else if (Target)
+	{
+		TargetSprite = Cast<ASpriteCharacterActor>(Target);
+		if (!TargetSprite)
+		{
+			TArray<AActor*> Attached;
+			Target->GetAttachedActors(Attached);
+			for (AActor* Child : Attached)
+			{
+				if (ASpriteCharacterActor* S = Cast<ASpriteCharacterActor>(Child))
+				{
+					TargetSprite = S;
+					break;
+				}
+			}
+		}
+	}
+	if (TargetSprite)
+	{
+		TargetSprite->PlayHitFlash();
+		TargetSprite->SetAnimState(ESpriteAnimState::Hit);
+
+		// Hit impact particles — spawn at sprite visual center (not actor origin,
+		// which is underground due to billboard depth offset compensation)
+		if (USkillVFXSubsystem* VFX = GetWorld()->GetSubsystem<USkillVFXSubsystem>())
+		{
+			FVector VFXPos = TargetSprite->GetActorLocation();
+			VFXPos.Z += TargetSprite->SpriteSize.Y * 0.5f;  // Halfway up the sprite
+			VFX->SpawnAutoAttackHitEffect(VFXPos, bIsCritical);
+		}
+	}
+	else if (Target)
+	{
+		// Non-sprite target (BP actor) — spawn particles at actor location
+		if (USkillVFXSubsystem* VFX = GetWorld()->GetSubsystem<USkillVFXSubsystem>())
+		{
+			VFX->SpawnAutoAttackHitEffect(Target->GetActorLocation(), bIsCritical);
+		}
 	}
 }
 
@@ -539,6 +767,33 @@ void UCombatActionSubsystem::HandleCombatDeath(const TSharedPtr<FJsonValue>& Dat
 	double KilledIdD = 0;
 	Obj->TryGetNumberField(TEXT("killedId"), KilledIdD);
 	int32 KilledId = (int32)KilledIdD;
+
+	// Play death voice for ANY player death (local + remote), so killing/being killed
+	// has the same audible feedback the RO Classic client used. The voice is positional
+	// at the player's last known position.
+	if (KilledId > 0 && KilledId < 2000000)
+	{
+		if (UAudioSubsystem* Audio = GetWorld()->GetSubsystem<UAudioSubsystem>())
+		{
+			const FString TgtClass = LookupPlayerJobClass(GetWorld(), KilledId, LocalCharacterId);
+			if (!TgtClass.IsEmpty())
+			{
+				const bool bIsFemale = LookupPlayerIsFemale(GetWorld(), KilledId, LocalCharacterId);
+				FVector Loc = FVector::ZeroVector;
+				if (KilledId == LocalCharacterId)
+				{
+					if (APlayerController* PC = GetLocalPC())
+						if (APawn* P = PC->GetPawn()) Loc = P->GetActorLocation();
+				}
+				else if (UOtherPlayerSubsystem* OPS = GetWorld()->GetSubsystem<UOtherPlayerSubsystem>())
+				{
+					if (AActor* PA = OPS->GetPlayer(KilledId))
+						Loc = PA->GetActorLocation();
+				}
+				Audio->PlayPlayerDeathVoice(TgtClass, bIsFemale, Loc);
+			}
+		}
+	}
 
 	if (KilledId == LocalCharacterId)
 	{

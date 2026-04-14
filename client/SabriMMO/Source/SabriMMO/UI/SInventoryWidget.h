@@ -44,6 +44,7 @@ private:
 	int32 GridColumns = 7;
 	uint32 LastDataVersion = 0;
 	int32 LastTabId = -1;
+	TArray<int32> LastFilteredInventoryIds;  // InventoryId per slot — skip rebuild if unchanged
 
 	// ---- tooltip ----
 	TSharedPtr<SWidget> TooltipOverlay;
@@ -60,6 +61,25 @@ private:
 	void ShowSplitPopup(int32 InventoryId, int32 MaxQty, const FVector2D& LocalPos);
 	void HideSplitPopup();
 	void ConfirmSplit();
+
+	// ---- drop confirmation popup (RO Classic: confirm non-stackable, quantity for stackable) ----
+	bool bDropPopupActive = false;
+	int32 DropSourceInventoryId = 0;
+	int32 DropMaxQuantity = 0;
+	bool bDropIsStackable = false;
+	FString DropItemName;
+	TSharedPtr<SEditableTextBox> DropQuantityInput;
+	TSharedPtr<SBox> DropPopupBox;
+	TSharedPtr<SWidget> DropPopupAlignWrapper;
+	TSharedPtr<SWidget> DropPopupViewportOverlay;
+	void ShowDropPopup(int32 InventoryId, const FString& ItemName, bool bStackable, int32 MaxQty);
+	void HideDropPopup();
+	void ConfirmDrop();
+
+	// ---- pending drop (set when drag released outside, resolved by popup) ----
+	bool bPendingDropFromDrag = false;
+	bool bDropPopupNeedsPosition = false;
+	FVector2D DropPopupCursorAbsPos = FVector2D::ZeroVector;
 
 	// ---- item drag state ----
 	bool bDragInitiated = false;

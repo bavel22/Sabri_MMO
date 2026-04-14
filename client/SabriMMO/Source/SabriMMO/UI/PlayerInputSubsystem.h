@@ -53,6 +53,11 @@ private:
 	float InteractRange = 200.f;
 	double LastInteractTime = 0.0;
 
+	// --- Walk-to-pickup state (ground items) ---
+	TWeakObjectPtr<AActor> PendingPickupActor;
+	int32 PendingPickupGroundItemId = -1;
+	float PickupRange = 150.f;
+
 	// --- Click-to-move state ---
 	bool bIsClickMoving = false;
 

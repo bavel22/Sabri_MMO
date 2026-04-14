@@ -21,8 +21,11 @@
 #include "Materials/MaterialExpressionScalarParameter.h"
 #include "Materials/MaterialExpressionMultiply.h"
 #include "Materials/MaterialExpressionConstant.h"
+#include "Materials/MaterialExpressionCustom.h"
+#include "Materials/MaterialExpressionSceneTexture.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
+#include "HAL/IConsoleManager.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogPostProcess, Log, All);
 
@@ -50,6 +53,17 @@ void UPostProcessSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	CreateEnvironmentMaterial();
 	ApplyZonePreset(CurrentZone);
 
+	// Enable custom depth + stencil so the post-process can read the player sprite's
+	// stencil mask (sprite writes CustomDepthStencilValue=1 in SpriteCharacterActor)
+	if (IConsoleVariable* CVar = IConsoleManager::Get().FindConsoleVariable(TEXT("r.CustomDepth")))
+	{
+		if (CVar->GetInt() < 3) CVar->Set(3, ECVF_SetByGameOverride);
+	}
+
+	// Build and push the cutout post-process material (fades walls in a halo around the sprite)
+	CreateCutoutMaterial();
+	ApplyCutoutMaterial();
+
 	UE_LOG(LogPostProcess, Log, TEXT("PostProcessSubsystem initialized for zone: %s"), *CurrentZone);
 }
 
@@ -59,6 +73,8 @@ void UPostProcessSubsystem::Deinitialize()
 	SunLight = nullptr;
 	AmbientLight = nullptr;
 	HeightFog = nullptr;
+	CutoutMaterial = nullptr;
+	CutoutMID = nullptr;
 	Super::Deinitialize();
 }
 
@@ -301,6 +317,102 @@ void UPostProcessSubsystem::ApplyEnvironmentMaterial()
 }
 
 // ============================================================
+// Cutout Post-Process — fades any wall pixel that's within
+// DilatePixels of the player sprite (which writes CustomStencil = 1).
+// Uses 9-tap dilation: sample stencil at the current pixel + 8 offsets.
+// If any sample reads stencil = 1, the pixel is in the halo around the
+// sprite and gets darkened. The sprite pixels themselves stay untouched.
+//
+// NOTE: This material is added to the unbound global PostProcessVolume,
+// which means it affects EVERY camera in the world — including any
+// USceneCaptureComponent2D that uses SCS_FinalColorLDR. The minimap's
+// overhead capture (MinimapSubsystem::SetupOverheadCapture) does not see
+// the player-sprite stencil (the billboard is edge-on from directly above)
+// so the cutout would darken the entire capture to ~61% brightness.
+// MinimapSubsystem calls ShowFlags.SetPostProcessMaterial(false) on its
+// capture component to skip this material. Any future SceneCapture2D
+// added to the project MUST do the same, or switch to SCS_SceneColorHDR.
+// See CLAUDE.md "SceneCapture2D must disable post-process materials".
+// ============================================================
+
+void UPostProcessSubsystem::CreateCutoutMaterial()
+{
+	if (CutoutMaterial) return;
+
+	CutoutMaterial = NewObject<UMaterial>(GetTransientPackage(), NAME_None, RF_Transient);
+	CutoutMaterial->MaterialDomain = MD_PostProcess;
+	CutoutMaterial->BlendableLocation = BL_SceneColorAfterTonemapping;
+	CutoutMaterial->BlendablePriority = 100;
+
+	UMaterialExpressionScalarParameter* FadeAmount =
+		NewObject<UMaterialExpressionScalarParameter>(CutoutMaterial);
+	FadeAmount->ParameterName = TEXT("FadeAmount");
+	FadeAmount->DefaultValue = 0.6f;
+	CutoutMaterial->GetExpressionCollection().AddExpression(FadeAmount);
+
+	// Scene texture nodes — let the material translator handle SceneTextureLookup
+	// (UMaterialExpressionSceneTexture pin layout: 0=Color float4, 1=Size, 2=InvSize)
+	UMaterialExpressionSceneTexture* SceneColorNode =
+		NewObject<UMaterialExpressionSceneTexture>(CutoutMaterial);
+	SceneColorNode->SceneTextureId = PPI_PostProcessInput0;  // 14 = scene color
+	CutoutMaterial->GetExpressionCollection().AddExpression(SceneColorNode);
+
+	UMaterialExpressionSceneTexture* StencilNode =
+		NewObject<UMaterialExpressionSceneTexture>(CutoutMaterial);
+	StencilNode->SceneTextureId = PPI_CustomStencil;  // 25 = sprite stencil mask
+	CutoutMaterial->GetExpressionCollection().AddExpression(StencilNode);
+
+	// Custom HLSL: darken every pixel except where the sprite stencil is set.
+	// Sprite uses bDisableDepthTest=1 so it always draws on top — those pixels
+	// have stencil=1 and stay at full brightness. Everything else gets faded.
+	UMaterialExpressionCustom* Custom = NewObject<UMaterialExpressionCustom>(CutoutMaterial);
+	Custom->OutputType = CMOT_Float3;
+	Custom->Code = TEXT(
+		"float StencilVal = InStencil.r;\n"
+		"float NotSprite = 1.0 - saturate(StencilVal);\n"
+		"// Where this pixel is NOT the sprite, fade it. Where it IS the sprite, leave alone.\n"
+		"float Fade = NotSprite * FadeAmount;\n"
+		"return lerp(InColor.rgb, InColor.rgb * 0.35, Fade);"
+	);
+
+	FCustomInput& ColorIn = Custom->Inputs.AddDefaulted_GetRef();
+	ColorIn.InputName = TEXT("InColor");
+	ColorIn.Input.Connect(0, SceneColorNode);
+
+	FCustomInput& StencilIn = Custom->Inputs.AddDefaulted_GetRef();
+	StencilIn.InputName = TEXT("InStencil");
+	StencilIn.Input.Connect(0, StencilNode);
+
+	FCustomInput& FadeIn = Custom->Inputs.AddDefaulted_GetRef();
+	FadeIn.InputName = TEXT("FadeAmount");
+	FadeIn.Input.Connect(0, FadeAmount);
+
+	CutoutMaterial->GetExpressionCollection().AddExpression(Custom);
+
+	// Post-process materials use EmissiveColor as the output
+	CutoutMaterial->GetEditorOnlyData()->EmissiveColor.Connect(0, Custom);
+
+	CutoutMaterial->PreEditChange(nullptr);
+	CutoutMaterial->PostEditChange();
+
+	CutoutMID = UMaterialInstanceDynamic::Create(CutoutMaterial, this);
+
+	UE_LOG(LogPostProcess, Log, TEXT("Created CutoutMaterial (post-process stencil cutout)"));
+}
+
+void UPostProcessSubsystem::ApplyCutoutMaterial()
+{
+	if (!CutoutMID || !PPVolume) return;
+	FWeightedBlendables& Blendables = PPVolume->Settings.WeightedBlendables;
+	for (const FWeightedBlendable& B : Blendables.Array)
+	{
+		if (B.Object == CutoutMID) return;
+	}
+	PPVolume->Settings.AddBlendable(CutoutMID, 1.0f);
+	UE_LOG(LogPostProcess, Log, TEXT("Pushed CutoutMaterial into PP volume"));
+}
+
+// ============================================================
 // PostProcessVolume setup
 // ============================================================
 
@@ -407,9 +519,40 @@ void UPostProcessSubsystem::ApplyZonePreset(const FString& ZoneName)
 	S.bOverride_AutoExposureBias = true;
 	S.AutoExposureBias = ExposureBias;
 
+	// Disable motion blur — sprite billboards smear during movement because
+	// translucent materials don't write to the velocity buffer, so motion blur
+	// uses stale/wrong velocities at sprite pixels. RO-style game doesn't need
+	// motion blur anyway.
+	S.bOverride_MotionBlurAmount = true;
+	S.MotionBlurAmount = 0.f;
+
 	S.WeightedBlendables.Array.Empty();
+
+	// Re-apply the cutout material since the zone preset just cleared blendables
+	if (CutoutMID) ApplyCutoutMaterial();
 
 	UE_LOG(LogPostProcess, Log,
 		TEXT("Zone preset: %s — Bloom=%.2f, WhiteTemp=%.0f, ExpBias=%.1f"),
 		*ZoneName, Bloom, WhiteTemp, ExposureBias);
+
+	// Re-apply user brightness after zone preset
+	if (BrightnessMultiplier != 1.0f)
+		SetBrightness(BrightnessMultiplier);
+}
+
+// ============================================================
+// SetBrightness — adjusts sun light intensity (user option)
+// ============================================================
+
+void UPostProcessSubsystem::SetBrightness(float Value)
+{
+	BrightnessMultiplier = FMath::Clamp(Value, 0.5f, 2.0f);
+	if (SunLight)
+	{
+		if (UDirectionalLightComponent* LC = SunLight->GetComponent())
+		{
+			// Base intensity is 3.14 (pi lux). Scale by user multiplier.
+			LC->SetIntensity(3.14f * BrightnessMultiplier);
+		}
+	}
 }

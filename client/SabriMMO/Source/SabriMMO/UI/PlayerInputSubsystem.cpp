@@ -16,6 +16,8 @@
 #include "UI/TradeSubsystem.h"
 #include "UI/PartySubsystem.h"
 #include "UI/ChatSubsystem.h"
+#include "UI/GroundItemSubsystem.h"
+#include "UI/GroundItemActor.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -158,6 +160,33 @@ void UPlayerInputSubsystem::OnWalkPollTick()
 			}
 		}
 	}
+
+	// --- Walk-to-pickup (ground items) ---
+	if (PendingPickupGroundItemId > 0)
+	{
+		AActor* ItemActor = PendingPickupActor.Get();
+		APawn* Pawn = GetLocalPawn();
+		if (!Pawn || !ItemActor)
+		{
+			PendingPickupActor.Reset();
+			PendingPickupGroundItemId = -1;
+		}
+		else
+		{
+			float Dist = FVector::Dist2D(Pawn->GetActorLocation(), ItemActor->GetActorLocation());
+			if (Dist <= PickupRange + 30.f)
+			{
+				CancelMovement();
+				if (UGroundItemSubsystem* GIS = GetWorld()->GetSubsystem<UGroundItemSubsystem>())
+				{
+					GIS->RequestPickup(PendingPickupGroundItemId);
+				}
+				PendingPickupActor.Reset();
+				PendingPickupGroundItemId = -1;
+				UE_LOG(LogMMOInput, Log, TEXT("Walk-to-pickup: arrived — picking up ground item"));
+			}
+		}
+	}
 }
 
 // ============================================================
@@ -252,7 +281,44 @@ void UPlayerInputSubsystem::OnLeftClickFromCharacter(ASabriMMOCharacter* Charact
 		}
 	}
 
-	// Priority 3: Enemies
+	// Priority 3: Ground Items
+	if (HitActor)
+	{
+		if (UGroundItemSubsystem* GIS = GetWorld()->GetSubsystem<UGroundItemSubsystem>())
+		{
+			int32 GItemId = GIS->GetGroundItemIdFromActor(HitActor);
+			if (GItemId > 0)
+			{
+				// Stop existing attack/interact
+				if (bIsAutoAttacking) StopAutoAttack();
+				PendingInteractNPC.Reset();
+
+				APawn* Pawn = GetLocalPawn();
+				if (Pawn)
+				{
+					float Dist = FVector::Dist2D(Pawn->GetActorLocation(), HitActor->GetActorLocation());
+					if (Dist <= PickupRange + 30.f)
+					{
+						// In range — pick up immediately
+						GIS->RequestPickup(GItemId);
+						PendingPickupActor.Reset();
+						PendingPickupGroundItemId = -1;
+					}
+					else
+					{
+						// Out of range — walk to item, then pick up
+						PendingPickupActor = HitActor;
+						PendingPickupGroundItemId = GItemId;
+						MoveToLocation(HitActor->GetActorLocation());
+						UE_LOG(LogMMOInput, Log, TEXT("Walk-to-pickup: ground item %d (dist=%.0f)"), GItemId, Dist);
+					}
+				}
+				return;
+			}
+		}
+	}
+
+	// Priority 4: Enemies
 	if (HitActor)
 	{
 		int32 EnemyId = GetEnemyIdFromActor(HitActor);
@@ -263,12 +329,14 @@ void UPlayerInputSubsystem::OnLeftClickFromCharacter(ASabriMMOCharacter* Charact
 		}
 	}
 
-	// Priority 3: Ground
+	// Priority 5: Ground
 	if (bIsAutoAttacking)
 	{
 		StopAutoAttack();
 	}
 	PendingInteractNPC.Reset();
+	PendingPickupActor.Reset();
+	PendingPickupGroundItemId = -1;
 	ProcessClickOnGround(Hit.ImpactPoint);
 }
 
@@ -388,6 +456,18 @@ void UPlayerInputSubsystem::ProcessClickOnEnemy(AActor* EnemyActor)
 {
 	int32 EnemyId = GetEnemyIdFromActor(EnemyActor);
 	if (EnemyId <= 0) return;
+
+	// NoCtrl OFF = require Ctrl held to attack (RO Classic default).
+	// NoCtrl ON (default in our game) = attack on click without Ctrl.
+	if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance()))
+	{
+		if (!GI->bOptionNoCtrl)
+		{
+			if (!FSlateApplication::IsInitialized() ||
+				!FSlateApplication::Get().GetModifierKeys().IsControlDown())
+				return;
+		}
+	}
 
 	if (USkillTreeSubsystem* SkillSub = GetWorld()->GetSubsystem<USkillTreeSubsystem>())
 		SkillSub->CancelWalkToCast();
@@ -552,6 +632,8 @@ void UPlayerInputSubsystem::ForceStopAllMovement()
 	bWalkingToAttack = false;
 	bIsClickMoving = false;
 	PendingInteractNPC.Reset();
+	PendingPickupActor.Reset();
+	PendingPickupGroundItemId = -1;
 }
 
 // ============================================================

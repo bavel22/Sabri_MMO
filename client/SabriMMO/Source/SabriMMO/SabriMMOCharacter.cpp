@@ -118,6 +118,7 @@ void ASabriMMOCharacter::BeginPlay()
 			if (Sprite)
 			{
 				Sprite->AttachToOwnerActor(this, true);
+				LocalSprite = Sprite;
 				// Hide 3D skeletal mesh — sprite replaces it
 				GetMesh()->SetVisibility(false);
 
@@ -129,16 +130,22 @@ void ASabriMMOCharacter::BeginPlay()
 			}
 		}
 
-		// Register local player name tag (RO Classic: always visible, white)
+		// Register local player name tag on SPRITE actor (tracks smooth ground-snap Z)
 		if (UNameTagSubsystem* NTS = GetWorld()->GetSubsystem<UNameTagSubsystem>())
 		{
 			FCharacterData SelChar = GI->GetSelectedCharacter();
 			if (!SelChar.Name.IsEmpty())
 			{
-				NTS->RegisterEntity(this, SelChar.Name, ENameTagEntityType::LocalPlayer, 0, 120.f, 150.f);
+				AActor* NameTagTarget = LocalSprite.IsValid() ? (AActor*)LocalSprite.Get() : (AActor*)this;
+				NTS->RegisterEntity(NameTagTarget, SelChar.Name, ENameTagEntityType::LocalPlayer, 0, 120.f, 150.f);
 			}
 		}
 	}
+}
+
+void ASabriMMOCharacter::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
 }
 
 void ASabriMMOCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)

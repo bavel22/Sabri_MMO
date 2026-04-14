@@ -373,6 +373,15 @@ void UMinimapSubsystem::SetupOverheadCapture()
 	CaptureComponent->ShowFlags.SetAtmosphere(false);
 	CaptureComponent->ShowFlags.SetDynamicShadows(false);
 
+	// Disable post-process materials on the capture. The PostProcessSubsystem
+	// pushes a cutout material into the unbound global PP volume that darkens
+	// every pixel where CustomStencil != 1 (i.e. everything that isn't the
+	// player sprite). The minimap camera looks straight down from above, so
+	// the billboard sprite is edge-on and writes no stencil into the capture,
+	// which causes the cutout to darken the entire minimap to ~61% brightness
+	// and the captured scene effectively vanishes against the dark frame.
+	CaptureComponent->ShowFlags.SetPostProcessMaterial(false);
+
 	// Start a timer to update capture position + capture at ~16 FPS
 	World->GetTimerManager().SetTimer(CaptureUpdateTimer, this,
 		&UMinimapSubsystem::UpdateCapturePosition, 0.0625f, true);

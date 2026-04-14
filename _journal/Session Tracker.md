@@ -10,6 +10,34 @@ All Claude Code sessions with their resume IDs, organized by topic. Use `claude 
 
 | Date | Resume ID | Topic | Notes |
 |------|-----------|-------|-------|
+| 2026-04-13 | `"ai generated rig and animations for non humanoids"` | UniRig pipeline setup + rocker proof | Researched AI rigging tools, installed UniRig (conda env, 4 Windows patches, RTX 5090 cu128). Proved on rocker: 40 bones, 6 procedural Blender animations. Scripts: animate_rocker.py, fix_rocker_legs.py, rebuild_from_fixed.py |
+| 2026-04-13 | `"implementing more enemy sprites"` | Enemy sprite batch production | Downloaded ~8 more enemy GLBs (chonchon, creamy, mandragora, pecopeco, poison_spore, poporing, smokie). Added spriteClass/weaponMode to ~20 monster templates. Loaded /sabrimmo-enemy |
+| 2026-04-13 | `3c21439f` | Egg/larva enemies — immobile | Made egg enemies (ant egg, dragon egg, pupa, thief bug egg, peco peco egg) not move or attack |
+| 2026-04-13 | `9d8e4131` | GLB to FBX conversion | Batch converted enemy GLBs for Blender processing |
+| 2026-04-13 | `b0bdd882` | Enemy sprite implementation | 10 new shape key animation presets (~1000 lines in render_monster.py): caterpillar, rabbit, egg, frog, tree, bird, flying insect, bat, quadruped, plant |
+| 2026-04-12 | `91745b32` | Enemy list review | Listed all spawned enemies, prioritized Prontera field monsters for sprite batch |
+| 2026-04-12 | `fda4dac5` (resumed) | 3D-to-2D pipeline — enemy models | Downloaded ~10 enemy GLBs via Tripo3D (drops, fabre, lunatic, pupa, willow, roda_frog, condor, hornet, savage_babe) |
+| 2026-04-11 | `4c2411ea` | Assassin katar attack investigation | Reviewed dual-wield/katar code, confirmed attacks working correctly |
+| 2026-04-11 | `a4e1585b` | Blender weight paint correction | Manual weight paint fix for stretched meshes after armature parenting. Updated _meta/pairing base armature.md |
+| 2026-04-11 | `965e50ad` | Sprite system review | Loaded /sabrimmo-sprites, reviewed pipeline state — 17-anim standard and shared armature confirmed stable |
+| 2026-04-11 | `0ea73525` | Blender crash troubleshooting | Blender hanging on launch — killed zombie processes |
+| 2026-04-10 | `"inventory performance"` | Inventory performance analysis + optimization start | Root cause report: 10 cascading bottlenecks (2 DB queries + 164KB transfer + 350 widget rebuilds per potion use). 4-phase optimization plan. Phase 1 started: GetFilteredItems returns const ref, RebuildFilteredCache, ItemDefCache TMap, HandleItemDefs/HandleRefineResult handlers |
+| 2026-04-10 | `"ground item client"` | Ground item client implementation | GroundItemSubsystem (368 lines) + GroundItemActor (230 lines). Billboard sprites, tier-color tinting, click-to-pickup, spawn arc animation, socket handlers for spawned_batch/despawned_batch/ground_list/picked_up |
+| 2026-04-09 | `"ground item system"` | Ground item / loot drop server system | Full RO Classic drop system: ownership phases (3s/5s/7s normal, 10s/20s/22s MVP), scatter offsets (SE/W/N cycle), 60s despawn, party share, damage ranking priority. 6 socket events, ~207 lines server globals + helpers, drop integration in enemy death handler |
+| 2026-04-08 | `"minimap fix"` | Minimap SceneCapture2D + cutout post-process fix | SetPostProcessMaterial(false) in MinimapSubsystem::SetupOverheadCapture. Root cause: global cutout PP material darkened entire capture. Regression protection in skill, CLAUDE.md, docs, inline comment, memory |
+| 2026-04-07 | `"enemy audio"` | Enemy/monster audio implementation | Body material sounds (soft/hard/metal/undead), attack/die/move/stand SFX, 60 monsters wired, variant SFX system (TArray + random pick), ROSFX/effect/ folder (626 files) |
+| 2026-04-07 | `"player audio"` | Player audio implementation | Per-weapon-type swing/hit sounds, per-class fallback, body material reaction, level up chime, heal sound. Two-tier resolution. Local + remote player support |
+| 2026-04-07 | `"audio research"` | BGM zone mapping + audio skill fix | Zone_BGM_Table.md, fixed /sabrimmo-audio misattribution, BGM files sourced (121 tracks), skill SFX wiring (SkillImpactSoundMap), 3 new audio skills created |
+| 2026-04-06 | `"character positioning tweaking"` | Sprite-vs-world rendering — final solution | BLEND_Translucent + bDisableDepthTest + binary alpha, two camera→feet/head line traces, per-pixel depth check, post-process cutout via PPI_CustomStencil. CameraSubsystem occlusion REMOVED. Hardcoded 96 capsule half-height. Motion blur disabled. New memory `sprite-rendering-2026-04-06.md` |
+| 2026-04-06 | `"Damage Number enhancements"` | Combat polish — close 04-05 carryover blockers | Crit starburst opacity/scale tuned, target flinch verified end-to-end (Hit anim + enemy:move guard firing), `NS_AutoAttackHit` replaced with punchier Niagara from `/Game/Variant_Combat/VFX/`. All 3 04-05 blockers closed |
+| 2026-04-06 | `"audio research"` | RO Classic audio — deep research | Full RO audio architecture: GRF/BGM/mp3nametable layout, 121 pre-renewal tracks, SFX inventory, composer credits (SoundTeMP/BlueBlue), filename misspellings to preserve, **legal status (Gravity v. NovaRO $4M 2022 — DO NOT ship RO audio)**, recommended Tier 1-3 sourcing. Output: `docsNew/05_Development/RO_Audio_System_Research.md` + memory `ro-audio-system.md`. Research only, no implementation |
+| 2026-04-05 | `"options-menu-expansion"` | Options menu expansion | New OptionsSubsystem + SOptionsWidget, 14 settings (Display/Interface/Camera/Gameplay), `UOptionsSaveGame` SaveGame persistence, FPS overlay, ESC menu integration, 9 target subsystems wired |
+| 2026-04-05 | `"character positioning tweaking"` | Character ground positioning fix | LocalSprite TWeakObjectPtr on pawn, name tag re-attached to sprite (smooth Z), OtherCharacterMovementComponent fixed HalfHeight=96, billboard SpriteDepthOffset compensation in ground snap, VFX spawn at visual center |
+| 2026-04-05 | `"Damage Number enhancements"` | RO Classic damage numbers + 6-phase hit impact | Sine arc + drift + scale rewrite, RO color swap, status custom-color path, hit flash (3,3,3 overbright), hit particles (NS_AutoAttackHit), crit starburst (FSlateBrush), combo total (FComboTracker), target flinch (Hit anim + enemy:move guard), hit sounds (5 WAVs, pitch jitter). New skill `/sabrimmo-damage-numbers` |
+| 2026-04-04 | `"login screen"` | Login screen background + resolution | Deferred texture loading retry, FSlateBrush, ScaleToFill, standalone timing fix, camera aspect ratio constraint |
+| 2026-04-04 | `"ESC menu"` | ESC menu + character select return | EscapeMenuSubsystem, player:leave two-phase handler, bReturningToCharSelect, Z=200 background overlay, static FButtonStyle |
+| 2026-04-04 | `"right click other players"` | Right-click player context menu | FMenuBuilder popup (Trade/Party Invite/Whisper), bDidRotateThisClick camera drag detection, PlayerInputSubsystem routing, guard conditions |
+| 2026-04-04 | `"icons"` | Item icon mapping (all 6169 items) | Subfolder-based IconAssetMap in InventorySubsystem, /Game/SabriMMO/Assets/Item_Icons/{subfolder}/Icon_{name}, underscore fallback |
 | 2026-04-03 | `"Storage"` | Kafra Storage — full implementation + QoL | Account-shared 300-slot storage, 10 socket handlers (6 storage + 4 inventory QoL), StorageSubsystem + SStorageWidget, split/sort/auto-stack/search, 40z Kafra fee, JSONB compounded_cards, 4 bugs fixed |
 | 2026-04-03 | `"sabrimmo-trading"` | Player-to-Player Trading — full implementation | TradeSession class, 9 socket handlers, two-step confirm (OK→Trade), 13 cancel paths, atomic transfer, trade_logs audit trail, /trade chat command, STradeWidget (Z=22), 4 bugs fixed |
 | 2026-04-02 | `"map system research and planning"` | Map system — minimap, world map, loading screen, Guide NPC | All 9 phases. MinimapSubsystem (134x134, 5 zoom, 3 opacity, draggable), SWorldMapWidget (12x8 grid, 62 zones), loading screen (Ken Burns, sparkles), Guide NPC marks, /where command, 5 socket events, ro_world_map_data.js. ~1429 lines, 6 new + 2 modified files. |
@@ -139,6 +167,8 @@ All Claude Code sessions with their resume IDs, organized by topic. Use `claude 
 | `"female archer animations"` | Archer + bow weapon sprites | Archer_f 1136 + bow 1136 sprites, global depth ordering, depth offset 5.0 |
 | `"Skeleton Sprite Animations"` | Skeleton enemy sprite | First humanoid monster, Mixamo rig, pure C++ sprite actor |
 | `"poring sprite animations"` | Poring enemy sprite | First blob monster, shape key anims, render_monster.py, --model-rotation -90 |
+| `"implementing more enemy sprites"` (04-13) | Enemy sprite batch + animation presets | ~20 enemy GLBs downloaded, 10 new shape key presets (~1000 lines in render_monster.py), spriteClass fields added to ~20 monster templates |
+| `"ai generated rig and animations for non humanoids"` (04-13) | UniRig AI rigging pipeline | Installed UniRig (conda, 4 patches, RTX 5090 cu128). Proved on rocker: 40 bones, 6 procedural anims. New skill `/sabrimmo-rig-animate` |
 
 ## Map System
 
@@ -153,11 +183,53 @@ All Claude Code sessions with their resume IDs, organized by topic. Use `claude 
 | `"Storage"` | Kafra Storage (account-shared) | 10 socket handlers, StorageSubsystem + SStorageWidget, split/sort/auto-stack/search QoL, 40z fee, JSONB, 4 bugs fixed |
 | `"sabrimmo-trading"` | Player-to-Player Trading | 9 socket handlers, TradeSession class, two-step confirm, 13 cancel paths, atomic transfer, trade_logs, /trade command, 4 bugs fixed |
 
+## UX / Polish
+
+| Resume ID | Topic | Notes |
+|-----------|-------|-------|
+| `"options-menu-expansion"` | Options menu — 14 settings + SaveGame | OptionsSubsystem + SOptionsWidget, UOptionsSaveGame slot `SabriMMO_Options`, 4 sections (Display/Interface/Camera/Gameplay), FPS overlay, 9 target subsystems |
+| `"character positioning tweaking"` (04-05) | Ground positioning + sprite snap | LocalSprite TWeakObjectPtr, name tag on sprite, fixed HalfHeight=96 in remote movement, billboard depth offset compensation, VFX spawn at visual center |
+| `"character positioning tweaking"` (04-06) | Sprite-vs-world rendering — final solution | BLEND_Translucent + bDisableDepthTest + binary alpha, two camera→feet/head line traces + per-pixel depth, post-process cutout via PPI_CustomStencil, hardcoded 96 capsule, CameraSubsystem occlusion removed, motion blur off |
+| `"Damage Number enhancements"` (04-05) | RO Classic numbers + hit impact | Sine arc / drift / scale, RO colors, status custom colors, hit flash, hit particles, crit starburst, combo total, target flinch, hit sounds. 6 phases + Phase A rewrite |
+| `"Damage Number enhancements"` (04-06) | Combat polish — close 04-05 carryover | Crit starburst opacity/scale tuned, target flinch verified in-game, hit particle replaced with punchier Niagara |
+| `"login screen"` | Login screen background + resolution | Deferred texture loading, FSlateBrush, ScaleToFill, standalone timing, camera 16:9 constraint |
+| `"ESC menu"` | ESC menu + character select return | EscapeMenuSubsystem, two-phase player:leave, Z=200 background, bReturningToCharSelect |
+| `"right click other players"` | Right-click player context menu | FMenuBuilder (Trade/Party/Whisper), camera drag vs quick-click, PlayerInputSubsystem routing |
+| `"icons"` | Item icon mapping (6169 items) | Subfolder IconAssetMap, underscore fallback, all categories mapped |
+
 ## 3D World Building
 
 | Resume ID | Topic | Notes |
 |-----------|-------|-------|
 | `"ground-texture-and-materials-system"` | Ground textures + materials + decals + grass | 3-day session (3/30-4/01). 1000+ AI textures, 608 RO originals, 17 material versions, 2700+ variants, DBuffer decals (91), Landscape Grass V3 (60 sprites, 13 zones), 80+ scripts, 3 new skills, 5 _meta guides |
+
+## Audio Research / Implementation
+
+| Resume ID | Topic | Notes |
+|-----------|-------|-------|
+| `"audio research"` (04-06) | RO Classic audio — deep research | Full architecture (GRF/BGM/mp3nametable/ACT-EffectTable-RSW), 121 pre-renewal tracks, SFX inventory, composer credits, filename misspellings, **legal status (Gravity v. NovaRO $4M 2022)**, recommended Tier 1-3 sourcing. Output: `docsNew/05_Development/RO_Audio_System_Research.md` + memory `ro-audio-system.md` |
+| `"enemy audio"` (04-07) | Enemy/monster audio | AudioSubsystem: body material layering, 60 monsters wired, variant SFX (TArray + random), ROSFX/effect/ 626 files |
+| `"player audio"` (04-07) | Player audio | Per-weapon swing/hit, per-class fallback, body material reaction, level up chime, heal sound, local + remote |
+| `"audio research"` (04-07) | BGM zone mapping + skill fix | Zone_BGM_Table.md, /sabrimmo-audio misattribution fixed, 121 BGM tracks sourced, SkillImpactSoundMap wiring, 3 new skills |
+
+## Ground Item / Loot System
+
+| Resume ID | Topic | Notes |
+|-----------|-------|-------|
+| `"ground item system"` (04-09) | Server-side ground items | RO Classic ownership phases, scatter offsets, 60s despawn, party share, damage ranking, 6 socket events, enemy death integration |
+| `"ground item client"` (04-10) | Client-side ground items | GroundItemSubsystem (368 lines) + GroundItemActor (230 lines), billboard sprites, tier-color tinting, click-to-pickup, spawn arc |
+
+## Inventory Performance
+
+| Resume ID | Topic | Notes |
+|-----------|-------|-------|
+| `"inventory performance"` (04-10) | Performance analysis + Phase 1 start | 10-finding root cause report, 4-phase optimization plan. Started: const ref GetFilteredItems, RebuildFilteredCache, ItemDefCache, HandleItemDefs |
+
+## Minimap / Map Fixes
+
+| Resume ID | Topic | Notes |
+|-----------|-------|-------|
+| `"minimap fix"` (04-08) | SceneCapture2D + cutout PP fix | SetPostProcessMaterial(false), regression protection in 5 locations (skill, CLAUDE.md, docs, inline comment, memory) |
 
 ## Code Audits
 

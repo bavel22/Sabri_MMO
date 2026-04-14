@@ -5,6 +5,7 @@
 #include "SCraftingPopup.h"
 #include "MMOGameInstance.h"
 #include "SocketEventRouter.h"
+#include "Audio/AudioSubsystem.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "Widgets/SWeakWidget.h"
@@ -182,6 +183,13 @@ void UCraftingSubsystem::HandlePharmacyResult(const TSharedPtr<FJsonValue>& Data
 	FString Message;
 	Obj->TryGetStringField(TEXT("message"), Message);
 
+	// Pharmacy chime — 2D non-spatial, distinct success/fail tones
+	if (UAudioSubsystem* Audio = GetWorld()->GetSubsystem<UAudioSubsystem>())
+	{
+		if (bSuccess) Audio->PlayPharmacySuccessSound();
+		else          Audio->PlayPharmacyFailSound();
+	}
+
 	if (bSuccess)
 	{
 		PopupWidget->SetStatusMessage(Message, false);
@@ -300,6 +308,9 @@ void UCraftingSubsystem::HideCraftingPopup()
 {
 	if (!bPopupVisible) return;
 
+	UAudioSubsystem::PlayUICancelStatic(GetWorld());
+
+
 	UWorld* World = GetWorld();
 	if (World)
 	{
@@ -324,6 +335,7 @@ void UCraftingSubsystem::EmitArrowCraft(int32 SourceInventoryId)
 {
 	UWorld* World = GetWorld();
 	if (!World) return;
+	UAudioSubsystem::PlayUIClickStatic(World);
 	UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance());
 	if (!GI) return;
 
@@ -341,6 +353,7 @@ void UCraftingSubsystem::EmitPharmacyCraft(int32 RecipeOutputId)
 {
 	UWorld* World = GetWorld();
 	if (!World) return;
+	UAudioSubsystem::PlayUIClickStatic(World);
 	UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance());
 	if (!GI) return;
 
@@ -355,6 +368,7 @@ void UCraftingSubsystem::EmitConverterCraft(int32 ProductId)
 {
 	UWorld* World = GetWorld();
 	if (!World) return;
+	UAudioSubsystem::PlayUIClickStatic(World);
 	UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance());
 	if (!GI) return;
 

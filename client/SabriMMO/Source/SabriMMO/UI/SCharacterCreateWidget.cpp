@@ -2,6 +2,8 @@
 
 #include "SCharacterCreateWidget.h"
 #include "LoginFlowSubsystem.h"
+#include "Audio/AudioSubsystem.h"
+#include "Engine/World.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/SOverlay.h"
@@ -665,6 +667,7 @@ FReply SCharacterCreateWidget::OnHairColorRight()
 // ============================================================
 FReply SCharacterCreateWidget::OnCreateClicked()
 {
+	UAudioSubsystem::PlayUIClickStatic(OwningSubsystem.IsValid() ? OwningSubsystem->GetWorld() : nullptr);
 	if (!NameField.IsValid())
 	{
 		return FReply::Handled();
@@ -716,6 +719,7 @@ FReply SCharacterCreateWidget::OnCreateClicked()
 
 FReply SCharacterCreateWidget::OnCancelClicked()
 {
+	UAudioSubsystem::PlayUICancelStatic(OwningSubsystem.IsValid() ? OwningSubsystem->GetWorld() : nullptr);
 	if (ULoginFlowSubsystem* Subsystem = OwningSubsystem.Get())
 	{
 		Subsystem->OnCreateCharacterCancelled();

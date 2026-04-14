@@ -32,3 +32,12 @@ Apply all transforms: Select mesh → Ctrl+A → All Transforms
 
     Key reminder: Use the Tripo3D GLB for --texture-from at render time (has the actual textures), since the Mixamo FBX
     strips textures.
+
+
+if there is wierd stretching after parenting:
+
+  1. Select the mesh → go to Edit Mode
+  2. Open Properties → Object Data (green triangle) → Vertex Groups
+  3. Click the down arrow next to the vertex group list → Delete All Groups
+  4. Go back to Object Mode
+  5. Re-parent: select mesh, Shift+select base_f armature → Ctrl+P → Armature Deform with Automatic Weights

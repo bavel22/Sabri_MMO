@@ -57,6 +57,7 @@ private:
 	// Button handlers
 	FReply OnSubmitClicked();
 	FReply OnExitClicked();
+	FReply OnOptionsClicked();
 	FReply OnToggleModeClicked();
 	void AttemptLogin();
 	void AttemptRegister();

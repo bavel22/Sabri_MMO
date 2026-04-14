@@ -864,6 +864,19 @@ void UHotbarSubsystem::RefreshItemQuantities()
 	}
 }
 
+bool UHotbarSubsystem::CheckAndRefreshIfInventoryChanged()
+{
+	UInventorySubsystem* InvSub = GetWorld() ? GetWorld()->GetSubsystem<UInventorySubsystem>() : nullptr;
+	if (!InvSub) return false;
+	if (InvSub->DataVersion != LastInvDataVersion)
+	{
+		LastInvDataVersion = InvSub->DataVersion;
+		RefreshItemQuantities();
+		return true;
+	}
+	return false;
+}
+
 // ============================================================
 // Icon utilities (delegate to other subsystems)
 // ============================================================

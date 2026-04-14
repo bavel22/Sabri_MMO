@@ -125,13 +125,967 @@ BLOB_ANIMATIONS = {
     },
 }
 
+# --- Caterpillar/Worm preset (Fabre, etc.) ---
+CATERPILLAR_SHAPE_KEYS = {
+    'Squash':  {'z_scale': 0.5,  'xy_scale': 1.3},       # Deeper curl
+    'Stretch': {'z_scale': 1.4,  'xy_scale': 0.82},      # Bigger bite extension
+    'Flatten': {'z_scale': 0.2,  'xy_scale': 1.8},       # Unused in death — curls instead
+    'HopUp':   {'z_offset': 0.25},                        # Higher rear-up
+}
+
+CATERPILLAR_ANIMATIONS = {
+    'Idle Wiggle': {
+        'total_frames': 48,
+        'classified_type': 'idle',
+        'keyframes': [
+            (0,  {}),
+            (12, {'Squash': 0.1}),
+            (24, {'Stretch': 0.08, 'HopUp': 0.05}),
+            (36, {'Squash': 0.06}),
+            (48, {}),
+        ],
+    },
+    'Crawl Forward': {
+        'total_frames': 36,
+        'classified_type': 'walk',
+        'keyframes': [
+            (0,  {'Squash': 0.35}),                        # compressed tight
+            (4,  {'Squash': 0.4}),                         # max scrunch
+            (8,  {'Stretch': 0.3, 'HopUp': 0.4}),         # push forward + lift
+            (14, {'Stretch': 0.4, 'HopUp': 0.6}),         # full extension, peak height
+            (18, {'Stretch': 0.2, 'HopUp': 0.3}),         # descending
+            (22, {'Squash': 0.3}),                         # land + compress
+            (28, {'Squash': 0.35}),                        # re-scrunch
+            (32, {'Squash': 0.2}),                         # easing
+            (36, {'Squash': 0.35}),                        # loop
+        ],
+    },
+    'Bite Attack': {
+        'total_frames': 30,
+        'classified_type': 'attack',
+        'keyframes': [
+            (0,  {}),                                      # rest
+            (3,  {'Squash': 0.35}),                        # coil body tight
+            (6,  {'Squash': 0.45}),                        # deep wind-up crouch
+            (9,  {'Stretch': 0.6, 'HopUp': 0.6}),         # REAR UP — big and obvious
+            (11, {'Stretch': 0.65, 'HopUp': 0.65}),       # peak rear-up (hold)
+            (14, {'Squash': 0.5}),                         # SLAM DOWN — fast strike
+            (16, {'Squash': 0.55}),                        # max impact compression
+            (20, {'Squash': 0.3}),                         # bounce
+            (24, {'Squash': 0.1}),                         # recovering
+            (30, {}),                                      # rest
+        ],
+    },
+    'Hit Recoil': {
+        'total_frames': 18,
+        'classified_type': 'hit',
+        'keyframes': [
+            (0,  {'Squash': 0.35}),
+            (4,  {'Squash': 0.45}),
+            (9,  {'Stretch': 0.2, 'HopUp': 0.2}),
+            (13, {'Stretch': 0.05}),
+            (18, {}),
+        ],
+    },
+    'Curl Death': {
+        'total_frames': 28,
+        'classified_type': 'death',
+        'keyframes': [
+            (0,  {}),                                      # alive
+            (3,  {'Squash': 0.3}),                         # initial hit
+            (6,  {'Stretch': 0.25, 'HopUp': 0.3}),        # death spasm — rears up
+            (9,  {'Squash': 0.45}),                        # snaps back down
+            (12, {'Stretch': 0.1, 'HopUp': 0.15}),        # smaller spasm
+            (16, {'Squash': 0.6}),                         # curling up
+            (20, {'Squash': 0.8}),                         # tightly curled
+            (24, {'Squash': 0.9}),                         # almost fully curled
+            (28, {'Squash': 1.0}),                         # dead — curled into ball (NOT flat)
+        ],
+    },
+}
+
+# --- Rabbit/Critter preset (Lunatic, etc.) ---
+RABBIT_SHAPE_KEYS = {
+    'Squash':   {'z_scale': 0.5,  'xy_scale': 1.3},       # Deeper crouch
+    'Stretch':  {'z_scale': 1.4,  'xy_scale': 0.8},       # Bigger stretch
+    'HopUp':    {'z_offset': 0.45},                        # Higher hop
+    'TiltOver': {'tilt': True, 'amount': 0.9},             # Strong diagonal fall
+}
+
+RABBIT_ANIMATIONS = {
+    'Idle Twitch': {
+        'total_frames': 56,
+        'classified_type': 'idle',
+        'keyframes': [
+            (0,  {}),
+            (14, {'Squash': 0.06}),
+            (28, {'Stretch': 0.06, 'HopUp': 0.12}),
+            (42, {'Squash': 0.04}),
+            (56, {}),
+        ],
+    },
+    'Bunny Hop': {
+        'total_frames': 30,
+        'classified_type': 'walk',
+        'keyframes': [
+            (0,  {'Squash': 0.5}),                         # deep crouch
+            (4,  {'Stretch': 0.35, 'HopUp': 0.7}),        # explosive launch
+            (9,  {'Stretch': 0.25, 'HopUp': 1.0}),        # peak — fully airborne
+            (14, {'Stretch': 0.1, 'HopUp': 0.6}),         # descending
+            (18, {'Squash': 0.45}),                        # heavy landing squash
+            (22, {'Squash': 0.3, 'HopUp': 0.15}),         # small bounce
+            (26, {'Squash': 0.2}),                         # settling
+            (30, {'Squash': 0.5}),                         # loop (back to crouch)
+        ],
+    },
+    'Headbutt Attack': {
+        'total_frames': 24,
+        'classified_type': 'attack',
+        'keyframes': [
+            (0,  {}),                                      # rest
+            (2,  {'Squash': 0.4}),                         # fast crouch
+            (4,  {'Squash': 0.5}),                         # deep wind-up
+            (7,  {'Stretch': 0.6, 'HopUp': 0.5}),         # LAUNCH forward — explosive
+            (9,  {'Stretch': 0.5, 'HopUp': 0.3}),         # impact moment
+            (12, {'Squash': 0.35}),                        # hard recoil
+            (16, {'Squash': 0.15}),                        # recovering
+            (20, {'Squash': 0.05}),                        # settling
+            (24, {}),                                      # rest
+        ],
+    },
+    'Hit Flinch': {
+        'total_frames': 16,
+        'classified_type': 'hit',
+        'keyframes': [
+            (0,  {'Squash': 0.4}),
+            (4,  {'Squash': 0.45, 'HopUp': 0.2}),
+            (8,  {'Stretch': 0.2, 'HopUp': 0.3}),
+            (12, {'Squash': 0.1}),
+            (16, {}),
+        ],
+    },
+    'Topple Death': {
+        'total_frames': 28,
+        'classified_type': 'death',
+        'keyframes': [
+            (0,  {}),                                      # alive
+            (2,  {'Squash': 0.3}),                         # hit
+            (5,  {'Stretch': 0.3, 'HopUp': 0.85}),        # LAUNCHED airborne
+            (8,  {'Squash': 0.25, 'HopUp': 0.6}),         # tumbling
+            (11, {'Stretch': 0.15, 'HopUp': 0.3}),        # coming down
+            (14, {'Squash': 0.4}),                         # CRASH landing
+            (17, {'Squash': 0.25, 'HopUp': 0.08}),        # small bounce
+            (20, {'Squash': 0.2, 'TiltOver': 0.3}),       # tipping on side
+            (24, {'Squash': 0.25, 'TiltOver': 0.7}),      # falling over
+            (28, {'Squash': 0.3, 'TiltOver': 1.0}),       # on side — dead
+        ],
+    },
+}
+
+# --- Egg/Cocoon preset (Pupa, Thief Bug Egg, etc.) ---
+EGG_SHAPE_KEYS = {
+    'Squash':  {'z_scale': 0.8,  'xy_scale': 1.12},      # Compression
+    'Stretch': {'z_scale': 1.15, 'xy_scale': 0.92},      # Elongation
+    'Flatten': {'z_scale': 0.15, 'xy_scale': 2.0},       # Cracked open
+    'HopUp':   {'z_offset': 0.08},                        # Wobble lift
+}
+
+EGG_ANIMATIONS = {
+    'Idle Wobble': {
+        'total_frames': 64,
+        'classified_type': 'idle',
+        'keyframes': [
+            (0,  {}),
+            (16, {'Squash': 0.06}),
+            (32, {'Stretch': 0.05, 'HopUp': 0.4}),
+            (48, {'Squash': 0.03}),
+            (64, {}),
+        ],
+    },
+    'Hit Jiggle': {
+        'total_frames': 18,
+        'classified_type': 'hit',
+        'keyframes': [
+            (0,  {'Squash': 0.35}),                        # hard impact
+            (3,  {'Stretch': 0.2, 'HopUp': 0.6}),         # big jiggle up
+            (6,  {'Squash': 0.25}),                        # bounce down
+            (9,  {'Stretch': 0.12, 'HopUp': 0.35}),       # smaller jiggle
+            (12, {'Squash': 0.1}),                         # bounce
+            (15, {'Stretch': 0.04}),                       # settling
+            (18, {}),
+        ],
+    },
+    'Crack Death': {
+        'total_frames': 28,
+        'classified_type': 'death',
+        'keyframes': [
+            (0,  {}),                                      # normal
+            (2,  {'Squash': 0.25}),                        # hit
+            (4,  {'Stretch': 0.15, 'HopUp': 0.5}),        # violent wobble up
+            (6,  {'Squash': 0.3}),                         # wobble down
+            (8,  {'Stretch': 0.1, 'HopUp': 0.4}),         # wobble up
+            (10, {'Squash': 0.35}),                        # wobble down — cracking
+            (13, {'Stretch': 0.08, 'HopUp': 0.2}),        # weaker wobble
+            (16, {'Squash': 0.25}),                        # structure failing
+            (20, {'Flatten': 0.4}),                        # shell breaking open
+            (24, {'Flatten': 0.7}),                        # collapsing
+            (28, {'Flatten': 1.0}),                        # cracked open flat
+        ],
+    },
+}
+
+# --- Frog preset (Roda Frog, etc.) ---
+FROG_SHAPE_KEYS = {
+    'Squash':   {'z_scale': 0.4,  'xy_scale': 1.4},       # Very deep frog crouch
+    'Stretch':  {'z_scale': 1.35, 'xy_scale': 0.8},       # Bigger tongue snap
+    'HopUp':    {'z_offset': 0.4},                         # Higher leap
+    'TiltOver': {'tilt': True, 'amount': 0.85},            # Strong belly-up roll
+}
+
+FROG_ANIMATIONS = {
+    'Idle Croak': {
+        'total_frames': 56,
+        'classified_type': 'idle',
+        'keyframes': [
+            (0,  {}),
+            (10, {'Squash': 0.12}),                        # throat in
+            (18, {'Stretch': 0.15, 'HopUp': 0.08}),       # throat PUFFS out
+            (24, {'Stretch': 0.12}),                       # hold puff
+            (30, {'Squash': 0.08}),                        # deflate
+            (42, {}),
+            (56, {}),
+        ],
+    },
+    'Frog Leap': {
+        'total_frames': 32,
+        'classified_type': 'walk',
+        'keyframes': [
+            (0,  {'Squash': 0.55}),                        # very deep crouch
+            (3,  {'Squash': 0.6}),                         # max crouch (loading)
+            (6,  {'Stretch': 0.4, 'HopUp': 0.8}),         # EXPLOSIVE launch
+            (11, {'Stretch': 0.25, 'HopUp': 1.0}),        # peak — full airborne
+            (16, {'Stretch': 0.1, 'HopUp': 0.6}),         # descending
+            (20, {'Squash': 0.5}),                         # SPLAT landing — big squash
+            (24, {'Squash': 0.35, 'HopUp': 0.1}),         # small bounce
+            (28, {'Squash': 0.25}),                        # settling
+            (32, {'Squash': 0.55}),                        # loop (back to crouch)
+        ],
+    },
+    'Tongue Snap': {
+        'total_frames': 24,
+        'classified_type': 'attack',
+        'keyframes': [
+            (0,  {}),                                      # rest
+            (2,  {'Squash': 0.35}),                        # fast crouch
+            (4,  {'Squash': 0.45}),                        # deep wind-up
+            (6,  {'Stretch': 0.65, 'HopUp': 0.3}),        # WHIP forward — explosive
+            (8,  {'Stretch': 0.6, 'HopUp': 0.15}),        # fully extended (tongue out)
+            (11, {'Squash': 0.35}),                        # SNAP back — fast recoil
+            (14, {'Squash': 0.2}),                         # recovering
+            (18, {'Squash': 0.08}),                        # settling
+            (24, {}),                                      # rest
+        ],
+    },
+    'Hit Flinch': {
+        'total_frames': 16,
+        'classified_type': 'hit',
+        'keyframes': [
+            (0,  {'Squash': 0.4}),
+            (4,  {'Squash': 0.45, 'HopUp': 0.25}),
+            (8,  {'Stretch': 0.2, 'HopUp': 0.35}),
+            (12, {'Squash': 0.12}),
+            (16, {}),
+        ],
+    },
+    'Belly Up Death': {
+        'total_frames': 32,
+        'classified_type': 'death',
+        'keyframes': [
+            (0,  {}),                                      # alive
+            (3,  {'Squash': 0.2}),                         # hit
+            (6,  {'Stretch': 0.5}),                        # BLOATING up — frog puffs
+            (9,  {'Stretch': 0.65}),                       # MAX BLOAT — big and round
+            (12, {'Stretch': 0.6}),                        # holding bloat
+            (15, {'Stretch': 0.5}),                        # slightly deflating
+            (18, {'Stretch': 0.4, 'TiltOver': 0.2}),      # starting to tip
+            (22, {'Stretch': 0.35, 'TiltOver': 0.5}),     # rolling belly-up
+            (26, {'Stretch': 0.3, 'TiltOver': 0.8}),      # on back — bloated
+            (32, {'Stretch': 0.25, 'TiltOver': 1.0}),     # belly up — puffed dead frog
+        ],
+    },
+}
+
+# --- Tree/Plant preset (Willow, Elder Willow, etc.) ---
+TREE_SHAPE_KEYS = {
+    'Squash':   {'z_scale': 0.65, 'xy_scale': 1.18},      # Bigger trunk slam
+    'Stretch':  {'z_scale': 1.25, 'xy_scale': 0.88},      # Taller reach
+    'HopUp':    {'z_offset': 0.18},                        # Bigger root lift
+    'TiltOver': {'tilt': True, 'amount': 1.0},             # Full timber fall
+}
+
+TREE_ANIMATIONS = {
+    'Idle Sway': {
+        'total_frames': 64,
+        'classified_type': 'idle',
+        'keyframes': [
+            (0,  {}),
+            (12, {'Stretch': 0.1}),                        # sway up
+            (24, {'Squash': 0.08}),                        # sway down
+            (36, {'Stretch': 0.06, 'HopUp': 0.1}),        # sway up + slight root lift
+            (48, {'Squash': 0.05}),                        # sway down
+            (64, {}),
+        ],
+    },
+    'Root Waddle': {
+        'total_frames': 32,
+        'classified_type': 'walk',
+        'keyframes': [
+            (0,  {'Squash': 0.15}),                        # lean down
+            (3,  {'Squash': 0.2}),                         # deeper lean — loading
+            (6,  {'HopUp': 0.75, 'Stretch': 0.15}),       # BIG root lift — uproot right
+            (9,  {'HopUp': 0.5, 'Stretch': 0.1}),         # coming down
+            (12, {'Squash': 0.2}),                         # PLANT — thud
+            (15, {'Squash': 0.12}),                        # wobble settle
+            (18, {'Squash': 0.2}),                         # lean again — loading
+            (21, {'HopUp': 0.75, 'Stretch': 0.15}),       # BIG root lift — uproot left
+            (24, {'HopUp': 0.5, 'Stretch': 0.1}),         # coming down
+            (27, {'Squash': 0.2}),                         # PLANT — thud
+            (30, {'Squash': 0.12}),                        # wobble
+            (32, {'Squash': 0.15}),                        # loop
+        ],
+    },
+    'Branch Swipe': {
+        'total_frames': 30,
+        'classified_type': 'attack',
+        'keyframes': [
+            (0,  {}),                                      # standing
+            (3,  {'Stretch': 0.2}),                        # reaching UP
+            (6,  {'Stretch': 0.35}),                       # TALL wind-up — branches raised
+            (8,  {'Stretch': 0.4}),                        # maximum height (hold)
+            (10, {'Squash': 0.4, 'HopUp': 0.4}),          # SLAM DOWN — fast + roots lift
+            (12, {'Squash': 0.45}),                        # max impact — ground shakes
+            (15, {'Squash': 0.3}),                         # rebound
+            (18, {'Stretch': 0.15}),                       # recovering upright
+            (22, {'Stretch': 0.06}),                       # settling
+            (26, {}),                                      # settling
+            (30, {}),                                      # rest
+        ],
+    },
+    'Trunk Shudder': {
+        'total_frames': 18,
+        'classified_type': 'hit',
+        'keyframes': [
+            (0,  {'Squash': 0.2}),                         # impact
+            (3,  {'Stretch': 0.15}),                       # shudder up
+            (6,  {'Squash': 0.18}),                        # shudder down
+            (9,  {'Stretch': 0.1}),                        # shudder up
+            (12, {'Squash': 0.06}),                        # settling
+            (18, {}),
+        ],
+    },
+    'Timber Death': {
+        'total_frames': 36,
+        'classified_type': 'death',
+        'keyframes': [
+            (0,  {}),                                      # standing
+            (4,  {'Stretch': 0.12}),                       # stiffening — creak
+            (8,  {'Stretch': 0.08, 'TiltOver': 0.1}),     # starting to lean
+            (12, {'TiltOver': 0.25, 'Squash': 0.05}),     # tipping point — creaking
+            (16, {'TiltOver': 0.4, 'Squash': 0.1}),       # falling — gaining speed
+            (20, {'TiltOver': 0.6, 'Squash': 0.15}),      # falling faster
+            (24, {'TiltOver': 0.8, 'Squash': 0.2}),       # almost down
+            (28, {'TiltOver': 0.95, 'Squash': 0.25}),     # TIMBER! impact
+            (32, {'TiltOver': 1.0, 'Squash': 0.2}),       # bounce settle
+            (36, {'TiltOver': 1.0, 'Squash': 0.2}),       # fallen tree — dead
+        ],
+    },
+}
+
+# --- Bird preset (Condor, Peco Peco, etc.) ---
+BIRD_SHAPE_KEYS = {
+    'Squash':   {'z_scale': 0.6,  'xy_scale': 1.25},      # Bigger peck range
+    'Stretch':  {'z_scale': 1.3,  'xy_scale': 0.82},      # Taller rear-up
+    'HopUp':    {'z_offset': 0.3},                         # Higher strut step
+    'TiltOver': {'tilt': True, 'amount': 0.9},             # Strong keel-over
+}
+
+BIRD_ANIMATIONS = {
+    'Idle Peck': {
+        'total_frames': 48,
+        'classified_type': 'idle',
+        'keyframes': [
+            (0,  {}),
+            (8,  {'Squash': 0.15}),                        # head dip — pecking ground
+            (12, {'Stretch': 0.08}),                       # head snap up
+            (20, {}),                                      # pause — looking around
+            (28, {'Squash': 0.12}),                        # another peck
+            (32, {'Stretch': 0.06}),                       # head up
+            (40, {'Squash': 0.05}),                        # slight bob
+            (48, {}),
+        ],
+    },
+    'Strut Walk': {
+        'total_frames': 28,
+        'classified_type': 'walk',
+        'keyframes': [
+            (0,  {'Squash': 0.15}),                        # head down
+            (2,  {'Squash': 0.2}),                         # loading step
+            (5,  {'Stretch': 0.15, 'HopUp': 0.6}),        # BIG step up — head bobs high
+            (8,  {'Squash': 0.2}),                         # head dips on plant
+            (10, {'Squash': 0.12}),                        # settle
+            (13, {'Squash': 0.18}),                        # loading other step
+            (16, {'Stretch': 0.15, 'HopUp': 0.6}),        # BIG step — head bobs
+            (19, {'Squash': 0.2}),                         # head dips on plant
+            (22, {'Squash': 0.12}),                        # settle
+            (25, {'Squash': 0.08}),                        # transition
+            (28, {'Squash': 0.15}),                        # loop
+        ],
+    },
+    'Peck Attack': {
+        'total_frames': 26,
+        'classified_type': 'attack',
+        'keyframes': [
+            (0,  {}),                                      # rest
+            (3,  {'Stretch': 0.25}),                       # rearing UP
+            (5,  {'Stretch': 0.4, 'HopUp': 0.2}),         # TALL wind-up — head high
+            (7,  {'Stretch': 0.42}),                       # hold at peak (menacing)
+            (9,  {'Squash': 0.45}),                        # SLAM peck DOWN — fast strike
+            (11, {'Squash': 0.5}),                         # max impact — beak in target
+            (14, {'Squash': 0.35}),                        # pulling back
+            (17, {'Stretch': 0.15, 'HopUp': 0.1}),        # recovering upright
+            (21, {'Stretch': 0.06}),                       # settling
+            (26, {}),                                      # rest
+        ],
+    },
+    'Wing Flinch': {
+        'total_frames': 16,
+        'classified_type': 'hit',
+        'keyframes': [
+            (0,  {'Squash': 0.25}),
+            (3,  {'Stretch': 0.25, 'HopUp': 0.4}),        # wing flap — big recoil up
+            (6,  {'Squash': 0.2}),
+            (10, {'Stretch': 0.08}),
+            (16, {}),
+        ],
+    },
+    'Keel Over Death': {
+        'total_frames': 32,
+        'classified_type': 'death',
+        'keyframes': [
+            (0,  {}),                                      # standing
+            (2,  {'Stretch': 0.2, 'HopUp': 0.3}),         # frantic wing FLAP up
+            (4,  {'Squash': 0.2}),                         # down
+            (6,  {'Stretch': 0.15, 'HopUp': 0.2}),        # another FLAP — weaker
+            (8,  {'Squash': 0.25}),                        # down — failing
+            (10, {'Stretch': 0.08, 'HopUp': 0.1}),        # last weak flap
+            (12, {'Squash': 0.3}),                         # buckle — wings give out
+            (16, {'Squash': 0.25, 'TiltOver': 0.2}),      # starting to tip
+            (20, {'Squash': 0.2,  'TiltOver': 0.5}),      # falling sideways
+            (24, {'Squash': 0.25, 'TiltOver': 0.8}),      # almost down
+            (28, {'Squash': 0.2,  'TiltOver': 0.95}),     # on side
+            (32, {'Squash': 0.2,  'TiltOver': 1.0}),      # keeled over — dead
+        ],
+    },
+}
+
+# --- Flying Insect preset (Hornet, Chonchon, etc.) ---
+FLYING_INSECT_SHAPE_KEYS = {
+    'Squash':    {'z_scale': 0.7,  'xy_scale': 1.2},
+    'Stretch':   {'z_scale': 1.25, 'xy_scale': 0.83},
+    'HopUp':     {'z_offset': 0.5},                        # Higher hover
+    'TiltOver':  {'tilt': True, 'amount': 0.9},            # Strong crash-on-side
+    'WingUp':    {'wing': True, 'z_offset': 0.18, 'xy_scale': 0.8},
+    'WingDown':  {'wing': True, 'z_offset': -0.12, 'xy_scale': 1.2},
+}
+
+FLYING_INSECT_ANIMATIONS = {
+    'Hover Buzz': {
+        'total_frames': 24,
+        'classified_type': 'idle',
+        'keyframes': [
+            # Body hover bob + rapid wing beats every 3 frames
+            (0,  {'HopUp': 0.6,  'Stretch': 0.08, 'WingDown': 0.8}),
+            (3,  {'HopUp': 0.42, 'Squash': 0.1,  'WingUp': 0.85}),
+            (6,  {'HopUp': 0.68, 'Stretch': 0.08, 'WingDown': 0.85}),
+            (9,  {'HopUp': 0.45, 'Squash': 0.08, 'WingUp': 0.8}),
+            (12, {'HopUp': 0.65, 'Stretch': 0.06, 'WingDown': 0.8}),
+            (15, {'HopUp': 0.4,  'Squash': 0.1,  'WingUp': 0.85}),
+            (18, {'HopUp': 0.62, 'Stretch': 0.07, 'WingDown': 0.85}),
+            (21, {'HopUp': 0.44, 'Squash': 0.08, 'WingUp': 0.8}),
+            (24, {'HopUp': 0.6,  'Stretch': 0.08, 'WingDown': 0.8}),
+        ],
+    },
+    'Dart Forward': {
+        'total_frames': 28,
+        'classified_type': 'walk',
+        'keyframes': [
+            (0,  {'HopUp': 0.5,  'Squash': 0.12, 'WingDown': 0.8}),
+            (2,  {'HopUp': 0.65, 'Stretch': 0.15, 'WingUp': 0.9}),
+            (5,  {'HopUp': 0.75, 'Stretch': 0.2,  'WingDown': 0.85}),
+            (7,  {'HopUp': 0.55, 'Squash': 0.08, 'WingUp': 0.85}),
+            (10, {'HopUp': 0.7,  'Stretch': 0.15, 'WingDown': 0.8}),
+            (12, {'HopUp': 0.48, 'Squash': 0.12, 'WingUp': 0.9}),
+            (15, {'HopUp': 0.7,  'Stretch': 0.12, 'WingDown': 0.85}),
+            (17, {'HopUp': 0.45, 'Squash': 0.1,  'WingUp': 0.85}),
+            (20, {'HopUp': 0.65, 'Stretch': 0.08, 'WingDown': 0.8}),
+            (23, {'HopUp': 0.48, 'Squash': 0.1,  'WingUp': 0.85}),
+            (26, {'HopUp': 0.55, 'Stretch': 0.06, 'WingDown': 0.8}),
+            (28, {'HopUp': 0.5,  'Squash': 0.12, 'WingDown': 0.8}),
+        ],
+    },
+    'Sting Attack': {
+        'total_frames': 30,
+        'classified_type': 'attack',
+        'keyframes': [
+            (0,  {'HopUp': 0.6,  'WingDown': 0.7}),
+            (2,  {'HopUp': 0.8,  'Stretch': 0.2,  'WingUp': 0.9}),
+            (4,  {'HopUp': 1.0,  'Stretch': 0.3,  'WingDown': 0.9}),    # MAX HEIGHT
+            (6,  {'HopUp': 0.95, 'Stretch': 0.25, 'WingUp': 0.85}),     # hold peak
+            (8,  {'HopUp': 0.35, 'Squash': 0.25, 'WingDown': 0.5}),     # DIVE — wings tuck
+            (10, {'HopUp': 0.15, 'Squash': 0.35}),                       # IMPACT
+            (12, {'HopUp': 0.12, 'Squash': 0.3}),                        # hold sting
+            (15, {'HopUp': 0.35, 'Stretch': 0.15, 'WingUp': 0.7}),      # recovering
+            (18, {'HopUp': 0.5,  'Stretch': 0.1,  'WingDown': 0.8}),
+            (21, {'HopUp': 0.55, 'WingUp': 0.8}),
+            (24, {'HopUp': 0.58, 'WingDown': 0.75}),
+            (27, {'HopUp': 0.6,  'WingUp': 0.8}),
+            (30, {'HopUp': 0.6,  'WingDown': 0.7}),
+        ],
+    },
+    'Swat Flinch': {
+        'total_frames': 18,
+        'classified_type': 'hit',
+        'keyframes': [
+            (0,  {'HopUp': 0.25, 'Squash': 0.25}),                       # SWATTED
+            (3,  {'HopUp': 0.15, 'Squash': 0.3}),                        # lowest
+            (6,  {'HopUp': 0.45, 'Stretch': 0.15, 'WingUp': 0.9}),      # frantic flap
+            (9,  {'HopUp': 0.5,  'WingDown': 0.8}),
+            (12, {'HopUp': 0.55, 'Stretch': 0.05, 'WingUp': 0.8}),
+            (15, {'HopUp': 0.58, 'WingDown': 0.7}),
+            (18, {'HopUp': 0.6,  'WingUp': 0.75}),
+        ],
+    },
+    'Swatted Death': {
+        'total_frames': 32,
+        'classified_type': 'death',
+        'keyframes': [
+            (0,  {'HopUp': 0.6,  'WingDown': 0.7}),                     # flying
+            (2,  {'HopUp': 0.5,  'Squash': 0.15, 'WingUp': 0.6}),      # hit
+            (4,  {'HopUp': 0.55, 'WingDown': 0.5}),                     # erratic
+            (6,  {'HopUp': 0.38, 'WingUp': 0.4}),                       # losing it
+            (8,  {'HopUp': 0.42, 'WingDown': 0.3}),                     # wings failing
+            (10, {'HopUp': 0.28, 'Squash': 0.15}),                      # dropping — wings stop
+            (12, {'HopUp': 0.2,  'Squash': 0.2}),                       # spiraling
+            (14, {'HopUp': 0.1,  'Squash': 0.2}),                       # almost down
+            (16, {'HopUp': 0.02, 'Squash': 0.25}),                      # CRASH
+            (18, {'Squash': 0.2}),                                        # on ground
+            (20, {'Squash': 0.15, 'TiltOver': 0.3}),                    # tipping over
+            (24, {'Squash': 0.2,  'TiltOver': 0.7}),                    # falling on side
+            (28, {'Squash': 0.25, 'TiltOver': 0.9}),                    # on side
+            (32, {'Squash': 0.2,  'TiltOver': 1.0}),                    # dead on side
+        ],
+    },
+}
+
+# --- Bat preset (Familiar, etc.) ---
+# Bats fly constantly like insects but with SLOW, LARGE wing beats.
+# Swooping flight, dive attacks, plummet death.
+BAT_SHAPE_KEYS = {
+    'Squash':    {'z_scale': 0.6,  'xy_scale': 1.28},
+    'Stretch':   {'z_scale': 1.35, 'xy_scale': 0.8},
+    'HopUp':     {'z_offset': 0.45},
+    'TiltOver':  {'tilt': True, 'amount': 0.9},            # Strong crash-on-side
+    'WingUp':    {'wing': True, 'z_offset': 0.22, 'xy_scale': 0.78},  # Bigger flaps
+    'WingDown':  {'wing': True, 'z_offset': -0.15, 'xy_scale': 1.22},
+}
+
+BAT_ANIMATIONS = {
+    'Wing Beat Hover': {
+        'total_frames': 32,
+        'classified_type': 'idle',
+        'keyframes': [
+            # Slow dramatic wing beats (every 5 frames) + body bob
+            (0,  {'HopUp': 0.55, 'Stretch': 0.15, 'WingUp': 0.8}),
+            (5,  {'HopUp': 0.38, 'Squash': 0.15, 'WingDown': 0.85}),
+            (10, {'HopUp': 0.6,  'Stretch': 0.12, 'WingUp': 0.75}),
+            (16, {'HopUp': 0.4,  'Squash': 0.12, 'WingDown': 0.8}),
+            (21, {'HopUp': 0.58, 'Stretch': 0.1,  'WingUp': 0.8}),
+            (26, {'HopUp': 0.38, 'Squash': 0.14, 'WingDown': 0.85}),
+            (32, {'HopUp': 0.55, 'Stretch': 0.15, 'WingUp': 0.8}),
+        ],
+    },
+    'Swoop Flight': {
+        'total_frames': 36,
+        'classified_type': 'walk',
+        'keyframes': [
+            (0,  {'HopUp': 0.5,  'Squash': 0.15, 'WingDown': 0.7}),
+            (4,  {'HopUp': 0.3,  'Squash': 0.2,  'WingDown': 0.85}),   # swooping DOWN
+            (8,  {'HopUp': 0.2,  'Squash': 0.25, 'WingUp': 0.5}),      # lowest — wings start up
+            (12, {'HopUp': 0.5,  'Stretch': 0.2,  'WingUp': 0.9}),     # BIG flap UP
+            (16, {'HopUp': 0.75, 'Stretch': 0.25, 'WingDown': 0.3}),   # peak — wings tucking
+            (20, {'HopUp': 0.6,  'Stretch': 0.12, 'WingDown': 0.7}),   # gliding
+            (24, {'HopUp': 0.45, 'Squash': 0.12, 'WingUp': 0.6}),      # descending
+            (28, {'HopUp': 0.35, 'Squash': 0.18, 'WingUp': 0.8}),      # swooping
+            (32, {'HopUp': 0.42, 'WingDown': 0.6}),                     # transition
+            (36, {'HopUp': 0.5,  'Squash': 0.15, 'WingDown': 0.7}),    # loop
+        ],
+    },
+    'Dive Bite': {
+        'total_frames': 30,
+        'classified_type': 'attack',
+        'keyframes': [
+            (0,  {'HopUp': 0.55, 'Stretch': 0.1,  'WingUp': 0.7}),
+            (3,  {'HopUp': 0.75, 'Stretch': 0.25, 'WingUp': 0.9}),    # rising — big flap
+            (5,  {'HopUp': 0.95, 'Stretch': 0.3,  'WingDown': 0.3}),   # MAX HEIGHT
+            (7,  {'HopUp': 1.0,  'Stretch': 0.28}),                     # hold peak — wings tucked
+            (9,  {'HopUp': 0.5,  'Squash': 0.2}),                       # DIVE — wings folded tight
+            (11, {'HopUp': 0.2,  'Squash': 0.35}),                      # IMPACT — fangs in
+            (13, {'HopUp': 0.15, 'Squash': 0.3}),                       # latched on
+            (16, {'HopUp': 0.3,  'Stretch': 0.15, 'WingUp': 0.6}),     # releasing — flap
+            (19, {'HopUp': 0.45, 'Stretch': 0.2,  'WingDown': 0.7}),
+            (23, {'HopUp': 0.52, 'Stretch': 0.12, 'WingUp': 0.7}),
+            (27, {'HopUp': 0.55, 'WingDown': 0.6}),
+            (30, {'HopUp': 0.55, 'Stretch': 0.1,  'WingUp': 0.7}),
+        ],
+    },
+    'Wing Recoil': {
+        'total_frames': 18,
+        'classified_type': 'hit',
+        'keyframes': [
+            (0,  {'HopUp': 0.25, 'Squash': 0.3}),                      # SMACKED
+            (3,  {'HopUp': 0.18, 'Squash': 0.35}),                      # lowest
+            (6,  {'HopUp': 0.45, 'Stretch': 0.2, 'WingUp': 0.9}),      # frantic flap
+            (9,  {'HopUp': 0.35, 'Squash': 0.1, 'WingDown': 0.8}),
+            (12, {'HopUp': 0.5,  'Stretch': 0.12, 'WingUp': 0.7}),
+            (15, {'HopUp': 0.48, 'WingDown': 0.6}),
+            (18, {'HopUp': 0.55, 'Stretch': 0.1, 'WingUp': 0.7}),
+        ],
+    },
+    'Plummet Death': {
+        'total_frames': 32,
+        'classified_type': 'death',
+        'keyframes': [
+            (0,  {'HopUp': 0.55, 'Stretch': 0.1, 'WingUp': 0.7}),     # flying
+            (3,  {'HopUp': 0.45, 'Squash': 0.15, 'WingDown': 0.5}),   # hit
+            (5,  {'HopUp': 0.5,  'Stretch': 0.15, 'WingUp': 0.6}),    # desperate flap
+            (7,  {'HopUp': 0.35, 'Squash': 0.2, 'WingDown': 0.3}),    # failing
+            (9,  {'HopUp': 0.4,  'WingUp': 0.3}),                      # last weak flap
+            (11, {'HopUp': 0.25, 'Squash': 0.25}),                     # wings FOLD — done
+            (13, {'HopUp': 0.15, 'Squash': 0.3}),                      # plummeting
+            (15, {'HopUp': 0.05, 'Squash': 0.35}),                     # almost ground
+            (17, {'Squash': 0.3}),                                       # CRASH
+            (19, {'Squash': 0.2}),                                       # on ground
+            (21, {'Squash': 0.15, 'TiltOver': 0.3}),                   # tipping over
+            (25, {'Squash': 0.2,  'TiltOver': 0.7}),                   # falling on side
+            (28, {'Squash': 0.2,  'TiltOver': 0.9}),                   # on side
+            (32, {'Squash': 0.2,  'TiltOver': 1.0}),                   # dead on side
+        ],
+    },
+}
+
+# --- Quadruped preset (Savage Babe, Wolf, Savage, etc.) ---
+# Four-legged animals: trotting gait, charge attacks, stumble/collapse death
+QUADRUPED_SHAPE_KEYS = {
+    'Squash':   {'z_scale': 0.6,  'xy_scale': 1.25},      # Deep crouch before charge
+    'Stretch':  {'z_scale': 1.25, 'xy_scale': 0.85},      # Body extends during charge
+    'HopUp':    {'z_offset': 0.18},                        # Trot bounce (not a hop)
+    'TiltOver': {'tilt': True, 'amount': 0.9},             # Collapse on side
+}
+
+QUADRUPED_ANIMATIONS = {
+    'Idle Sniff': {
+        'total_frames': 48,
+        'classified_type': 'idle',
+        'keyframes': [
+            (0,  {}),                                      # standing
+            (8,  {'Squash': 0.1}),                         # head dips — sniffing
+            (14, {'Stretch': 0.06}),                       # head up — alert
+            (20, {}),                                      # pause
+            (28, {'Squash': 0.12}),                        # another sniff
+            (34, {'Stretch': 0.08}),                       # look up
+            (40, {'Squash': 0.04}),                        # breathing
+            (48, {}),                                      # loop
+        ],
+    },
+    'Trot Forward': {
+        'total_frames': 28,
+        'classified_type': 'walk',
+        'keyframes': [
+            (0,  {'Squash': 0.15}),                        # front legs plant
+            (3,  {'Stretch': 0.1, 'HopUp': 0.5}),         # push off — body UP
+            (6,  {'Squash': 0.18}),                        # front legs land — bob down
+            (9,  {'Stretch': 0.08, 'HopUp': 0.4}),        # push off again
+            (12, {'Squash': 0.2}),                         # land — deeper bob
+            (15, {'Stretch': 0.12, 'HopUp': 0.55}),       # bigger push — trotting faster
+            (18, {'Squash': 0.15}),                        # land
+            (21, {'Stretch': 0.1, 'HopUp': 0.45}),        # push
+            (24, {'Squash': 0.18}),                        # land
+            (28, {'Squash': 0.15}),                        # loop
+        ],
+    },
+    'Charge Attack': {
+        'total_frames': 30,
+        'classified_type': 'attack',
+        'keyframes': [
+            (0,  {}),                                      # standing
+            (3,  {'Squash': 0.3}),                         # crouch — winding up
+            (5,  {'Squash': 0.45}),                        # deep crouch — LOADING
+            (7,  {'Stretch': 0.5, 'HopUp': 0.4}),         # CHARGE — body extends forward
+            (9,  {'Stretch': 0.6, 'HopUp': 0.3}),         # full extension — IMPACT
+            (11, {'Stretch': 0.55, 'HopUp': 0.15}),       # follow-through
+            (14, {'Squash': 0.35}),                        # hard recoil — head down
+            (17, {'Squash': 0.25}),                        # recovering
+            (21, {'Squash': 0.12}),                        # settling
+            (25, {'Squash': 0.05}),                        # almost rest
+            (30, {}),                                      # rest
+        ],
+    },
+    'Stumble Flinch': {
+        'total_frames': 18,
+        'classified_type': 'hit',
+        'keyframes': [
+            (0,  {'Squash': 0.35}),                        # impact — buckles
+            (3,  {'Squash': 0.4, 'HopUp': 0.15}),         # stumble — slight lift
+            (6,  {'Stretch': 0.15, 'HopUp': 0.25}),       # recovering step
+            (9,  {'Squash': 0.2}),                         # plants feet
+            (12, {'Stretch': 0.08}),                       # steadying
+            (18, {}),                                      # recovered
+        ],
+    },
+    'Collapse Death': {
+        'total_frames': 32,
+        'classified_type': 'death',
+        'keyframes': [
+            (0,  {}),                                      # standing
+            (3,  {'Squash': 0.25}),                        # hit — legs buckle
+            (6,  {'Stretch': 0.15, 'HopUp': 0.2}),        # staggers up
+            (9,  {'Squash': 0.35}),                        # legs GIVE OUT
+            (12, {'Squash': 0.4}),                         # collapsing
+            (15, {'Squash': 0.3, 'TiltOver': 0.2}),       # starting to tip
+            (18, {'Squash': 0.25, 'TiltOver': 0.4}),      # falling sideways
+            (22, {'Squash': 0.2, 'TiltOver': 0.65}),      # almost down
+            (26, {'Squash': 0.25, 'TiltOver': 0.85}),     # on side
+            (32, {'Squash': 0.2, 'TiltOver': 1.0}),       # dead — on side
+        ],
+    },
+}
+
+# --- Plant preset (Mandragora, Flora, etc.) ---
+# Rooted/stationary monsters — no walk. Attack by thrashing tentacles/leaves.
+PLANT_SHAPE_KEYS = {
+    'Squash':   {'z_scale': 0.65, 'xy_scale': 1.25},      # Tentacle retraction / compression
+    'Stretch':  {'z_scale': 1.35, 'xy_scale': 0.82},      # Tentacle extension / lashing out
+    'HopUp':    {'z_offset': 0.12},                        # Slight lift for writhing effect
+    'TiltOver': {'tilt': True, 'amount': 0.85},            # Wilting death
+}
+
+PLANT_ANIMATIONS = {
+    'Idle Sway': {
+        'total_frames': 56,
+        'classified_type': 'idle',
+        'keyframes': [
+            (0,  {}),                                      # resting
+            (8,  {'Stretch': 0.1, 'HopUp': 0.2}),         # sway up — leaves rustle
+            (16, {'Squash': 0.08}),                        # sway down
+            (24, {'Stretch': 0.06, 'HopUp': 0.15}),       # sway up again
+            (32, {'Squash': 0.05}),                        # settle
+            (42, {'Stretch': 0.04, 'HopUp': 0.08}),       # gentle breath
+            (56, {}),                                      # loop
+        ],
+    },
+    'Tentacle Thrash': {
+        'total_frames': 30,
+        'classified_type': 'attack',
+        'keyframes': [
+            (0,  {}),                                      # still
+            (2,  {'Squash': 0.25}),                        # retract — coiling
+            (4,  {'Squash': 0.35}),                        # deep retract — LOADING
+            (6,  {'Stretch': 0.5, 'HopUp': 0.4}),         # LASH OUT — big extension
+            (8,  {'Squash': 0.3}),                         # snap back
+            (10, {'Stretch': 0.45, 'HopUp': 0.35}),       # LASH AGAIN — rapid thrash
+            (12, {'Squash': 0.25}),                        # snap back
+            (14, {'Stretch': 0.35, 'HopUp': 0.25}),       # third lash — weaker
+            (17, {'Squash': 0.2}),                         # retract
+            (20, {'Squash': 0.12}),                        # settling
+            (25, {'Squash': 0.05}),                        # calming
+            (30, {}),                                      # rest
+        ],
+    },
+    'Recoil Flinch': {
+        'total_frames': 18,
+        'classified_type': 'hit',
+        'keyframes': [
+            (0,  {'Squash': 0.35}),                        # impact — compressed
+            (3,  {'Squash': 0.4, 'HopUp': 0.1}),          # max compress
+            (6,  {'Stretch': 0.2, 'HopUp': 0.2}),         # rebound — springs back
+            (10, {'Stretch': 0.08}),                       # settling
+            (14, {'Squash': 0.03}),                        # almost rest
+            (18, {}),                                      # recovered
+        ],
+    },
+    'Wilt Death': {
+        'total_frames': 32,
+        'classified_type': 'death',
+        'keyframes': [
+            (0,  {}),                                      # alive
+            (3,  {'Squash': 0.15}),                        # hit
+            (6,  {'Stretch': 0.12, 'HopUp': 0.1}),        # last sway — still fighting
+            (9,  {'Squash': 0.2}),                         # drooping
+            (12, {'Squash': 0.25}),                        # wilting — leaves droop
+            (16, {'Squash': 0.3, 'TiltOver': 0.2}),       # starting to lean
+            (20, {'Squash': 0.3, 'TiltOver': 0.45}),      # falling sideways
+            (24, {'Squash': 0.25, 'TiltOver': 0.7}),      # almost down
+            (28, {'Squash': 0.25, 'TiltOver': 0.9}),      # on side
+            (32, {'Squash': 0.2, 'TiltOver': 1.0}),       # wilted — dead
+        ],
+    },
+}
+
+# --- Biped Insect preset (Rocker, Thief Bug, etc.) ---
+# Upright insects with arms and legs. Uses LeanForward for body tilt
+# and ArmReach for arm extension. Can't truly move limbs independently,
+# but rapid lean+squash+stretch cycles create convincing biped movement.
+BIPED_INSECT_SHAPE_KEYS = {
+    'Squash':      {'z_scale': 0.6,  'xy_scale': 1.25},   # Crouch/wind-up
+    'Stretch':     {'z_scale': 1.3,  'xy_scale': 0.83},   # Reach up / stand tall
+    'HopUp':       {'z_offset': 0.2},                      # Walking step bounce
+    'TiltOver':    {'tilt': True, 'amount': 0.9},          # Death crumple sideways
+    'LeanForward': {'lean': True, 'amount': 0.35},         # Upper body tilts forward
+    'ArmReach':    {'wing': True, 'z_offset': 0.12, 'xy_scale': 1.2},  # Arms extend outward
+}
+
+BIPED_INSECT_ANIMATIONS = {
+    'Idle Fidget': {
+        'total_frames': 48,
+        'classified_type': 'idle',
+        'keyframes': [
+            (0,  {}),                                      # standing upright
+            (8,  {'Squash': 0.06, 'LeanForward': 0.1}),   # slight forward bob
+            (14, {'Stretch': 0.05}),                       # straighten
+            (20, {}),                                      # pause
+            (26, {'LeanForward': 0.15, 'ArmReach': 0.1}), # look down — arms shift
+            (32, {'Stretch': 0.08}),                       # back up
+            (38, {'Squash': 0.04}),                        # subtle fidget
+            (48, {}),                                      # loop
+        ],
+    },
+    'Skitter Walk': {
+        'total_frames': 24,
+        'classified_type': 'walk',
+        'keyframes': [
+            # Rapid rhythmic walk: lean-bob-lean-bob
+            (0,  {'Squash': 0.15, 'LeanForward': 0.2}),    # step — leaning forward
+            (3,  {'Stretch': 0.1, 'HopUp': 0.5}),          # push off — body UP
+            (6,  {'Squash': 0.18, 'LeanForward': 0.15}),   # land — bob down + lean
+            (9,  {'Stretch': 0.08, 'HopUp': 0.45}),        # push off again
+            (12, {'Squash': 0.2, 'LeanForward': 0.25}),    # deeper step — more lean
+            (15, {'Stretch': 0.12, 'HopUp': 0.55}),        # big push off
+            (18, {'Squash': 0.15, 'LeanForward': 0.18}),   # land
+            (21, {'Stretch': 0.08, 'HopUp': 0.4}),         # push
+            (24, {'Squash': 0.15, 'LeanForward': 0.2}),    # loop
+        ],
+    },
+    'Claw Swipe': {
+        'total_frames': 30,
+        'classified_type': 'attack',
+        'keyframes': [
+            (0,  {}),                                       # standing
+            (3,  {'Squash': 0.3}),                          # crouch — loading
+            (5,  {'Squash': 0.4, 'ArmReach': 0.3}),        # deep wind-up — arms pull back
+            (7,  {'Stretch': 0.5, 'LeanForward': 0.5,
+                  'ArmReach': 0.8, 'HopUp': 0.3}),         # LUNGE — arms reach, body extends
+            (9,  {'Stretch': 0.45, 'LeanForward': 0.6,
+                  'ArmReach': 0.9}),                        # MAX REACH — claw swipe impact
+            (11, {'Stretch': 0.3, 'LeanForward': 0.4,
+                  'ArmReach': 0.6}),                        # follow through
+            (14, {'Squash': 0.3, 'LeanForward': 0.15}),    # recoil back
+            (17, {'Squash': 0.2}),                          # recovering
+            (21, {'Squash': 0.1}),                          # settling
+            (25, {'Squash': 0.04}),                         # almost rest
+            (30, {}),                                       # rest
+        ],
+    },
+    'Flinch Reel': {
+        'total_frames': 18,
+        'classified_type': 'hit',
+        'keyframes': [
+            (0,  {'Squash': 0.3}),                          # impact — crumples
+            (3,  {'Squash': 0.35, 'HopUp': 0.15}),         # reeling back
+            (6,  {'Stretch': 0.12, 'LeanForward': 0.15}),  # stumbles forward
+            (9,  {'Squash': 0.15}),                         # catches self
+            (12, {'Stretch': 0.06}),                        # steadying
+            (18, {}),                                       # recovered
+        ],
+    },
+    'Crumple Death': {
+        'total_frames': 32,
+        'classified_type': 'death',
+        'keyframes': [
+            (0,  {}),                                       # standing
+            (3,  {'Squash': 0.2}),                          # hit — buckles
+            (6,  {'Stretch': 0.1, 'LeanForward': 0.2}),    # staggers forward
+            (9,  {'Squash': 0.3, 'LeanForward': 0.35}),    # legs giving out — pitching forward
+            (12, {'Squash': 0.35, 'LeanForward': 0.4}),    # crumpling — almost down
+            (15, {'Squash': 0.3, 'LeanForward': 0.3,
+                  'TiltOver': 0.2}),                        # starting to tip sideways
+            (19, {'Squash': 0.25, 'TiltOver': 0.45}),      # falling
+            (23, {'Squash': 0.25, 'TiltOver': 0.7}),       # almost down
+            (27, {'Squash': 0.2, 'TiltOver': 0.9}),        # on side
+            (32, {'Squash': 0.2, 'TiltOver': 1.0}),        # crumpled — dead
+        ],
+    },
+}
+
 # Monster type registry
 MONSTER_PRESETS = {
     'blob': {
         'shape_keys': BLOB_SHAPE_KEYS,
         'animations': BLOB_ANIMATIONS,
     },
-    # Future: 'quadruped', 'insect', 'plant', etc.
+    'caterpillar': {
+        'shape_keys': CATERPILLAR_SHAPE_KEYS,
+        'animations': CATERPILLAR_ANIMATIONS,
+    },
+    'rabbit': {
+        'shape_keys': RABBIT_SHAPE_KEYS,
+        'animations': RABBIT_ANIMATIONS,
+    },
+    'egg': {
+        'shape_keys': EGG_SHAPE_KEYS,
+        'animations': EGG_ANIMATIONS,
+    },
+    'frog': {
+        'shape_keys': FROG_SHAPE_KEYS,
+        'animations': FROG_ANIMATIONS,
+    },
+    'tree': {
+        'shape_keys': TREE_SHAPE_KEYS,
+        'animations': TREE_ANIMATIONS,
+    },
+    'bird': {
+        'shape_keys': BIRD_SHAPE_KEYS,
+        'animations': BIRD_ANIMATIONS,
+    },
+    'flying_insect': {
+        'shape_keys': FLYING_INSECT_SHAPE_KEYS,
+        'animations': FLYING_INSECT_ANIMATIONS,
+    },
+    'bat': {
+        'shape_keys': BAT_SHAPE_KEYS,
+        'animations': BAT_ANIMATIONS,
+    },
+    'quadruped': {
+        'shape_keys': QUADRUPED_SHAPE_KEYS,
+        'animations': QUADRUPED_ANIMATIONS,
+    },
+    'plant': {
+        'shape_keys': PLANT_SHAPE_KEYS,
+        'animations': PLANT_ANIMATIONS,
+    },
+    'biped_insect': {
+        'shape_keys': BIPED_INSECT_SHAPE_KEYS,
+        'animations': BIPED_INSECT_ANIMATIONS,
+    },
 }
 
 
@@ -154,7 +1108,8 @@ def parse_args():
                         help="Output directory")
     parser.add_argument("--monster-type", default="blob",
                         choices=list(MONSTER_PRESETS.keys()),
-                        help="Monster type preset (default: blob)")
+                        help="Monster type preset (default: blob). "
+                             "Use 'caterpillar' for worm/insect enemies.")
     parser.add_argument("--directions", type=int, default=8, choices=[4, 8])
     parser.add_argument("--render-size", type=int, default=1024)
     parser.add_argument("--no-cel-shade", action="store_true")
@@ -303,9 +1258,13 @@ def compute_mesh_bounds(mesh_obj):
 def add_shape_keys(mesh_obj, preset):
     """Add shape keys to the mesh based on the preset definition.
 
-    Deformation keys (Squash/Stretch/Flatten) anchor to z_min so the
-    model stays on the ground plane. The HopUp key translates all
-    vertices uniformly upward for hop/bounce animations.
+    Shape key types:
+      - Deformation (Squash/Stretch/Flatten): scale from z_min anchor
+      - Translation (HopUp): uniform vertical offset
+      - Wing-targeted (WingUp/WingDown): only affects vertices above center
+        height AND beyond 35% of max XY extent (wing region)
+      - Tilt (TiltOver): tilts model sideways — vertices on +X side drop,
+        -X side rises. Creates "fallen over" death poses.
     """
     # Create Basis if needed
     if not mesh_obj.data.shape_keys:
@@ -314,17 +1273,80 @@ def add_shape_keys(mesh_obj, preset):
     basis = mesh_obj.data.shape_keys.key_blocks['Basis']
     center, z_min, z_max = compute_mesh_bounds(mesh_obj)
     height = z_max - z_min
+    center_z = (z_min + z_max) / 2
+
+    # Compute max XY distance from center (for wing detection)
+    max_xy_dist = 0
+    for v in mesh_obj.data.vertices:
+        xy_dist = math.sqrt((v.co.x - center.x)**2 + (v.co.y - center.y)**2)
+        max_xy_dist = max(max_xy_dist, xy_dist)
 
     for sk_name, params in preset.items():
         key = mesh_obj.shape_key_add(name=sk_name, from_mix=False)
         key.value = 0.0
 
-        if 'z_offset' in params:
+        if params.get('wing'):
+            # Wing-targeted: only deform vertices in the wing region
+            # (above center height AND far from center XY)
+            wing_z_off = params.get('z_offset', 0) * height
+            wing_xy_scale = params.get('xy_scale', 1.0)
+            wing_threshold = 0.35  # 35% of max XY extent
+
+            for i in range(len(key.data)):
+                bco = basis.data[i].co
+                xy_dist = math.sqrt((bco.x - center.x)**2 +
+                                    (bco.y - center.y)**2)
+                is_wing = ((bco.z > center_z) and
+                           (xy_dist > max_xy_dist * wing_threshold))
+
+                if is_wing:
+                    key.data[i].co = mathutils.Vector((
+                        center.x + (bco.x - center.x) * wing_xy_scale,
+                        center.y + (bco.y - center.y) * wing_xy_scale,
+                        bco.z + wing_z_off,
+                    ))
+                # else: non-wing vertices stay at basis (no deformation)
+
+        elif params.get('lean'):
+            # Forward lean: higher vertices move forward (Y axis),
+            # anchored at feet. Creates walking lean, attack lunge,
+            # and backward recoil. Essential for biped enemies.
+            lean_amount = params.get('amount', 0.3) * height
+            for i in range(len(key.data)):
+                bco = basis.data[i].co
+                # Z ratio: 0 at feet, 1 at head
+                z_ratio = ((bco.z - z_min) / height
+                           if height > 0 else 0)
+                key.data[i].co = mathutils.Vector((
+                    bco.x,
+                    bco.y + z_ratio * lean_amount,
+                    bco.z,
+                ))
+
+        elif params.get('tilt'):
+            # Diagonal tilt: combines X+Y so from ALL 8 camera angles the
+            # fall is always partially sideways, never directly toward/away.
+            # The SW corner drops, NE corner rises — from the south camera
+            # this looks like falling forward-right (away from viewer).
+            tilt_amount = params.get('amount', 0.4) * height
+            for i in range(len(key.data)):
+                bco = basis.data[i].co
+                # Diagonal ratio: (X + Y) normalized by 2*max for safe range
+                diag = ((bco.x - center.x) + (bco.y - center.y))
+                diag_ratio = diag / (max_xy_dist * 2.0) if max_xy_dist > 0 else 0
+                key.data[i].co = mathutils.Vector((
+                    bco.x,
+                    bco.y,
+                    bco.z + diag_ratio * tilt_amount,
+                ))
+
+        elif 'z_offset' in params:
             # Uniform vertical translation (HopUp)
             offset = params['z_offset'] * height
             for i in range(len(key.data)):
                 bco = basis.data[i].co
-                key.data[i].co = mathutils.Vector((bco.x, bco.y, bco.z + offset))
+                key.data[i].co = mathutils.Vector((
+                    bco.x, bco.y, bco.z + offset))
         else:
             # Scale deformation anchored to z_min (ground)
             z_scale = params['z_scale']
@@ -587,7 +1609,8 @@ def auto_frame_camera(cam_obj, mesh_obj, sk_names, elevation_deg=10.0,
     if sk:
         # Activate stretch + hop to find max bounds
         for name in sk_names:
-            if name in ('Stretch', 'HopUp'):
+            if name in ('Stretch', 'HopUp', 'TiltOver', 'WingUp',
+                            'LeanForward', 'ArmReach'):
                 sk.key_blocks[name].value = 1.0
         bpy.context.view_layer.update()
 

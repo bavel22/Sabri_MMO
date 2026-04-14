@@ -420,6 +420,7 @@ RO_MONSTER_TEMPLATES['fabre'] = {
     raceGroups: {},
     stats: { str: 0, agi: 2, vit: 4, int: 0, dex: 7, luk: 5, level: 2, weaponATK: 8 },
     modes: { detector: true },
+    spriteClass: 'fabre', weaponMode: 0,
     drops: [
         { itemName: 'Fluff', rate: 65 },
         { itemName: 'Feather', rate: 5 },
@@ -446,6 +447,7 @@ RO_MONSTER_TEMPLATES['pupa'] = {
     raceGroups: {},
     stats: { str: 0, agi: 0, vit: 0, int: 0, dex: 0, luk: 20, level: 2, weaponATK: 1 },
     modes: { detector: true },
+    spriteClass: 'pupa', weaponMode: 0,
     drops: [
         { itemName: 'Phracon', rate: 0.8 },
         { itemName: 'Chrysalis', rate: 55 },
@@ -626,6 +628,7 @@ RO_MONSTER_TEMPLATES['lunatic'] = {
     raceGroups: {},
     stats: { str: 0, agi: 3, vit: 3, int: 10, dex: 8, luk: 60, level: 3, weaponATK: 9 },
     modes: {},
+    spriteClass: 'lunatic', weaponMode: 0,
     drops: [
         { itemName: 'Clover', rate: 65 },
         { itemName: 'Feather', rate: 10 },
@@ -652,6 +655,7 @@ RO_MONSTER_TEMPLATES['drops'] = {
     raceGroups: {},
     stats: { str: 0, agi: 3, vit: 3, int: 0, dex: 12, luk: 15, level: 3, weaponATK: 10 },
     modes: {},
+    spriteClass: 'drops', weaponMode: 0,
     drops: [
         { itemName: 'Jellopy', rate: 75 },
         { itemName: 'Rod', rate: 0.8 },
@@ -729,6 +733,7 @@ RO_MONSTER_TEMPLATES['wilow'] = {
     raceGroups: {},
     stats: { str: 0, agi: 4, vit: 8, int: 30, dex: 9, luk: 10, level: 4, weaponATK: 9 },
     modes: {},
+    spriteClass: 'willow', weaponMode: 0,
     drops: [
         { itemName: 'Tree Root', rate: 90 },
         { itemName: 'Wooden Block', rate: 1 },
@@ -755,6 +760,7 @@ RO_MONSTER_TEMPLATES['chonchon'] = {
     raceGroups: {},
     stats: { str: 0, agi: 10, vit: 4, int: 5, dex: 12, luk: 2, level: 4, weaponATK: 10 },
     modes: { detector: true },
+    spriteClass: 'chonchon', weaponMode: 0,
     drops: [
         { itemName: 'Iron', rate: 0.5 },
         { itemName: 'Shell', rate: 65 },
@@ -933,6 +939,7 @@ RO_MONSTER_TEMPLATES['condor'] = {
     raceGroups: {},
     stats: { str: 0, agi: 13, vit: 5, int: 0, dex: 13, luk: 10, level: 5, weaponATK: 11 },
     modes: {},
+    spriteClass: 'condor', weaponMode: 0,
     drops: [
         { itemName: 'Talon', rate: 90 },
         { itemName: 'Bow', rate: 1.5 },
@@ -959,6 +966,7 @@ RO_MONSTER_TEMPLATES['roda_frog'] = {
     raceGroups: {},
     stats: { str: 0, agi: 5, vit: 5, int: 5, dex: 10, luk: 5, level: 5, weaponATK: 11 },
     modes: {},
+    spriteClass: 'roda_frog', weaponMode: 0,
     drops: [
         { itemName: 'Sticky Webfoot', rate: 90 },
         { itemName: 'Spawn', rate: 5 },
@@ -1034,6 +1042,7 @@ RO_MONSTER_TEMPLATES['savage_babe'] = {
     raceGroups: {},
     stats: { str: 0, agi: 7, vit: 14, int: 5, dex: 12, luk: 35, level: 7, weaponATK: 20 },
     modes: {},
+    spriteClass: 'savage_babe', weaponMode: 0,
     drops: [
         { itemName: 'Animal\'s Skin', rate: 90 },
         { itemName: 'Axe', rate: 1 },
@@ -1060,6 +1069,7 @@ RO_MONSTER_TEMPLATES['hornet'] = {
     raceGroups: {},
     stats: { str: 6, agi: 20, vit: 8, int: 10, dex: 17, luk: 5, level: 8, weaponATK: 22 },
     modes: { detector: true },
+    spriteClass: 'hornet', weaponMode: 0,
     drops: [
         { itemName: 'Wind of Verdure', rate: 0.8 },
         { itemName: 'Bee Sting', rate: 90 },
@@ -1085,6 +1095,7 @@ RO_MONSTER_TEMPLATES['farmiliar'] = {
     raceGroups: {},
     stats: { str: 0, agi: 12, vit: 8, int: 5, dex: 28, luk: 0, level: 8, weaponATK: 20 },
     modes: {},
+    spriteClass: 'farmiliar', weaponMode: 0,
     drops: [
         { itemName: 'Tooth of Bat', rate: 55 },
         { itemName: 'Falchion', rate: 0.2 },
@@ -1137,6 +1148,7 @@ RO_MONSTER_TEMPLATES['rocker'] = {
     raceGroups: {},
     stats: { str: 0, agi: 9, vit: 18, int: 10, dex: 14, luk: 15, level: 9, weaponATK: 24 },
     modes: { detector: true },
+    spriteClass: 'rocker', weaponMode: 0,
     drops: [
         { itemName: 'Grasshopper\'s Leg', rate: 90 },
         { itemName: 'Green Acre Guitar', rate: 0.1 },
@@ -1369,6 +1381,7 @@ RO_MONSTER_TEMPLATES['mandragora'] = {
     raceGroups: {},
     stats: { str: 0, agi: 12, vit: 24, int: 0, dex: 36, luk: 15, level: 12, weaponATK: 26 },
     modes: {},
+    spriteClass: 'mandragora', weaponMode: 0,
     drops: [
         { itemName: 'Green Live', rate: 0.5 },
         { itemName: 'Stem', rate: 90 },
@@ -1447,6 +1460,7 @@ RO_MONSTER_TEMPLATES['poporing'] = {
     raceGroups: {},
     stats: { str: 0, agi: 14, vit: 14, int: 0, dex: 19, luk: 15, level: 14, weaponATK: 59 },
     modes: {},
+    spriteClass: 'poporing', weaponMode: 0,
     drops: [
         { itemName: 'Sticky Mucus', rate: 55 },
         { itemName: 'Garlet', rate: 15 },
@@ -1495,6 +1509,7 @@ RO_MONSTER_TEMPLATES['zombie'] = {
     aspd: 148, walkSpeed: 400, attackDelay: 2612, attackMotion: 912, damageMotion: 288,
     size: 'medium', race: 'undead', element: { type: 'undead', level: 1 },
     monsterClass: 'normal', aiType: 'aggressive', respawnMs: 12500,
+    spriteClass: 'zombie', weaponMode: 0,
     raceGroups: {},
     stats: { str: 0, agi: 8, vit: 7, int: 0, dex: 15, luk: 0, level: 15, weaponATK: 67 },
     modes: {},
@@ -1647,6 +1662,7 @@ RO_MONSTER_TEMPLATES['creamy'] = {
     raceGroups: {},
     stats: { str: 0, agi: 40, vit: 16, int: 15, dex: 16, luk: 55, level: 16, weaponATK: 53 },
     modes: { detector: true },
+    spriteClass: 'creamy', weaponMode: 0,
     drops: [
         { itemName: 'Powder of Butterfly', rate: 90 },
         { itemName: 'Silk Robe', rate: 0.1 },
@@ -1880,6 +1896,7 @@ RO_MONSTER_TEMPLATES['smokie'] = {
     raceGroups: {},
     stats: { str: 0, agi: 18, vit: 36, int: 25, dex: 26, luk: 35, level: 18, weaponATK: 61 },
     modes: {},
+    spriteClass: 'smokie', weaponMode: 0,
     drops: [
         { itemName: 'Raccoon Leaf', rate: 55 },
         { itemName: 'Animal\'s Skin', rate: 55 },
@@ -2086,6 +2103,7 @@ RO_MONSTER_TEMPLATES['pecopeco'] = {
     raceGroups: {},
     stats: { str: 0, agi: 13, vit: 13, int: 25, dex: 27, luk: 9, level: 19, weaponATK: 50 },
     modes: {},
+    spriteClass: 'pecopeco', weaponMode: 0,
     drops: [
         { itemName: 'Bill of Birds', rate: 90 },
         { itemName: 'Sandals', rate: 0.2 },
@@ -2163,6 +2181,7 @@ RO_MONSTER_TEMPLATES['poison_spore'] = {
     raceGroups: {},
     stats: { str: 0, agi: 19, vit: 25, int: 0, dex: 24, luk: 0, level: 19, weaponATK: 89 },
     modes: {},
+    spriteClass: 'poison_spore', weaponMode: 0,
     drops: [
         { itemName: 'Poison Spore', rate: 90 },
         { itemName: 'Hat', rate: 0.2 },
@@ -2369,6 +2388,7 @@ RO_MONSTER_TEMPLATES['yoyo'] = {
     raceGroups: {},
     stats: { str: 0, agi: 24, vit: 30, int: 35, dex: 32, luk: 55, level: 21, weaponATK: 71 },
     modes: {},
+    spriteClass: 'yoyo', weaponMode: 0,
     drops: [
         { itemName: 'Yoyo Tail', rate: 90 },
         { itemName: 'Banana', rate: 15 },

@@ -55,6 +55,13 @@ private:
 	TSharedPtr<SWidget> DeathOverlayWrapper;
 	TSharedPtr<SWidget> DeathOverlayViewportOverlay;  // SWeakWidget passed to AddViewportWidgetContent
 
+	// ---- Hit sound assets (first audio system in project) ----
+	UPROPERTY()
+	TArray<TObjectPtr<USoundBase>> NormalHitSounds;
+
+	UPROPERTY()
+	TObjectPtr<USoundBase> CritHitSound = nullptr;
+
 	// ---- Readiness guard (prevents ProcessEvent during PostLoad) ----
 	bool bReadyToProcess = false;
 

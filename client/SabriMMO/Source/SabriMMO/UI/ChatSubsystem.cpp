@@ -4,6 +4,7 @@
 #include "ChatSubsystem.h"
 #include "MMOGameInstance.h"
 #include "SocketEventRouter.h"
+#include "Audio/AudioSubsystem.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "Framework/Application/SlateApplication.h"
@@ -94,7 +95,12 @@ public:
 					[
 						SNew(SBorder)
 						.BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
-						.BorderBackgroundColor(ChatColors::PanelBrown)
+						.BorderBackgroundColor_Lambda([this]() -> FSlateColor {
+							float Alpha = 0.90f;
+							if (UChatSubsystem* S = OwningSubsystem.Get())
+								Alpha = S->ChatPanelOpacity;
+							return FSlateColor(FLinearColor(0.43f, 0.29f, 0.17f, Alpha));
+						})
 						.Padding(FMargin(0.f))
 						[
 							SNew(SVerticalBox)
@@ -347,6 +353,15 @@ private:
 	{
 		if (!ScrollBox.IsValid()) return;
 
+		// Timestamp prefix if enabled
+		FString TimePrefix;
+		UChatSubsystem* Sub = OwningSubsystem.Get();
+		if (Sub && Sub->bShowTimestamps && Msg.Timestamp > 0.0)
+		{
+			FDateTime DT(static_cast<int64>(Msg.Timestamp));
+			TimePrefix = FString::Printf(TEXT("[%02d:%02d] "), DT.GetHour(), DT.GetMinute());
+		}
+
 		FString DisplayText;
 		if (Msg.Channel == EChatChannel::System)
 		{
@@ -370,6 +385,7 @@ private:
 			DisplayText = FString::Printf(TEXT("%s%s: %s"), *ChannelPrefix, *Msg.SenderName, *Msg.Message);
 		}
 
+		DisplayText = TimePrefix + DisplayText;
 		const FLinearColor MsgColor = UChatSubsystem::GetChannelColor(Msg.Channel);
 
 		ScrollBox->AddSlot()
@@ -504,7 +520,7 @@ void UChatSubsystem::HandleChatReceive(const TSharedPtr<FJsonValue>& Data)
 	FString ChannelStr;
 	Obj->TryGetStringField(TEXT("channel"), ChannelStr);
 	Msg.Channel = ParseChannel(ChannelStr);
-	Msg.Timestamp = FPlatformTime::Seconds();
+	Msg.Timestamp = FDateTime::Now().GetTicks();
 
 	// Whisper: format per official RO msgstringtable — "( From Name: ) message"
 	if (ChannelStr.ToUpper() == TEXT("WHISPER"))
@@ -515,6 +531,10 @@ void UChatSubsystem::HandleChatReceive(const TSharedPtr<FJsonValue>& Data)
 		if (!OrigSender.IsEmpty()) LastWhisperer = OrigSender;
 		Msg.Message = FString::Printf(TEXT("( From %s: ) %s"), *OrigSender, *Msg.Message);
 		Msg.SenderName = TEXT("");  // Clear sender — message already contains the name
+
+		// Whisper alert chime — RO Classic uses the universal button click sound
+		// (버튼소리.wav) as the audio cue for incoming whispers.
+		UAudioSubsystem::PlayUIClickStatic(GetWorld());
 	}
 	else if (ChannelStr.ToUpper() == TEXT("WHISPER_SENT"))
 	{
@@ -553,7 +573,7 @@ void UChatSubsystem::HandleChatError(const TSharedPtr<FJsonValue>& Data)
 	Msg.SenderName = TEXT("");
 	Msg.Message = ErrorMsg;
 	Msg.Channel = EChatChannel::System;
-	Msg.Timestamp = FPlatformTime::Seconds();
+	Msg.Timestamp = FDateTime::Now().GetTicks();
 
 	if (Messages.Num() >= MAX_MESSAGES) Messages.RemoveAt(0);
 	Messages.Add(MoveTemp(Msg));
@@ -570,7 +590,7 @@ void UChatSubsystem::AddCombatLogMessage(const FString& Message)
 	Msg.SenderName = TEXT("SYSTEM");
 	Msg.Message = Message;
 	Msg.Channel = EChatChannel::Combat;
-	Msg.Timestamp = FPlatformTime::Seconds();
+	Msg.Timestamp = FDateTime::Now().GetTicks();
 
 	if (Messages.Num() >= MAX_MESSAGES)
 	{
@@ -1072,7 +1092,7 @@ void UChatSubsystem::SendChatMessage(const FString& Message, const FString& Chan
 			Msg.SenderName = TEXT("");
 			Msg.Message = FString::Printf(TEXT("%s (%d, %d)"), *ZoneName, CellX, CellY);
 			Msg.Channel = EChatChannel::System;
-			Msg.Timestamp = FPlatformTime::Seconds();
+			Msg.Timestamp = FDateTime::Now().GetTicks();
 			if (Messages.Num() >= MAX_MESSAGES) Messages.RemoveAt(0);
 			Messages.Add(MoveTemp(Msg));
 			++MessageVersion;
@@ -1114,7 +1134,7 @@ void UChatSubsystem::SendChatMessage(const FString& Message, const FString& Chan
 	LocalMsg.SenderName = LocalCharacterName;
 	LocalMsg.Message = ActualMessage;
 	LocalMsg.Channel = ParseChannel(ActualChannel);
-	LocalMsg.Timestamp = FPlatformTime::Seconds();
+	LocalMsg.Timestamp = FDateTime::Now().GetTicks();
 
 	if (Messages.Num() >= MAX_MESSAGES)
 	{

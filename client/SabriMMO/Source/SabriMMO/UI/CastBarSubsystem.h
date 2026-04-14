@@ -39,6 +39,9 @@ public:
 	TMap<int32, FCastBarEntry> ActiveCasts;  // casterId → cast data
 	int32 LocalCharacterId = 0;
 
+	// ---- options flag (set by OptionsSubsystem) ----
+	bool bCastBarsEnabled = true;
+
 private:
 	// ---- event handlers ----
 	void HandleCastStart(const TSharedPtr<FJsonValue>& Data);

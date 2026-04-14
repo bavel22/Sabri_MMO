@@ -48,7 +48,7 @@ public:
 
 	// ---- tab filtering ----
 	int32 CurrentTab = 0;   // 0=Item(consumable), 1=Equip, 2=Etc
-	TArray<FInventoryItem> GetFilteredItems() const;
+	const TArray<FInventoryItem>& GetFilteredItems() const;
 	void SetTab(int32 Tab);
 
 	// ---- drag-and-drop state (shared by inventory + equipment widgets) ----
@@ -97,6 +97,9 @@ public:
 	FInventoryItem* FindItemByInventoryId(int32 InventoryId);
 	TArray<FInventoryItem> GetEquippedItems() const;
 
+	// ---- item definition cache (static data keyed by item_id) ----
+	TMap<int32, FInventoryItem> ItemDefCache;
+
 	// ---- item icon utilities (reusable by any widget/system) ----
 	FSlateBrush* GetOrCreateItemIconBrush(const FString& IconName);
 
@@ -115,15 +118,27 @@ private:
 	void HandleCardResult(const TSharedPtr<FJsonValue>& Data);
 	void HandleItemUsed(const TSharedPtr<FJsonValue>& Data);
 	void HandleLootDrop(const TSharedPtr<FJsonValue>& Data);
+	void HandleRefineResult(const TSharedPtr<FJsonValue>& Data);
 
 	// ---- helpers ----
 	FInventoryItem ParseItemFromJson(const TSharedPtr<FJsonObject>& Obj);
 	void RecalculateWeight();
 	TArray<FInventoryItem> FindEligibleEquipment(const FInventoryItem& Card) const;
+	void RebuildFilteredCache() const;
+	void HandleItemDefs(const TSharedPtr<FJsonValue>& Data);
 
 	// ---- state ----
 	bool bWidgetVisible = false;
 	int32 LocalCharacterId = 0;
+
+	// ---- filtered items cache (rebuilt lazily on access) ----
+	mutable TArray<FInventoryItem> CachedFilteredItems;
+	mutable uint32 FilterCacheDataVersion = UINT32_MAX;
+	mutable int32 FilterCacheTab = -1;
+	mutable FString FilterCacheSearch;
+
+	// ---- O(1) inventory lookup (InventoryId → index in Items array) ----
+	TMap<int32, int32> InventoryIdToIndex;
 
 	TSharedPtr<SInventoryWidget> InventoryWidget;
 	TSharedPtr<SWidget> AlignmentWrapper;

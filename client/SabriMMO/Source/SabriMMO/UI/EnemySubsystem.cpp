@@ -6,6 +6,7 @@
 #include "NameTagSubsystem.h"
 #include "MMOGameInstance.h"
 #include "SocketEventRouter.h"
+#include "Audio/AudioSubsystem.h"
 #include "Sprite/SpriteCharacterActor.h"
 #include "Components/CapsuleComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -188,6 +189,18 @@ void UEnemySubsystem::Deinitialize()
 	}
 
 	HideSensePopup();
+
+	// Clear stand sound timers for all entities. Timer manager belongs to the world and
+	// would clean up on world teardown, but explicit clearing is safer.
+	if (UWorld* World = GetWorld())
+	{
+		FTimerManager& TM = World->GetTimerManager();
+		for (auto& Pair : Enemies)
+		{
+			if (Pair.Value.StandSoundTimer.IsValid())
+				TM.ClearTimer(Pair.Value.StandSoundTimer);
+		}
+	}
 
 	// Destroy all spawned enemy + sprite actors
 	for (auto& Pair : Enemies)
@@ -420,6 +433,54 @@ void UEnemySubsystem::HandleEnemySpawn(const TSharedPtr<FJsonValue>& Data)
 	Enemies.Add(EnemyId, Entry);
 	ActorToEnemyId.Add(PrimaryActor, EnemyId);
 
+	// ---- Audio bindings (sprite enemies only) ----
+	if (Sprite)
+	{
+		UAudioSubsystem* Audio = GetWorld()->GetSubsystem<UAudioSubsystem>();
+
+		// Frame-sync the move sound to the Walk animation cycle. Each time the sprite's
+		// Walk animation wraps from last frame to first, we play the monster move sound.
+		// This is the authentic RO Classic ACT-style "boing" cadence — perfectly synced
+		// to the visual hop, not approximated by a fixed cooldown.
+		// Lambda captures TWeakObjectPtr<this> so it safely no-ops if subsystem is destroyed.
+		TWeakObjectPtr<UEnemySubsystem> WeakThis(this);
+		Sprite->OnAnimCycleComplete.AddLambda([WeakThis, EnemyId](ESpriteAnimState State)
+		{
+			if (State != ESpriteAnimState::Walk) return;
+			if (!WeakThis.IsValid()) return;
+
+			const FEnemyEntry* E = WeakThis->Enemies.Find(EnemyId);
+			if (!E || E->bIsDead || !E->Actor.IsValid()) return;
+
+			if (UAudioSubsystem* A = WeakThis->GetWorld()->GetSubsystem<UAudioSubsystem>())
+				A->PlayMonsterSound(E->SpriteClass, EMonsterSoundType::Move, E->Actor->GetActorLocation());
+		});
+
+		// Stand sound timer (RO Classic monsters with idle ambient like Pharaoh, Baphomet).
+		// No-op for Poring/Skeleton — HasStandSound returns false and the timer is never set.
+		// Initial offset is randomized so all entities don't fire on the same tick.
+		if (Audio && Audio->HasStandSound(SpriteClass))
+		{
+			const float Interval = Audio->GetStandInterval(SpriteClass);
+			const float InitialDelay = FMath::FRandRange(0.f, Interval);
+
+			GetWorld()->GetTimerManager().SetTimer(
+				Enemies[EnemyId].StandSoundTimer,
+				[WeakThis, EnemyId]()
+				{
+					if (!WeakThis.IsValid()) return;
+					const FEnemyEntry* E = WeakThis->Enemies.Find(EnemyId);
+					if (!E || E->bIsDead || !E->Actor.IsValid()) return;
+					if (UAudioSubsystem* A = WeakThis->GetWorld()->GetSubsystem<UAudioSubsystem>())
+						A->PlayMonsterSound(E->SpriteClass, EMonsterSoundType::Stand, E->Actor->GetActorLocation());
+				},
+				Interval,
+				true,           // looping
+				InitialDelay    // first fire delay
+			);
+		}
+	}
+
 	// Register name tag
 	float SpriteHeight = Sprite ? 150.f : 0.f;
 	if (UNameTagSubsystem* NTS = GetWorld()->GetSubsystem<UNameTagSubsystem>())
@@ -469,14 +530,32 @@ void UEnemySubsystem::HandleEnemyMove(const TSharedPtr<FJsonValue>& Data)
 
 		Entry->SpriteActor->SetServerTargetPosition(NewPos, bIsMoving, WalkSpeed);
 
+		// Move SFX is no longer throttled here — it is fired by the SpriteCharacterActor's
+		// OnAnimCycleComplete delegate (frame-locked to the Walk animation cycle for
+		// authentic RO Classic Poring "boing" timing). The binding is set up once in
+		// HandleEnemySpawn and persists for the entity's lifetime.
+
 		// Drive sprite animation + facing
 		if (Entry->SpriteActor->IsBodyReady())
 		{
 			auto State = Entry->SpriteActor->GetAnimState();
-			if (State != ESpriteAnimState::Death)
+			// Don't override one-shot animations (Hit, Attack, Death) — let them finish
+			if (State != ESpriteAnimState::Death && State != ESpriteAnimState::Hit
+				&& State != ESpriteAnimState::Attack)
 			{
-				Entry->SpriteActor->SetAnimState(
-					bIsMoving ? ESpriteAnimState::Walk : ESpriteAnimState::Idle);
+				// CRITICAL: only call SetAnimState when the state ACTUALLY changes.
+				// SetAnimState resets CurrentFrame=0 which would prevent the Walk cycle
+				// from ever completing if we called it every move tick (~30Hz). That
+				// would also break OnAnimCycleComplete — the hook that drives monster
+				// move SFX (Poring "boing" cadence). Mirror the sprite's own
+				// velocity-driven pattern at SpriteCharacterActor.cpp:2326.
+				const ESpriteAnimState Desired = bIsMoving
+					? ESpriteAnimState::Walk
+					: ESpriteAnimState::Idle;
+				if (State != Desired)
+				{
+					Entry->SpriteActor->SetAnimState(Desired);
+				}
 
 				if (bIsMoving)
 				{
@@ -512,6 +591,10 @@ void UEnemySubsystem::HandleEnemyDeath(const TSharedPtr<FJsonValue>& Data)
 	if (!Obj->TryGetNumberField(TEXT("enemyId"), EnemyIdD)) return;
 	int32 EnemyId = (int32)EnemyIdD;
 
+	// Check the MVP flag from the death payload (server emits isMvp:true for boss kills)
+	bool bIsMvp = false;
+	Obj->TryGetBoolField(TEXT("isMvp"), bIsMvp);
+
 	FEnemyEntry* Entry = Enemies.Find(EnemyId);
 	if (!Entry || !Entry->Actor.IsValid()) return;
 	AActor* Enemy = Entry->Actor.Get();
@@ -523,6 +606,18 @@ void UEnemySubsystem::HandleEnemyDeath(const TSharedPtr<FJsonValue>& Data)
 	{
 		Entry->SpriteActor->SetAnimState(ESpriteAnimState::Death);
 		Entry->SpriteActor->DisableClickCollision();
+
+		// Play monster death SFX (RO Classic-style: <monster>_die.wav, the iconic poring "pop")
+		if (UAudioSubsystem* Audio = GetWorld()->GetSubsystem<UAudioSubsystem>())
+		{
+			Audio->PlayMonsterSound(Entry->SpriteClass, EMonsterSoundType::Die, Enemy->GetActorLocation());
+
+			// MVP fanfare — iconic RO Classic "you killed an MVP" stinger (2D non-spatial)
+			if (bIsMvp)
+			{
+				Audio->PlayMvpFanfareSound();
+			}
+		}
 
 		// Hide after corpse linger (4s)
 		TWeakObjectPtr<AActor> WeakActor = Enemy;
@@ -596,6 +691,10 @@ void UEnemySubsystem::HandleEnemyHealthUpdate(const TSharedPtr<FJsonValue>& Data
 		auto State = Entry->SpriteActor->GetAnimState();
 		if (State != ESpriteAnimState::Death && State != ESpriteAnimState::Attack)
 			Entry->SpriteActor->SetAnimState(ESpriteAnimState::Hit);
+
+		// Play monster damage SFX (RO Classic-style: <monster>_damage.wav)
+		if (UAudioSubsystem* Audio = GetWorld()->GetSubsystem<UAudioSubsystem>())
+			Audio->PlayMonsterSound(Entry->SpriteClass, EMonsterSoundType::Damage, Enemy->GetActorLocation());
 	}
 
 	// Update struct
@@ -652,10 +751,21 @@ void UEnemySubsystem::HandleEnemyAttack(const TSharedPtr<FJsonValue>& Data)
 			else if (TargetType == TEXT("ground")) CastState = ESpriteAnimState::CastGround;
 			else if (TargetType == TEXT("aoe"))    CastState = ESpriteAnimState::CastAoe;
 			Entry->SpriteActor->SetAnimState(CastState);
+
+			// Play monster attack SFX on skill cast (RO Classic: monsters whose skill
+			// animation is their attack pose still play the attack swing sound). Future:
+			// per-skill cast SFX requires extracting data\wav\effect\ from the GRF, then
+			// adding a skill-id -> wav lookup table here.
+			if (UAudioSubsystem* Audio = GetWorld()->GetSubsystem<UAudioSubsystem>())
+				Audio->PlayMonsterSound(Entry->SpriteClass, EMonsterSoundType::Attack, Enemy->GetActorLocation());
 		}
 		else
 		{
 			Entry->SpriteActor->SetAnimState(ESpriteAnimState::Attack);
+
+			// Play monster attack SFX (RO Classic-style: <monster>_attack.wav)
+			if (UAudioSubsystem* Audio = GetWorld()->GetSubsystem<UAudioSubsystem>())
+				Audio->PlayMonsterSound(Entry->SpriteClass, EMonsterSoundType::Attack, Enemy->GetActorLocation());
 		}
 	}
 

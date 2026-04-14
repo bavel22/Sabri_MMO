@@ -1,6 +1,6 @@
 // SDamageNumberOverlay.h — Fullscreen transparent Slate overlay that renders
-// RO-style damage numbers via OnPaint with per-digit fan-out animation.
-// All rendering is done in OnPaint for maximum performance and control.
+// RO Classic damage numbers via OnPaint with parabolic sine arc, scale shrink,
+// diagonal drift, and per-type animation curves. Faithful to roBrowser Damage.js.
 
 #pragma once
 
@@ -8,12 +8,13 @@
 #include "Widgets/SCompoundWidget.h"
 #include "Widgets/DeclarativeSyntaxSupport.h"
 #include "Fonts/SlateFontInfo.h"
+#include "Engine/Texture2D.h"
 
 // Damage pop-up type — determines color and scale
 enum class EDamagePopType : uint8
 {
-	NormalDamage,    // Yellow/gold — auto-attack damage dealt to enemies
-	CriticalDamage,  // White, larger — critical hit on enemy
+	NormalDamage,    // White — auto-attack damage dealt to enemies (RO Classic)
+	CriticalDamage,  // Yellow — critical hit on enemy (RO Classic)
 	PlayerHit,       // Red — local player receiving damage
 	PlayerCritHit,   // Bright red, larger — local player receiving a critical hit
 	SkillDamage,     // Orange — skill damage dealt to enemies
@@ -21,7 +22,8 @@ enum class EDamagePopType : uint8
 	Heal,            // Green — healing received
 	Dodge,           // Green — FLEE dodge (target dodged via AGI)
 	PerfectDodge,    // Bright green — Lucky Dodge (target dodged via LUK)
-	Block            // Silver/white — Auto Guard shield block
+	Block,           // Silver/white — Auto Guard shield block
+	ComboTotal       // Yellow — multi-hit skill total (3s duration, rapid pop-in)
 };
 
 // Single damage pop-up entry in the pool
@@ -37,21 +39,29 @@ struct FDamagePopEntry
 	FString TextLabel;         // If non-empty, renders this text instead of Value digits
 	FLinearColor CustomColor = FLinearColor::White;  // Used when TextLabel is set
 	bool bHasCustomColor = false;
+	float Lifetime = 1.5f;        // Per-entry duration (type-dependent)
+	float DriftDirection = 1.0f;  // Horizontal drift sign (+1 right, -1 left, 0 none)
 };
 
 class SDamageNumberOverlay : public SCompoundWidget
 {
 public:
-	SLATE_BEGIN_ARGS(SDamageNumberOverlay) {}
+	SLATE_BEGIN_ARGS(SDamageNumberOverlay)
+		: _CritStarburstTexture(nullptr)
+	{}
+		SLATE_ARGUMENT(UTexture2D*, CritStarburstTexture)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
 
 	/** Add a new damage pop-up at the given screen position. */
-	void AddDamagePop(int32 Value, EDamagePopType Type, FVector2D ScreenPosition, const FString& Element = TEXT(""));
+	void AddDamagePop(int32 Value, EDamagePopType Type, FVector2D ScreenPosition, const FString& Element = TEXT(""), const FLinearColor* CustomColor = nullptr);
 
 	/** Add a floating text label (e.g. "Poisoned!", "Stunned!") at the given screen position. */
 	void AddTextPop(const FString& Text, const FLinearColor& Color, FVector2D ScreenPosition);
+
+	/** Options: font scale multiplier (set by OptionsSubsystem). */
+	static float FontScaleMultiplier;
 
 	// SWidget interface
 	virtual int32 OnPaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry,
@@ -68,13 +78,33 @@ private:
 	int32 NextEntryIndex = 0;
 	int32 ActiveCount = 0;  // Rough count of active entries (for timer optimization)
 
-	// ---- Animation Constants (RO-faithful) ----
-	static constexpr float LIFETIME = 1.3f;              // Total pop-up duration (seconds)
-	static constexpr float RISE_DISTANCE = 85.0f;        // Pixels to rise over lifetime
-	static constexpr float SPREAD_PER_DIGIT = 4.5f;      // Max extra pixels of spread per digit
-	static constexpr float FADE_START = 0.65f;            // Start fading at 65% of lifetime
-	static constexpr float DIGIT_BASE_GAP = 1.0f;        // Base gap between digits (pixels)
-	static constexpr float RANDOM_X_RANGE = 12.0f;       // Random horizontal bias range (+/-)
+	// ---- Animation Constants (RO Classic faithful) ----
+	// Per-type durations
+	static constexpr float LIFETIME_DAMAGE = 1.5f;        // Normal/crit/skill damage
+	static constexpr float LIFETIME_MISS = 0.8f;          // Miss/dodge/block text
+	static constexpr float LIFETIME_HEAL = 1.5f;          // Heal numbers
+	static constexpr float LIFETIME_COMBO = 3.0f;         // Combo total (RO: 3s)
+
+	// Damage arc parameters (screen pixels)
+	static constexpr float ARC_AMPLITUDE = 120.0f;        // Height of sine arc peak
+	static constexpr float ARC_BASE_OFFSET = 30.0f;       // Starting offset above spawn
+	static constexpr float DRIFT_DISTANCE = 60.0f;        // Horizontal drift over lifetime
+	static constexpr float SCALE_START = 2.5f;            // Initial scale multiplier (shrinks to 0)
+
+	// Miss/dodge/block parameters
+	static constexpr float MISS_SCALE = 0.7f;             // Fixed scale for miss text
+	static constexpr float MISS_BASE_OFFSET = 20.0f;      // Starting offset above spawn
+	static constexpr float MISS_RISE_DISTANCE = 100.0f;   // Vertical rise distance
+
+	// Heal parameters
+	static constexpr float HEAL_STATIONARY_PCT = 0.4f;    // Hold still for first 40%
+	static constexpr float HEAL_SCALE_START = 2.5f;       // Initial heal scale
+	static constexpr float HEAL_SCALE_FLOOR = 0.8f;       // Minimum heal scale
+	static constexpr float HEAL_RISE_SPEED = 80.0f;       // Rise speed (pixels/sec) after hold
+
+	// Shared constants
+	static constexpr float DIGIT_BASE_GAP = 1.0f;         // Gap between digits (pixels)
+	static constexpr float RANDOM_X_RANGE = 12.0f;        // Random horizontal bias range (+/-)
 	static constexpr float STACK_CHECK_RADIUS = 60.0f;    // Pixel radius for stacking detection
 	static constexpr float STACK_CHECK_TIME = 0.8f;       // Time window for stacking (seconds)
 	static constexpr float STACK_OFFSET_Y = -26.0f;       // Vertical offset per stacked number
@@ -98,6 +128,9 @@ private:
 
 	/** Get tint color based on attack element (for elemental damage coloring). */
 	static FLinearColor GetElementTint(const FString& Element);
+
+	// Critical starburst brush (rendered behind crit numbers)
+	FSlateBrush CritStarburstBrush;
 
 	// Cached font measure service (avoid repeated lookups)
 	mutable bool bFontCacheValid = false;

@@ -10,6 +10,7 @@
 #include "DrawDebugHelpers.h"
 #include "MMOGameInstance.h"
 #include "SocketEventRouter.h"
+#include "Audio/AudioSubsystem.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
@@ -507,6 +508,7 @@ void USkillTreeSubsystem::RequestSkillData()
 
 void USkillTreeSubsystem::LearnSkill(int32 SkillId)
 {
+	UAudioSubsystem::PlayUIClickStatic(GetWorld());
 	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld() ? GetWorld()->GetGameInstance() : nullptr);
 	if (!GI || !GI->IsSocketConnected()) return;
 
@@ -526,6 +528,7 @@ void USkillTreeSubsystem::LearnSkill(int32 SkillId)
 
 void USkillTreeSubsystem::ResetAllSkills()
 {
+	UAudioSubsystem::PlayUIClickStatic(GetWorld());
 	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld() ? GetWorld()->GetGameInstance() : nullptr);
 	if (!GI || !GI->IsSocketConnected()) return;
 
@@ -1134,6 +1137,33 @@ void USkillTreeSubsystem::HandleSkillUsed(const TSharedPtr<FJsonValue>& Data)
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Cyan,
 			FString::Printf(TEXT("%s Lv%d used! (-%d SP)"), *SkillName, SkillLevel, (int32)SpCost));
+	}
+
+	// ---- Skill audio fallback hook ----
+	// Many utility/UI/non-damaging skills (Steal, Vending, Item Appraisal, Detoxify,
+	// Pick Stone, Loud Exclamation, Pharmacy, Identify, Hiding-toggle, Cloaking-toggle,
+	// Backslide, etc.) do NOT emit `skill:effect_damage` and may not emit `skill:buff_applied`
+	// either — they only confirm via this `skill:used` event. The VFX subsystem normally
+	// owns audio playback through `skill:effect_damage`, so without a hook here those
+	// skills are completely silent.
+	//
+	// We fire the impact sound at the local player's pawn location. The audio's per-skill
+	// 300ms dedup ensures damage skills which DO emit `skill:effect_damage` won't double-fire
+	// (the impact event arrives within the dedup window and is suppressed).
+	if (SkillId > 0)
+	{
+		if (UAudioSubsystem* Audio = GetWorld()->GetSubsystem<UAudioSubsystem>())
+		{
+			FVector SoundLoc = FVector::ZeroVector;
+			if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+			{
+				if (APawn* Pawn = PC->GetPawn())
+				{
+					SoundLoc = Pawn->GetActorLocation();
+				}
+			}
+			Audio->PlaySkillImpactSound(SkillId, SoundLoc);
+		}
 	}
 
 	// Vending skill (605): server sends vending:setup event which triggers the UI.

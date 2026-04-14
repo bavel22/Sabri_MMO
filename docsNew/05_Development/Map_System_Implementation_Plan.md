@@ -552,6 +552,20 @@
 
 ---
 
+## Known Gotchas
+
+### Minimap SceneCapture must disable post-process materials
+
+`MinimapSubsystem::SetupOverheadCapture()` sets `CaptureComponent->ShowFlags.SetPostProcessMaterial(false)`. This is **required**, not optional.
+
+`PostProcessSubsystem` pushes a cutout post-process material into the unbound global `APostProcessVolume`. That material darkens every pixel where `CustomStencil != 1` (see `docsNew/05_Development/RO_Classic_Visual_Style_Research.md` and `memory/sprite-rendering-2026-04-06.md`). The minimap's SceneCapture uses `SCS_FinalColorLDR`, which runs the full post-process chain — including the cutout.
+
+The minimap camera looks straight down, and the player sprite is a billboard facing the main camera, so from the overhead view the sprite is edge-on and writes no stencil into the capture. Result: the cutout darkens the entire captured frame to ~61% brightness, which visually reads as "the minimap texture isn't showing" (the dim capture blends into the dark frame background).
+
+**If you add another SceneCapture2D anywhere in the project**, repeat the same `SetPostProcessMaterial(false)` call, or switch the capture source to `SCS_SceneColorHDR`. See `memory/feedback-scenecapture-postprocess.md`.
+
+---
+
 ## Implementation Order (Recommended)
 
 | Order | Phase | Priority | Depends On |

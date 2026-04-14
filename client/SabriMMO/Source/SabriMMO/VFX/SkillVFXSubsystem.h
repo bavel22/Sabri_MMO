@@ -40,6 +40,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "SkillVFX")
 	UNiagaraComponent* SpawnLoopingPortalEffect(FVector Location);
 
+	/** Spawn a brief hit impact particle at target location (auto-attack hits). */
+	void SpawnAutoAttackHitEffect(FVector Location, bool bIsCritical = false);
+
 	// ---- toggle effects (like RO's /effect command) ----
 	UFUNCTION(BlueprintCallable, Category = "SkillVFX")
 	void SetEffectsEnabled(bool bEnabled) { bVFXEnabled = bEnabled; }
@@ -112,6 +115,10 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UNiagaraSystem> NS_HealFlash;
+
+	/** Auto-attack hit impact (small white spark burst at target). */
+	UPROPERTY()
+	TObjectPtr<UNiagaraSystem> NS_AutoAttackHit;
 
 	/** Niagara-based casting circle (from Free_Magic pack). Used instead of decal if available. */
 	UPROPERTY()

@@ -1,7 +1,7 @@
 # Sabri_MMO Dashboard
 
 ## Quick Links
-- [Session Tracker](Session%20Tracker.md) — All 58 Claude Code sessions with resume IDs
+- [Session Tracker](Session%20Tracker.md) — All 73 Claude Code sessions with resume IDs
 - [Workflow Guide](Workflow%20Guide.md) — How to use Obsidian + Claude Code together
 - [Prompt Library](../_prompts/README.md) — Reusable prompts that work
 - [Documentation Index](DocsNewINDEX.md) — Master doc navigation
@@ -9,19 +9,19 @@
 - [Global Rules](../docsNew/00_Global_Rules/Global_Rules.md) — Design standards
 - [CLAUDE.md](../CLAUDE.md) — Claude Code project instructions
 
-## Current Stats (2026-04-04)
+## Current Stats (2026-04-14)
 | Metric | Count |
 |--------|-------|
-| Server lines | ~34,500 + 12 modules (~6,300) |
-| Socket events | 103 |
+| Server lines | ~36,800 + 12 modules (~6,300) |
+| Socket events | 115 (+6 ground item) |
 | REST endpoints | 11 |
-| C++ Subsystems | 36 |
+| C++ Subsystems | 39 (+AudioSubsystem, +GroundItemSubsystem) |
 | Skill definitions | 293 (69 + 224) |
 | Buff types | 95 |
 | Status effects | 10 |
 | Items in DB | 6,169 |
 | Cards | 538 |
-| Monster templates | 509 |
+| Monster templates | 509 (~20 with spriteClass) |
 | Active spawns | 46 |
 | Zones | 4 |
 | VFX configs | 97 |
@@ -31,6 +31,9 @@
 | Decal instances | 91 |
 | Scatter meshes | 135 (75 V1 + 60 V3) |
 | Environment scripts | 80+ |
+| Audio files | 121 BGM tracks + 626 ROSFX |
+| Enemy 3D models | ~20 GLBs (Tripo3D) |
+| Monster animation presets | 12 (blob + 10 new body types + humanoid) |
 
 ## What's Implemented
 - [x] All 6 first classes + 13 second classes
@@ -71,6 +74,26 @@
 - [x] Kafra Storage — account-shared 300-slot storage, 10 socket handlers, split/sort/auto-stack/search QoL, 40z fee
 - [x] Player-to-Player Trading — 10 items + zeny, two-step confirm (OK/Trade), 13 cancel paths, atomic transfer, /trade command, trade logs
 - [x] Right-click player context menu — Trade/Party Invite/Whisper, camera drag vs quick-click detection, FMenuBuilder popup
+- [x] Login screen — deferred texture loading, FSlateBrush, ScaleToFill, standalone timing fix, camera 16:9
+- [x] ESC menu — character select return, player:leave two-phase handler, Z=200 overlay, dead/alive states
+- [x] Item icons — all 6169 items mapped to subfolder-based icon assets in InventorySubsystem
+- [x] Options menu — 14 settings (Display/Interface/Camera/Gameplay), `UOptionsSaveGame` persistence, FPS overlay, ESC menu integration, 9 target subsystems wired
+- [x] Character ground positioning fix — LocalSprite TWeakObjectPtr, name tag tracks sprite, fixed remote HalfHeight=96, billboard SpriteDepthOffset compensation, VFX spawn at visual center
+- [x] RO Classic damage numbers — Sine arc + horizontal drift + 3.0x→0 scale shrink, per-type curves (damage/miss/heal), RO color spec (white/yellow/red/green), element tinting, status custom-color path
+- [x] Hit impact system — Hit flash (3,3,3 overbright 150ms), hit particles (NS_AutoAttackHit at visual center), crit starburst (FSlateBrush), combo total (FComboTracker, multi-hit buffer), target flinch (Hit anim + enemy:move guard)
+- [x] Hit sound system — First audio in project: 5 WAVs, random variant + ±5% pitch jitter, positional `PlaySoundAtLocation`
+- [x] Sprite-vs-world rendering (final) — BLEND_Translucent + bDisableDepthTest + binary alpha, two camera→feet/head line traces + per-pixel depth, post-process cutout via PPI_CustomStencil, hardcoded 96 capsule, motion blur off
+- [x] RO Classic audio research — full architecture (GRF/BGM/SFX trigger sources), 121 pre-renewal tracks, composer credits, legal status ($4M Gravity v. NovaRO 2022), Tier 1-3 sourcing path documented
+- [x] Audio system implementation — AudioSubsystem (2847 lines), enemy SFX (60 monsters, body material layering), player SFX (per-weapon swing/hit, per-class fallback), BGM zone mapping, skill SFX (SkillImpactSoundMap), 3 audio skills created
+- [x] Minimap SceneCapture2D fix — SetPostProcessMaterial(false) to exclude cutout PP from minimap capture, regression protection in 5 locations
+- [x] Ground item / loot drop system — server: RO Classic ownership phases (3s/5s/7s normal, 10s/20s/22s MVP), scatter offsets, 60s despawn, party share, 6 socket events. Client: GroundItemSubsystem + GroundItemActor (733 lines), billboard sprites, tier-color tinting, click-to-pickup, spawn arc
+- [x] Inventory performance analysis — 10-finding root cause report, Phase 1 optimizations started (const ref GetFilteredItems, RebuildFilteredCache, ItemDefCache TMap)
+- [x] Enemy 3D model downloads — ~20 GLBs from Tripo3D (fabre, lunatic, drops, pupa, willow, condor, hornet, roda_frog, savage_babe, chonchon, creamy, mandragora, pecopeco, poison_spore, poporing, smokie, rocker, farmiliar, yoyo)
+- [x] Monster animation presets — 10 new shape key presets (~1000 lines in render_monster.py): caterpillar, rabbit, egg, frog, tree, bird, flying insect, bat, quadruped, plant
+- [x] Monster template spriteClass fields — ~20 templates updated with spriteClass + weaponMode
+- [x] UniRig pipeline — AI rigging for non-humanoid enemies, installed + proved on rocker (40 bones, 6 anims). Skill: `/sabrimmo-rig-animate`
+- [x] Blender 5.x FBX import fix — monkey-patched cast_shadow deprecation crash in blender_sprite_render_v2.py
+- [x] Egg/larva enemies — made immobile (ant egg, dragon egg, pupa, thief bug egg, peco peco egg)
 
 ## What's Next
 
@@ -141,6 +164,11 @@ See [Skill_VFX_Execution_Plan](../docsNew/05_Development/Skill_VFX_Execution_Pla
 - [x] **Monster sprite — non-humanoid** (Poring: shape key anims via render_monster.py, --model-rotation -90)
 - [x] **Enemy sprite integration** (EnemySubsystem: sprite enemies as pure C++ actors, no BP_EnemyCharacter)
 - [x] **Re-render swordsman_m + mage_f** with new 17-animation standard set
+- [x] **UniRig pipeline** — AI rigging for non-humanoid enemies (proved on rocker, 40 bones, 6 anims)
+- [x] **10 monster animation presets** — caterpillar, rabbit, egg, frog, tree, bird, flying insect, bat, quadruped, plant (~1000 lines in render_monster.py)
+- [x] **~20 enemy 3D models** downloaded from Tripo3D (fabre through yoyo)
+- [x] **spriteClass + weaponMode** added to ~20 monster templates
+- [ ] **Render enemy sprite atlases** — rocker animated .blend ready, other enemies need rigging first
 - [ ] **More weapon .blend templates** (sword, staff, rod, katar, spear, mace, axe — dagger + bow done)
   - [x] Figure out weapon positioning across different classes/genders
 - [x] **NavMesh pathfinding** — implemented server-side (recast-navigation, de-aggro, all movement patched)
@@ -149,7 +177,7 @@ See [Skill_VFX_Execution_Plan](../docsNew/05_Development/Skill_VFX_Execution_Pla
 - [x] Hair color tint system (9 RO colors, material TintColor multiply)
 - [x] Headgear sprite layer (holdout occlusion, Egg Shell Hat)
 - [ ] Male hair style 1 atlas (female done, male not yet)
-- [ ] More enemy sprites (additional monsters)
+- [ ] More enemy sprites — rig + animate remaining ~18 downloaded GLBs, render atlases
 
 ### 3D World — Next Steps
 - [ ] Apply materials and decals to Prontera zone (first complete zone)
@@ -162,23 +190,50 @@ See [Skill_VFX_Execution_Plan](../docsNew/05_Development/Skill_VFX_Execution_Pla
 - [ ] Review audit results in `_audit/` and triage fixes (43 files, 2 master reports)
 
 ### Map System — Next Steps
+- [x] Commit map system code — committed in `60eca6c`
 - [ ] Generate world map illustration (prompt ready: `_prompts/world_map_generation_prompt.md`)
 - [ ] Generate loading screen art (12 prompts ready: `_prompts/loading_screen_generation_prompts.md`)
-- [ ] Commit map system code (6 new + 2 modified files, untracked)
 
 ### Economy Systems
 - [x] Kafra Storage — implemented 2026-04-03 (prompt: `_prompts/implement_kafra_storage.md`)
 - [x] Player-to-Player Trading — implemented 2026-04-03 (prompt: `_prompts/implement_player_trading.md`)
-- [ ] Right-click context menu on other players (trade, party invite, whisper — requires PlayerInputSubsystem right-click routing)
+- [x] Right-click context menu on other players — implemented 2026-04-04
 
 ### UX / Polish
-- [ ] ESC → character select screen
-- [ ] Fix character floating off ground / terrain clipping when moving north
-- [ ] Attack impact effects / damage number improvements (make combat more exciting)
-- [ ] Right-click context menu on other players (trade, party invite, whisper)
+- [x] ESC → character select screen — implemented 2026-04-04
+- [x] Login screen background + resolution sizing — implemented 2026-04-04
+- [x] Item icon mapping (6169 items) — implemented 2026-04-04
+- [x] Right-click context menu on other players — implemented 2026-04-04
+- [x] Fix character floating off ground / terrain clipping when moving north — implemented 2026-04-05
+- [x] Attack impact effects / damage number improvements — implemented 2026-04-05 (polish needed: starburst visibility, target flinch verification, better hit particle)
+- [x] Options menu (14 settings, SaveGame persistence, FPS overlay) — implemented 2026-04-05
+- [x] Crit starburst — opacity/scale/saturation tuned for readability — 2026-04-06
+- [x] Target flinch — verified end-to-end (Hit anim atlas confirmed, PlayHitAnimation called, enemy:move guard firing) — 2026-04-06
+- [x] Replace auto-attack hit particle — `NS_AutoAttackHit` swapped for punchier Niagara from `/Game/Variant_Combat/VFX/` — 2026-04-06
+- [x] Sprite-vs-world rendering (silhouette behind walls, no clipping into nearby geometry) — implemented 2026-04-06
+
+### Audio System (implemented 2026-04-07)
+- [x] Deep research on RO Classic audio (architecture, BGM tracklist, SFX inventory, legal status, sourcing tiers) — `docsNew/05_Development/RO_Audio_System_Research.md`
+- [x] AudioSubsystem built (2847 lines) — enemy body material SFX, player per-weapon swing/hit, per-class fallback, BGM zone mapping, skill SFX (SkillImpactSoundMap), 60 monsters wired, 121 BGM tracks sourced
+- [x] Fix `/sabrimmo-audio` skill — removed Tobias Marberger misattribution. 3 new audio skills created (enemy/player/combat)
+- [ ] Audio testing — verify all SFX (enemy, player, BGM, skill) in-game
+- [ ] Source Tier 1 placeholder audio (Sonniss GDC 2026 + Kenney CC0 + OpenGameArt) ahead of commissioned tracks
+
+### Ground Item / Loot Drop System (implemented 2026-04-09 to 2026-04-10)
+- [x] Server: RO Classic ownership phases, scatter offsets, 60s despawn, party share, damage ranking, 6 socket events
+- [x] Client: GroundItemSubsystem + GroundItemActor (733 lines), billboard sprites, tier-color tinting, click-to-pickup, spawn arc
+- [ ] End-to-end testing (kill monster → items drop on ground → pick up → inventory)
+- [ ] Drop rate table verification against rAthena
+
+### Inventory Performance (analysis done 2026-04-10, optimization in progress)
+- [x] Root cause report: 10 cascading bottlenecks (2 DB queries + 164KB transfer + 350 widget rebuilds per potion use)
+- [x] Phase 1 started: const ref GetFilteredItems, RebuildFilteredCache, ItemDefCache TMap
+- [ ] Phase 1 remaining: fix GetItemAtSlot lambdas, add TMap<InventoryId, Index>
+- [ ] Phase 2: Delta widget update instead of full rebuild
+- [ ] Phase 3: Strip descriptions from server payload (164KB → ~20KB)
+- [ ] Phase 4: Incremental weight + itemDef Map on server
 
 ### Remaining Features
-- [ ] Sound effects / music system (needs research + implementation plan)
 - [ ] Client-side homunculus actor + position broadcast
 - [ ] PvP system
 - [ ] War of Emperium / Guild system
@@ -190,6 +245,16 @@ See [Skill_VFX_Execution_Plan](../docsNew/05_Development/Skill_VFX_Execution_Pla
 
 ## Recent Sessions
 <!-- Add links to session logs here, newest first -->
+- **2026-04-13** — Enemy sprite batch production: 10 new shape key animation presets (~1000 lines), ~20 spriteClass fields added to monster templates, egg/larva enemies made immobile, UniRig AI rigging pipeline installed + proved on rocker (40 bones, 6 anims), Blender 5.x FBX import fix, ~8 more enemy GLBs downloaded. ([daily note](2026-04-13.md))
+- **2026-04-12** — Asset generation day: ~10 enemy 3D models downloaded from Tripo3D (drops, fabre, lunatic, pupa, willow, condor, hornet, roda_frog, savage_babe), enemy spawn priority reviewed. ([daily note](2026-04-12.md))
+- **2026-04-11** — Sprite system review, assassin katar attack investigation (confirmed correct), Blender weight paint fix documented, egg shell hat item distribution, Blender crash troubleshooting. ([daily note](2026-04-11.md))
+- **2026-04-10** — Inventory performance analysis (10-finding root cause report, 4-phase optimization plan). Ground item client implementation (GroundItemSubsystem + GroundItemActor, 733 lines). Phase 1 inventory optimizations started (const ref, cache, ItemDefCache). ([daily note](2026-04-10.md))
+- **2026-04-09** — Ground item / loot drop server system: RO Classic ownership phases, scatter offsets, 60s despawn, party share, damage ranking, 6 socket events, enemy death integration. Research doc created. ([daily note](2026-04-09.md))
+- **2026-04-08** — Minimap SceneCapture2D fix (SetPostProcessMaterial(false) to exclude cutout PP). Regression protection in 5 locations. ([daily note](2026-04-08.md))
+- **2026-04-07** — Full audio system implementation: AudioSubsystem (2847 lines), enemy SFX (60 monsters, body material layering), player SFX (per-weapon swing/hit, per-class), BGM zone mapping (121 tracks), skill SFX (SkillImpactSoundMap), 3 new audio skills. Options menu drop sound toggles. ([daily note](2026-04-07.md))
+- **2026-04-06** — Sprite-vs-world rendering FINAL solution (BLEND_Translucent + bDisableDepthTest + binary alpha, two camera→feet/head line traces + per-pixel depth, post-process cutout via PPI_CustomStencil, hardcoded 96 capsule, motion blur off, CameraSubsystem occlusion removed). Damage number polish — closed all 3 carryover blockers from 04-05 (crit starburst readable, target flinch verified, hit particle replaced). RO Classic audio deep research (GRF/BGM/SFX architecture, 121 pre-renewal tracks, composer credits, **Gravity v. NovaRO $4M legal status**, Tier 1-3 sourcing recommendations) — research only, output to `RO_Audio_System_Research.md`. ([daily note](2026-04-06.md))
+- **2026-04-05** — Options menu expansion (14 settings, SaveGame, FPS overlay), character ground positioning fix (LocalSprite, name tag on sprite, fixed remote HalfHeight, billboard depth comp), RO Classic damage number rewrite + 6-phase hit impact (sine arc, status colors, hit flash, hit particles, crit starburst, combo total, target flinch, hit sounds). 3 new skills, 2 new docs, 3 new prompts. ([daily note](2026-04-05.md))
+- **2026-04-04** — Login screen (deferred texture, resolution fix), ESC menu (char select return, Z=200 overlay), right-click player context (Trade/Party/Whisper), item icons (6169 mapped to subfolders). Major commit `60eca6c`. ([daily note](2026-04-04.md))
 - **2026-04-03** — Kafra Storage (account-shared 300-slot, 10 handlers, split/sort/search QoL) + Player-to-Player Trading (two-step confirm, 13 cancel paths, atomic transfer, /trade command). 8 bugs found and fixed. ([daily note](2026-04-03.md))
 - **2026-04-02** — Complete map system: minimap (134x134, 5 zoom, draggable), world map (12x8 grid, 62 zones), loading screen (Ken Burns, sparkles), Guide NPC marks, /where command. Planned Kafra Storage + Player Trading (prompts created). ([daily note](2026-04-02.md))
 - **2026-03-30 to 2026-04-01** — Ground texture & material system: 1000+ AI textures, 608 RO originals, 17 material versions, 2700+ variants, DBuffer decals (91), Landscape Grass V3 (60 sprites, 13 zones), 80+ scripts, 3 new skills, 5 _meta guides ([daily note](2026-03-30.md))

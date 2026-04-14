@@ -4,6 +4,8 @@
 #include "CombatActionSubsystem.h"
 #include "MultiplayerEventSubsystem.h"
 #include "HotbarSubsystem.h"
+#include "OptionsSubsystem.h"
+#include "Audio/AudioSubsystem.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "Widgets/SWeakWidget.h"
@@ -43,6 +45,19 @@ void UEscapeMenuSubsystem::Deinitialize()
 
 void UEscapeMenuSubsystem::ToggleMenu()
 {
+	// If options panel is open, close it instead of toggling ESC menu
+	if (UOptionsSubsystem* OptSub = GetWorld()->GetSubsystem<UOptionsSubsystem>())
+	{
+		if (OptSub->IsOptionsPanelVisible())
+		{
+			UAudioSubsystem::PlayUICancelStatic(GetWorld());
+			OptSub->HideOptionsPanel();
+			return;
+		}
+	}
+
+	UAudioSubsystem::PlayUIClickStatic(GetWorld());
+
 	if (bMenuVisible)
 		HideMenu();
 	else
@@ -89,6 +104,7 @@ bool UEscapeMenuSubsystem::IsPlayerDead() const
 
 void UEscapeMenuSubsystem::OnCharacterSelectPressed()
 {
+	UAudioSubsystem::PlayUIClickStatic(GetWorld());
 	HideMenu();
 	UMMOGameInstance* GI = GetGI();
 	if (GI)
@@ -99,6 +115,7 @@ void UEscapeMenuSubsystem::OnCharacterSelectPressed()
 
 void UEscapeMenuSubsystem::OnRespawnPressed()
 {
+	UAudioSubsystem::PlayUIClickStatic(GetWorld());
 	HideMenu();
 	UWorld* World = GetWorld();
 	if (!World) return;
@@ -110,6 +127,7 @@ void UEscapeMenuSubsystem::OnRespawnPressed()
 
 void UEscapeMenuSubsystem::OnHotkeyPressed()
 {
+	UAudioSubsystem::PlayUIClickStatic(GetWorld());
 	HideMenu();
 	UWorld* World = GetWorld();
 	if (!World) return;
@@ -119,8 +137,21 @@ void UEscapeMenuSubsystem::OnHotkeyPressed()
 	}
 }
 
+void UEscapeMenuSubsystem::OnOptionPressed()
+{
+	UAudioSubsystem::PlayUIClickStatic(GetWorld());
+	HideMenu();
+	UWorld* World = GetWorld();
+	if (!World) return;
+	if (UOptionsSubsystem* OptSub = World->GetSubsystem<UOptionsSubsystem>())
+	{
+		OptSub->ShowOptionsPanel();
+	}
+}
+
 void UEscapeMenuSubsystem::OnExitGamePressed()
 {
+	UAudioSubsystem::PlayUIClickStatic(GetWorld());
 	HideMenu();
 	// Disconnect socket cleanly then exit
 	UMMOGameInstance* GI = GetGI();

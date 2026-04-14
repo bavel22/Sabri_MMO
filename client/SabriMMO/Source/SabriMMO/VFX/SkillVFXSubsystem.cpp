@@ -5,6 +5,7 @@
 #include "MMOGameInstance.h"
 #include "UI/EnemySubsystem.h"
 #include "UI/OtherPlayerSubsystem.h"
+#include "Audio/AudioSubsystem.h"
 #include "CharacterData.h"
 #include "SocketEventRouter.h"
 #include "NiagaraComponent.h"
@@ -17,6 +18,8 @@
 #include "EngineUtils.h"
 #include "TimerManager.h"
 #include "Serialization/JsonSerializer.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogSkillVFX, Log, All);
 
@@ -79,6 +82,10 @@ void USkillVFXSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		if (!NS_CastingCircle)
 			NS_CastingCircle = TryLoad(TEXT("/Game/Free_Magic/VFX_Niagara/NS_Free_Magic_Circle2.NS_Free_Magic_Circle2"));
 	}
+
+	// Auto-attack hit impact: small spark burst at target position
+	NS_AutoAttackHit = TryLoad(TEXT("/Game/Variant_Combat/VFX/NS_AutoAttackHit.NS_AutoAttackHit"));
+	if (!NS_AutoAttackHit) NS_AutoAttackHit = TryLoad(TEXT("/Game/Free_Magic/VFX_Niagara/NS_Free_Magic_Hit1.NS_Free_Magic_Hit1"));
 
 	int32 LoadedCount = 0;
 	if (NS_BoltFromSky)     ++LoadedCount;
@@ -268,6 +275,13 @@ void USkillVFXSubsystem::HandleCastStart(const TSharedPtr<FJsonValue>& Data)
 	if (!CircleLocation.IsZero())
 	{
 		SpawnCastingCircle(CasterId, CircleLocation, Config, CastTimeSec);
+
+		// Play the per-skill cast windup sound at the caster's position (if mapped).
+		// Most RO Classic skills have only an impact sound; cast sound is optional.
+		if (UAudioSubsystem* Audio = GetWorld()->GetSubsystem<UAudioSubsystem>())
+		{
+			Audio->PlaySkillCastSound(SkillId, CircleLocation);
+		}
 	}
 	else
 	{
@@ -302,7 +316,10 @@ void USkillVFXSubsystem::HandleCastInterrupted(const TSharedPtr<FJsonValue>& Dat
 void USkillVFXSubsystem::HandleSkillEffectDamage(const TSharedPtr<FJsonValue>& Data)
 {
 	if (!bReadyToProcess) return;
-	if (!bVFXEnabled || !Data.IsValid()) return;
+	// IMPORTANT: do NOT gate on bVFXEnabled here — audio runs regardless of the
+	// "Skill Effects" toggle. The toggle is for VFX/particles only, not sounds.
+	// bVFXEnabled is checked later, right before the VFX template switch.
+	if (!Data.IsValid()) return;
 
 	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
 	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
@@ -312,8 +329,12 @@ void USkillVFXSubsystem::HandleSkillEffectDamage(const TSharedPtr<FJsonValue>& D
 	double TargetXD = 0, TargetYD = 0, TargetZD = 0;
 	double AttackerXD = 0, AttackerYD = 0, AttackerZD = 0;
 	double HitNumberD = 0, TotalHitsD = 0;
+	double HitsFieldD = 0; // separate parse — present ONLY in the summary event
 	bool bIsEnemy = false;
+	bool bIsMiss = false;
 	FString Element;
+	FString AttackerWeaponType;
+	FString SkillCategory;
 
 	Obj->TryGetNumberField(TEXT("attackerId"), AttackerIdD);
 	Obj->TryGetNumberField(TEXT("targetId"), TargetIdD);
@@ -326,10 +347,14 @@ void USkillVFXSubsystem::HandleSkillEffectDamage(const TSharedPtr<FJsonValue>& D
 	Obj->TryGetNumberField(TEXT("attackerY"), AttackerYD);
 	Obj->TryGetNumberField(TEXT("attackerZ"), AttackerZD);
 	Obj->TryGetNumberField(TEXT("hitNumber"), HitNumberD);
-	Obj->TryGetNumberField(TEXT("hits"), TotalHitsD);       // bolt skills send "hits" = numHits
-	Obj->TryGetNumberField(TEXT("totalHits"), TotalHitsD);   // combat:damage sends "totalHits"
+	Obj->TryGetNumberField(TEXT("hits"), HitsFieldD);        // bolt skills SUMMARY only
+	Obj->TryGetNumberField(TEXT("hits"), TotalHitsD);        // bolt skills send "hits" = numHits
+	Obj->TryGetNumberField(TEXT("totalHits"), TotalHitsD);    // per-hit events send "totalHits"
 	Obj->TryGetBoolField(TEXT("isEnemy"), bIsEnemy);
+	Obj->TryGetBoolField(TEXT("isMiss"), bIsMiss);
 	Obj->TryGetStringField(TEXT("element"), Element);
+	Obj->TryGetStringField(TEXT("attackerWeaponType"), AttackerWeaponType); // for weapon hit layering
+	Obj->TryGetStringField(TEXT("skillCategory"), SkillCategory);            // 'physical' | 'magical'
 
 	const int32 SkillId = static_cast<int32>(SkillIdD);
 	const int32 HitNumber = static_cast<int32>(HitNumberD);
@@ -351,6 +376,66 @@ void USkillVFXSubsystem::HandleSkillEffectDamage(const TSharedPtr<FJsonValue>& D
 	RemoveCastingCircle(static_cast<int32>(AttackerIdD));
 
 	const FSkillVFXConfig& Config = SkillVFXDataHelper::GetSkillVFXConfig(SkillId);
+
+	// ============================================================
+	// AUDIO PATH — runs FIRST and is INDEPENDENT of bVFXEnabled / VFX template.
+	// ============================================================
+	// The server emits multi-hit skills (Cold/Fire/Lightning Bolt, Soul Strike) as:
+	//   1) ONE summary event with `hits` field set, no hitNumber
+	//   2) N per-hit events with hitNumber 1..N, totalHits=N, staggered ~200ms apart
+	// We want one audible thump PER projectile, so:
+	//   - SUMMARY event (HitsFieldD > 0): SKIP — the per-hits will fire the audio
+	//   - per-hit event (HitNumber >= 1): play every time, dedup bypassed
+	//   - single-hit event (HitNumber == 0 AND HitsFieldD == 0): play once, dedup applies
+	// For self-centered AoE (Magnum Break), play at the caster instead of the target.
+	// Damage concurrency bucket (cap=8) limits how many can play simultaneously
+	// even if multiple enemies are hit by the same AoE.
+	//
+	// CRITICAL: this block must run BEFORE bVFXEnabled and Config.Template gates,
+	// because:
+	//   1. Many skills (Double Strafe, Throw Stone, Mammonite, Pierce, Spear Stab,
+	//      Sand Attack, Loud Exclamation, etc.) have NO VFX config — gating audio
+	//      on Config.Template makes them silent.
+	//   2. Audio is its own concern. The "Skill Effects" toggle in Options is meant
+	//      to disable particle VFX, not silence the entire combat sound layer.
+	const bool bIsSummaryOfMultiHit = (HitsFieldD > 0);
+	if (!bIsSummaryOfMultiHit)
+	{
+		if (UAudioSubsystem* Audio = GetWorld()->GetSubsystem<UAudioSubsystem>())
+		{
+			// bSelfCentered only matters for self-centered AoEs that have a VFX config
+			// (Magnum Break) — for VFX-less skills the flag is the default false
+			// and TargetLoc is the right place to play.
+			const FVector SoundLoc = Config.bSelfCentered ? AttackerLoc : TargetLoc;
+			const bool bPlayed = Audio->PlaySkillImpactSound(SkillId, SoundLoc, HitNumber);
+			UE_LOG(LogSkillVFX, Verbose, TEXT("Skill audio: id=%d hitNum=%d hitsField=%d played=%d"),
+				SkillId, HitNumber, (int32)HitsFieldD, bPlayed ? 1 : 0);
+
+			// ----- Weapon hit "thwack" overlay for physical skills -----
+			// RO Classic plays the attacker's weapon hit sound (hit_arrow / hit_sword /
+			// hit_axe / etc.) on top of the skill SFX when a physical skill connects.
+			// Magic skills (bolts, walls, balls) skip this so they sound clean.
+			//
+			// The server tags each skill:effect_damage payload with skillCategory and
+			// attackerWeaponType in broadcastToZone. We only fire the hit sound when:
+			//   - the skill is physical (not magical)
+			//   - the attack actually landed (damage > 0 and not a miss)
+			//   - the attacker has a weapon type the audio system recognizes
+			// PlayWeaponHitSound returns false silently if the weapon type has no
+			// mapped wav (knuckle/whip/instrument), so it's safe to call unguarded.
+			const bool bIsPhysical = SkillCategory.Equals(TEXT("physical"), ESearchCase::IgnoreCase);
+			const bool bLanded = !bIsMiss && DamageD > 0;
+			if (bIsPhysical && bLanded && !AttackerWeaponType.IsEmpty())
+			{
+				Audio->PlayWeaponHitSound(AttackerWeaponType, TargetLoc);
+			}
+		}
+	}
+
+	// ============================================================
+	// VFX PATH — gated by both the "Skill Effects" option and the per-skill template.
+	// ============================================================
+	if (!bVFXEnabled) return;
 	if (Config.Template == ESkillVFXTemplate::None) return;
 
 	switch (Config.Template)
@@ -472,8 +557,9 @@ void USkillVFXSubsystem::HandleSkillEffectDamage(const TSharedPtr<FJsonValue>& D
 void USkillVFXSubsystem::HandleBuffApplied(const TSharedPtr<FJsonValue>& Data)
 {
 	if (!bReadyToProcess) return;
-	UE_LOG(LogSkillVFX, Log, TEXT("HandleBuffApplied ENTERED — bVFXEnabled=%d DataValid=%d"), bVFXEnabled, Data.IsValid());
-	if (!bVFXEnabled || !Data.IsValid()) return;
+	UE_LOG(LogSkillVFX, Verbose, TEXT("HandleBuffApplied ENTERED — bVFXEnabled=%d DataValid=%d"), bVFXEnabled, Data.IsValid());
+	// Audio runs INDEPENDENTLY of bVFXEnabled — only the VFX spawn is gated.
+	if (!Data.IsValid()) return;
 
 	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
 	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
@@ -488,9 +574,31 @@ void USkillVFXSubsystem::HandleBuffApplied(const TSharedPtr<FJsonValue>& Data)
 
 	const int32 TargetId = static_cast<int32>(TargetIdD);
 	const int32 SkillId = static_cast<int32>(SkillIdD);
-	UE_LOG(LogSkillVFX, Log, TEXT("HandleBuffApplied — SkillId=%d TargetId=%d IsEnemy=%d"), SkillId, TargetId, bIsEnemy);
+	UE_LOG(LogSkillVFX, Verbose, TEXT("HandleBuffApplied — SkillId=%d TargetId=%d IsEnemy=%d"), SkillId, TargetId, bIsEnemy);
 
 	const FSkillVFXConfig& Config = SkillVFXDataHelper::GetSkillVFXConfig(SkillId);
+
+	// ---- Audio FIRST (independent of bVFXEnabled) ----
+	// Self-buffs like Endure and Sight don't go through skill:effect_damage, so this
+	// handler is the place to fire their sound. Fall back to the local pawn position
+	// if we can't resolve the target actor (so the sound still plays for the local
+	// player even if their actor isn't registered yet).
+	{
+		FVector BuffSoundLoc = GetActorLocationById(TargetId, bIsEnemy);
+		if (BuffSoundLoc.IsNearlyZero())
+		{
+			if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+				if (APawn* Pawn = PC->GetPawn())
+					BuffSoundLoc = Pawn->GetActorLocation();
+		}
+		if (UAudioSubsystem* Audio = GetWorld()->GetSubsystem<UAudioSubsystem>())
+		{
+			Audio->PlaySkillImpactSound(SkillId, BuffSoundLoc);
+		}
+	}
+
+	// ---- VFX PATH gated by bVFXEnabled ----
+	if (!bVFXEnabled) return;
 
 	// Handle SelfBuff template (Endure, Sight, etc.) — spawn attached to target
 	if (Config.Template == ESkillVFXTemplate::SelfBuff)
@@ -1222,6 +1330,21 @@ void USkillVFXSubsystem::SpawnAoEImpact(FVector Location, const FSkillVFXConfig&
 	if (!NS_AoEImpact) return;
 	UNiagaraComponent* Comp = SpawnNiagaraAtLocation(NS_AoEImpact, Location);
 	if (Comp) SetNiagaraColor(Comp, Config.PrimaryColor);
+}
+
+void USkillVFXSubsystem::SpawnAutoAttackHitEffect(FVector Location, bool bIsCritical)
+{
+	if (!NS_AutoAttackHit || !bVFXEnabled) return;
+	// Quick hit impact at target — fewer but bigger particles, more scatter
+	FVector Scale = bIsCritical ? FVector(0.8f) : FVector(0.5f);
+	UNiagaraComponent* Comp = SpawnNiagaraAtLocation(NS_AutoAttackHit, Location, FRotator::ZeroRotator, Scale);
+	if (Comp)
+	{
+		FLinearColor Color = bIsCritical
+			? FLinearColor(0.9f, 0.9f, 0.15f)   // Yellow for crit
+			: FLinearColor(1.0f, 1.0f, 1.0f);   // White for normal
+		SetNiagaraColor(Comp, Color);
+	}
 }
 
 void USkillVFXSubsystem::SpawnGroundPersistent(FVector Location, const FSkillVFXConfig& Config, int32 SkillId)

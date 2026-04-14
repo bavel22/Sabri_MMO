@@ -317,3 +317,14 @@ pipeline_v2_*.txt
 
 # Duplicate navmesh copy
 client/server/
+
+# Large audio assets (sourced externally, not tracked in git)
+BGM/
+ROSFX/
+
+# UniRig AI rigging tool (cloned repo with its own .git)
+UniRig/
+
+# Temp files
+_tmp_*
+temp_*

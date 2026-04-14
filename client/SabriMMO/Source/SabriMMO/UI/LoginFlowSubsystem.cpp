@@ -6,6 +6,7 @@
 #include "SLoadingOverlayWidget.h"
 #include "MMOGameInstance.h"
 #include "MMOHttpManager.h"
+#include "Audio/AudioSubsystem.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "Engine/Texture2D.h"
@@ -75,6 +76,12 @@ void ULoginFlowSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	// --- Fullscreen Background (below all login widgets) ---
 	// Deferred — viewport and textures are not ready during OnWorldBeginPlay in standalone.
 	TryLoadBackgroundTexture(ViewportClient, 15);
+
+	// --- Login screen BGM (RO Classic Title track 01) ---
+	if (UAudioSubsystem* Audio = InWorld.GetSubsystem<UAudioSubsystem>())
+	{
+		Audio->PlayBgm(TEXT("/Game/SabriMMO/Audio/BGM/bgm_01"));
+	}
 
 	// --- Login Widget ---
 	LoginWidget = SNew(SLoginWidget).Subsystem(this);

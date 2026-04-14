@@ -53,6 +53,9 @@ public:
 	// ---- NPC name labels (screen-space text above NPC actors) ----
 	TArray<FNPCNameData> NPCNames;
 
+	// ---- options flags (set by OptionsSubsystem) ----
+	bool bShowEnemyBars = true;
+
 	// ---- Lifecycle ----
 	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;

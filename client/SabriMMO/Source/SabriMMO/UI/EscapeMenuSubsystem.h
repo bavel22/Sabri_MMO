@@ -40,6 +40,7 @@ public:
 	void OnCharacterSelectPressed();
 	void OnRespawnPressed();
 	void OnHotkeyPressed();
+	void OnOptionPressed();
 	void OnExitGamePressed();
 
 private:

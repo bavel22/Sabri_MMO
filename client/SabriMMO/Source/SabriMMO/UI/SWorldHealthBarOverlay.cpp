@@ -12,6 +12,8 @@
 #include "Engine/GameViewportClient.h"
 #include "Widgets/SNullWidget.h"
 #include "Kismet/GameplayStatics.h"
+#include "GameFramework/Character.h"
+#include "Components/CapsuleComponent.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWorldHealthBarOverlay, Log, All);
 
@@ -84,8 +86,10 @@ int32 SWorldHealthBarOverlay::OnPaint(
 
 		if (BarPC && Pawn)
 		{
-			// Use sprite screen bounds for positioning (scales with zoom)
+			// Use capsule bottom (ground level) for positioning
 			FVector ActorPos = Pawn->GetActorLocation();
+			if (ACharacter* Char = Cast<ACharacter>(Pawn))
+				ActorPos.Z -= Char->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
 			FVector2D TopScreen, BottomScreen;
 			const float SpriteH = 150.f; // SpriteSize.Y
 
@@ -93,8 +97,8 @@ int32 SWorldHealthBarOverlay::OnPaint(
 			if (GetSpriteScreenBounds(BarPC, ActorPos, SpriteH, TopScreen, BottomScreen))
 			{
 				float SpriteScreenH = BottomScreen.Y - TopScreen.Y;
+				// Position health bar just below sprite bottom (scales with zoom)
 				float Margin = FMath::Max(SpriteScreenH * 0.05f, 2.f);
-				// Position health bar just below sprite bottom
 				ScreenPos = FVector2D(BottomScreen.X, BottomScreen.Y + Margin);
 			}
 			else if (Sub->ProjectWorldToScreen(ActorPos, ScreenPos))
@@ -120,7 +124,8 @@ int32 SWorldHealthBarOverlay::OnPaint(
 	}
 	SkipPlayerBar:
 
-	// ---- Draw enemy bars ----
+	// ---- Draw enemy bars (skip if disabled in options) ----
+	if (!Sub->bShowEnemyBars) goto SkipEnemyBars;
 	for (const auto& Pair : Sub->EnemyHealthMap)
 	{
 		const FEnemyBarData& Enemy = Pair.Value;
@@ -142,6 +147,8 @@ int32 SWorldHealthBarOverlay::OnPaint(
 		DrawEnemyBar(OutDrawElements, BarLayerId, AllottedGeometry, InvScale,
 			ScreenPos, HPPercent, bCritical);
 	}
+
+	SkipEnemyBars:
 
 	// ---- NPC name labels REMOVED (Phase 5) ----
 	// NPC names now rendered by UNameTagSubsystem (Z=7) with RO Classic hover-only behavior.

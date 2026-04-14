@@ -51,6 +51,11 @@ public:
 	const TArray<FNameTagEntry>& GetEntries() const { return Entries; }
 	int32 GetLocalPlayerLevel() const { return LocalPlayerLevel; }
 
+	// ---- options flags (set by OptionsSubsystem) ----
+	bool bShowPlayerNames = true;
+	bool bShowEnemyNames = true;
+	bool bShowNPCNames = true;
+
 private:
 	TArray<FNameTagEntry> Entries;
 	int32 LocalPlayerLevel = 1;

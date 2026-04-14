@@ -38,6 +38,11 @@ Reusable prompts that have produced good results with Claude Code.
 - [implement_kafra_storage.md](implement_kafra_storage.md) — Complete Kafra Storage implementation (account-shared 300-slot storage via Kafra NPCs, 7 phases, server+client+DB)
 - [implement_player_trading.md](implement_player_trading.md) — Complete P2P trading system (10 slots/side, Zeny exchange, two-step confirmation, anti-scam, 12 phases)
 
+### Combat Feel / UI Polish Prompts
+- [implement_ro_damage_numbers.md](implement_ro_damage_numbers.md) — Initial RO Classic damage number rewrite (sine arc + drift + scale shrink, per-type curves, color spec, crit starburst). Template for "rewrite an animation system to match a reference spec."
+- [implement_damage_number_remaining_features.md](implement_damage_number_remaining_features.md) — 6-phase implementation plan (hit flash, particles, starburst, combo total, flinch, sounds) with file matrix and dependency order. Template for any multi-phase feature broken across files.
+- [implement_hit_impact_features.md](implement_hit_impact_features.md) — Tighter step-by-step companion to the 6-phase plan, with "Pre-Implementation: Read These Files First" block. Template for "implement steps from a plan doc" follow-up prompts.
+
 ### Skill Implementation Pattern
 The pattern that worked for every class:
 1. `/deep-research` — gather rAthena + iRO Wiki + RateMyServer data

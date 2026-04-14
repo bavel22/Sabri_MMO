@@ -833,8 +833,14 @@ void SPartyWidget::RebuildSettingsPopup()
 
 	// Determine current mode
 	FString CurrentMode;
+	FString CurrentItemShare;
+	FString CurrentItemDistribute;
 	if (UPartySubsystem* Sub = WeakSub.Get())
+	{
 		CurrentMode = Sub->ExpShare;
+		CurrentItemShare = Sub->ItemShare;
+		CurrentItemDistribute = Sub->ItemDistribute;
+	}
 
 	auto MakeOptionButton = [this, WeakSub](const FString& Label, const FString& Description, const FString& Mode, bool bIsActive) -> TSharedRef<SWidget>
 	{
@@ -960,6 +966,152 @@ void SPartyWidget::RebuildSettingsPopup()
 							TEXT("EXP split evenly with +20% bonus per member. Requires <15 level gap."),
 							TEXT("even_share"),
 							CurrentMode == TEXT("even_share"))
+					]
+
+					// ── Item Pickup label ──
+					+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 8.f, 0.f, 4.f)
+					[
+						SNew(STextBlock)
+						.Text(FText::FromString(TEXT("Item Pickup:")))
+						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 8))
+						.ColorAndOpacity(FSlateColor(PartyColors::TextPrimary))
+					]
+
+					// Each Take (items)
+					+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 1.f)
+					[
+						SNew(SBorder)
+						.BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
+						.BorderBackgroundColor(CurrentItemShare != TEXT("party_share") ? FLinearColor(0.20f, 0.45f, 0.20f, 1.f) : PartyColors::ButtonBg)
+						.Padding(FMargin(8.f, 4.f))
+						.Cursor(EMouseCursor::Hand)
+						.OnMouseButtonDown_Lambda([WeakSub](const FGeometry&, const FPointerEvent& Event) -> FReply
+						{
+							if (Event.GetEffectingButton() == EKeys::LeftMouseButton)
+							{
+								if (UPartySubsystem* Sub = WeakSub.Get()) Sub->ChangeItemShare(TEXT("each_take"));
+								return FReply::Handled();
+							}
+							return FReply::Unhandled();
+						})
+						[
+							SNew(SVerticalBox)
+							+ SVerticalBox::Slot().AutoHeight()
+							[
+								SNew(SHorizontalBox)
+								+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.f, 0.f, 4.f, 0.f)
+								[ SNew(STextBlock).Text(FText::FromString(CurrentItemShare != TEXT("party_share") ? TEXT("[x]") : TEXT("[ ]"))).Font(FCoreStyle::GetDefaultFontStyle("Regular", 8)).ColorAndOpacity(FSlateColor(PartyColors::TextPrimary)) ]
+								+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+								[ SNew(STextBlock).Text(FText::FromString(TEXT("Each Take"))).Font(FCoreStyle::GetDefaultFontStyle("Bold", 9)).ColorAndOpacity(FSlateColor(GoldHighlight)) ]
+							]
+							+ SVerticalBox::Slot().AutoHeight().Padding(18.f, 0.f, 0.f, 0.f)
+							[ SNew(STextBlock).Text(FText::FromString(TEXT("Only damage dealers can loot during priority window."))).Font(FCoreStyle::GetDefaultFontStyle("Regular", 7)).ColorAndOpacity(FSlateColor(PartyColors::TextDim)).AutoWrapText(true).WrapTextAt(180.f) ]
+						]
+					]
+
+					// Party Share (items)
+					+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 1.f)
+					[
+						SNew(SBorder)
+						.BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
+						.BorderBackgroundColor(CurrentItemShare == TEXT("party_share") ? FLinearColor(0.20f, 0.45f, 0.20f, 1.f) : PartyColors::ButtonBg)
+						.Padding(FMargin(8.f, 4.f))
+						.Cursor(EMouseCursor::Hand)
+						.OnMouseButtonDown_Lambda([WeakSub](const FGeometry&, const FPointerEvent& Event) -> FReply
+						{
+							if (Event.GetEffectingButton() == EKeys::LeftMouseButton)
+							{
+								if (UPartySubsystem* Sub = WeakSub.Get()) Sub->ChangeItemShare(TEXT("party_share"));
+								return FReply::Handled();
+							}
+							return FReply::Unhandled();
+						})
+						[
+							SNew(SVerticalBox)
+							+ SVerticalBox::Slot().AutoHeight()
+							[
+								SNew(SHorizontalBox)
+								+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.f, 0.f, 4.f, 0.f)
+								[ SNew(STextBlock).Text(FText::FromString(CurrentItemShare == TEXT("party_share") ? TEXT("[x]") : TEXT("[ ]"))).Font(FCoreStyle::GetDefaultFontStyle("Regular", 8)).ColorAndOpacity(FSlateColor(PartyColors::TextPrimary)) ]
+								+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+								[ SNew(STextBlock).Text(FText::FromString(TEXT("Party Share"))).Font(FCoreStyle::GetDefaultFontStyle("Bold", 9)).ColorAndOpacity(FSlateColor(GoldHighlight)) ]
+							]
+							+ SVerticalBox::Slot().AutoHeight().Padding(18.f, 0.f, 0.f, 0.f)
+							[ SNew(STextBlock).Text(FText::FromString(TEXT("Any party member can pick up dropped items immediately."))).Font(FCoreStyle::GetDefaultFontStyle("Regular", 7)).ColorAndOpacity(FSlateColor(PartyColors::TextDim)).AutoWrapText(true).WrapTextAt(180.f) ]
+						]
+					]
+
+					// ── Item Distribution label ──
+					+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 8.f, 0.f, 4.f)
+					[
+						SNew(STextBlock)
+						.Text(FText::FromString(TEXT("Item Distribution:")))
+						.Font(FCoreStyle::GetDefaultFontStyle("Bold", 8))
+						.ColorAndOpacity(FSlateColor(PartyColors::TextPrimary))
+					]
+
+					// Individual
+					+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 1.f)
+					[
+						SNew(SBorder)
+						.BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
+						.BorderBackgroundColor(CurrentItemDistribute != TEXT("shared") ? FLinearColor(0.20f, 0.45f, 0.20f, 1.f) : PartyColors::ButtonBg)
+						.Padding(FMargin(8.f, 4.f))
+						.Cursor(EMouseCursor::Hand)
+						.OnMouseButtonDown_Lambda([WeakSub](const FGeometry&, const FPointerEvent& Event) -> FReply
+						{
+							if (Event.GetEffectingButton() == EKeys::LeftMouseButton)
+							{
+								if (UPartySubsystem* Sub = WeakSub.Get()) Sub->ChangeItemDistribute(TEXT("individual"));
+								return FReply::Handled();
+							}
+							return FReply::Unhandled();
+						})
+						[
+							SNew(SVerticalBox)
+							+ SVerticalBox::Slot().AutoHeight()
+							[
+								SNew(SHorizontalBox)
+								+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.f, 0.f, 4.f, 0.f)
+								[ SNew(STextBlock).Text(FText::FromString(CurrentItemDistribute != TEXT("shared") ? TEXT("[x]") : TEXT("[ ]"))).Font(FCoreStyle::GetDefaultFontStyle("Regular", 8)).ColorAndOpacity(FSlateColor(PartyColors::TextPrimary)) ]
+								+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+								[ SNew(STextBlock).Text(FText::FromString(TEXT("Individual"))).Font(FCoreStyle::GetDefaultFontStyle("Bold", 9)).ColorAndOpacity(FSlateColor(GoldHighlight)) ]
+							]
+							+ SVerticalBox::Slot().AutoHeight().Padding(18.f, 0.f, 0.f, 0.f)
+							[ SNew(STextBlock).Text(FText::FromString(TEXT("You keep whatever you pick up."))).Font(FCoreStyle::GetDefaultFontStyle("Regular", 7)).ColorAndOpacity(FSlateColor(PartyColors::TextDim)).AutoWrapText(true).WrapTextAt(180.f) ]
+						]
+					]
+
+					// Shared
+					+ SVerticalBox::Slot().AutoHeight().Padding(0.f, 1.f)
+					[
+						SNew(SBorder)
+						.BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
+						.BorderBackgroundColor(CurrentItemDistribute == TEXT("shared") ? FLinearColor(0.20f, 0.45f, 0.20f, 1.f) : PartyColors::ButtonBg)
+						.Padding(FMargin(8.f, 4.f))
+						.Cursor(EMouseCursor::Hand)
+						.OnMouseButtonDown_Lambda([WeakSub](const FGeometry&, const FPointerEvent& Event) -> FReply
+						{
+							if (Event.GetEffectingButton() == EKeys::LeftMouseButton)
+							{
+								if (UPartySubsystem* Sub = WeakSub.Get()) Sub->ChangeItemDistribute(TEXT("shared"));
+								return FReply::Handled();
+							}
+							return FReply::Unhandled();
+						})
+						[
+							SNew(SVerticalBox)
+							+ SVerticalBox::Slot().AutoHeight()
+							[
+								SNew(SHorizontalBox)
+								+ SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center).Padding(0.f, 0.f, 4.f, 0.f)
+								[ SNew(STextBlock).Text(FText::FromString(CurrentItemDistribute == TEXT("shared") ? TEXT("[x]") : TEXT("[ ]"))).Font(FCoreStyle::GetDefaultFontStyle("Regular", 8)).ColorAndOpacity(FSlateColor(PartyColors::TextPrimary)) ]
+								+ SHorizontalBox::Slot().FillWidth(1.f).VAlign(VAlign_Center)
+								[ SNew(STextBlock).Text(FText::FromString(TEXT("Shared"))).Font(FCoreStyle::GetDefaultFontStyle("Bold", 9)).ColorAndOpacity(FSlateColor(GoldHighlight)) ]
+							]
+							+ SVerticalBox::Slot().AutoHeight().Padding(18.f, 0.f, 0.f, 0.f)
+							[ SNew(STextBlock).Text(FText::FromString(TEXT("Picked up items randomly go to a party member in range."))).Font(FCoreStyle::GetDefaultFontStyle("Regular", 7)).ColorAndOpacity(FSlateColor(PartyColors::TextDim)).AutoWrapText(true).WrapTextAt(180.f) ]
+						]
 					]
 
 					// Close button

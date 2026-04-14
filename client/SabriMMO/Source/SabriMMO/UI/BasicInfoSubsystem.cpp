@@ -4,6 +4,7 @@
 #include "SBasicInfoWidget.h"
 #include "MMOGameInstance.h"
 #include "SocketEventRouter.h"
+#include "Audio/AudioSubsystem.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
@@ -376,6 +377,32 @@ void UBasicInfoSubsystem::HandleExpLevelUp(const TSharedPtr<FJsonValue>& Data)
 	{
 		ParseExpPayload(*ExpPtr);
 	}
+
+	// Distinct base vs job level-up chimes (RO Classic uses two different stingers).
+	// Server sends baseLevelUps[] and jobLevelUps[] arrays — both can be non-empty
+	// if a single exp gain pushed both levels at once.
+	const TArray<TSharedPtr<FJsonValue>>* BaseUpsArr = nullptr;
+	const TArray<TSharedPtr<FJsonValue>>* JobUpsArr  = nullptr;
+	const bool bBaseUp = Obj->TryGetArrayField(TEXT("baseLevelUps"), BaseUpsArr) && BaseUpsArr && BaseUpsArr->Num() > 0;
+	const bool bJobUp  = Obj->TryGetArrayField(TEXT("jobLevelUps"),  JobUpsArr)  && JobUpsArr  && JobUpsArr->Num() > 0;
+
+	if (UAudioSubsystem* Audio = GetWorld()->GetSubsystem<UAudioSubsystem>())
+	{
+		// Base level chime takes priority (more iconic). Job chime layered if also leveled.
+		if (bBaseUp)
+		{
+			Audio->PlayLevelUpSound();
+		}
+		if (bJobUp)
+		{
+			Audio->PlayJobLevelUpSound();
+		}
+		// Fallback when arrays are missing — still play base chime so we never go silent
+		if (!bBaseUp && !bJobUp)
+		{
+			Audio->PlayLevelUpSound();
+		}
+	}
 }
 
 void UBasicInfoSubsystem::HandlePlayerJoined(const TSharedPtr<FJsonValue>& Data)
@@ -481,7 +508,17 @@ void UBasicInfoSubsystem::HandleZenyUpdate(const TSharedPtr<FJsonValue>& Data)
 	double Z = 0;
 	if ((*ObjPtr)->TryGetNumberField(TEXT("zeny"), Z))
 	{
-		Zuzucoin = (int32)Z;
+		const int32 NewZeny = (int32)Z;
+		// Only play coin pickup chime when zeny INCREASED (not on spend).
+		// First update (Zuzucoin == 0 from initial join) is silent.
+		if (Zuzucoin > 0 && NewZeny > Zuzucoin)
+		{
+			if (UAudioSubsystem* Audio = GetWorld()->GetSubsystem<UAudioSubsystem>())
+			{
+				Audio->PlayCoinPickupSound();
+			}
+		}
+		Zuzucoin = NewZeny;
 	}
 }
 
@@ -559,10 +596,18 @@ void UBasicInfoSubsystem::PopulateNameFromGameInstance()
 }
 
 // ============================================================
-// Weight formula — RO-style: 2000 + STR*30
+// Weight formula — RO-style: 2000 + STR*30 (fallback only)
+// Server-authoritative maxWeight from inventory:data / weight:status
+// is preferred since it includes Enlarge Weight Limit, mount bonuses, etc.
 // ============================================================
 
 void UBasicInfoSubsystem::RecalcMaxWeight()
 {
-	MaxWeight = 2000 + STR * 30;
+	// Only use client-side formula if server hasn't sent a value yet.
+	// Once server maxWeight arrives (via inventory:data or weight:status),
+	// that value takes priority and won't be overwritten here.
+	if (MaxWeight <= 0)
+	{
+		MaxWeight = 2000 + STR * 30;
+	}
 }

@@ -25,6 +25,11 @@ public:
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 	virtual void Deinitialize() override;
 
+	// ---- options flags (set by OptionsSubsystem) ----
+	bool bDamageNumbersEnabled = true;
+	bool bShowMissText = true;
+	float DamageNumberScale = 1.0f;  // 0.75 = small, 1.0 = normal, 1.25 = large
+
 private:
 	// ---- event handlers ----
 	void HandleCombatDamage(const TSharedPtr<FJsonValue>& Data);
@@ -44,7 +49,8 @@ private:
 		int32 AttackerId, int32 TargetId,
 		const FVector& TargetWorldPos,
 		const FString& HitType = TEXT("normal"),
-		const FString& Element = TEXT("neutral"));
+		const FString& Element = TEXT("neutral"),
+		const FLinearColor* CustomColor = nullptr);
 
 	// ---- spawn a floating text label (e.g. "Poisoned!", "Stunned!") ----
 	void SpawnTextPop(const FString& Text, const FLinearColor& Color,
@@ -57,7 +63,24 @@ private:
 	static FString GetStatusDisplayName(const FString& StatusType);
 	static FLinearColor GetStatusColor(const FString& StatusType);
 
+	// ---- combo total tracking ----
+	struct FComboTracker
+	{
+		int32 TotalDamage = 0;
+		int32 ExpectedHits = 0;
+		int32 HitsReceived = 0;
+		int32 TargetId = 0;
+		bool bIsEnemy = false;
+		FVector LastTargetPos = FVector::ZeroVector;
+	};
+	TMap<FString, FComboTracker> ActiveCombos;
+
+	void SpawnComboTotal(int32 TotalDamage, bool bIsEnemy, int32 TargetId, const FVector& Pos);
+
 	// ---- state ----
+	UPROPERTY()
+	UTexture2D* CritStarburstTexture = nullptr;
+
 	bool bOverlayAdded = false;
 	int32 LocalCharacterId = 0;
 

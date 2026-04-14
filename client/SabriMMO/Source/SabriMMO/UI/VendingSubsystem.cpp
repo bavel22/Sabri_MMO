@@ -8,6 +8,7 @@
 #include "NameTagSubsystem.h"
 #include "MMOGameInstance.h"
 #include "SocketEventRouter.h"
+#include "Audio/AudioSubsystem.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "GameFramework/PlayerController.h"
@@ -351,6 +352,7 @@ void UVendingSubsystem::OpenVendingSetup(int32 MaxSlots)
 
 void UVendingSubsystem::CloseVendingSetup()
 {
+	UAudioSubsystem::PlayUICancelStatic(GetWorld());
 	HideSetupPopup();
 }
 
@@ -358,6 +360,7 @@ void UVendingSubsystem::StartVending(const FString& Title, const TArray<FVendSet
 {
 	UWorld* World = GetWorld();
 	if (!World) return;
+	UAudioSubsystem::PlayUIClickStatic(World);
 	UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance());
 	if (!GI) return;
 
@@ -426,6 +429,7 @@ void UVendingSubsystem::BrowseShop(int32 VendorId)
 
 void UVendingSubsystem::CloseBrowse()
 {
+	UAudioSubsystem::PlayUICancelStatic(GetWorld());
 	HideBrowsePopup();
 }
 

@@ -30,6 +30,10 @@ public:
 	void OnMouseDelta(const FVector2D& Delta);
 	void OnZoom(float AxisValue);
 
+	// Configurable via Options menu (set by OptionsSubsystem)
+	float ZoomSpeed = 80.f;
+	float RotationSensitivity = 0.6f;
+
 private:
 	bool bIsRotatingCamera = false;
 	bool bDidRotateThisClick = false;
@@ -40,16 +44,9 @@ private:
 	static constexpr float MinArmLength = 200.f;
 	static constexpr float MaxArmLength = 1500.f;
 	static constexpr float FixedPitch = -55.f;
-	static constexpr float ZoomSpeed = 80.f;
-	static constexpr float RotationSensitivity = 0.6f;
 
 	TWeakObjectPtr<USpringArmComponent> CachedSpringArm;
 
 	void SetupCamera();
 	FTimerHandle SetupRetryTimer;
-	FTimerHandle OcclusionTickTimer;
-
-	// --- Occlusion transparency: hide actors between camera and player ---
-	void UpdateOcclusionTransparency();
-	TSet<TWeakObjectPtr<AActor>> OccludedActors;
 };

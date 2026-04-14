@@ -30,7 +30,8 @@ public class SabriMMO : ModuleRules
 			"NavigationSystem",
 			"Navmesh",
 			"ProceduralMeshComponent",
-			"RenderCore"
+			"RenderCore",
+			"RHI"
 		});
 
 		// Exclude NetworkPrediction module due to UE 5.7 compiler bug

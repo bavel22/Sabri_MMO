@@ -11,6 +11,17 @@ class UMaterialInstanceDynamic;
 class UDecalComponent;
 
 /**
+ * Fires when a looping sprite animation completes one full cycle (last frame -> first frame).
+ * Used by EnemySubsystem to frame-sync the monster move sound (RO Classic Poring "boing"
+ * cadence) to the actual Walk animation cycle instead of a fixed cooldown.
+ *
+ * Param 1: the animation state that just completed a cycle (typically Walk or Idle).
+ *
+ * Note: only fires for looping states. One-shot states (Attack, Death, Hit) do NOT fire this.
+ */
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnSpriteAnimCycleComplete, ESpriteAnimState /*State*/);
+
+/**
  * A single sprite layer (body, hair, weapon, etc.)
  * Rendered as a procedural quad with UV manipulation for atlas cell selection.
  */
@@ -85,6 +96,14 @@ public:
 	ESpriteWeaponMode GetWeaponMode() const { return CurrentWeaponMode; }
 	bool IsBodyReady() const { return Layers[static_cast<int32>(ESpriteLayer::Body)].bActive; }
 
+	/**
+	 * Fires whenever a looping animation completes one full cycle and wraps to frame 0.
+	 * Used by EnemySubsystem to fire the monster move sound (Poring hop cadence) in
+	 * exact sync with the Walk animation, rather than via fixed cooldown approximation.
+	 * Only fires for looping animation states (Walk, Idle, Sit). One-shot states do not fire.
+	 */
+	FOnSpriteAnimCycleComplete OnAnimCycleComplete;
+
 	// --- Quick Setup (loads atlases from content) ---
 
 	UFUNCTION(BlueprintCallable, Category = "Sprite")
@@ -133,6 +152,9 @@ public:
 
 	/** Disable click targeting (corpse stays visible but not clickable) */
 	void DisableClickCollision();
+
+	/** Play brief white flash on all sprite layers (150ms). Called on damage hit. */
+	void PlayHitFlash();
 
 protected:
 	UPROPERTY(VisibleAnywhere)
@@ -190,6 +212,7 @@ public:
 
 	/** Z offset to lower sprite from owner actor's location (set by EnemySubsystem for ground-snap) */
 	float GroundZOffset = 0.f;
+	bool bIsLocalPlayerSprite = false;
 
 	/** C++ server-driven movement (replaces BP Tick interpolation for sprite enemies) */
 	void SetServerTargetPosition(const FVector& Pos, bool bMoving, float Speed);
@@ -264,4 +287,10 @@ private:
 	FSpriteAtlasInfo ParseAtlasJSON(const FString& JsonStr, const FString& AtlasName);
 
 	UMaterialInstanceDynamic* CreateSpriteMaterial(UTexture2D* Texture);
+
+	// ---- Hit flash state ----
+	float HitFlashTimer = 0.0f;
+	bool bHitFlashing = false;
+	static constexpr float HIT_FLASH_DURATION = 0.15f;  // 150ms white flash
+	TMap<int32, FLinearColor> SavedLayerTints;  // Original tints before flash
 };

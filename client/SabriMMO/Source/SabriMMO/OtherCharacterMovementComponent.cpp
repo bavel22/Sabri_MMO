@@ -25,7 +25,9 @@ void UOtherCharacterMovementComponent::TickComponent(
 
 	// Downward line trace to find the floor beneath the character
 	const FVector ActorLoc = Owner->GetActorLocation();
-	const float HalfHeight = Owner->GetCapsuleComponent()->GetScaledCapsuleHalfHeight();
+	// Use 96 to match local player capsule (SabriMMOCharacter::InitCapsuleSize(42, 96))
+	// so sprite Z subtraction (also 96) produces ground level consistently
+	static constexpr float HalfHeight = 96.f;
 
 	const FVector TraceStart(ActorLoc.X, ActorLoc.Y, ActorLoc.Z + 200.f);
 	const FVector TraceEnd(ActorLoc.X, ActorLoc.Y, ActorLoc.Z - 2000.f);

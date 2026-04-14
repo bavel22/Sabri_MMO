@@ -105,6 +105,11 @@ public:
 		{
 			if (!Entry.Actor.IsValid() || !Entry.bVisible) continue;
 
+			// Options menu: hide player/enemy/NPC names if disabled
+			if (Entry.Type == ENameTagEntityType::Player && !Sub->bShowPlayerNames) continue;
+			if (Entry.Type == ENameTagEntityType::Monster && !Sub->bShowEnemyNames) continue;
+			if (Entry.Type == ENameTagEntityType::NPC && !Sub->bShowNPCNames) continue;
+
 			// RO Classic: monsters and NPCs are HOVER-ONLY
 			if (Entry.Type == ENameTagEntityType::Monster || Entry.Type == ENameTagEntityType::NPC)
 			{
@@ -124,7 +129,7 @@ public:
 					continue;
 
 				float SpriteScreenH = BottomScreen.Y - TopScreen.Y;
-				// Name position: proportional margin above sprite top (5% of sprite height)
+				// Name position: proportional margin above sprite top (scales with zoom)
 				float Margin = FMath::Max(SpriteScreenH * 0.05f, 4.f);
 				ScreenPos.X = TopScreen.X;
 				ScreenPos.Y = TopScreen.Y - Margin;

@@ -8,6 +8,7 @@
 #include "SocketEventRouter.h"
 #include "ChatSubsystem.h"
 #include "InventorySubsystem.h"
+#include "Audio/AudioSubsystem.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "Kismet/GameplayStatics.h"
@@ -310,6 +311,8 @@ void UTradeSubsystem::AcceptRequest()
 {
 	if (State != ETradeState::RequestReceived) return;
 
+	UAudioSubsystem::PlayUIClickStatic(GetWorld());
+
 	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
 	if (!GI || !GI->IsSocketConnected()) return;
 
@@ -324,6 +327,8 @@ void UTradeSubsystem::AcceptRequest()
 void UTradeSubsystem::DeclineRequest()
 {
 	if (State != ETradeState::RequestReceived) return;
+
+	UAudioSubsystem::PlayUICancelStatic(GetWorld());
 
 	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
 	if (!GI || !GI->IsSocketConnected()) return;
@@ -383,6 +388,8 @@ void UTradeSubsystem::Lock()
 	if (State != ETradeState::Open) return;
 	if (bMyLocked) return;
 
+	UAudioSubsystem::PlayUIClickStatic(GetWorld());
+
 	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
 	if (!GI || !GI->IsSocketConnected()) return;
 
@@ -397,6 +404,8 @@ void UTradeSubsystem::Confirm()
 {
 	if (State != ETradeState::BothLocked) return;
 
+	UAudioSubsystem::PlayUIClickStatic(GetWorld());
+
 	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
 	if (!GI || !GI->IsSocketConnected()) return;
 
@@ -408,6 +417,8 @@ void UTradeSubsystem::Confirm()
 
 void UTradeSubsystem::Cancel()
 {
+	UAudioSubsystem::PlayUICancelStatic(GetWorld());
+
 	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
 	if (!GI || !GI->IsSocketConnected()) return;
 
@@ -433,6 +444,18 @@ void UTradeSubsystem::HandleRequestReceived(const TSharedPtr<FJsonValue>& Data)
 	if (Obj->TryGetNumberField(TEXT("fromCharacterId"), d))
 		RequestFromCharId = (int32)d;
 	Obj->TryGetStringField(TEXT("fromName"), RequestFromName);
+
+	// Auto-decline if option enabled
+	if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance()))
+	{
+		if (GI->bOptionAutoDeclineTrades)
+		{
+			UE_LOG(LogTrade, Log, TEXT("Auto-declined trade from %s (option enabled)"), *RequestFromName);
+			State = ETradeState::RequestReceived;
+			DeclineRequest();
+			return;
+		}
+	}
 
 	State = ETradeState::RequestReceived;
 	++DataVersion;

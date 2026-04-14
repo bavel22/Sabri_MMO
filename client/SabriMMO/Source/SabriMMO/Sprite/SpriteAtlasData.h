@@ -241,24 +241,31 @@ struct FSpriteAtlasKey
 	}
 };
 
+// Camera depth offset applied to sprite quads (must match SpriteCharacterActor.cpp)
+// Zero because sprites now use BLEND_Translucent + bDisableDepthTest (always on top)
+static constexpr float GSpriteCameraDepthOffset = 0.f;
+
 /** Utility: compute sprite screen bounds using billboard up vector (not world up) */
 static bool GetSpriteScreenBounds(APlayerController* PC, const FVector& ActorPos,
 	float SpriteHeight, FVector2D& OutTop, FVector2D& OutBottom)
 {
 	if (!PC || !PC->PlayerCameraManager) return false;
 
-	// Project sprite bottom (actor position)
-	if (!PC->ProjectWorldLocationToScreen(ActorPos, OutBottom, true))
+	// Account for camera depth offset — quad is pushed toward camera in local X
+	FVector CamFwd = PC->PlayerCameraManager->GetCameraRotation().Vector();
+	FVector OffsetPos = ActorPos - CamFwd * GSpriteCameraDepthOffset;
+
+	// Project sprite bottom (offset position where quad actually renders)
+	if (!PC->ProjectWorldLocationToScreen(OffsetPos, OutBottom, true))
 		return false;
 
 	// Compute billboard up direction (matches SpriteCharacterActor::UpdateBillboard)
-	FVector CamFwd = PC->PlayerCameraManager->GetCameraRotation().Vector();
 	FRotator BillboardRot = (-CamFwd).Rotation();
 	BillboardRot.Roll = 0.f;
 	FVector BillboardUp = BillboardRot.RotateVector(FVector(0.f, 0.f, 1.f));
 
-	// Sprite top in world space = actor pos + billboard up * height
-	FVector TopWorld = ActorPos + BillboardUp * SpriteHeight;
+	// Sprite top in world space = offset pos + billboard up * height
+	FVector TopWorld = OffsetPos + BillboardUp * SpriteHeight;
 	if (!PC->ProjectWorldLocationToScreen(TopWorld, OutTop, true))
 		return false;
 

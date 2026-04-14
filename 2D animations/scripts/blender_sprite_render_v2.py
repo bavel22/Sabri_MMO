@@ -196,6 +196,27 @@ def clear_scene():
                 collection.remove(block)
 
 
+_fbx_light_patched = False
+def _patch_fbx_light_import():
+    """Monkey-patch Blender 5.x FBX importer to skip cast_shadow crash."""
+    global _fbx_light_patched
+    if _fbx_light_patched:
+        return
+    try:
+        import io_scene_fbx.import_fbx as fbx_mod
+        original = fbx_mod.blen_read_light
+        def patched(fbx_tmpl, fbx_obj, settings):
+            try:
+                return original(fbx_tmpl, fbx_obj, settings)
+            except AttributeError:
+                print('[WARN] Skipping FBX light with cast_shadow deprecation')
+                return bpy.data.lights.new('PatchedLight', 'POINT')
+        fbx_mod.blen_read_light = patched
+        _fbx_light_patched = True
+    except (ImportError, AttributeError):
+        pass
+
+
 def import_model(filepath):
     """Import GLB/FBX/OBJ model. Returns (armature, meshes)."""
     ext = os.path.splitext(filepath)[1].lower()
@@ -204,6 +225,10 @@ def import_model(filepath):
     if ext in ('.glb', '.gltf'):
         bpy.ops.import_scene.gltf(filepath=filepath)
     elif ext == '.fbx':
+        # Blender 5.1 bug: FBX files with embedded lights crash on
+        # CyclesLightSettings.cast_shadow (removed in 5.x).
+        # Workaround: monkey-patch blen_read_light to skip the crash.
+        _patch_fbx_light_import()
         bpy.ops.import_scene.fbx(filepath=filepath)
     elif ext == '.obj':
         bpy.ops.wm.obj_import(filepath=filepath)

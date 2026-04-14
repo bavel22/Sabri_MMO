@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "character": "condor",
+  "cell_size": 1024,
+  "animations": [
+    { "folder": "Idle Peck", "state": "idle", "group": "shared" },
+    { "folder": "Strut Walk", "state": "walk", "group": "shared" },
+    { "folder": "Peck Attack", "state": "attack", "group": "shared" },
+    { "folder": "Wing Flinch", "state": "hit", "group": "shared" },
+    { "folder": "Keel Over Death", "state": "death", "group": "shared" }
+  ]
+}

@@ -9,9 +9,6 @@
 #include "GameFramework/PlayerController.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
-#include "Materials/MaterialInstanceDynamic.h"
-#include "Components/PrimitiveComponent.h"
-#include "CollisionQueryParams.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogCamera, Log, All);
 
@@ -43,18 +40,7 @@ void UCameraSubsystem::Deinitialize()
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(SetupRetryTimer);
-		World->GetTimerManager().ClearTimer(OcclusionTickTimer);
 	}
-
-	// Restore any still-hidden actors
-	for (auto& WeakActor : OccludedActors)
-	{
-		if (AActor* Actor = WeakActor.Get())
-		{
-			Actor->SetActorHiddenInGame(false);
-		}
-	}
-	OccludedActors.Empty();
 
 	CachedSpringArm = nullptr;
 	Super::Deinitialize();
@@ -139,12 +125,6 @@ void UCameraSubsystem::SetupCamera()
 	SA->bEnableCameraLag = false;
 	SA->bEnableCameraRotationLag = false;
 
-	// Start occlusion transparency tick (every 0.1s — fast enough to feel responsive)
-	World->GetTimerManager().SetTimer(OcclusionTickTimer, FTimerDelegate::CreateLambda([this]()
-	{
-		UpdateOcclusionTransparency();
-	}), 0.1f, true);
-
 	UE_LOG(LogCamera, Log, TEXT("RO Classic camera configured: pitch=%.0f, yaw=%.0f, arm=%.0f on %s"),
 		FixedPitch, CurrentYaw, SA->TargetArmLength, *SA->GetName());
 }
@@ -185,72 +165,6 @@ void UCameraSubsystem::OnZoom(float AxisValue)
 	SA->TargetArmLength = FMath::Clamp(NewLength, MinArmLength, MaxArmLength);
 }
 
-// ============================================================
-// Occlusion Transparency — fade environment meshes blocking
-// the camera's view of the player character
-// ============================================================
-
-void UCameraSubsystem::UpdateOcclusionTransparency()
-{
-	UWorld* World = GetWorld();
-	if (!World) return;
-
-	APlayerController* PC = World->GetFirstPlayerController();
-	if (!PC || !PC->PlayerCameraManager) return;
-
-	APawn* Pawn = PC->GetPawn();
-	if (!Pawn) return;
-
-	FVector CameraLoc = PC->PlayerCameraManager->GetCameraLocation();
-	FVector PlayerLoc = Pawn->GetActorLocation() + FVector(0.f, 0.f, 80.f);
-
-	// Multi-trace from camera to player
-	FCollisionQueryParams QueryParams;
-	QueryParams.AddIgnoredActor(Pawn);
-	QueryParams.bTraceComplex = false;
-
-	TArray<FHitResult> Hits;
-	World->LineTraceMultiByChannel(Hits, CameraLoc, PlayerLoc, ECC_Visibility, QueryParams);
-
-	// Collect currently occluding actors (use actor granularity, not component)
-	TSet<AActor*> CurrentlyOccluding;
-	for (const FHitResult& Hit : Hits)
-	{
-		AActor* HitActor = Hit.GetActor();
-		if (!HitActor || HitActor == Pawn) continue;
-
-		// Skip sprites (CustomDepthStencilValue = 1 on their components)
-		UPrimitiveComponent* HitComp = Hit.GetComponent();
-		if (HitComp && HitComp->bRenderCustomDepth && HitComp->CustomDepthStencilValue == 1)
-			continue;
-
-		CurrentlyOccluding.Add(HitActor);
-
-		// Hide this actor if not already hidden
-		if (!OccludedActors.Contains(HitActor))
-		{
-			HitActor->SetActorHiddenInGame(true);
-			OccludedActors.Add(HitActor);
-		}
-	}
-
-	// Restore actors no longer occluding
-	TArray<TWeakObjectPtr<AActor>> ToRemove;
-	for (auto& WeakActor : OccludedActors)
-	{
-		AActor* Actor = WeakActor.Get();
-		if (!Actor || !CurrentlyOccluding.Contains(Actor))
-		{
-			if (Actor)
-			{
-				Actor->SetActorHiddenInGame(false);
-			}
-			ToRemove.Add(WeakActor);
-		}
-	}
-
-	for (auto& Key : ToRemove)
-	{
-		OccludedActors.Remove(Key);
-	}
-}
+// Occlusion handling removed (Option A): the sprite material uses
+// BLEND_Translucent + bDisableDepthTest, so the character renders on top of
+// any wall/landscape between camera and player. No need to hide world geometry.

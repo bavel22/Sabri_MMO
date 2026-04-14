@@ -142,7 +142,7 @@ int32 SCastBarOverlay::OnPaint(
 		OutDrawElements, LayerId, InWidgetStyle, bParentEnabled);
 
 	UCastBarSubsystem* Sub = OwningSubsystem.Get();
-	if (!Sub || Sub->ActiveCasts.Num() == 0) return OutLayerId;
+	if (!Sub || !Sub->bCastBarsEnabled || Sub->ActiveCasts.Num() == 0) return OutLayerId;
 
 	const double Now = FPlatformTime::Seconds();
 	const ESlateDrawEffect DrawEffects = ESlateDrawEffect::None;

@@ -7,6 +7,7 @@
 #include "ChatSubsystem.h"
 #include "MMOGameInstance.h"
 #include "SocketEventRouter.h"
+#include "Audio/AudioSubsystem.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "Engine/GameViewportClient.h"
@@ -304,6 +305,7 @@ void UStorageSubsystem::RequestOpen()
 
 void UStorageSubsystem::RequestClose()
 {
+	UAudioSubsystem::PlayUICancelStatic(GetWorld());
 	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
 	if (!GI) return;
 	bIsOpen = false;
@@ -313,6 +315,8 @@ void UStorageSubsystem::RequestClose()
 
 void UStorageSubsystem::DepositItem(int32 InventoryId, int32 Quantity)
 {
+	// Storage deposit reuses the equip kachunk sound (item slides into a slot)
+	UAudioSubsystem::PlayEquipStatic(GetWorld());
 	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
 	if (!GI) return;
 
@@ -324,6 +328,7 @@ void UStorageSubsystem::DepositItem(int32 InventoryId, int32 Quantity)
 
 void UStorageSubsystem::WithdrawItem(int32 StorageId, int32 Quantity)
 {
+	UAudioSubsystem::PlayEquipStatic(GetWorld());
 	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
 	if (!GI) return;
 

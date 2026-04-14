@@ -11,6 +11,9 @@
 #include "TradeSubsystem.h"
 #include "MMOGameInstance.h"
 #include "SocketEventRouter.h"
+#include "Audio/AudioSubsystem.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/Pawn.h"
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
@@ -221,6 +224,8 @@ void UInventorySubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	{
 		Router->RegisterHandler(TEXT("inventory:data"), this,
 			[this](const TSharedPtr<FJsonValue>& D) { HandleInventoryData(D); });
+		Router->RegisterHandler(TEXT("itemDefs:data"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleItemDefs(D); });
 		Router->RegisterHandler(TEXT("inventory:equipped"), this,
 			[this](const TSharedPtr<FJsonValue>& D) { HandleInventoryEquipped(D); });
 		Router->RegisterHandler(TEXT("inventory:dropped"), this,
@@ -233,6 +238,8 @@ void UInventorySubsystem::OnWorldBeginPlay(UWorld& InWorld)
 			[this](const TSharedPtr<FJsonValue>& D) { HandleItemUsed(D); });
 		Router->RegisterHandler(TEXT("loot:drop"), this,
 			[this](const TSharedPtr<FJsonValue>& D) { HandleLootDrop(D); });
+		Router->RegisterHandler(TEXT("refine:result"), this,
+			[this](const TSharedPtr<FJsonValue>& D) { HandleRefineResult(D); });
 		Router->RegisterHandler(TEXT("identify:item_list"), this,
 			[this](const TSharedPtr<FJsonValue>& D) { HandleIdentifyItemList(D); });
 		Router->RegisterHandler(TEXT("identify:result"), this,
@@ -425,22 +432,148 @@ void UInventorySubsystem::HandleInventoryData(const TSharedPtr<FJsonValue>& Data
 	double Val = 0;
 	if (Obj->TryGetNumberField(TEXT("zuzucoin"), Val)) Zuzucoin = (int32)Val;
 
+	// Parse new item definitions if server included them (for newly acquired item types)
+	const TSharedPtr<FJsonObject>* NewDefsObj = nullptr;
+	if (Obj->TryGetObjectField(TEXT("newDefs"), NewDefsObj) && NewDefsObj)
+	{
+		for (const auto& Pair : (*NewDefsObj)->Values)
+		{
+			const TSharedPtr<FJsonObject>* DefObj = nullptr;
+			if (Pair.Value->TryGetObject(DefObj) && DefObj)
+			{
+				FInventoryItem Def = ParseItemFromJson(*DefObj);
+				if (Def.ItemId > 0)
+				{
+					ItemDefCache.Add(Def.ItemId, MoveTemp(Def));
+				}
+			}
+		}
+	}
+
 	// Parse items array
 	const TArray<TSharedPtr<FJsonValue>>* ItemsArray = nullptr;
 	if (Obj->TryGetArrayField(TEXT("items"), ItemsArray) && ItemsArray)
 	{
 		Items.Empty();
+		InventoryIdToIndex.Empty();
 		for (const TSharedPtr<FJsonValue>& ItemVal : *ItemsArray)
 		{
 			const TSharedPtr<FJsonObject>* ItemObj = nullptr;
 			if (ItemVal->TryGetObject(ItemObj) && ItemObj)
 			{
-				Items.Add(ParseItemFromJson(*ItemObj));
+				FInventoryItem Item = ParseItemFromJson(*ItemObj);
+
+				// If this item has no name (light payload), merge from definition cache
+				if (Item.Name.IsEmpty() && Item.ItemId > 0)
+				{
+					if (const FInventoryItem* Def = ItemDefCache.Find(Item.ItemId))
+					{
+						Item.Name = Def->Name;
+						Item.Description = Def->Description;
+						Item.FullDescription = Def->FullDescription;
+						Item.ItemType = Def->ItemType;
+						Item.EquipSlot = Def->EquipSlot;
+						Item.Weight = Def->Weight;
+						Item.Price = Def->Price;
+						Item.BuyPrice = Def->BuyPrice;
+						Item.SellPrice = Def->SellPrice;
+						Item.ATK = Def->ATK;
+						Item.DEF = Def->DEF;
+						Item.MATK = Def->MATK;
+						Item.MDEF = Def->MDEF;
+						Item.StrBonus = Def->StrBonus;
+						Item.AgiBonus = Def->AgiBonus;
+						Item.VitBonus = Def->VitBonus;
+						Item.IntBonus = Def->IntBonus;
+						Item.DexBonus = Def->DexBonus;
+						Item.LukBonus = Def->LukBonus;
+						Item.MaxHPBonus = Def->MaxHPBonus;
+						Item.MaxSPBonus = Def->MaxSPBonus;
+						Item.HitBonus = Def->HitBonus;
+						Item.FleeBonus = Def->FleeBonus;
+						Item.CriticalBonus = Def->CriticalBonus;
+						Item.PerfectDodgeBonus = Def->PerfectDodgeBonus;
+						Item.RequiredLevel = Def->RequiredLevel;
+						Item.bStackable = Def->bStackable;
+						Item.MaxStack = Def->MaxStack;
+						Item.Icon = Def->Icon;
+						Item.ViewSprite = Def->ViewSprite;
+						Item.WeaponType = Def->WeaponType;
+						Item.ASPDModifier = Def->ASPDModifier;
+						Item.WeaponRange = Def->WeaponRange;
+						Item.Slots = Def->Slots;
+						Item.WeaponLevel = Def->WeaponLevel;
+						Item.bRefineable = Def->bRefineable;
+						Item.JobsAllowed = Def->JobsAllowed;
+						Item.CardType = Def->CardType;
+						Item.CardPrefix = Def->CardPrefix;
+						Item.CardSuffix = Def->CardSuffix;
+						Item.bTwoHanded = Def->bTwoHanded;
+						Item.Element = Def->Element;
+					}
+
+					// Resolve CompoundedCardDetails client-side from cache
+					Item.CompoundedCardDetails.Empty();
+					for (int32 CardId : Item.CompoundedCards)
+					{
+						if (CardId <= 0)
+						{
+							Item.CompoundedCardDetails.Add(FCompoundedCardInfo());
+							continue;
+						}
+						const FInventoryItem* CardDef = ItemDefCache.Find(CardId);
+						if (CardDef)
+						{
+							FCompoundedCardInfo Info;
+							Info.ItemId = CardId;
+							Info.Name = CardDef->Name;
+							Info.Description = CardDef->Description;
+							Info.FullDescription = CardDef->FullDescription;
+							Info.Icon = CardDef->Icon;
+							Info.CardType = CardDef->CardType;
+							Info.CardPrefix = CardDef->CardPrefix;
+							Info.CardSuffix = CardDef->CardSuffix;
+							Info.Weight = CardDef->Weight;
+							Item.CompoundedCardDetails.Add(MoveTemp(Info));
+						}
+						else
+						{
+							Item.CompoundedCardDetails.Add(FCompoundedCardInfo());
+						}
+					}
+				}
+				else if (Item.ItemId > 0 && !ItemDefCache.Contains(Item.ItemId))
+				{
+					// Full payload — cache the definition for future light payloads
+					ItemDefCache.Add(Item.ItemId, Item);
+				}
+
+				// Build O(1) lookup index
+				InventoryIdToIndex.Add(Item.InventoryId, Items.Num());
+				Items.Add(MoveTemp(Item));
 			}
 		}
 	}
 
-	RecalculateWeight();
+	// Use server-authoritative weight (includes STR, Enlarge Weight Limit, mount bonuses)
+	double WeightVal = 0;
+	if (Obj->TryGetNumberField(TEXT("currentWeight"), WeightVal))
+	{
+		CurrentWeight = (int32)WeightVal;
+	}
+	else
+	{
+		RecalculateWeight(); // Fallback: compute from items
+	}
+	if (Obj->TryGetNumberField(TEXT("maxWeight"), WeightVal) && WeightVal > 0)
+	{
+		MaxWeight = (int32)WeightVal;
+	}
+	else if (MaxWeight <= 0)
+	{
+		MaxWeight = 2000; // Fallback default
+	}
+
 	++DataVersion;
 
 	UE_LOG(LogInventory, Log, TEXT("Inventory updated: %d items, %d zuzucoin, weight=%d/%d (v%u)"),
@@ -485,9 +618,16 @@ void UInventorySubsystem::HandleItemUsed(const TSharedPtr<FJsonValue>& Data)
 	UE_LOG(LogInventory, Log, TEXT("Item used: %s — healed %d, SP restored %d"),
 		*ItemName, (int32)Healed, (int32)SPRestored);
 
-	// Request full inventory refresh to update quantities
-	// (server also sends inventory:data, but requesting ensures consistency)
-	RequestInventoryRefresh();
+	// Item use chime — RO Classic plays se_drink_potion.wav for ANY item use
+	// (potions, scrolls, fly wing, etc.). 2D non-spatial — local player only.
+	if (UAudioSubsystem* Audio = GetWorld()->GetSubsystem<UAudioSubsystem>())
+	{
+		Audio->PlayItemUseSound();
+	}
+
+	// Server already sends inventory:data after item use — no need to request again.
+	// The redundant RequestInventoryRefresh was causing a double inventory cycle
+	// (light payload from use handler + full payload from inventory:load).
 }
 
 void UInventorySubsystem::HandleLootDrop(const TSharedPtr<FJsonValue>& Data)
@@ -532,7 +672,83 @@ void UInventorySubsystem::HandleLootDrop(const TSharedPtr<FJsonValue>& Data)
 	}
 	LootNotifications.Add(MoveTemp(Notification));
 
+	// Pick the highest-rarity tier color from the drop list — server tags each item
+	// with `tierColor` based on its item type (red=MVP, purple=card, blue=equip,
+	// green=heal, yellow=usable/ammo, pink=etc). Plays one chime per drop event using
+	// the rarest item's color so a Poring Card stack still triggers the purple chime.
+	auto TierRank = [](const FString& C) -> int32
+	{
+		if (C == TEXT("red"))    return 6; // MVP exclusive
+		if (C == TEXT("purple")) return 5; // Card
+		if (C == TEXT("blue"))   return 4; // Equipment
+		if (C == TEXT("green"))  return 3; // Heal
+		if (C == TEXT("yellow")) return 2; // Usable / ammo
+		if (C == TEXT("pink"))   return 1; // Etc / material
+		return 0;
+	};
+
+	FString BestTier = TEXT("blue"); // sensible default if no tierColor is set
+	int32 BestRank = 0;
+	if (ItemsArray)
+	{
+		for (const TSharedPtr<FJsonValue>& ItemVal : *ItemsArray)
+		{
+			const TSharedPtr<FJsonObject>* ItemObj = nullptr;
+			if (!ItemVal->TryGetObject(ItemObj) || !ItemObj) continue;
+			FString TC;
+			(*ItemObj)->TryGetStringField(TEXT("tierColor"), TC);
+			if (TC.IsEmpty()) continue;
+			const int32 R = TierRank(TC);
+			if (R > BestRank)
+			{
+				BestRank = R;
+				BestTier = TC;
+			}
+		}
+	}
+
+	if (UWorld* World = GetWorld())
+	{
+		if (UAudioSubsystem* Audio = World->GetSubsystem<UAudioSubsystem>())
+		{
+			FVector PlayerLoc = FVector::ZeroVector;
+			if (APlayerController* PC = World->GetFirstPlayerController())
+			{
+				if (APawn* Pawn = PC->GetPawn())
+				{
+					PlayerLoc = Pawn->GetActorLocation();
+				}
+			}
+			Audio->PlayItemDropSound(BestTier, PlayerLoc);
+		}
+	}
+
 	// No need to refresh inventory — server already sends inventory:data after loot:drop
+}
+
+// ============================================================
+// Refine result handler — play success/fail chime
+// ============================================================
+
+void UInventorySubsystem::HandleRefineResult(const TSharedPtr<FJsonValue>& Data)
+{
+	if (!Data.IsValid()) return;
+	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
+	const TSharedPtr<FJsonObject>& Obj = *ObjPtr;
+
+	bool bSuccess = false;
+	Obj->TryGetBoolField(TEXT("success"), bSuccess);
+
+	// Play the iconic RO Classic refine chime/thud
+	if (UWorld* World = GetWorld())
+	{
+		if (UAudioSubsystem* Audio = World->GetSubsystem<UAudioSubsystem>())
+		{
+			if (bSuccess) Audio->PlayRefineSuccessSound();
+			else          Audio->PlayRefineFailSound();
+		}
+	}
 }
 
 // ============================================================
@@ -588,9 +804,12 @@ void UInventorySubsystem::RecalculateWeight()
 
 FInventoryItem* UInventorySubsystem::FindItemByInventoryId(int32 InventoryId)
 {
-	for (FInventoryItem& Item : Items)
+	if (const int32* IndexPtr = InventoryIdToIndex.Find(InventoryId))
 	{
-		if (Item.InventoryId == InventoryId) return &Item;
+		if (*IndexPtr >= 0 && *IndexPtr < Items.Num())
+		{
+			return &Items[*IndexPtr];
+		}
 	}
 	return nullptr;
 }
@@ -613,41 +832,56 @@ FSlateBrush* UInventorySubsystem::GetOrCreateItemIconBrush(const FString& IconNa
 {
 	if (IconName.IsEmpty()) return nullptr;
 
-	// Check cache first
+	// Check cache first (keyed on original server name)
 	if (TSharedPtr<FSlateBrush>* Found = ItemIconBrushCache.Find(IconName))
 	{
 		return Found->Get();
 	}
 
-	// Map server icon field → actual UE5 asset name (filesystem rename breaks .uasset internals)
+	// UE5 replaces special characters with underscores when importing assets.
+	// The server icon field keeps the original rAthena name (e.g. "grasshopper's_leg"),
+	// but the .uasset on disk is "grasshopper_s_leg". Sanitize to match.
+	FString SanitizedName = IconName;
+	SanitizedName.ReplaceCharInline(TEXT('\''), TEXT('_'));
+	SanitizedName.ReplaceCharInline(TEXT('.'), TEXT('_'));
+	SanitizedName.ReplaceCharInline(TEXT('!'), TEXT('_'));
+
+	// Map server icon field → subfolder/asset name
+	// Values are "subfolder/AssetName" — resolved to /Game/SabriMMO/Assets/Item_Icons/{subfolder}/Icon_{AssetName}
 	static const TMap<FString, FString> IconAssetMap = {
-		// Consumables
-		{TEXT("red_potion"),     TEXT("CrimsonVial")},
-		{TEXT("orange_potion"),  TEXT("AmberElixir")},
-		{TEXT("yellow_potion"), TEXT("GoldenSalve")},
-		{TEXT("blue_potion"),    TEXT("AzurePhilter")},
-		{TEXT("meat"),           TEXT("RoastedHaunch")},
-		{TEXT("strawberry"),     TEXT("Strawberry")},
-		{TEXT("green_herb"),     TEXT("VerdantLeaf")},
-		// Loot / Etc
-		{TEXT("jellopy"),        TEXT("GloopyResidue")},
-		{TEXT("sticky_mucus"),   TEXT("ViscousSlime")},
-		{TEXT("shell"),          TEXT("ChitinShard")},
-		{TEXT("feather"),        TEXT("DownyPlume")},
-		{TEXT("mushroom_spore"), TEXT("SporeCluster")},
-		{TEXT("insect_leg"),     TEXT("BarbedLimb")},
-		{TEXT("fluff"),          TEXT("SilkenTuft")},
+		// Consumables — potions, herbs, food
+		{TEXT("red_potion"),     TEXT("consumables/CrimsonVial")},
+		{TEXT("orange_potion"),  TEXT("consumables/AmberElixir")},
+		{TEXT("yellow_potion"),  TEXT("consumables/GoldenSalve")},
+		{TEXT("blue_potion"),    TEXT("consumables/AzurePhilter")},
+		{TEXT("meat"),           TEXT("consumables/RoastedHaunch")},
+		{TEXT("strawberry"),     TEXT("consumables/Strawberry")},
+		{TEXT("green_herb"),     TEXT("consumables/VerdantLeaf")},
+		{TEXT("red_herb"),       TEXT("consumables/CrimsonHerb")},
+		{TEXT("grape"),          TEXT("consumables/PurpleGrape")},
+		{TEXT("apple"),          TEXT("consumables/RubyApple")},
+		{TEXT("carrot"),         TEXT("consumables/GoldenCarrot")},
+		{TEXT("orange"),         TEXT("consumables/SunburstOrange")},
+		{TEXT("baked_yam"),      TEXT("consumables/EarthenTuber")},
+		// Etc / Crafting — loot, materials, ores
+		{TEXT("jellopy"),        TEXT("etc_crafting/GloopyResidue")},
+		{TEXT("sticky_mucus"),   TEXT("etc_crafting/ViscousSlime")},
+		{TEXT("shell"),          TEXT("etc_crafting/ChitinShard")},
+		{TEXT("feather"),        TEXT("etc_crafting/DownyPlume")},
+		{TEXT("mushroom_spore"), TEXT("etc_crafting/SporeCluster")},
+		{TEXT("long_limb"),      TEXT("etc_crafting/BarbedLimb")},
+		{TEXT("fluff"),          TEXT("etc_crafting/SilkenTuft")},
 		// Weapons
-		{TEXT("knife"),          TEXT("RusticShiv")},
-		{TEXT("cutter"),         TEXT("KeenEdge")},
-		{TEXT("main_gauche"),    TEXT("StilettoFang")},
-		{TEXT("sword"),          TEXT("IronCleaver")},
-		{TEXT("falchion"),       TEXT("CrescentSaber")},
-		{TEXT("bow"),            TEXT("HuntingLongbow")},
-		// Armor
-		{TEXT("cotton_shirt"),   TEXT("LinenTunic")},
-		{TEXT("padded_armor"),   TEXT("QuiltedVest")},
-		{TEXT("chain_mail"),     TEXT("RingweaveHauberk")},
+		{TEXT("knife"),          TEXT("weapons/RusticShiv")},
+		{TEXT("cutter"),         TEXT("weapons/KeenEdge")},
+		{TEXT("main_gauche"),    TEXT("weapons/StilettoFang")},
+		{TEXT("sword"),          TEXT("weapons/IronCleaver")},
+		{TEXT("falchion"),       TEXT("weapons/CrescentSaber")},
+		{TEXT("bow"),            TEXT("weapons/HuntingLongbow")},
+		// Armor — body armor
+		{TEXT("cotton_shirt"),   TEXT("armor/LinenTunic")},
+		{TEXT("padded_armor"),   TEXT("armor/QuiltedVest")},
+		{TEXT("chain_mail"),     TEXT("armor/RingweaveHauberk")},
 	};
 
 	// All card items share a single generic card icon (icon names end with "_card")
@@ -676,14 +910,72 @@ FSlateBrush* UInventorySubsystem::GetOrCreateItemIconBrush(const FString& IconNa
 		return nullptr;
 	}
 
-	const FString* AssetName = IconAssetMap.Find(IconName);
-	FString ContentPath = FString::Printf(TEXT("/Game/SabriMMO/Assets/Item_Icons/Icon_%s"),
-		AssetName ? **AssetName : *IconName);
+	// --- Resolve content path ---
+	FString ContentPath;
+	UTexture2D* Tex = nullptr;
 
-	UTexture2D* Tex = LoadObject<UTexture2D>(nullptr, *ContentPath);
+	// 1) Check legacy override map (29 creative-named icons)
+	const FString* AssetPath = IconAssetMap.Find(SanitizedName);
+	if (!AssetPath) AssetPath = IconAssetMap.Find(IconName);
+	if (AssetPath)
+	{
+		int32 SlashIdx = INDEX_NONE;
+		AssetPath->FindLastChar(TEXT('/'), SlashIdx);
+		if (SlashIdx != INDEX_NONE)
+		{
+			FString SubFolder = AssetPath->Left(SlashIdx);
+			FString AssetName = AssetPath->Mid(SlashIdx + 1);
+			ContentPath = FString::Printf(TEXT("/Game/SabriMMO/Assets/Item_Icons/%s/Icon_%s"),
+				*SubFolder, *AssetName);
+		}
+		else
+		{
+			ContentPath = FString::Printf(TEXT("/Game/SabriMMO/Assets/Item_Icons/Icon_%s"), **AssetPath);
+		}
+		Tex = LoadObject<UTexture2D>(nullptr, *ContentPath);
+	}
+
+	// 2) Search each subfolder by convention: Icon_{icon_name}
+	//    Also try stripping trailing underscores (rAthena slotted variants:
+	//    sword_ / sword__ are the same visual item as sword)
 	if (!Tex)
 	{
-		UE_LOG(LogInventory, Warning, TEXT("Failed to load item icon: %s"), *ContentPath);
+		static const TCHAR* Subfolders[] = {
+			TEXT("consumables"), TEXT("etc_crafting"), TEXT("weapons"), TEXT("headgear"),
+			TEXT("accessories"), TEXT("armor"), TEXT("garments"), TEXT("footgear"), TEXT("shields")
+		};
+
+		// Try sanitized name first, then base name with trailing underscores stripped
+		FString BaseName = SanitizedName;
+		while (BaseName.Len() > 0 && BaseName[BaseName.Len() - 1] == TEXT('_'))
+		{
+			BaseName.LeftChopInline(1);
+		}
+		const bool bHasVariantSuffix = (BaseName != SanitizedName);
+
+		for (const TCHAR* Sub : Subfolders)
+		{
+			ContentPath = FString::Printf(TEXT("/Game/SabriMMO/Assets/Item_Icons/%s/Icon_%s"),
+				Sub, *SanitizedName);
+			Tex = LoadObject<UTexture2D>(nullptr, *ContentPath);
+			if (Tex) break;
+		}
+
+		// Fall back to base name (slotted variant → base item icon)
+		if (!Tex && bHasVariantSuffix && BaseName.Len() > 0)
+		{
+			for (const TCHAR* Sub : Subfolders)
+			{
+				ContentPath = FString::Printf(TEXT("/Game/SabriMMO/Assets/Item_Icons/%s/Icon_%s"),
+					Sub, *BaseName);
+				Tex = LoadObject<UTexture2D>(nullptr, *ContentPath);
+				if (Tex) break;
+			}
+		}
+	}
+
+	if (!Tex)
+	{
 		// Cache null so we don't retry LoadObject every grid rebuild
 		ItemIconBrushCache.Add(IconName, nullptr);
 		return nullptr;
@@ -723,14 +1015,13 @@ void UInventorySubsystem::SetTab(int32 Tab)
 	CurrentTab = FMath::Clamp(Tab, 0, 2);
 }
 
-TArray<FInventoryItem> UInventorySubsystem::GetFilteredItems() const
+void UInventorySubsystem::RebuildFilteredCache() const
 {
-	TArray<FInventoryItem> Filtered;
+	CachedFilteredItems.Empty();
 	for (const FInventoryItem& Item : Items)
 	{
-		if (Item.bIsEquipped) continue; // Equipped items don't show in inventory grid
+		if (Item.bIsEquipped) continue;
 
-		// Tab filter
 		bool bPassTab = false;
 		switch (CurrentTab)
 		{
@@ -740,16 +1031,53 @@ TArray<FInventoryItem> UInventorySubsystem::GetFilteredItems() const
 		}
 		if (!bPassTab) continue;
 
-		// Search filter
 		if (!SearchFilter.IsEmpty())
 		{
 			if (!Item.Name.Contains(SearchFilter, ESearchCase::IgnoreCase))
 				continue;
 		}
 
-		Filtered.Add(Item);
+		CachedFilteredItems.Add(Item);
 	}
-	return Filtered;
+	FilterCacheDataVersion = DataVersion;
+	FilterCacheTab = CurrentTab;
+	FilterCacheSearch = SearchFilter;
+}
+
+const TArray<FInventoryItem>& UInventorySubsystem::GetFilteredItems() const
+{
+	if (FilterCacheDataVersion != DataVersion || FilterCacheTab != CurrentTab || FilterCacheSearch != SearchFilter)
+	{
+		RebuildFilteredCache();
+	}
+	return CachedFilteredItems;
+}
+
+void UInventorySubsystem::HandleItemDefs(const TSharedPtr<FJsonValue>& Data)
+{
+	if (!Data.IsValid()) return;
+	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
+	const TSharedPtr<FJsonObject>& Obj = *ObjPtr;
+
+	const TSharedPtr<FJsonObject>* DefsObj = nullptr;
+	if (!Obj->TryGetObjectField(TEXT("definitions"), DefsObj) || !DefsObj) return;
+
+	int32 Count = 0;
+	for (const auto& Pair : (*DefsObj)->Values)
+	{
+		const TSharedPtr<FJsonObject>* DefObj = nullptr;
+		if (Pair.Value->TryGetObject(DefObj) && DefObj)
+		{
+			FInventoryItem Def = ParseItemFromJson(*DefObj);
+			if (Def.ItemId > 0)
+			{
+				ItemDefCache.Add(Def.ItemId, MoveTemp(Def));
+				++Count;
+			}
+		}
+	}
+	UE_LOG(LogInventory, Log, TEXT("Item definition cache loaded: %d definitions"), Count);
 }
 
 // ============================================================
@@ -772,6 +1100,9 @@ void UInventorySubsystem::EquipItem(int32 InventoryId)
 	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
 	if (!GI) return;
 
+	// Predicted equip kachunk — fires immediately on user action, before server confirms
+	UAudioSubsystem::PlayEquipStatic(GetWorld());
+
 	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 	Payload->SetNumberField(TEXT("inventoryId"), InventoryId);
 	Payload->SetBoolField(TEXT("equip"), true);
@@ -784,6 +1115,9 @@ void UInventorySubsystem::UnequipItem(int32 InventoryId)
 	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
 	if (!GI) return;
 
+	// Predicted unequip kachunk — same sound set as equip, picked at random
+	UAudioSubsystem::PlayEquipStatic(GetWorld());
+
 	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 	Payload->SetNumberField(TEXT("inventoryId"), InventoryId);
 	Payload->SetBoolField(TEXT("equip"), false);
@@ -793,12 +1127,27 @@ void UInventorySubsystem::UnequipItem(int32 InventoryId)
 
 void UInventorySubsystem::DropItem(int32 InventoryId, int32 Quantity)
 {
-	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
+	UWorld* World = GetWorld();
+	if (!World) return;
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance());
 	if (!GI) return;
 
 	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 	Payload->SetNumberField(TEXT("inventoryId"), InventoryId);
 	if (Quantity > 0) Payload->SetNumberField(TEXT("quantity"), Quantity);
+
+	// Send current position so server uses fresh data for ground item placement
+	if (APlayerController* PC = World->GetFirstPlayerController())
+	{
+		if (APawn* Pawn = PC->GetPawn())
+		{
+			FVector Loc = Pawn->GetActorLocation();
+			Payload->SetNumberField(TEXT("px"), Loc.X);
+			Payload->SetNumberField(TEXT("py"), Loc.Y);
+			Payload->SetNumberField(TEXT("pz"), Loc.Z);
+		}
+	}
+
 	GI->EmitSocketEvent(TEXT("inventory:drop"), Payload);
 	UE_LOG(LogInventory, Log, TEXT("Sent inventory:drop for inv_id=%d qty=%d"), InventoryId, Quantity);
 }
@@ -1270,6 +1619,7 @@ void UInventorySubsystem::BeginCardCompound(const FInventoryItem& Card)
 void UInventorySubsystem::HideCardCompoundPopup()
 {
 	if (!bCardCompoundVisible) return;
+	UAudioSubsystem::PlayUICancelStatic(GetWorld());
 
 	if (CardCompoundOverlay.IsValid())
 	{
@@ -1296,6 +1646,7 @@ bool UInventorySubsystem::IsCardCompoundVisible() const
 
 void UInventorySubsystem::EmitCardCompound(int32 CardInventoryId, int32 EquipInventoryId, int32 SlotIndex)
 {
+	UAudioSubsystem::PlayUIClickStatic(GetWorld());
 	UMMOGameInstance* GI = Cast<UMMOGameInstance>(GetWorld()->GetGameInstance());
 	if (!GI) return;
 
@@ -1475,6 +1826,7 @@ void UInventorySubsystem::ShowIdentifyPopup(const TArray<FInventoryItem>& Uniden
 void UInventorySubsystem::HideIdentifyPopup()
 {
 	if (!bIdentifyPopupVisible) return;
+	UAudioSubsystem::PlayUICancelStatic(GetWorld());
 
 	if (IdentifyOverlay.IsValid())
 	{

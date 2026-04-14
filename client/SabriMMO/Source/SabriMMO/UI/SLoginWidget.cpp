@@ -2,6 +2,9 @@
 
 #include "SLoginWidget.h"
 #include "LoginFlowSubsystem.h"
+#include "OptionsSubsystem.h"
+#include "Audio/AudioSubsystem.h"
+#include "Engine/World.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/SOverlay.h"
@@ -52,6 +55,19 @@ namespace LoginColors
 void SLoginWidget::Construct(const FArguments& InArgs)
 {
 	OwningSubsystem = InArgs._Subsystem;
+
+	// Flat button style — default 9-slice doesn't fill the full area, so text looks outside the button
+	static FButtonStyle FlatBtnStyle = []()
+	{
+		FButtonStyle S = FCoreStyle::Get().GetWidgetStyle<FButtonStyle>("Button");
+		S.Normal.DrawAs  = ESlateBrushDrawType::Box;
+		S.Normal.TintColor  = FSlateColor(FLinearColor::White);
+		S.Hovered.DrawAs = ESlateBrushDrawType::Box;
+		S.Hovered.TintColor = FSlateColor(FLinearColor(1.2f, 1.2f, 1.2f, 1.f));
+		S.Pressed.DrawAs = ESlateBrushDrawType::Box;
+		S.Pressed.TintColor = FSlateColor(FLinearColor(0.8f, 0.8f, 0.8f, 1.f));
+		return S;
+	}();
 
 	ChildSlot
 	[
@@ -291,19 +307,17 @@ void SLoginWidget::Construct(const FArguments& InArgs)
 								.FillWidth(1.f)
 								[
 									SNew(SButton)
+									.ButtonStyle(&FlatBtnStyle)
 									.ButtonColorAndOpacity(LoginColors::ButtonGreen)
 									.OnClicked(this, &SLoginWidget::OnSubmitClicked)
+									.ContentPadding(FMargin(16.f, 4.f))
+									.HAlign(HAlign_Center)
+									.VAlign(VAlign_Center)
 									[
-										SNew(SBox)
-										.HAlign(HAlign_Center)
-										.VAlign(VAlign_Center)
-										.Padding(FMargin(16.f, 4.f))
-										[
-											SAssignNew(SubmitButtonText, STextBlock)
-											.Text(FText::FromString(TEXT("Login")))
-											.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
-											.ColorAndOpacity(FSlateColor(LoginColors::TextBright))
-										]
+										SAssignNew(SubmitButtonText, STextBlock)
+										.Text(FText::FromString(TEXT("Login")))
+										.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+										.ColorAndOpacity(FSlateColor(LoginColors::TextBright))
 									]
 								]
 
@@ -312,21 +326,39 @@ void SLoginWidget::Construct(const FArguments& InArgs)
 								.AutoWidth()
 								.Padding(FMargin(8.f, 0.f, 0.f, 0.f))
 								[
+									// Options button (auto width) — opens audio/video settings
+									SNew(SButton)
+									.ButtonStyle(&FlatBtnStyle)
+									.ButtonColorAndOpacity(LoginColors::ButtonBlue)
+									.OnClicked(this, &SLoginWidget::OnOptionsClicked)
+									.ContentPadding(FMargin(16.f, 4.f))
+									.HAlign(HAlign_Center)
+									.VAlign(VAlign_Center)
+									[
+										SNew(STextBlock)
+										.Text(FText::FromString(TEXT("Options")))
+										.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+										.ColorAndOpacity(FSlateColor(LoginColors::TextBright))
+									]
+								]
+
+								+ SHorizontalBox::Slot()
+								.AutoWidth()
+								.Padding(FMargin(8.f, 0.f, 0.f, 0.f))
+								[
 									// Exit button (auto width)
 									SNew(SButton)
+									.ButtonStyle(&FlatBtnStyle)
 									.ButtonColorAndOpacity(LoginColors::ButtonRed)
 									.OnClicked(this, &SLoginWidget::OnExitClicked)
+									.ContentPadding(FMargin(16.f, 4.f))
+									.HAlign(HAlign_Center)
+									.VAlign(VAlign_Center)
 									[
-										SNew(SBox)
-										.HAlign(HAlign_Center)
-										.VAlign(VAlign_Center)
-										.Padding(FMargin(16.f, 4.f))
-										[
-											SNew(STextBlock)
-											.Text(FText::FromString(TEXT("Exit")))
-											.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
-											.ColorAndOpacity(FSlateColor(LoginColors::TextBright))
-										]
+										SNew(STextBlock)
+										.Text(FText::FromString(TEXT("Exit")))
+										.Font(FCoreStyle::GetDefaultFontStyle("Bold", 10))
+										.ColorAndOpacity(FSlateColor(LoginColors::TextBright))
 									]
 								]
 							]
@@ -384,6 +416,7 @@ void SLoginWidget::UpdateModeVisuals()
 
 FReply SLoginWidget::OnToggleModeClicked()
 {
+	UAudioSubsystem::PlayUIClickStatic(OwningSubsystem.IsValid() ? OwningSubsystem->GetWorld() : nullptr);
 	bIsRegisterMode = !bIsRegisterMode;
 	UpdateModeVisuals();
 	FocusAppropriateField();
@@ -448,6 +481,7 @@ void SLoginWidget::FocusAppropriateField()
 // ============================================================
 FReply SLoginWidget::OnSubmitClicked()
 {
+	UAudioSubsystem::PlayUIClickStatic(OwningSubsystem.IsValid() ? OwningSubsystem->GetWorld() : nullptr);
 	if (bIsRegisterMode)
 		AttemptRegister();
 	else
@@ -457,6 +491,7 @@ FReply SLoginWidget::OnSubmitClicked()
 
 FReply SLoginWidget::OnExitClicked()
 {
+	UAudioSubsystem::PlayUICancelStatic(OwningSubsystem.IsValid() ? OwningSubsystem->GetWorld() : nullptr);
 	if (OwningSubsystem.IsValid())
 	{
 		OwningSubsystem->OnExitRequested();
@@ -464,6 +499,19 @@ FReply SLoginWidget::OnExitClicked()
 	else
 	{
 		FPlatformMisc::RequestExit(false);
+	}
+	return FReply::Handled();
+}
+
+FReply SLoginWidget::OnOptionsClicked()
+{
+	UAudioSubsystem::PlayUIClickStatic(OwningSubsystem.IsValid() ? OwningSubsystem->GetWorld() : nullptr);
+	if (UWorld* World = OwningSubsystem.IsValid() ? OwningSubsystem->GetWorld() : nullptr)
+	{
+		if (UOptionsSubsystem* Opts = World->GetSubsystem<UOptionsSubsystem>())
+		{
+			Opts->ShowOptionsPanel();
+		}
 	}
 	return FReply::Handled();
 }
