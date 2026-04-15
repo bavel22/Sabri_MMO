@@ -1124,6 +1124,9 @@ def parse_args():
     parser.add_argument("--model-rotation", type=float, default=0.0,
                         help="Rotate model around Z axis (degrees) before rendering. "
                              "Use to align face with south camera (dir_idx=0).")
+    parser.add_argument("--thicken", type=float, default=0.0,
+                        help="Add solidify modifier for thin geometry (wings/fins). "
+                             "Value is thickness in model units (try 0.03-0.05).")
     parser.add_argument("--save-blend", action="store_true",
                         help="Save .blend file for manual tweaking")
 
@@ -1552,6 +1555,25 @@ def setup_cel_shade(shadow_brightness=0.45, mid_brightness=0.78):
     print(f"[OK] Cel-shade applied to {processed} materials")
 
 
+def thicken_mesh(thickness=0.03):
+    """Add solidify modifier to give thin geometry (wings, fins) visible depth.
+
+    Without this, paper-thin geometry like bat wings is invisible when
+    viewed edge-on from side camera angles (W/E directions).
+    """
+    count = 0
+    for obj in bpy.context.scene.objects:
+        if obj.type != 'MESH':
+            continue
+        mod = obj.modifiers.new(name="Thicken", type='SOLIDIFY')
+        mod.thickness = thickness
+        mod.offset = 0          # centered — extends both sides equally
+        mod.use_even_offset = True  # even thickness on angled faces
+        count += 1
+
+    print(f"[OK] Thickened {count} meshes (thickness={thickness})")
+
+
 def add_outline(thickness=0.002):
     """Add solidify modifier for 1px-style black outline."""
     outline_mat = bpy.data.materials.new(name="Outline_Black")
@@ -1720,8 +1742,29 @@ def sample_frames(start, end, target_count):
     return [int(start + i * step) for i in range(target_count)]
 
 
+def interpolate_lunge(frame, lunge_offsets):
+    """Linearly interpolate lunge offset at the given frame."""
+    sorted_frames = sorted(lunge_offsets.keys())
+    if frame <= sorted_frames[0]:
+        return lunge_offsets[sorted_frames[0]]
+    if frame >= sorted_frames[-1]:
+        return lunge_offsets[sorted_frames[-1]]
+    for i in range(len(sorted_frames) - 1):
+        f0 = sorted_frames[i]
+        f1 = sorted_frames[i + 1]
+        if f0 <= frame <= f1:
+            t = (frame - f0) / (f1 - f0) if f1 != f0 else 0
+            return lunge_offsets[f0] + t * (lunge_offsets[f1] - lunge_offsets[f0])
+    return 0.0
+
+
 def render_all(cam_obj, output_dir, mesh_obj, animations, args):
-    """Render every animation x direction x sampled frame."""
+    """Render every animation x direction x sampled frame.
+
+    Supports 'lunge_offsets' per animation: a dict {frame: offset} that
+    physically translates the mesh TOWARD the camera during attack frames.
+    This creates a ram/jolt effect that looks correct from all 8 directions.
+    """
     os.makedirs(output_dir, exist_ok=True)
     dir_names = DIRECTION_NAMES_8 if args.directions == 8 else DIRECTION_NAMES_4
     num_dirs = args.directions
@@ -1733,6 +1776,7 @@ def render_all(cam_obj, output_dir, mesh_obj, animations, args):
         atype = anim_info['classified_type']
         target_frames = DEFAULT_FRAME_TARGETS.get(atype, 8)
         total_frames = anim_info['total_frames']
+        lunge_offsets = anim_info.get('lunge_offsets')
 
         # Switch to this animation's action
         sk.animation_data.action = anim_info['action']
@@ -1746,6 +1790,20 @@ def render_all(cam_obj, output_dir, mesh_obj, animations, args):
 
             for fi, frame in enumerate(frames):
                 bpy.context.scene.frame_set(frame)
+
+                # Apply lunge: translate mesh toward camera
+                if lunge_offsets:
+                    lunge = interpolate_lunge(frame, lunge_offsets)
+                    if abs(lunge) > 0.001:
+                        angle_h = dir_idx * (2 * math.pi / num_dirs)
+                        lunge_x = math.sin(angle_h) * lunge
+                        lunge_y = -math.cos(angle_h) * lunge
+                        mesh_obj.location = mathutils.Vector((lunge_x, lunge_y, 0))
+                    else:
+                        mesh_obj.location = mathutils.Vector((0, 0, 0))
+                else:
+                    mesh_obj.location = mathutils.Vector((0, 0, 0))
+
                 bpy.context.view_layer.update()
 
                 # Output to subfolder per animation
@@ -1759,6 +1817,8 @@ def render_all(cam_obj, output_dir, mesh_obj, animations, args):
                 bpy.ops.render.render(write_still=True)
                 total += 1
 
+        # Reset mesh position after each animation
+        mesh_obj.location = mathutils.Vector((0, 0, 0))
         print(f"  {anim_name}: {len(frames)} frames x {num_dirs} dirs")
 
     # Reset shape keys
@@ -1830,6 +1890,8 @@ def main():
 
     # 6. Visual setup
     print("\n--- Visual Setup ---")
+    if args.thicken > 0:
+        thicken_mesh(args.thicken)
     if not args.no_cel_shade:
         setup_cel_shade(args.cel_shadow, args.cel_mid)
     if not args.no_outline:

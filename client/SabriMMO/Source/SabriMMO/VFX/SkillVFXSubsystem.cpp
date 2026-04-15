@@ -1347,6 +1347,27 @@ void USkillVFXSubsystem::SpawnAutoAttackHitEffect(FVector Location, bool bIsCrit
 	}
 }
 
+void USkillVFXSubsystem::SpawnGroundStrikeEffect(FVector Location)
+{
+	if (!bVFXEnabled) return;
+
+	// Use the earth/dark stone impact for a ground eruption look.
+	UNiagaraSystem* GroundVFX = Cast<UNiagaraSystem>(StaticLoadObject(
+		UNiagaraSystem::StaticClass(), nullptr,
+		TEXT("/Game/Mixed_Magic_VFX_Pack/VFX/NS_Dark_Stone_Impact.NS_Dark_Stone_Impact")));
+	if (!GroundVFX)
+		GroundVFX = NS_AutoAttackHit;  // fallback
+	if (!GroundVFX) return;
+
+	UNiagaraComponent* Comp = SpawnNiagaraAtLocation(
+		GroundVFX, Location, FRotator(-90.f, 0.f, 0.f), FVector(0.6f));
+	if (Comp)
+	{
+		// Earth/green tint for vine attack
+		SetNiagaraColor(Comp, FLinearColor(0.3f, 0.55f, 0.15f));
+	}
+}
+
 void USkillVFXSubsystem::SpawnGroundPersistent(FVector Location, const FSkillVFXConfig& Config, int32 SkillId)
 {
 	if (!Config.VFXOverridePath.IsEmpty())

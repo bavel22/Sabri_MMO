@@ -43,6 +43,9 @@ public:
 	/** Spawn a brief hit impact particle at target location (auto-attack hits). */
 	void SpawnAutoAttackHitEffect(FVector Location, bool bIsCritical = false);
 
+	/** Spawn an earth-colored upward burst at target feet (ranged ground attacks like Mandragora vines). */
+	void SpawnGroundStrikeEffect(FVector Location);
+
 	// ---- toggle effects (like RO's /effect command) ----
 	UFUNCTION(BlueprintCallable, Category = "SkillVFX")
 	void SetEffectsEnabled(bool bEnabled) { bVFXEnabled = bEnabled; }

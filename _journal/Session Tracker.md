@@ -10,6 +10,9 @@ All Claude Code sessions with their resume IDs, organized by topic. Use `claude 
 
 | Date | Resume ID | Topic | Notes |
 |------|-----------|-------|-------|
+| 2026-04-14 | `"implementing more enemy sprites"` (cont.) | Enemy attack lunge + ground strike VFX | Melee lunge (wind-up→lunge→return via ServerTargetPos), ranged vine decal, SpawnGroundStrikeEffect (NS_Dark_Stone_Impact green tint), Mandragora attackRange+aiType fix |
+| 2026-04-14 | `"ai generated rig and animations for non humanoids"` (cont.) | Render pipeline improvements | --thicken CLI arg (Solidify for thin geometry), interpolate_lunge(), lunge_offsets in render_all() |
+| 2026-04-14 | `f5a4b398` | Journal organization + commit | Backfilled 04-11 through 04-14, updated tracker + dashboard, committed `dea49b4` (172 files, +39,625 lines) |
 | 2026-04-13 | `"ai generated rig and animations for non humanoids"` | UniRig pipeline setup + rocker proof | Researched AI rigging tools, installed UniRig (conda env, 4 Windows patches, RTX 5090 cu128). Proved on rocker: 40 bones, 6 procedural Blender animations. Scripts: animate_rocker.py, fix_rocker_legs.py, rebuild_from_fixed.py |
 | 2026-04-13 | `"implementing more enemy sprites"` | Enemy sprite batch production | Downloaded ~8 more enemy GLBs (chonchon, creamy, mandragora, pecopeco, poison_spore, poporing, smokie). Added spriteClass/weaponMode to ~20 monster templates. Loaded /sabrimmo-enemy |
 | 2026-04-13 | `3c21439f` | Egg/larva enemies — immobile | Made egg enemies (ant egg, dragon egg, pupa, thief bug egg, peco peco egg) not move or attack |

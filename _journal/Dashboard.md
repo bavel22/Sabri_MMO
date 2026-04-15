@@ -94,6 +94,10 @@
 - [x] UniRig pipeline — AI rigging for non-humanoid enemies, installed + proved on rocker (40 bones, 6 anims). Skill: `/sabrimmo-rig-animate`
 - [x] Blender 5.x FBX import fix — monkey-patched cast_shadow deprecation crash in blender_sprite_render_v2.py
 - [x] Egg/larva enemies — made immobile (ant egg, dragon egg, pupa, thief bug egg, peco peco egg)
+- [x] Enemy attack lunge system — melee wind-up→lunge→return (ServerTargetPos + timers), ranged vine decal at target feet, safe TWeakObjectPtr guards
+- [x] Ground strike VFX — SpawnGroundStrikeEffect (NS_Dark_Stone_Impact, green earth tint) for ranged ground attacks like Mandragora
+- [x] Render pipeline: thicken modifier (--thicken for thin geometry), lunge offset interpolation in render_all()
+- [x] Mandragora fix — attackRange 200→450, aiType passive→aggressive
 
 ## What's Next
 
@@ -245,6 +249,7 @@ See [Skill_VFX_Execution_Plan](../docsNew/05_Development/Skill_VFX_Execution_Pla
 
 ## Recent Sessions
 <!-- Add links to session logs here, newest first -->
+- **2026-04-14** — Enemy attack polish: melee lunge system (wind-up→lunge→return via ServerTargetPos), ranged vine decal for Mandragora-style attacks, SpawnGroundStrikeEffect VFX, render_monster --thicken + lunge_offsets, Mandragora attackRange/aiType fix. Journal backfill + major commit `dea49b4` (172 files). ([daily note](2026-04-14.md))
 - **2026-04-13** — Enemy sprite batch production: 10 new shape key animation presets (~1000 lines), ~20 spriteClass fields added to monster templates, egg/larva enemies made immobile, UniRig AI rigging pipeline installed + proved on rocker (40 bones, 6 anims), Blender 5.x FBX import fix, ~8 more enemy GLBs downloaded. ([daily note](2026-04-13.md))
 - **2026-04-12** — Asset generation day: ~10 enemy 3D models downloaded from Tripo3D (drops, fabre, lunatic, pupa, willow, condor, hornet, roda_frog, savage_babe), enemy spawn priority reviewed. ([daily note](2026-04-12.md))
 - **2026-04-11** — Sprite system review, assassin katar attack investigation (confirmed correct), Blender weight paint fix documented, egg shell hat item distribution, Blender crash troubleshooting. ([daily note](2026-04-11.md))

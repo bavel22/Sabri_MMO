@@ -7,7 +7,9 @@
 #include "MMOGameInstance.h"
 #include "SocketEventRouter.h"
 #include "Audio/AudioSubsystem.h"
+#include "VFX/SkillVFXSubsystem.h"
 #include "Sprite/SpriteCharacterActor.h"
+#include "Kismet/GameplayStatics.h"
 #include "Components/CapsuleComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Engine/World.h"
@@ -752,10 +754,6 @@ void UEnemySubsystem::HandleEnemyAttack(const TSharedPtr<FJsonValue>& Data)
 			else if (TargetType == TEXT("aoe"))    CastState = ESpriteAnimState::CastAoe;
 			Entry->SpriteActor->SetAnimState(CastState);
 
-			// Play monster attack SFX on skill cast (RO Classic: monsters whose skill
-			// animation is their attack pose still play the attack swing sound). Future:
-			// per-skill cast SFX requires extracting data\wav\effect\ from the GRF, then
-			// adding a skill-id -> wav lookup table here.
 			if (UAudioSubsystem* Audio = GetWorld()->GetSubsystem<UAudioSubsystem>())
 				Audio->PlayMonsterSound(Entry->SpriteClass, EMonsterSoundType::Attack, Enemy->GetActorLocation());
 		}
@@ -763,9 +761,99 @@ void UEnemySubsystem::HandleEnemyAttack(const TSharedPtr<FJsonValue>& Data)
 		{
 			Entry->SpriteActor->SetAnimState(ESpriteAnimState::Attack);
 
-			// Play monster attack SFX (RO Classic-style: <monster>_attack.wav)
 			if (UAudioSubsystem* Audio = GetWorld()->GetSubsystem<UAudioSubsystem>())
 				Audio->PlayMonsterSound(Entry->SpriteClass, EMonsterSoundType::Attack, Enemy->GetActorLocation());
+
+			// ---- Attack lunge: jolt sprite toward target ----
+			// Find the target position (local player or another enemy)
+			FVector TargetPos = FVector::ZeroVector;
+			bool bHasTarget = false;
+
+			double TargetIdD = 0;
+			Obj->TryGetNumberField(TEXT("targetId"), TargetIdD);
+
+			// Try local player first
+			if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+			{
+				if (APawn* Pawn = PC->GetPawn())
+				{
+					TargetPos = Pawn->GetActorLocation();
+					bHasTarget = true;
+				}
+			}
+
+			if (bHasTarget)
+			{
+				FVector EnemyPos = Enemy->GetActorLocation();
+				float DistToTarget = FVector::Dist2D(EnemyPos, TargetPos);
+				static constexpr float LungeDistance = 60.f;
+				static constexpr float MinClearance = 40.f;
+				static constexpr float WindUpDistance = 20.f;
+				static constexpr float MeleeThreshold = 250.f; // server MELEE_RANGE(150)+TOLERANCE(50)+buffer
+				static constexpr float WindUpDelay = 0.08f;    // wind-up duration
+				static constexpr float LungeHold = 0.10f;     // hold at peak
+				static constexpr float ReturnDelay = 0.15f;    // snap back
+
+				float MaxLunge = FMath::Max(0.f, DistToTarget - MinClearance);
+				float ActualLunge = FMath::Min(LungeDistance, MaxLunge);
+
+				if (ActualLunge >= 5.f && DistToTarget <= MeleeThreshold)
+				{
+					// ---- Melee: wind-up + lunge toward target ----
+					FVector Dir = (TargetPos - EnemyPos).GetSafeNormal2D();
+					FVector OriginalPos = Entry->SpriteActor->ServerTargetPos;
+					FVector WindUpPos = EnemyPos - Dir * WindUpDistance;
+					FVector LungePos = EnemyPos + Dir * ActualLunge;
+
+					TWeakObjectPtr<UEnemySubsystem> WeakThis(this);
+					int32 LungeEnemyId = EnemyId;
+
+					Entry->SpriteActor->ServerTargetPos = WindUpPos;
+
+					FTimerHandle LungeTimer;
+					GetWorld()->GetTimerManager().SetTimer(LungeTimer,
+						[WeakThis, LungeEnemyId, LungePos]()
+						{
+							if (!WeakThis.IsValid()) return;
+							FEnemyEntry* E = WeakThis->Enemies.Find(LungeEnemyId);
+							if (!E || E->bIsDead || !E->SpriteActor.IsValid()) return;
+							E->SpriteActor->ServerTargetPos = LungePos;
+						},
+						WindUpDelay, false);
+
+					FTimerHandle ReturnTimer;
+					GetWorld()->GetTimerManager().SetTimer(ReturnTimer,
+						[WeakThis, LungeEnemyId, OriginalPos]()
+						{
+							if (!WeakThis.IsValid()) return;
+							FEnemyEntry* E = WeakThis->Enemies.Find(LungeEnemyId);
+							if (!E || E->bIsDead || !E->SpriteActor.IsValid()) return;
+							E->SpriteActor->ServerTargetPos = OriginalPos;
+						},
+						WindUpDelay + LungeHold + ReturnDelay, false);
+				}
+				else if (DistToTarget > MeleeThreshold)
+				{
+					// ---- Ranged: ground vine decal at target's feet ----
+					// Spawns a temporary RootTendril/CrackedEarth decal that fades after 0.8s
+					UMaterialInterface* VineDecalMat = Cast<UMaterialInterface>(
+						StaticLoadObject(UMaterialInterface::StaticClass(), nullptr,
+							TEXT("/Game/SabriMMO/Materials/Environment/Decals/Instances/MI_T_Decal_RootTendril.MI_T_Decal_RootTendril")));
+					if (!VineDecalMat)
+						VineDecalMat = Cast<UMaterialInterface>(StaticLoadObject(
+							UMaterialInterface::StaticClass(), nullptr,
+							TEXT("/Game/SabriMMO/Materials/Environment/Decals/Instances/MI_T_Decal_CrackedEarth.MI_T_Decal_CrackedEarth")));
+
+					if (VineDecalMat)
+					{
+						FVector DecalSize(80.f, 80.f, 80.f);
+						FRotator DecalRot(-90.f, FMath::FRandRange(0.f, 360.f), 0.f);
+						UGameplayStatics::SpawnDecalAtLocation(
+							GetWorld(), VineDecalMat, DecalSize,
+							TargetPos, DecalRot, 0.8f);
+					}
+				}
+			}
 		}
 	}
 
