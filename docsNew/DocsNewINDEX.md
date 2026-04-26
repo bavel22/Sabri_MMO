@@ -1,6 +1,6 @@
 # Sabri_MMO Documentation Index
 
-> Master navigation for all project documentation. Last updated: 2026-03-20.
+> Master navigation for all project documentation. Last updated: 2026-04-15.
 
 ---
 
@@ -400,7 +400,7 @@ Game design reference — 14 design docs + 14 implementation guides. These are r
 
 ## Database Migrations
 
-25 migration files in `database/migrations/`, listed in recommended execution order:
+28 migration files in `database/migrations/`, listed in recommended execution order (the table below may lag the actual directory — run `ls database/migrations/` for the authoritative list):
 
 | Migration | Purpose |
 |-----------|---------|

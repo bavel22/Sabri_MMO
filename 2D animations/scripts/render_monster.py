@@ -1115,8 +1115,11 @@ def parse_args():
     parser.add_argument("--no-cel-shade", action="store_true")
     parser.add_argument("--no-outline", action="store_true")
     parser.add_argument("--outline-width", type=float, default=0.002)
-    parser.add_argument("--cel-shadow", type=float, default=0.45)
-    parser.add_argument("--cel-mid", type=float, default=0.78)
+    # Lighting defaults match the current standard (see feedback-render-pipeline-standard.md):
+    # shadow 0.92, mid 0.98 = soft posterized RO Classic look.
+    # Older value 0.45/0.78 produced dark, high-contrast sprites.
+    parser.add_argument("--cel-shadow", type=float, default=0.92)
+    parser.add_argument("--cel-mid", type=float, default=0.98)
     parser.add_argument("--camera-angle", type=float, default=10.0,
                         help="Camera elevation degrees (default 10)")
     parser.add_argument("--camera-target-z", type=float, default=0.7,
@@ -1124,6 +1127,9 @@ def parse_args():
     parser.add_argument("--model-rotation", type=float, default=0.0,
                         help="Rotate model around Z axis (degrees) before rendering. "
                              "Use to align face with south camera (dir_idx=0).")
+    parser.add_argument("--model-z-offset", type=float, default=0.0,
+                        help="Lift model up by N units before rendering (Blender units). "
+                             "Use for flying creatures to appear airborne (e.g. 0.5 for bats).")
     parser.add_argument("--thicken", type=float, default=0.0,
                         help="Add solidify modifier for thin geometry (wings/fins). "
                              "Value is thickness in model units (try 0.03-0.05).")
@@ -1792,17 +1798,18 @@ def render_all(cam_obj, output_dir, mesh_obj, animations, args):
                 bpy.context.scene.frame_set(frame)
 
                 # Apply lunge: translate mesh toward camera
+                z_base = args.model_z_offset
                 if lunge_offsets:
                     lunge = interpolate_lunge(frame, lunge_offsets)
                     if abs(lunge) > 0.001:
                         angle_h = dir_idx * (2 * math.pi / num_dirs)
                         lunge_x = math.sin(angle_h) * lunge
                         lunge_y = -math.cos(angle_h) * lunge
-                        mesh_obj.location = mathutils.Vector((lunge_x, lunge_y, 0))
+                        mesh_obj.location = mathutils.Vector((lunge_x, lunge_y, z_base))
                     else:
-                        mesh_obj.location = mathutils.Vector((0, 0, 0))
+                        mesh_obj.location = mathutils.Vector((0, 0, z_base))
                 else:
-                    mesh_obj.location = mathutils.Vector((0, 0, 0))
+                    mesh_obj.location = mathutils.Vector((0, 0, z_base))
 
                 bpy.context.view_layer.update()
 
@@ -1817,8 +1824,8 @@ def render_all(cam_obj, output_dir, mesh_obj, animations, args):
                 bpy.ops.render.render(write_still=True)
                 total += 1
 
-        # Reset mesh position after each animation
-        mesh_obj.location = mathutils.Vector((0, 0, 0))
+        # Reset mesh position after each animation (preserve z-offset for flying creatures)
+        mesh_obj.location = mathutils.Vector((0, 0, args.model_z_offset))
         print(f"  {anim_name}: {len(frames)} frames x {num_dirs} dirs")
 
     # Reset shape keys

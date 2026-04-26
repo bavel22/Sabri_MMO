@@ -171,6 +171,8 @@ void UMMOGameInstance::SaveGameOptions()
     Save->fBgmVolume     = fOptionBgmVolume;
     Save->fSfxVolume     = fOptionSfxVolume;
     Save->fAmbientVolume = fOptionAmbientVolume;
+    // Video
+    Save->iSpriteQuality = iOptionSpriteQuality;
     // Login
     Save->bRememberUsername = bRememberUsername;
     Save->RememberedUsername = (bRememberUsername && !Username.IsEmpty()) ? Username : FString();
@@ -224,6 +226,8 @@ void UMMOGameInstance::LoadGameOptions()
     fOptionBgmVolume     = Save->fBgmVolume;
     fOptionSfxVolume     = Save->fSfxVolume;
     fOptionAmbientVolume = Save->fAmbientVolume;
+    // Video
+    iOptionSpriteQuality = FMath::Clamp(Save->iSpriteQuality, 0, 3);
     // Login
     bRememberUsername = Save->bRememberUsername;
     if (bRememberUsername)

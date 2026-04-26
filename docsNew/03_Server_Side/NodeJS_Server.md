@@ -4,7 +4,7 @@
 
 ## Overview
 
-The server is a single monolithic file: `server/src/index.js` (~32,200 lines) plus 11 data modules (~6,000 lines total). It handles REST API (11 endpoints), Socket.io real-time events (79 handlers), combat tick loop, enemy AI state machine, inventory management, skill system, zone transitions, NPC shops, party system, buff/debuff tracking, and database operations.
+The server is a single monolithic file: `server/src/index.js` (35,281 lines as of 2026-04-15) plus 21 `ro_*.js` data modules (~7,000 lines total — combat formulas, skills, monsters, items, cards, buffs, statuses, AI codes, navmesh, world map, ensembles, etc.). It handles REST API (11 endpoints), Socket.io real-time events (106 `socket.on` handlers), combat tick loop, enemy AI state machine, inventory management, skill system, zone transitions, NPC shops, party system, buff/debuff tracking, audio SFX event broadcasting, ground item drops, and database operations.
 
 **Runtime**: Node.js 18+ LTS
 **Port**: 3001 (configurable via `PORT` env var)
@@ -15,7 +15,7 @@ The server is a single monolithic file: `server/src/index.js` (~32,200 lines) pl
 ```
 server/
 ├── src/
-│   ├── index.js                  # Main server (~32,200 lines)
+│   ├── index.js                  # Main server (35,281 lines as of 2026-04-15)
 │   ├── ro_monster_templates.js   # 509 RO monster definitions
 │   ├── ro_item_mapping.js        # RO item name ↔ ID mapping
 │   ├── ro_exp_tables.js          # EXP tables, class config, level caps

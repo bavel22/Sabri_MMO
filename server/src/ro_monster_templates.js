@@ -63,6 +63,7 @@ RO_MONSTER_TEMPLATES['red_plant'] = {
     raceGroups: {},
     stats: { str: 0, agi: 0, vit: 0, int: 0, dex: 0, luk: 0, level: 1, weaponATK: 1 },
     modes: {},
+    spriteClass: 'red_plant', weaponMode: 0,
     drops: [
         { itemName: 'Red Herb', rate: 55 },
         { itemName: 'Flower', rate: 10 },
@@ -89,6 +90,7 @@ RO_MONSTER_TEMPLATES['blue_plant'] = {
     raceGroups: {},
     stats: { str: 0, agi: 0, vit: 0, int: 0, dex: 0, luk: 0, level: 1, weaponATK: 1 },
     modes: {},
+    spriteClass: 'blue_plant', weaponMode: 0,
     drops: [
         { itemName: 'Blue Herb', rate: 55 },
         { itemName: 'Flower', rate: 10 },
@@ -115,6 +117,7 @@ RO_MONSTER_TEMPLATES['green_plant'] = {
     raceGroups: {},
     stats: { str: 0, agi: 0, vit: 0, int: 0, dex: 0, luk: 0, level: 1, weaponATK: 1 },
     modes: {},
+    spriteClass: 'green_plant', weaponMode: 0,
     drops: [
         { itemName: 'Green Herb', rate: 70 },
         { itemName: 'Flower', rate: 10 },
@@ -141,6 +144,7 @@ RO_MONSTER_TEMPLATES['yellow_plant'] = {
     raceGroups: {},
     stats: { str: 0, agi: 0, vit: 0, int: 0, dex: 0, luk: 0, level: 1, weaponATK: 1 },
     modes: {},
+    spriteClass: 'yellow_plant', weaponMode: 0,
     drops: [
         { itemName: 'Yellow Herb', rate: 55 },
         { itemName: 'Flower', rate: 10 },
@@ -167,6 +171,7 @@ RO_MONSTER_TEMPLATES['white_plant'] = {
     raceGroups: {},
     stats: { str: 0, agi: 0, vit: 0, int: 0, dex: 0, luk: 0, level: 1, weaponATK: 1 },
     modes: {},
+    spriteClass: 'white_plant', weaponMode: 0,
     drops: [
         { itemName: 'White Herb', rate: 55 },
         { itemName: 'Flower', rate: 10 },
@@ -193,6 +198,7 @@ RO_MONSTER_TEMPLATES['shining_plant'] = {
     raceGroups: {},
     stats: { str: 0, agi: 0, vit: 0, int: 0, dex: 0, luk: 90, level: 1, weaponATK: 1 },
     modes: {},
+    spriteClass: 'shining_plant', weaponMode: 0,
     drops: [
         { itemName: 'Blue Herb', rate: 55 },
         { itemName: 'Yellow Herb', rate: 10 },
@@ -219,6 +225,7 @@ RO_MONSTER_TEMPLATES['black_mushroom'] = {
     raceGroups: {},
     stats: { str: 0, agi: 0, vit: 0, int: 0, dex: 0, luk: 0, level: 1, weaponATK: 1 },
     modes: {},
+    spriteClass: 'black_mushroom', weaponMode: 0,
     drops: [
         { itemName: 'Alcohol', rate: 0.5 },
         { itemName: 'Detrimindexta', rate: 0.5 },
@@ -245,6 +252,7 @@ RO_MONSTER_TEMPLATES['red_mushroom'] = {
     raceGroups: {},
     stats: { str: 0, agi: 0, vit: 0, int: 0, dex: 0, luk: 0, level: 1, weaponATK: 1 },
     modes: {},
+    spriteClass: 'red_mushroom', weaponMode: 0,
     drops: [
         { itemName: 'Alcohol', rate: 0.5 },
         { itemName: 'Karvodailnirol', rate: 0.5 },
@@ -271,6 +279,7 @@ RO_MONSTER_TEMPLATES['thief_mushroom'] = {
     raceGroups: {},
     stats: { str: 0, agi: 0, vit: 0, int: 0, dex: 0, luk: 0, level: 1, weaponATK: 1 },
     modes: {},
+    spriteClass: 'thief_mushroom', weaponMode: 0,
     drops: [
         { itemName: 'Orange Net Mushroom', rate: 15 },
         { itemName: 'Orange Gooey Mushroom', rate: 30 },
@@ -291,6 +300,7 @@ RO_MONSTER_TEMPLATES['fabre_'] = {
     raceGroups: {},
     stats: { str: 0, agi: 2, vit: 0, int: 0, dex: 4, luk: 5, level: 1, weaponATK: 4 },
     modes: { detector: true },
+    spriteClass: 'fabre', weaponMode: 0,
     drops: [
         { itemName: 'Fluff', rate: 20 },
         { itemName: 'Feather', rate: 2.5 },
@@ -316,6 +326,7 @@ RO_MONSTER_TEMPLATES['crystal_1'] = {
     raceGroups: {},
     stats: { str: 0, agi: 0, vit: 0, int: 0, dex: 999, luk: 0, level: 1, weaponATK: 0 },
     modes: {},
+    spriteClass: 'wind_crystal', weaponMode: 0,
     drops: [
         { itemName: 'Piece of Cake', rate: 38 },
         { itemName: 'Candy Cane', rate: 45 },
@@ -342,6 +353,7 @@ RO_MONSTER_TEMPLATES['crystal_2'] = {
     raceGroups: {},
     stats: { str: 0, agi: 0, vit: 0, int: 0, dex: 999, luk: 0, level: 1, weaponATK: 0 },
     modes: {},
+    spriteClass: 'earth_crystal', weaponMode: 0,
     drops: [
         { itemName: 'Piece of Cake', rate: 38 },
         { itemName: 'Candy Cane', rate: 45 },
@@ -368,6 +380,7 @@ RO_MONSTER_TEMPLATES['crystal_3'] = {
     raceGroups: {},
     stats: { str: 0, agi: 0, vit: 0, int: 0, dex: 999, luk: 0, level: 1, weaponATK: 0 },
     modes: {},
+    spriteClass: 'fire_crystal', weaponMode: 0,
     drops: [
         { itemName: 'Piece of Cake', rate: 38 },
         { itemName: 'Candy Cane', rate: 45 },
@@ -394,6 +407,7 @@ RO_MONSTER_TEMPLATES['crystal_4'] = {
     raceGroups: {},
     stats: { str: 0, agi: 0, vit: 0, int: 0, dex: 999, luk: 0, level: 1, weaponATK: 0 },
     modes: {},
+    spriteClass: 'ice_crystal', weaponMode: 0,
     drops: [
         { itemName: 'Piece of Cake', rate: 38 },
         { itemName: 'Candy Cane', rate: 45 },
@@ -474,6 +488,7 @@ RO_MONSTER_TEMPLATES['mastering'] = {
     raceGroups: {},
     stats: { str: 0, agi: 2, vit: 2, int: 0, dex: 17, luk: 60, level: 2, weaponATK: 18 },
     modes: {},
+    spriteClass: 'mastering', weaponMode: 0,
     drops: [
         { itemName: 'Unicorn Horn', rate: 2 },
         { itemName: 'Unripe Apple', rate: 0.5 },
@@ -500,6 +515,7 @@ RO_MONSTER_TEMPLATES['meta_fabre'] = {
     raceGroups: {},
     stats: { str: 0, agi: 2, vit: 4, int: 0, dex: 7, luk: 5, level: 2, weaponATK: 8 },
     modes: { detector: true },
+    spriteClass: 'fabre', weaponMode: 0,
     drops: [
         { itemName: 'Fluff', rate: 65 },
         { itemName: 'Feather', rate: 6 },
@@ -526,6 +542,7 @@ RO_MONSTER_TEMPLATES['meta_pupa'] = {
     raceGroups: {},
     stats: { str: 0, agi: 0, vit: 0, int: 0, dex: 0, luk: 20, level: 2, weaponATK: 1 },
     modes: { detector: true },
+    spriteClass: 'pupa', weaponMode: 0,
     drops: [
         { itemName: 'Phracon', rate: 3 },
         { itemName: 'Chrysalis', rate: 60 },
@@ -552,6 +569,7 @@ RO_MONSTER_TEMPLATES['pecopeco_egg'] = {
     raceGroups: {},
     stats: { str: 0, agi: 0, vit: 0, int: 0, dex: 0, luk: 20, level: 3, weaponATK: 1 },
     modes: {},
+    spriteClass: 'pecopeco_egg', weaponMode: 0,
     drops: [
         { itemName: 'Phracon', rate: 2.5 },
         { itemName: 'Shell', rate: 15 },
@@ -578,6 +596,7 @@ RO_MONSTER_TEMPLATES['picky'] = {
     raceGroups: {},
     stats: { str: 0, agi: 3, vit: 3, int: 5, dex: 10, luk: 30, level: 3, weaponATK: 9 },
     modes: {},
+    spriteClass: 'picky', weaponMode: 0,
     drops: [
         { itemName: 'Feather of Birds', rate: 90 },
         { itemName: 'Feather', rate: 7 },
@@ -603,6 +622,7 @@ RO_MONSTER_TEMPLATES['poring_'] = {
     raceGroups: {},
     stats: { str: 0, agi: 14, vit: 3, int: 10, dex: 12, luk: 90, level: 3, weaponATK: 12 },
     modes: {},
+    spriteClass: 'santa_poring', weaponMode: 0,
     drops: [
         { itemName: 'Candy', rate: 20 },
         { itemName: 'Candy Cane', rate: 10 },
@@ -682,6 +702,7 @@ RO_MONSTER_TEMPLATES['meta_pecopeco_egg'] = {
     raceGroups: {},
     stats: { str: 0, agi: 0, vit: 0, int: 0, dex: 0, luk: 20, level: 3, weaponATK: 1 },
     modes: {},
+    spriteClass: 'pecopeco_egg', weaponMode: 0,
     drops: [
         { itemName: 'Phracon', rate: 1.2 },
         { itemName: 'Shell', rate: 15 },
@@ -708,6 +729,7 @@ RO_MONSTER_TEMPLATES['meta_picky'] = {
     raceGroups: {},
     stats: { str: 0, agi: 3, vit: 3, int: 0, dex: 10, luk: 30, level: 3, weaponATK: 9 },
     modes: {},
+    spriteClass: 'picky', weaponMode: 0,
     drops: [
         { itemName: 'Feather of Birds', rate: 65 },
         { itemName: 'Feather', rate: 8.5 },
@@ -787,6 +809,7 @@ RO_MONSTER_TEMPLATES['thief_bug_egg'] = {
     raceGroups: {},
     stats: { str: 0, agi: 6, vit: 4, int: 0, dex: 14, luk: 20, level: 4, weaponATK: 13 },
     modes: { detector: true },
+    spriteClass: 'thief_bug_egg', weaponMode: 0,
     drops: [
         { itemName: 'Phracon', rate: 3 },
         { itemName: 'Chrysalis', rate: 50 },
@@ -813,6 +836,7 @@ RO_MONSTER_TEMPLATES['picky_'] = {
     raceGroups: {},
     stats: { str: 0, agi: 3, vit: 3, int: 10, dex: 11, luk: 20, level: 4, weaponATK: 8 },
     modes: {},
+    spriteClass: 'picky', weaponMode: 0,
     drops: [
         { itemName: 'Feather of Birds', rate: 90 },
         { itemName: 'Feather', rate: 7 },
@@ -839,6 +863,7 @@ RO_MONSTER_TEMPLATES['ant_egg'] = {
     raceGroups: {},
     stats: { str: 0, agi: 0, vit: 0, int: 0, dex: 0, luk: 20, level: 4, weaponATK: 1 },
     modes: {},
+    spriteClass: 'ant_egg', weaponMode: 0,
     drops: [
         { itemName: 'Phracon', rate: 3.2 },
         { itemName: 'Shell', rate: 20 },
@@ -864,6 +889,7 @@ RO_MONSTER_TEMPLATES['chonchon_'] = {
     raceGroups: {},
     stats: { str: 0, agi: 10, vit: 4, int: 5, dex: 12, luk: 2, level: 4, weaponATK: 10 },
     modes: { detector: true },
+    spriteClass: 'chonchon', weaponMode: 0,
     drops: [
         { itemName: 'Iron', rate: 0.5 },
         { itemName: 'Shell', rate: 55 },
@@ -889,6 +915,7 @@ RO_MONSTER_TEMPLATES['meta_ant_egg'] = {
     raceGroups: {},
     stats: { str: 0, agi: 0, vit: 0, int: 0, dex: 0, luk: 20, level: 4, weaponATK: 1 },
     modes: {},
+    spriteClass: 'ant_egg', weaponMode: 0,
     drops: [
         { itemName: 'Phracon', rate: 1.35 },
         { itemName: 'Shell', rate: 27.4 },
@@ -914,6 +941,7 @@ RO_MONSTER_TEMPLATES['meta_picky_'] = {
     raceGroups: {},
     stats: { str: 0, agi: 3, vit: 3, int: 0, dex: 11, luk: 20, level: 4, weaponATK: 8 },
     modes: {},
+    spriteClass: 'picky', weaponMode: 0,
     drops: [
         { itemName: 'Feather of Birds', rate: 65 },
         { itemName: 'Feather', rate: 8.5 },
@@ -991,6 +1019,7 @@ RO_MONSTER_TEMPLATES['thief_bug'] = {
     raceGroups: {},
     stats: { str: 0, agi: 6, vit: 6, int: 0, dex: 11, luk: 0, level: 6, weaponATK: 18 },
     modes: { detector: true },
+    spriteClass: 'thief_bug', weaponMode: 0,
     drops: [
         { itemName: 'Worm Peeling', rate: 25 },
         { itemName: 'Jacket', rate: 0.8 },
@@ -1016,6 +1045,7 @@ RO_MONSTER_TEMPLATES['eclipse'] = {
     raceGroups: {},
     stats: { str: 0, agi: 36, vit: 6, int: 0, dex: 11, luk: 80, level: 6, weaponATK: 20 },
     modes: {},
+    spriteClass: 'eclipse', weaponMode: 0,
     drops: [
         { itemName: 'Cute Ribbon', rate: 2 },
         { itemName: 'Red Herb', rate: 80 },
@@ -1122,6 +1152,7 @@ RO_MONSTER_TEMPLATES['dragon_fly'] = {
     raceGroups: {},
     stats: { str: 0, agi: 20, vit: 8, int: 15, dex: 17, luk: 5, level: 8, weaponATK: 22 },
     modes: {},
+    spriteClass: 'dragon_fly', weaponMode: 0,
     drops: [
         { itemName: 'Sweet Gent', rate: 2 },
         { itemName: 'Red Herb', rate: 80 },
@@ -1175,6 +1206,7 @@ RO_MONSTER_TEMPLATES['desert_wolf_b'] = {
     raceGroups: {},
     stats: { str: 0, agi: 9, vit: 9, int: 5, dex: 21, luk: 40, level: 9, weaponATK: 30 },
     modes: {},
+    spriteClass: 'desert_wolf_b', weaponMode: 0,
     drops: [
         { itemName: 'Phracon', rate: 0.85 },
         { itemName: 'Animal\'s Skin', rate: 55 },
@@ -1201,6 +1233,7 @@ RO_MONSTER_TEMPLATES['thief_bug_'] = {
     raceGroups: {},
     stats: { str: 0, agi: 15, vit: 10, int: 5, dex: 23, luk: 5, level: 10, weaponATK: 33 },
     modes: { detector: true },
+    spriteClass: 'thief_bug_f', weaponMode: 0,
     drops: [
         { itemName: 'Worm Peeling', rate: 35 },
         { itemName: 'Garlet', rate: 2.5 },
@@ -1253,6 +1286,7 @@ RO_MONSTER_TEMPLATES['toad'] = {
     raceGroups: {},
     stats: { str: 0, agi: 5, vit: 10, int: 10, dex: 10, luk: 25, level: 10, weaponATK: 26 },
     modes: {},
+    spriteClass: 'toad', weaponMode: 0,
     drops: [
         { itemName: 'Big Sis\' Ribbon', rate: 0.5 },
         { itemName: 'Honey', rate: 20 },
@@ -1279,6 +1313,7 @@ RO_MONSTER_TEMPLATES['plankton'] = {
     raceGroups: {},
     stats: { str: 0, agi: 10, vit: 10, int: 0, dex: 15, luk: 0, level: 10, weaponATK: 26 },
     modes: {},
+    spriteClass: 'plankton', weaponMode: 0,
     drops: [
         { itemName: 'Single Cell', rate: 90 },
         { itemName: 'Garlet', rate: 3 },
@@ -1305,6 +1340,7 @@ RO_MONSTER_TEMPLATES['antonio'] = {
     raceGroups: {},
     stats: { str: 0, agi: 0, vit: 0, int: 50, dex: 100, luk: 100, level: 10, weaponATK: 13 },
     modes: {},
+    spriteClass: 'antonio', weaponMode: 0,
     drops: [
         { itemName: 'Red Stocking', rate: 100 },
         { itemName: 'Gift Box', rate: 2 },
@@ -1331,6 +1367,7 @@ RO_MONSTER_TEMPLATES['kukre'] = {
     raceGroups: {},
     stats: { str: 0, agi: 11, vit: 11, int: 5, dex: 16, luk: 2, level: 11, weaponATK: 28 },
     modes: {},
+    spriteClass: 'kukre', weaponMode: 0,
     drops: [
         { itemName: 'Crystal Blue', rate: 0.3 },
         { itemName: 'Worm Peeling', rate: 55 },
@@ -1357,6 +1394,7 @@ RO_MONSTER_TEMPLATES['tarou'] = {
     raceGroups: {},
     stats: { str: 0, agi: 20, vit: 11, int: 10, dex: 24, luk: 5, level: 11, weaponATK: 34 },
     modes: {},
+    spriteClass: 'tarou', weaponMode: 0,
     drops: [
         { itemName: 'Rat Tail', rate: 90 },
         { itemName: 'Animal\'s Skin', rate: 30 },
@@ -1408,6 +1446,7 @@ RO_MONSTER_TEMPLATES['ambernite'] = {
     raceGroups: {},
     stats: { str: 0, agi: 13, vit: 13, int: 5, dex: 18, luk: 5, level: 13, weaponATK: 39 },
     modes: { detector: true },
+    spriteClass: 'ambernite', weaponMode: 0,
     drops: [
         { itemName: 'Crystal Blue', rate: 0.5 },
         { itemName: 'Snail\'s Shell', rate: 90 },
@@ -1434,6 +1473,7 @@ RO_MONSTER_TEMPLATES['worm_tail'] = {
     raceGroups: {},
     stats: { str: 0, agi: 14, vit: 28, int: 5, dex: 46, luk: 5, level: 14, weaponATK: 42 },
     modes: {},
+    spriteClass: 'worm_tail', weaponMode: 0,
     drops: [
         { itemName: 'Green Live', rate: 0.6 },
         { itemName: 'Emveretarcon', rate: 0.25 },
@@ -1487,6 +1527,7 @@ RO_MONSTER_TEMPLATES['hydra'] = {
     raceGroups: {},
     stats: { str: 0, agi: 14, vit: 14, int: 0, dex: 40, luk: 2, level: 14, weaponATK: 22 },
     modes: {},
+    spriteClass: 'hydra', weaponMode: 0,
     drops: [
         { itemName: 'Emveretarcon', rate: 0.25 },
         { itemName: 'Tentacle', rate: 55 },
@@ -1537,6 +1578,7 @@ RO_MONSTER_TEMPLATES['snake'] = {
     raceGroups: {},
     stats: { str: 0, agi: 15, vit: 15, int: 10, dex: 35, luk: 5, level: 15, weaponATK: 46 },
     modes: {},
+    spriteClass: 'snake', weaponMode: 0,
     drops: [
         { itemName: 'Snake Scale', rate: 90 },
         { itemName: 'Katana', rate: 0.15 },
@@ -1563,6 +1605,7 @@ RO_MONSTER_TEMPLATES['shellfish'] = {
     raceGroups: {},
     stats: { str: 0, agi: 12, vit: 8, int: 0, dex: 32, luk: 5, level: 15, weaponATK: 35 },
     modes: {},
+    spriteClass: 'shellfish', weaponMode: 0,
     drops: [
         { itemName: 'Clam Shell', rate: 55 },
         { itemName: 'Clam Flesh', rate: 10 },
@@ -1614,6 +1657,7 @@ RO_MONSTER_TEMPLATES['boiled_rice'] = {
     raceGroups: {},
     stats: { str: 0, agi: 14, vit: 14, int: 0, dex: 19, luk: 15, level: 15, weaponATK: 49 },
     modes: {},
+    spriteClass: 'boiled_rice', weaponMode: 0,
     drops: [
         { itemName: 'Rice Ball', rate: 55 },
         { itemName: 'Rice Ball Doll', rate: 30 },
@@ -1636,6 +1680,7 @@ RO_MONSTER_TEMPLATES['spore'] = {
     raceGroups: {},
     stats: { str: 0, agi: 12, vit: 12, int: 5, dex: 19, luk: 8, level: 16, weaponATK: 24 },
     modes: {},
+    spriteClass: 'spore', weaponMode: 0,
     drops: [
         { itemName: 'Mushroom Spore', rate: 90 },
         { itemName: 'Red Herb', rate: 8 },
@@ -1689,6 +1734,7 @@ RO_MONSTER_TEMPLATES['stainer'] = {
     raceGroups: {},
     stats: { str: 0, agi: 40, vit: 16, int: 5, dex: 30, luk: 5, level: 16, weaponATK: 53 },
     modes: { detector: true },
+    spriteClass: 'stainer', weaponMode: 0,
     drops: [
         { itemName: 'Wind of Verdure', rate: 0.7 },
         { itemName: 'Emveretarcon', rate: 0.3 },
@@ -1715,6 +1761,7 @@ RO_MONSTER_TEMPLATES['meta_creamy'] = {
     raceGroups: {},
     stats: { str: 0, agi: 40, vit: 16, int: 15, dex: 16, luk: 55, level: 16, weaponATK: 53 },
     modes: { detector: true },
+    spriteClass: 'creamy', weaponMode: 0,
     drops: [
         { itemName: 'Powder of Butterfly', rate: 60 },
         { itemName: 'Silk Robe', rate: 0.1 },
@@ -1740,6 +1787,7 @@ RO_MONSTER_TEMPLATES['steel_chonchon'] = {
     raceGroups: {},
     stats: { str: 0, agi: 43, vit: 17, int: 5, dex: 33, luk: 10, level: 17, weaponATK: 54 },
     modes: { detector: true },
+    spriteClass: 'steel_chonchon', weaponMode: 0,
     drops: [
         { itemName: 'Wind of Verdure', rate: 0.9 },
         { itemName: 'Steel', rate: 0.3 },
@@ -1766,6 +1814,7 @@ RO_MONSTER_TEMPLATES['muka'] = {
     raceGroups: {},
     stats: { str: 15, agi: 15, vit: 30, int: 5, dex: 20, luk: 10, level: 17, weaponATK: 40 },
     modes: {},
+    spriteClass: 'muka', weaponMode: 0,
     drops: [
         { itemName: 'Green Live', rate: 0.7 },
         { itemName: 'Cactus Needle', rate: 90 },
@@ -1792,6 +1841,7 @@ RO_MONSTER_TEMPLATES['andre'] = {
     raceGroups: {},
     stats: { str: 0, agi: 17, vit: 24, int: 20, dex: 26, luk: 20, level: 17, weaponATK: 60 },
     modes: { detector: true },
+    spriteClass: 'andre', weaponMode: 0,
     drops: [
         { itemName: 'Worm Peeling', rate: 90 },
         { itemName: 'Garlet', rate: 10 },
@@ -1818,6 +1868,7 @@ RO_MONSTER_TEMPLATES['coco'] = {
     raceGroups: {},
     stats: { str: 24, agi: 17, vit: 34, int: 20, dex: 24, luk: 10, level: 17, weaponATK: 56 },
     modes: {},
+    spriteClass: 'coco', weaponMode: 0,
     drops: [
         { itemName: 'Acorn', rate: 90 },
         { itemName: 'Hood', rate: 0.2 },
@@ -1844,6 +1895,7 @@ RO_MONSTER_TEMPLATES['rafflesia'] = {
     raceGroups: {},
     stats: { str: 0, agi: 18, vit: 24, int: 11, dex: 37, luk: 10, level: 17, weaponATK: 105 },
     modes: {},
+    spriteClass: 'rafflesia', weaponMode: 0,
     drops: [
         { itemName: 'Maneater Root', rate: 55 },
         { itemName: 'Scell', rate: 16 },
@@ -1870,6 +1922,7 @@ RO_MONSTER_TEMPLATES['meta_andre'] = {
     raceGroups: {},
     stats: { str: 0, agi: 17, vit: 24, int: 20, dex: 26, luk: 20, level: 17, weaponATK: 60 },
     modes: { detector: true },
+    spriteClass: 'andre', weaponMode: 0,
     drops: [
         { itemName: 'Worm Peeling', rate: 60 },
         { itemName: 'Garlet', rate: 30 },
@@ -1920,6 +1973,7 @@ RO_MONSTER_TEMPLATES['vocal'] = {
     aspd: 178, walkSpeed: 200, attackDelay: 1080, attackMotion: 648, damageMotion: 480,
     size: 'medium', race: 'insect', element: { type: 'earth', level: 1 },
     monsterClass: 'normal', aiType: 'aggressive', respawnMs: 13400,
+    spriteClass: 'vocal', weaponMode: 0,
     raceGroups: {},
     stats: { str: 77, agi: 28, vit: 26, int: 30, dex: 53, luk: 40, level: 18, weaponATK: 71 },
     modes: { detector: true },
@@ -1949,6 +2003,7 @@ RO_MONSTER_TEMPLATES['ghostring'] = {
     raceGroups: {},
     stats: { str: 40, agi: 27, vit: 18, int: 45, dex: 72, luk: 30, level: 18, weaponATK: 82 },
     modes: {},
+    spriteClass: 'ghostring', weaponMode: 0,
     drops: [
         { itemName: 'Fabric', rate: 53.35 },
         { itemName: 'Ghost Bandana', rate: 1 },
@@ -1975,6 +2030,7 @@ RO_MONSTER_TEMPLATES['horn'] = {
     raceGroups: {},
     stats: { str: 22, agi: 18, vit: 28, int: 10, dex: 47, luk: 15, level: 18, weaponATK: 58 },
     modes: { detector: true },
+    spriteClass: 'horn', weaponMode: 0,
     drops: [
         { itemName: 'Green Live', rate: 0.8 },
         { itemName: 'Emveretarcon', rate: 0.35 },
@@ -2000,6 +2056,7 @@ RO_MONSTER_TEMPLATES['martin'] = {
     raceGroups: {},
     stats: { str: 12, agi: 18, vit: 30, int: 15, dex: 15, luk: 5, level: 18, weaponATK: 52 },
     modes: {},
+    spriteClass: 'martin', weaponMode: 0,
     drops: [
         { itemName: 'Mole Whiskers', rate: 90 },
         { itemName: 'Mole Claw', rate: 5 },
@@ -2026,6 +2083,7 @@ RO_MONSTER_TEMPLATES['piere'] = {
     raceGroups: {},
     stats: { str: 0, agi: 18, vit: 26, int: 20, dex: 27, luk: 15, level: 18, weaponATK: 64 },
     modes: { detector: true },
+    spriteClass: 'piere', weaponMode: 0,
     drops: [
         { itemName: 'Worm Peeling', rate: 90 },
         { itemName: 'Garlet', rate: 11 },
@@ -2052,6 +2110,7 @@ RO_MONSTER_TEMPLATES['meta_piere'] = {
     raceGroups: {},
     stats: { str: 0, agi: 18, vit: 26, int: 20, dex: 27, luk: 15, level: 18, weaponATK: 64 },
     modes: { detector: true },
+    spriteClass: 'piere', weaponMode: 0,
     drops: [
         { itemName: 'Worm Peeling', rate: 57 },
         { itemName: 'Garlet', rate: 11 },
@@ -2078,6 +2137,7 @@ RO_MONSTER_TEMPLATES['aster'] = {
     raceGroups: {},
     stats: { str: 0, agi: 19, vit: 15, int: 0, dex: 34, luk: 5, level: 18, weaponATK: 56 },
     modes: {},
+    spriteClass: 'aster', weaponMode: 0,
     drops: [
         { itemName: 'Sticky Mucus', rate: 5 },
         { itemName: 'Coral Reef', rate: 0.4 },
@@ -2129,6 +2189,7 @@ RO_MONSTER_TEMPLATES['thief_bug__'] = {
     raceGroups: {},
     stats: { str: 0, agi: 29, vit: 16, int: 5, dex: 36, luk: 0, level: 19, weaponATK: 76 },
     modes: { detector: true },
+    spriteClass: 'thief_bug_male', weaponMode: 0,
     drops: [
         { itemName: 'Emveretarcon', rate: 0.4 },
         { itemName: 'Insect Feeler', rate: 55 },
@@ -2155,6 +2216,7 @@ RO_MONSTER_TEMPLATES['vadon'] = {
     raceGroups: {},
     stats: { str: 0, agi: 19, vit: 16, int: 10, dex: 36, luk: 15, level: 19, weaponATK: 74 },
     modes: {},
+    spriteClass: 'vadon', weaponMode: 0,
     drops: [
         { itemName: 'Crystal Blue', rate: 0.4 },
         { itemName: 'Nipper', rate: 90 },
@@ -2208,6 +2270,7 @@ RO_MONSTER_TEMPLATES['deniro'] = {
     raceGroups: {},
     stats: { str: 0, agi: 19, vit: 30, int: 20, dex: 43, luk: 10, level: 19, weaponATK: 68 },
     modes: { detector: true },
+    spriteClass: 'deniro', weaponMode: 0,
     drops: [
         { itemName: 'Worm Peeling', rate: 90 },
         { itemName: 'Garlet', rate: 30 },
@@ -2234,6 +2297,7 @@ RO_MONSTER_TEMPLATES['provoke_yoyo'] = {
     raceGroups: {},
     stats: { str: 0, agi: 24, vit: 30, int: 35, dex: 32, luk: 55, level: 19, weaponATK: 71 },
     modes: {},
+    spriteClass: 'yoyo', weaponMode: 0,
     drops: [
         { itemName: 'Yoyo Tail', rate: 60 },
         { itemName: 'Cacao', rate: 5 },
@@ -2260,6 +2324,7 @@ RO_MONSTER_TEMPLATES['meta_deniro'] = {
     raceGroups: {},
     stats: { str: 0, agi: 19, vit: 30, int: 20, dex: 43, luk: 10, level: 19, weaponATK: 68 },
     modes: { detector: true },
+    spriteClass: 'deniro', weaponMode: 0,
     drops: [
         { itemName: 'Worm Peeling', rate: 60 },
         { itemName: 'Garlet', rate: 30 },
@@ -2286,6 +2351,7 @@ RO_MONSTER_TEMPLATES['elder_wilow'] = {
     raceGroups: {},
     stats: { str: 0, agi: 20, vit: 25, int: 35, dex: 38, luk: 30, level: 20, weaponATK: 58 },
     modes: {},
+    spriteClass: 'elder_wilow', weaponMode: 0,
     drops: [
         { itemName: 'Red Blood', rate: 0.5 },
         { itemName: 'Resin', rate: 90 },
@@ -2312,6 +2378,7 @@ RO_MONSTER_TEMPLATES['crab'] = {
     raceGroups: {},
     stats: { str: 18, agi: 20, vit: 15, int: 0, dex: 36, luk: 15, level: 20, weaponATK: 71 },
     modes: {},
+    spriteClass: 'crab', weaponMode: 0,
     drops: [
         { itemName: 'Crab Shell', rate: 55 },
         { itemName: 'Nipper', rate: 15 },
@@ -2336,6 +2403,7 @@ RO_MONSTER_TEMPLATES['angeling'] = {
     raceGroups: {},
     stats: { str: 0, agi: 50, vit: 20, int: 75, dex: 68, luk: 200, level: 20, weaponATK: 120 },
     modes: {},
+    spriteClass: 'angeling', weaponMode: 0,
     drops: [
         { itemName: 'Angel Wing', rate: 1 },
         { itemName: 'Scapulare', rate: 0.6 },
@@ -2362,6 +2430,7 @@ RO_MONSTER_TEMPLATES['vitata'] = {
     raceGroups: {},
     stats: { str: 0, agi: 20, vit: 25, int: 65, dex: 40, luk: 70, level: 20, weaponATK: 69 },
     modes: { detector: true },
+    spriteClass: 'vitata', weaponMode: 0,
     drops: [
         { itemName: 'Green Live', rate: 0.9 },
         { itemName: 'Worm Peeling', rate: 50 },
@@ -2415,6 +2484,7 @@ RO_MONSTER_TEMPLATES['dustiness'] = {
     raceGroups: {},
     stats: { str: 0, agi: 53, vit: 17, int: 0, dex: 38, luk: 5, level: 21, weaponATK: 80 },
     modes: { detector: true },
+    spriteClass: 'dustiness', weaponMode: 0,
     drops: [
         { itemName: 'Moth Dust', rate: 90 },
         { itemName: 'Moth Wings', rate: 5 },
@@ -2440,6 +2510,7 @@ RO_MONSTER_TEMPLATES['marina'] = {
     raceGroups: {},
     stats: { str: 0, agi: 21, vit: 21, int: 0, dex: 36, luk: 10, level: 21, weaponATK: 84 },
     modes: {},
+    spriteClass: 'marina', weaponMode: 0,
     drops: [
         { itemName: 'Single Cell', rate: 50 },
         { itemName: 'Sticky Mucus', rate: 15 },
@@ -2462,9 +2533,11 @@ RO_MONSTER_TEMPLATES['raggler'] = {
     aspd: 180, walkSpeed: 200, attackDelay: 1000, attackMotion: 900, damageMotion: 384,
     size: 'small', race: 'brute', element: { type: 'wind', level: 1 },
     monsterClass: 'normal', aiType: 'aggressive', respawnMs: 14300,
+    spriteClass: 'raggler', weaponMode: 0,
     raceGroups: {},
     stats: { str: 18, agi: 10, vit: 32, int: 20, dex: 39, luk: 35, level: 21, weaponATK: 102 },
     modes: {},
+    spriteClass: 'raggler', weaponMode: 0,
     drops: [
         { itemName: 'Cyfar', rate: 30 },
         { itemName: 'Feather of Birds', rate: 50 },
@@ -2488,6 +2561,7 @@ RO_MONSTER_TEMPLATES['orc_baby'] = {
     aspd: 187, walkSpeed: 200, attackDelay: 672, attackMotion: 864, damageMotion: 288,
     size: 'small', race: 'demihuman', element: { type: 'earth', level: 1 },
     monsterClass: 'normal', aiType: 'aggressive', respawnMs: 14300,
+    spriteClass: 'orc_baby', weaponMode: 0,
     raceGroups: {},
     stats: { str: 30, agi: 15, vit: 10, int: 18, dex: 35, luk: 2, level: 21, weaponATK: 135 },
     modes: {},
@@ -2516,6 +2590,7 @@ RO_MONSTER_TEMPLATES['thara_frog'] = {
     raceGroups: {},
     stats: { str: 0, agi: 22, vit: 22, int: 5, dex: 34, luk: 10, level: 22, weaponATK: 105 },
     modes: {},
+    spriteClass: 'thara_frog', weaponMode: 0,
     drops: [
         { itemName: 'Emveretarcon', rate: 0.45 },
         { itemName: 'Spawn', rate: 55 },
@@ -2538,6 +2613,7 @@ RO_MONSTER_TEMPLATES['metaller'] = {
     aspd: 166, walkSpeed: 200, attackDelay: 1708, attackMotion: 1008, damageMotion: 540,
     size: 'medium', race: 'insect', element: { type: 'fire', level: 1 },
     monsterClass: 'normal', aiType: 'aggressive', respawnMs: 14600,
+    spriteClass: 'metaller', weaponMode: 0,
     raceGroups: {},
     stats: { str: 0, agi: 22, vit: 22, int: 20, dex: 49, luk: 50, level: 22, weaponATK: 131 },
     modes: { detector: true },
@@ -2564,6 +2640,7 @@ RO_MONSTER_TEMPLATES['goblin_5'] = {
     aspd: 170, walkSpeed: 200, attackDelay: 1500, attackMotion: 500, damageMotion: 300,
     size: 'medium', race: 'demihuman', element: { type: 'neutral', level: 1 },
     monsterClass: 'normal', aiType: 'passive', respawnMs: 14600,
+    spriteClass: 'goblin', weaponMode: 0,
     raceGroups: { Goblin: true, Element: true, ElementLevel: true, WalkSpeed: true, AttackDelay: true, AttackMotion: true, ClientAttackMotion: true, DamageMotion: true, Ai: true },
     stats: { str: 0, agi: 22, vit: 22, int: 15, dex: 32, luk: 10, level: 22, weaponATK: 105 },
     modes: {},
@@ -2593,6 +2670,7 @@ RO_MONSTER_TEMPLATES['anacondaq'] = {
     raceGroups: {},
     stats: { str: 0, agi: 23, vit: 28, int: 10, dex: 36, luk: 5, level: 23, weaponATK: 124 },
     modes: {},
+    spriteClass: 'anacondaq', weaponMode: 0,
     drops: [
         { itemName: 'Emveretarcon', rate: 0.5 },
         { itemName: 'Venom Canine', rate: 90 },
@@ -2619,6 +2697,7 @@ RO_MONSTER_TEMPLATES['cornutus'] = {
     raceGroups: {},
     stats: { str: 0, agi: 23, vit: 23, int: 5, dex: 36, luk: 12, level: 23, weaponATK: 109 },
     modes: {},
+    spriteClass: 'cornutus', weaponMode: 0,
     drops: [
         { itemName: 'Crystal Blue', rate: 0.45 },
         { itemName: 'Conch', rate: 55 },
@@ -2645,6 +2724,7 @@ RO_MONSTER_TEMPLATES['caramel'] = {
     raceGroups: {},
     stats: { str: 35, agi: 23, vit: 46, int: 5, dex: 38, luk: 10, level: 23, weaponATK: 90 },
     modes: {},
+    spriteClass: 'caramel', weaponMode: 0,
     drops: [
         { itemName: 'Porcupine Quill', rate: 90 },
         { itemName: 'Coat', rate: 0.05 },
@@ -2667,6 +2747,7 @@ RO_MONSTER_TEMPLATES['goblin_4'] = {
     aspd: 170, walkSpeed: 200, attackDelay: 1500, attackMotion: 500, damageMotion: 300,
     size: 'medium', race: 'demihuman', element: { type: 'neutral', level: 1 },
     monsterClass: 'normal', aiType: 'passive', respawnMs: 14900,
+    spriteClass: 'goblin', weaponMode: 0,
     raceGroups: { Goblin: true, Element: true, ElementLevel: true, WalkSpeed: true, AttackDelay: true, AttackMotion: true, ClientAttackMotion: true, DamageMotion: true, Ai: true },
     stats: { str: 0, agi: 23, vit: 46, int: 15, dex: 36, luk: 10, level: 23, weaponATK: 109 },
     modes: {},
@@ -2693,9 +2774,11 @@ RO_MONSTER_TEMPLATES['zerom'] = {
     aspd: 164, walkSpeed: 200, attackDelay: 1780, attackMotion: 1080, damageMotion: 432,
     size: 'medium', race: 'demihuman', element: { type: 'fire', level: 1 },
     monsterClass: 'normal', aiType: 'aggressive', respawnMs: 14900,
+    spriteClass: 'zerom', weaponMode: 0,
     raceGroups: {},
     stats: { str: 0, agi: 23, vit: 23, int: 5, dex: 42, luk: 0, level: 23, weaponATK: 127 },
     modes: {},
+    spriteClass: 'zerom', weaponMode: 0,
     drops: [
         { itemName: 'Emveretarcon', rate: 0.55 },
         { itemName: 'Iron', rate: 1.9 },
@@ -2722,6 +2805,7 @@ RO_MONSTER_TEMPLATES['anopheles'] = {
     raceGroups: {},
     stats: { str: 0, agi: 200, vit: 4, int: 5, dex: 120, luk: 5, level: 23, weaponATK: 48 },
     modes: { detector: true },
+    spriteClass: 'anopheles', weaponMode: 0,
     drops: [
         { itemName: 'Fly Wing', rate: 10 },
         { itemName: 'Bacillus', rate: 5 },
@@ -2743,6 +2827,7 @@ RO_MONSTER_TEMPLATES['stapo'] = {
     raceGroups: {},
     stats: { str: 12, agi: 11, vit: 15, int: 12, dex: 23, luk: 0, level: 23, weaponATK: 135 },
     modes: {},
+    spriteClass: 'stapo', weaponMode: 0,
     drops: [
         { itemName: 'Jellopy', rate: 10 },
         { itemName: 'Jubilee', rate: 10 },
@@ -2768,6 +2853,7 @@ RO_MONSTER_TEMPLATES['scorpion'] = {
     raceGroups: {},
     stats: { str: 0, agi: 24, vit: 24, int: 5, dex: 52, luk: 5, level: 24, weaponATK: 80 },
     modes: { detector: true },
+    spriteClass: 'scorpion', weaponMode: 0,
     drops: [
         { itemName: 'Red Blood', rate: 0.7 },
         { itemName: 'Scorpion\'s Tail', rate: 55 },
@@ -2791,6 +2877,7 @@ RO_MONSTER_TEMPLATES['ork_warrior'] = {
     aspd: 170, walkSpeed: 200, attackDelay: 1500, attackMotion: 500, damageMotion: 300,
     size: 'medium', race: 'demihuman', element: { type: 'neutral', level: 1 },
     monsterClass: 'normal', aiType: 'passive', respawnMs: 15200,
+    spriteClass: 'orc_warrior', weaponMode: 0,
     raceGroups: { Orc: true, Element: true, ElementLevel: true, WalkSpeed: true, AttackDelay: true, AttackMotion: true, ClientAttackMotion: true, DamageMotion: true, Ai: true },
     stats: { str: 0, agi: 24, vit: 48, int: 25, dex: 34, luk: 10, level: 24, weaponATK: 104 },
     modes: {},
@@ -2820,6 +2907,7 @@ RO_MONSTER_TEMPLATES['megalodon'] = {
     raceGroups: {},
     stats: { str: 0, agi: 12, vit: 24, int: 0, dex: 26, luk: 5, level: 24, weaponATK: 155 },
     modes: {},
+    spriteClass: 'megalodon', weaponMode: 0,
     drops: [
         { itemName: 'Stinky Scale', rate: 55 },
         { itemName: 'Skel-Bone', rate: 15 },
@@ -2846,6 +2934,7 @@ RO_MONSTER_TEMPLATES['vagabond_wolf'] = {
     raceGroups: {},
     stats: { str: 57, agi: 45, vit: 48, int: 20, dex: 50, luk: 65, level: 24, weaponATK: 135 },
     modes: {},
+    spriteClass: 'vagabond_wolf', weaponMode: 0,
     drops: [
         { itemName: 'Western Grace', rate: 2 },
         { itemName: 'Wolf Claw', rate: 80 },
@@ -2872,6 +2961,7 @@ RO_MONSTER_TEMPLATES['drainliar'] = {
     raceGroups: {},
     stats: { str: 0, agi: 36, vit: 24, int: 0, dex: 78, luk: 0, level: 24, weaponATK: 74 },
     modes: {},
+    spriteClass: 'drainliar', weaponMode: 0,
     drops: [
         { itemName: 'Emveretarcon', rate: 0.6 },
         { itemName: 'Tooth of Bat', rate: 30 },
@@ -2898,6 +2988,7 @@ RO_MONSTER_TEMPLATES['eggyra'] = {
     raceGroups: {},
     stats: { str: 0, agi: 36, vit: 24, int: 0, dex: 32, luk: 0, level: 24, weaponATK: 85 },
     modes: {},
+    spriteClass: 'eggyra', weaponMode: 0,
     drops: [
         { itemName: 'Scell', rate: 10 },
         { itemName: 'Egg Shell', rate: 0.2 },
@@ -2921,6 +3012,7 @@ RO_MONSTER_TEMPLATES['goblin_2'] = {
     aspd: 170, walkSpeed: 200, attackDelay: 1500, attackMotion: 500, damageMotion: 300,
     size: 'medium', race: 'demihuman', element: { type: 'neutral', level: 1 },
     monsterClass: 'normal', aiType: 'passive', respawnMs: 15200,
+    spriteClass: 'goblin', weaponMode: 0,
     raceGroups: { Goblin: true, Element: true, ElementLevel: true, WalkSpeed: true, AttackDelay: true, AttackMotion: true, ClientAttackMotion: true, DamageMotion: true, Ai: true },
     stats: { str: 0, agi: 24, vit: 24, int: 15, dex: 66, luk: 10, level: 24, weaponATK: 88 },
     modes: {},
@@ -2947,6 +3039,7 @@ RO_MONSTER_TEMPLATES['goblin_3'] = {
     aspd: 170, walkSpeed: 200, attackDelay: 1500, attackMotion: 500, damageMotion: 300,
     size: 'medium', race: 'demihuman', element: { type: 'neutral', level: 1 },
     monsterClass: 'normal', aiType: 'passive', respawnMs: 15200,
+    spriteClass: 'goblin', weaponMode: 0,
     raceGroups: { Goblin: true, Element: true, ElementLevel: true, WalkSpeed: true, AttackDelay: true, AttackMotion: true, ClientAttackMotion: true, DamageMotion: true, Ai: true },
     stats: { str: 0, agi: 24, vit: 24, int: 15, dex: 24, luk: 10, level: 24, weaponATK: 132 },
     modes: {},
@@ -2966,6 +3059,7 @@ RO_MONSTER_TEMPLATES['goblin_3'] = {
 // ──── Orc Zombie (ID: 1153) ──── Level 24 | HP 1,568 | NORMAL | undead/neutral1 | passive
 RO_MONSTER_TEMPLATES['orc_zombie'] = {
     id: 1153, name: 'Orc Zombie', aegisName: 'ORC_ZOMBIE',
+    spriteClass: 'orc_zombie', weaponMode: 0,
     level: 24, maxHealth: 1568, baseExp: 196, jobExp: 120, mvpExp: 0,
     attack: 151, attack2: 184, defense: 5, magicDefense: 10,
     str: 0, agi: 12, vit: 24, int: 0, dex: 24, luk: 5,
@@ -2988,6 +3082,7 @@ RO_MONSTER_TEMPLATES['orc_zombie'] = {
 // ──── Smoking Orc (ID: 1235) ──── Level 24 | HP 1,400 | NORMAL | demihuman/earth1 | aggressive
 RO_MONSTER_TEMPLATES['smoking_orc'] = {
     id: 1235, name: 'Smoking Orc', aegisName: 'SMOKING_ORC',
+    spriteClass: 'smoking_orc', weaponMode: 0,
     level: 24, maxHealth: 1400, baseExp: 261, jobExp: 160, mvpExp: 0,
     attack: 114, attack2: 136, defense: 10, magicDefense: 20,
     str: 0, agi: 24, vit: 48, int: 20, dex: 34, luk: 0,
@@ -3014,6 +3109,7 @@ RO_MONSTER_TEMPLATES['smoking_orc'] = {
 // ──── Christmas Orc (ID: 1588) ──── Level 24 | HP 1,400 | NORMAL | demihuman/earth1 | passive
 RO_MONSTER_TEMPLATES['orc_xmas'] = {
     id: 1588, name: 'Christmas Orc', aegisName: 'ORC_XMAS',
+    spriteClass: 'orc_xmas', weaponMode: 0,
     level: 24, maxHealth: 1400, baseExp: 261, jobExp: 160, mvpExp: 0,
     attack: 104, attack2: 126, defense: 10, magicDefense: 5,
     str: 0, agi: 24, vit: 48, int: 25, dex: 34, luk: 10,
@@ -3050,6 +3146,7 @@ RO_MONSTER_TEMPLATES['wolf'] = {
     raceGroups: {},
     stats: { str: 0, agi: 20, vit: 28, int: 15, dex: 32, luk: 20, level: 25, weaponATK: 37 },
     modes: {},
+    spriteClass: 'wolf', weaponMode: 0,
     drops: [
         { itemName: 'Emveretarcon', rate: 0.2 },
         { itemName: 'Wolf Claw', rate: 90 },
@@ -3066,6 +3163,7 @@ RO_MONSTER_TEMPLATES['wolf'] = {
 // ──── Golem (ID: 1040) ──── Level 25 | HP 3,900 | NORMAL | formless/neutral1 | passive
 RO_MONSTER_TEMPLATES['golem'] = {
     id: 1040, name: 'Golem', aegisName: 'GOLEM',
+    spriteClass: 'golem', weaponMode: 0,
     level: 25, maxHealth: 3900, baseExp: 465, jobExp: 94, mvpExp: 0,
     attack: 175, attack2: 187, defense: 40, magicDefense: 0,
     str: 0, agi: 15, vit: 25, int: 0, dex: 15, luk: 0,
@@ -3118,6 +3216,7 @@ RO_MONSTER_TEMPLATES['bigfoot'] = {
 // ──── Pirate Skeleton (ID: 1071) ──── Level 25 | HP 1,676 | NORMAL | undead/undead1 | aggressive
 RO_MONSTER_TEMPLATES['pirate_skel'] = {
     id: 1071, name: 'Pirate Skeleton', aegisName: 'PIRATE_SKEL',
+    spriteClass: 'pirate_skel', weaponMode: 0,
     level: 25, maxHealth: 1676, baseExp: 233, jobExp: 142, mvpExp: 0,
     attack: 145, attack2: 178, defense: 10, magicDefense: 15,
     str: 25, agi: 13, vit: 25, int: 5, dex: 25, luk: 10,
@@ -3154,6 +3253,7 @@ RO_MONSTER_TEMPLATES['argos'] = {
     raceGroups: {},
     stats: { str: 0, agi: 25, vit: 25, int: 5, dex: 32, luk: 15, level: 25, weaponATK: 158 },
     modes: { detector: true },
+    spriteClass: 'argos', weaponMode: 0,
     drops: [
         { itemName: 'Cobweb', rate: 90 },
         { itemName: 'Scell', rate: 12 },
@@ -3177,6 +3277,7 @@ RO_MONSTER_TEMPLATES['goblin_1'] = {
     aspd: 170, walkSpeed: 200, attackDelay: 1500, attackMotion: 500, damageMotion: 300,
     size: 'medium', race: 'demihuman', element: { type: 'neutral', level: 1 },
     monsterClass: 'normal', aiType: 'passive', respawnMs: 15500,
+    spriteClass: 'goblin', weaponMode: 0,
     raceGroups: { Goblin: true, Element: true, ElementLevel: true, WalkSpeed: true, AttackDelay: true, AttackMotion: true, ClientAttackMotion: true, DamageMotion: true, Ai: true },
     stats: { str: 0, agi: 53, vit: 25, int: 20, dex: 38, luk: 10, level: 25, weaponATK: 118 },
     modes: {},
@@ -3196,6 +3297,7 @@ RO_MONSTER_TEMPLATES['goblin_1'] = {
 // ──── Christmas Goblin (ID: 1245) ──── Level 25 | HP 1,176 | NORMAL | demihuman/wind1 | passive
 RO_MONSTER_TEMPLATES['gobline_xmas'] = {
     id: 1245, name: 'Christmas Goblin', aegisName: 'GOBLINE_XMAS',
+    spriteClass: 'goblin_xmas', weaponMode: 0,
     level: 25, maxHealth: 1176, baseExp: 282, jobExp: 171, mvpExp: 0,
     attack: 118, attack2: 140, defense: 10, magicDefense: 5,
     str: 0, agi: 53, vit: 25, int: 20, dex: 38, luk: 45,
@@ -3232,6 +3334,7 @@ RO_MONSTER_TEMPLATES['cookie'] = {
     raceGroups: {},
     stats: { str: 0, agi: 35, vit: 20, int: 53, dex: 37, luk: 90, level: 25, weaponATK: 130 },
     modes: {},
+    spriteClass: 'cookie', weaponMode: 0,
     drops: [
         { itemName: 'Well-baked Cookie', rate: 10 },
         { itemName: 'Candy Cane', rate: 1.5 },
@@ -3248,6 +3351,7 @@ RO_MONSTER_TEMPLATES['cookie'] = {
 // ──── Rotar Zairo (ID: 1392) ──── Level 25 | HP 1,209 | NORMAL | formless/wind2 | aggressive
 RO_MONSTER_TEMPLATES['rotar_zairo'] = {
     id: 1392, name: 'Rotar Zairo', aegisName: 'ROTAR_ZAIRO',
+    spriteClass: 'rotar_zairo', weaponMode: 0,
     level: 25, maxHealth: 1209, baseExp: 351, jobExp: 215, mvpExp: 0,
     attack: 109, attack2: 137, defense: 4, magicDefense: 34,
     str: 0, agi: 62, vit: 45, int: 26, dex: 55, luk: 5,
@@ -3284,6 +3388,7 @@ RO_MONSTER_TEMPLATES['flora'] = {
     raceGroups: {},
     stats: { str: 0, agi: 26, vit: 35, int: 5, dex: 43, luk: 80, level: 26, weaponATK: 242 },
     modes: {},
+    spriteClass: 'flora', weaponMode: 0,
     drops: [
         { itemName: 'Maneater Blossom', rate: 90 },
         { itemName: 'Sunflower', rate: 0.03 },
@@ -3310,6 +3415,7 @@ RO_MONSTER_TEMPLATES['hode'] = {
     raceGroups: {},
     stats: { str: 0, agi: 26, vit: 42, int: 5, dex: 49, luk: 40, level: 26, weaponATK: 146 },
     modes: {},
+    spriteClass: 'hode', weaponMode: 0,
     drops: [
         { itemName: 'Green Live', rate: 1.2 },
         { itemName: 'Earthworm Peeling', rate: 90 },
@@ -3326,6 +3432,7 @@ RO_MONSTER_TEMPLATES['hode'] = {
 // ──── Magnolia (ID: 1138) ──── Level 26 | HP 3,195 | NORMAL | demon/water1 | passive
 RO_MONSTER_TEMPLATES['magnolia'] = {
     id: 1138, name: 'Magnolia', aegisName: 'MAGNOLIA',
+    spriteClass: 'magnolia', weaponMode: 0,
     level: 26, maxHealth: 3195, baseExp: 393, jobExp: 248, mvpExp: 0,
     attack: 120, attack2: 151, defense: 5, magicDefense: 30,
     str: 0, agi: 26, vit: 26, int: 0, dex: 39, luk: 5,
@@ -3362,6 +3469,7 @@ RO_MONSTER_TEMPLATES['mantis'] = {
     raceGroups: {},
     stats: { str: 0, agi: 26, vit: 24, int: 5, dex: 45, luk: 15, level: 26, weaponATK: 118 },
     modes: { detector: true },
+    spriteClass: 'mantis', weaponMode: 0,
     drops: [
         { itemName: 'Green Live', rate: 1.1 },
         { itemName: 'Mantis Scythe', rate: 90 },
@@ -3388,6 +3496,7 @@ RO_MONSTER_TEMPLATES['phen'] = {
     raceGroups: {},
     stats: { str: 0, agi: 26, vit: 26, int: 0, dex: 88, luk: 75, level: 26, weaponATK: 138 },
     modes: {},
+    spriteClass: 'phen', weaponMode: 0,
     drops: [
         { itemName: 'Fish Tail', rate: 55 },
         { itemName: 'Sharp Scale', rate: 20 },
@@ -3413,6 +3522,7 @@ RO_MONSTER_TEMPLATES['savage'] = {
     raceGroups: {},
     stats: { str: 0, agi: 26, vit: 54, int: 10, dex: 37, luk: 15, level: 26, weaponATK: 120 },
     modes: {},
+    spriteClass: 'savage', weaponMode: 0,
     drops: [
         { itemName: 'Wild Boar\'s Mane', rate: 90 },
         { itemName: 'Grape', rate: 3 },
@@ -3439,6 +3549,7 @@ RO_MONSTER_TEMPLATES['m_savage'] = {
     raceGroups: {},
     stats: { str: 0, agi: 26, vit: 54, int: 10, dex: 37, luk: 10, level: 26, weaponATK: 146 },
     modes: {},
+    spriteClass: 'savage', weaponMode: 0,
     drops: [
         { itemName: 'Wild Boar\'s Mane', rate: 60 },
         { itemName: 'Grape', rate: 1.5 },
@@ -3464,6 +3575,7 @@ RO_MONSTER_TEMPLATES['metaling'] = {
     raceGroups: {},
     stats: { str: 30, agi: 15, vit: 10, int: 18, dex: 35, luk: 2, level: 26, weaponATK: 135 },
     modes: {},
+    spriteClass: 'metaling', weaponMode: 0,
     drops: [
         { itemName: 'Flexible Tube', rate: 40 },
         { itemName: 'Iron Ore', rate: 10 },
@@ -3490,6 +3602,7 @@ RO_MONSTER_TEMPLATES['desert_wolf'] = {
     raceGroups: {},
     stats: { str: 56, agi: 27, vit: 45, int: 15, dex: 56, luk: 10, level: 27, weaponATK: 169 },
     modes: {},
+    spriteClass: 'desert_wolf', weaponMode: 0,
     drops: [
         { itemName: 'Katar', rate: 0.05 },
         { itemName: 'Claw of Desert Wolf', rate: 55 },
@@ -3516,6 +3629,7 @@ RO_MONSTER_TEMPLATES['m_desert_wolf'] = {
     raceGroups: {},
     stats: { str: 0, agi: 27, vit: 45, int: 15, dex: 56, luk: 10, level: 27, weaponATK: 169 },
     modes: {},
+    spriteClass: 'desert_wolf', weaponMode: 0,
     drops: [
         { itemName: 'Katar', rate: 0.05 },
         { itemName: 'Claw of Desert Wolf', rate: 55 },
@@ -3531,6 +3645,7 @@ RO_MONSTER_TEMPLATES['m_desert_wolf'] = {
 // ──── Dumpling Child (ID: 1409) ──── Level 27 | HP 2,098 | NORMAL | demihuman/neutral1 | aggressive
 RO_MONSTER_TEMPLATES['rice_cake_boy'] = {
     id: 1409, name: 'Dumpling Child', aegisName: 'RICE_CAKE_BOY',
+    spriteClass: 'rice_cake_boy', weaponMode: 0,
     level: 27, maxHealth: 2098, baseExp: 231, jobExp: 149, mvpExp: 0,
     attack: 112, attack2: 134, defense: 5, magicDefense: 12,
     str: 0, agi: 22, vit: 29, int: 5, dex: 41, luk: 10,
@@ -3566,6 +3681,7 @@ RO_MONSTER_TEMPLATES['marine_sphere'] = {
     raceGroups: {},
     stats: { str: 0, agi: 28, vit: 28, int: 0, dex: 33, luk: 50, level: 28, weaponATK: 120 },
     modes: {},
+    spriteClass: 'marine_sphere', weaponMode: 0,
     drops: [
         { itemName: 'Tendon', rate: 50 },
         { itemName: 'Detonator', rate: 25 },
@@ -3581,6 +3697,7 @@ RO_MONSTER_TEMPLATES['marine_sphere'] = {
 // ──── Orc Skeleton (ID: 1152) ──── Level 28 | HP 2,278 | NORMAL | undead/neutral1 | passive
 RO_MONSTER_TEMPLATES['orc_skeleton'] = {
     id: 1152, name: 'Orc Skeleton', aegisName: 'ORC_SKELETON',
+    spriteClass: 'orc_skeleton', weaponMode: 0,
     level: 28, maxHealth: 2278, baseExp: 315, jobExp: 194, mvpExp: 0,
     attack: 190, attack2: 236, defense: 10, magicDefense: 10,
     str: 0, agi: 14, vit: 18, int: 0, dex: 30, luk: 15,
@@ -3616,6 +3733,7 @@ RO_MONSTER_TEMPLATES['cookie_xmas'] = {
     raceGroups: {},
     stats: { str: 0, agi: 24, vit: 30, int: 53, dex: 45, luk: 100, level: 28, weaponATK: 140 },
     modes: {},
+    spriteClass: 'cookie_xmas', weaponMode: 0,
     drops: [
         { itemName: 'Well-baked Cookie', rate: 15 },
         { itemName: 'Pearl', rate: 0.45 },
@@ -3632,6 +3750,7 @@ RO_MONSTER_TEMPLATES['cookie_xmas'] = {
 // ──── Goblin Archer (ID: 1258) ──── Level 28 | HP 1,750 | NORMAL | demihuman/neutral1 | passive
 RO_MONSTER_TEMPLATES['goblin_archer'] = {
     id: 1258, name: 'Goblin Archer', aegisName: 'GOBLIN_ARCHER',
+    spriteClass: 'goblin_archer', weaponMode: 3,
     level: 28, maxHealth: 1750, baseExp: 461, jobExp: 284, mvpExp: 0,
     attack: 89, attack2: 113, defense: 0, magicDefense: 0,
     str: 10, agi: 15, vit: 20, int: 15, dex: 72, luk: 20,
@@ -3668,6 +3787,7 @@ RO_MONSTER_TEMPLATES['porcellio'] = {
     raceGroups: {},
     stats: { str: 0, agi: 31, vit: 21, int: 50, dex: 54, luk: 85, level: 28, weaponATK: 82 },
     modes: { detector: true },
+    spriteClass: 'porcellio', weaponMode: 0,
     drops: [
         { itemName: 'Jubilee', rate: 50 },
         { itemName: 'Main Gauche', rate: 0.25 },
@@ -3683,6 +3803,7 @@ RO_MONSTER_TEMPLATES['porcellio'] = {
 // ──── Soldier Skeleton (ID: 1028) ──── Level 29 | HP 2,334 | NORMAL | undead/undead1 | aggressive
 RO_MONSTER_TEMPLATES['soldier_skeleton'] = {
     id: 1028, name: 'Soldier Skeleton', aegisName: 'SOLDIER_SKELETON',
+    spriteClass: 'soldier_skeleton', weaponMode: 0,
     level: 29, maxHealth: 2334, baseExp: 372, jobExp: 226, mvpExp: 0,
     attack: 221, attack2: 245, defense: 10, magicDefense: 15,
     str: 0, agi: 15, vit: 22, int: 5, dex: 40, luk: 15,
@@ -3719,6 +3840,7 @@ RO_MONSTER_TEMPLATES['giearth'] = {
     raceGroups: {},
     stats: { str: 25, agi: 29, vit: 46, int: 60, dex: 64, luk: 105, level: 29, weaponATK: 154 },
     modes: { detector: true },
+    spriteClass: 'giearth', weaponMode: 0,
     drops: [
         { itemName: 'Great Nature', rate: 0.3 },
         { itemName: 'Coal', rate: 1.5 },
@@ -3770,6 +3892,7 @@ RO_MONSTER_TEMPLATES['sword_fish'] = {
     raceGroups: {},
     stats: { str: 0, agi: 30, vit: 30, int: 41, dex: 62, luk: 30, level: 30, weaponATK: 168 },
     modes: {},
+    spriteClass: 'sword_fish', weaponMode: 0,
     drops: [
         { itemName: 'Mystic Frozen', rate: 0.1 },
         { itemName: 'Sharp Scale', rate: 90 },
@@ -3796,6 +3919,7 @@ RO_MONSTER_TEMPLATES['frilldora'] = {
     raceGroups: {},
     stats: { str: 35, agi: 30, vit: 38, int: 15, dex: 53, luk: 30, level: 30, weaponATK: 200 },
     modes: {},
+    spriteClass: 'frilldora', weaponMode: 0,
     drops: [
         { itemName: 'Frill', rate: 55 },
         { itemName: 'Rough Elunium', rate: 0.9 },
@@ -3838,6 +3962,7 @@ RO_MONSTER_TEMPLATES['skel_worker'] = {
 // ──── Sasquatch (ID: 1243) ──── Level 30 | HP 3,163 | NORMAL | brute/neutral3 | aggressive
 RO_MONSTER_TEMPLATES['sasquatch'] = {
     id: 1243, name: 'Sasquatch', aegisName: 'SASQUATCH',
+    spriteClass: 'sasquatch', weaponMode: 0,
     level: 30, maxHealth: 3163, baseExp: 529, jobExp: 319, mvpExp: 0,
     attack: 250, attack2: 280, defense: 5, magicDefense: 0,
     str: 75, agi: 25, vit: 60, int: 10, dex: 34, luk: 20,
@@ -3874,6 +3999,7 @@ RO_MONSTER_TEMPLATES['karakasa'] = {
     raceGroups: {},
     stats: { str: 0, agi: 45, vit: 12, int: 20, dex: 49, luk: 60, level: 30, weaponATK: 141 },
     modes: {},
+    spriteClass: 'karakasa', weaponMode: 0,
     drops: [
         { itemName: 'Oil Paper', rate: 50 },
         { itemName: 'Piece of Bamboo', rate: 42.68 },
@@ -3926,6 +4052,7 @@ RO_MONSTER_TEMPLATES['obeaune'] = {
     raceGroups: {},
     stats: { str: 0, agi: 31, vit: 31, int: 55, dex: 74, luk: 85, level: 31, weaponATK: 141 },
     modes: {},
+    spriteClass: 'obeaune', weaponMode: 0,
     drops: [
         { itemName: 'Mystic Frozen', rate: 0.13 },
         { itemName: 'Heart of Mermaid', rate: 90 },
@@ -3942,6 +4069,7 @@ RO_MONSTER_TEMPLATES['obeaune'] = {
 // ──── Kobold (ID: 1134) ──── Level 31 | HP 2,179 | NORMAL | demihuman/neutral1 | passive
 RO_MONSTER_TEMPLATES['kobold_2'] = {
     id: 1134, name: 'Kobold', aegisName: 'KOBOLD_2',
+    spriteClass: 'kobold', weaponMode: 0,
     level: 31, maxHealth: 2179, baseExp: 806, jobExp: 407, mvpExp: 0,
     attack: 262, attack2: 324, defense: 15, magicDefense: 10,
     str: 0, agi: 31, vit: 31, int: 20, dex: 46, luk: 20,
@@ -3967,6 +4095,7 @@ RO_MONSTER_TEMPLATES['kobold_2'] = {
 // ──── Kobold (ID: 1135) ──── Level 31 | HP 2,179 | NORMAL | demihuman/neutral1 | passive
 RO_MONSTER_TEMPLATES['kobold_3'] = {
     id: 1135, name: 'Kobold', aegisName: 'KOBOLD_3',
+    spriteClass: 'kobold', weaponMode: 0,
     level: 31, maxHealth: 2179, baseExp: 644, jobExp: 407, mvpExp: 0,
     attack: 186, attack2: 216, defense: 15, magicDefense: 10,
     str: 0, agi: 31, vit: 31, int: 20, dex: 88, luk: 20,
@@ -4003,6 +4132,7 @@ RO_MONSTER_TEMPLATES['marse'] = {
     raceGroups: {},
     stats: { str: 0, agi: 31, vit: 25, int: 5, dex: 52, luk: 30, level: 31, weaponATK: 211 },
     modes: {},
+    spriteClass: 'marse', weaponMode: 0,
     drops: [
         { itemName: 'Squid Ink', rate: 90 },
         { itemName: 'Tentacle', rate: 30 },
@@ -4029,6 +4159,7 @@ RO_MONSTER_TEMPLATES['matyr'] = {
     raceGroups: {},
     stats: { str: 0, agi: 47, vit: 38, int: 5, dex: 64, luk: 5, level: 31, weaponATK: 134 },
     modes: {},
+    spriteClass: 'matyr', weaponMode: 0,
     drops: [
         { itemName: 'Matyr\'s Flea Guard', rate: 0.1 },
         { itemName: 'Monster\'s Feed', rate: 50 },
@@ -4044,6 +4175,7 @@ RO_MONSTER_TEMPLATES['matyr'] = {
 // ──── Zenorc (ID: 1177) ──── Level 31 | HP 2,585 | NORMAL | demihuman/shadow1 | passive
 RO_MONSTER_TEMPLATES['zenorc'] = {
     id: 1177, name: 'Zenorc', aegisName: 'ZENORC',
+    spriteClass: 'zenorc', weaponMode: 0,
     level: 31, maxHealth: 2585, baseExp: 967, jobExp: 407, mvpExp: 0,
     attack: 188, attack2: 223, defense: 0, magicDefense: 15,
     str: 0, agi: 77, vit: 15, int: 0, dex: 76, luk: 10,
@@ -4069,6 +4201,7 @@ RO_MONSTER_TEMPLATES['zenorc'] = {
 // ──── Orc Lady (ID: 1273) ──── Level 31 | HP 2,000 | NORMAL | demihuman/neutral1 | passive
 RO_MONSTER_TEMPLATES['orc_lady'] = {
     id: 1273, name: 'Orc Lady', aegisName: 'ORC_LADY',
+    spriteClass: 'orc_lady', weaponMode: 0,
     level: 31, maxHealth: 2000, baseExp: 644, jobExp: 407, mvpExp: 0,
     attack: 135, attack2: 170, defense: 10, magicDefense: 10,
     str: 35, agi: 42, vit: 25, int: 15, dex: 69, luk: 55,
@@ -4105,6 +4238,7 @@ RO_MONSTER_TEMPLATES['deviling'] = {
     raceGroups: {},
     stats: { str: 30, agi: 50, vit: 20, int: 75, dex: 77, luk: 200, level: 31, weaponATK: 135 },
     modes: {},
+    spriteClass: 'deviling', weaponMode: 0,
     drops: [
         { itemName: 'Little Evil Wing', rate: 30 },
         { itemName: 'Zargon', rate: 48.5 },
@@ -4131,6 +4265,7 @@ RO_MONSTER_TEMPLATES['roween'] = {
     raceGroups: {},
     stats: { str: 51, agi: 39, vit: 48, int: 18, dex: 67, luk: 19, level: 31, weaponATK: 298 },
     modes: {},
+    spriteClass: 'roween', weaponMode: 0,
     drops: [
         { itemName: 'Rotten Meat', rate: 30 },
         { itemName: 'Animal\'s Skin', rate: 30 },
@@ -4142,8 +4277,9 @@ RO_MONSTER_TEMPLATES['roween'] = {
 };
 
 // ──── Bongun (ID: 1188) ──── Level 32 | HP 3,520 | NORMAL | undead/undead1 | aggressive
-RO_MONSTER_TEMPLATES['bon_gun'] = {
+RO_MONSTER_TEMPLATES['bogun'] = {
     id: 1188, name: 'Bongun', aegisName: 'BON_GUN',
+    spriteClass: 'bogun', weaponMode: 0,
     level: 32, maxHealth: 3520, baseExp: 424, jobExp: 242, mvpExp: 0,
     attack: 220, attack2: 260, defense: 0, magicDefense: 0,
     str: 45, agi: 15, vit: 36, int: 10, dex: 48, luk: 15,
@@ -4180,6 +4316,7 @@ RO_MONSTER_TEMPLATES['tri_joint'] = {
     raceGroups: {},
     stats: { str: 0, agi: 48, vit: 24, int: 10, dex: 67, luk: 20, level: 32, weaponATK: 178 },
     modes: { detector: true },
+    spriteClass: 'tri_joint', weaponMode: 0,
     drops: [
         { itemName: 'Cyfar', rate: 1 },
         { itemName: 'Solid Shell', rate: 3.8 },
@@ -4205,6 +4342,7 @@ RO_MONSTER_TEMPLATES['baby_leopard'] = {
     raceGroups: {},
     stats: { str: 20, agi: 44, vit: 20, int: 4, dex: 49, luk: 10, level: 32, weaponATK: 155 },
     modes: {},
+    spriteClass: 'baby_leopard', weaponMode: 0,
     drops: [
         { itemName: 'Leopard Skin', rate: 52 },
         { itemName: 'Leopard Claw', rate: 32 },
@@ -4220,6 +4358,7 @@ RO_MONSTER_TEMPLATES['baby_leopard'] = {
 // ──── Dokebi (ID: 1110) ──── Level 33 | HP 2,697 | NORMAL | demon/shadow1 | aggressive
 RO_MONSTER_TEMPLATES['dokebi'] = {
     id: 1110, name: 'Dokebi', aegisName: 'DOKEBI',
+    spriteClass: 'dokebi', weaponMode: 0,
     level: 33, maxHealth: 2697, baseExp: 889, jobExp: 455, mvpExp: 0,
     attack: 197, attack2: 249, defense: 0, magicDefense: 10,
     str: 50, agi: 50, vit: 40, int: 35, dex: 69, luk: 40,
@@ -4272,6 +4411,7 @@ RO_MONSTER_TEMPLATES['sohee'] = {
 // ──── Kobold Archer (ID: 1282) ──── Level 33 | HP 2,560 | NORMAL | demihuman/neutral1 | passive
 RO_MONSTER_TEMPLATES['kobold_archer'] = {
     id: 1282, name: 'Kobold Archer', aegisName: 'KOBOLD_ARCHER',
+    spriteClass: 'kobold_archer', weaponMode: 3,
     level: 33, maxHealth: 2560, baseExp: 739, jobExp: 455, mvpExp: 0,
     attack: 155, attack2: 185, defense: 10, magicDefense: 5,
     str: 10, agi: 20, vit: 15, int: 30, dex: 100, luk: 25,
@@ -4298,6 +4438,7 @@ RO_MONSTER_TEMPLATES['kobold_archer'] = {
 // ──── Miyabi Doll (ID: 1404) ──── Level 33 | HP 6,300 | NORMAL | demon/shadow1 | aggressive
 RO_MONSTER_TEMPLATES['miyabi_ningyo'] = {
     id: 1404, name: 'Miyabi Doll', aegisName: 'MIYABI_NINGYO',
+    spriteClass: 'miyabi_doll', weaponMode: 0,
     level: 33, maxHealth: 6300, baseExp: 795, jobExp: 453, mvpExp: 0,
     attack: 250, attack2: 305, defense: 1, magicDefense: 20,
     str: 0, agi: 52, vit: 15, int: 10, dex: 62, luk: 15,
@@ -4334,6 +4475,7 @@ RO_MONSTER_TEMPLATES['horong'] = {
     raceGroups: {},
     stats: { str: 0, agi: 34, vit: 10, int: 0, dex: 50, luk: 0, level: 34, weaponATK: 275 },
     modes: {},
+    spriteClass: 'horong', weaponMode: 0,
     drops: [
         { itemName: 'Stone Heart', rate: 65 },
         { itemName: 'Zargon', rate: 5 },
@@ -4350,6 +4492,7 @@ RO_MONSTER_TEMPLATES['horong'] = {
 // ──── Sandman (ID: 1165) ──── Level 34 | HP 3,413 | NORMAL | formless/earth3 | aggressive
 RO_MONSTER_TEMPLATES['sand_man'] = {
     id: 1165, name: 'Sandman', aegisName: 'SAND_MAN',
+    spriteClass: 'sand_man', weaponMode: 0,
     level: 34, maxHealth: 3413, baseExp: 810, jobExp: 492, mvpExp: 0,
     attack: 180, attack2: 205, defense: 10, magicDefense: 25,
     str: 24, agi: 34, vit: 58, int: 38, dex: 60, luk: 5,
@@ -4386,6 +4529,7 @@ RO_MONSTER_TEMPLATES['whisper'] = {
     raceGroups: {},
     stats: { str: 0, agi: 51, vit: 14, int: 0, dex: 60, luk: 0, level: 34, weaponATK: 180 },
     modes: { detector: true },
+    spriteClass: 'whisper', weaponMode: 0,
     drops: [
         { itemName: 'Star Dust', rate: 1.5 },
         { itemName: 'Fabric', rate: 53.35 },
@@ -4409,6 +4553,7 @@ RO_MONSTER_TEMPLATES['whisper_'] = {
     raceGroups: {},
     stats: { str: 0, agi: 51, vit: 14, int: 0, dex: 60, luk: 0, level: 34, weaponATK: 198 },
     modes: {},
+    spriteClass: 'whisper', weaponMode: 0,
     drops: [
         { itemName: 'Star Dust', rate: 0.1 },
         { itemName: 'Fabric', rate: 1 },
@@ -4430,6 +4575,7 @@ RO_MONSTER_TEMPLATES['whisper_boss'] = {
     raceGroups: {},
     stats: { str: 0, agi: 51, vit: 14, int: 0, dex: 60, luk: 0, level: 34, weaponATK: 198 },
     modes: { detector: true },
+    spriteClass: 'whisper', weaponMode: 0, spriteScale: 1.5,  // 3× regular whisper (whisper=small=0.5x → 1.5)
     drops: [
         { itemName: 'Star Dust', rate: 1.5 },
         { itemName: 'Fabric', rate: 53.35 },
@@ -4467,6 +4613,7 @@ RO_MONSTER_TEMPLATES['kind_of_beetle'] = {
 // ──── Requiem (ID: 1164) ──── Level 35 | HP 3,089 | NORMAL | demihuman/shadow1 | aggressive
 RO_MONSTER_TEMPLATES['requiem'] = {
     id: 1164, name: 'Requiem', aegisName: 'REQUIEM',
+    spriteClass: 'requiem', weaponMode: 0,
     level: 35, maxHealth: 3089, baseExp: 800, jobExp: 458, mvpExp: 0,
     attack: 220, attack2: 272, defense: 0, magicDefense: 15,
     str: 0, agi: 53, vit: 35, int: 5, dex: 57, luk: 2,
@@ -4519,6 +4666,7 @@ RO_MONSTER_TEMPLATES['cruiser'] = {
 // ──── Goblin Steamrider (ID: 1280) ──── Level 35 | HP 2,490 | NORMAL | demihuman/wind2 | aggressive
 RO_MONSTER_TEMPLATES['steam_goblin'] = {
     id: 1280, name: 'Goblin Steamrider', aegisName: 'STEAM_GOBLIN',
+    spriteClass: 'steam_goblin', weaponMode: 0,
     level: 35, maxHealth: 2490, baseExp: 864, jobExp: 495, mvpExp: 0,
     attack: 234, attack2: 269, defense: 20, magicDefense: 5,
     str: 58, agi: 59, vit: 32, int: 15, dex: 75, luk: 25,
@@ -4545,6 +4693,7 @@ RO_MONSTER_TEMPLATES['steam_goblin'] = {
 // ──── Zipper Bear (ID: 1417) ──── Level 35 | HP 2,901 | NORMAL | brute/shadow1 | aggressive
 RO_MONSTER_TEMPLATES['zipper_bear'] = {
     id: 1417, name: 'Zipper Bear', aegisName: 'ZIPPER_BEAR',
+    spriteClass: 'zipper_bear', weaponMode: 0,
     level: 35, maxHealth: 2901, baseExp: 370, jobExp: 225, mvpExp: 0,
     attack: 248, attack2: 289, defense: 10, magicDefense: 5,
     str: 30, agi: 25, vit: 55, int: 15, dex: 28, luk: 25,
@@ -4579,6 +4728,7 @@ RO_MONSTER_TEMPLATES['noxious'] = {
     raceGroups: {},
     stats: { str: 12, agi: 41, vit: 10, int: 30, dex: 44, luk: 2, level: 35, weaponATK: 299 },
     modes: {},
+    spriteClass: 'noxious', weaponMode: 0,
     drops: [
         { itemName: 'Toxic Gas', rate: 10 },
         { itemName: 'Mould Powder', rate: 30 },
@@ -4603,6 +4753,7 @@ RO_MONSTER_TEMPLATES['marc'] = {
     raceGroups: {},
     stats: { str: 0, agi: 36, vit: 36, int: 20, dex: 56, luk: 30, level: 36, weaponATK: 220 },
     modes: {},
+    spriteClass: 'marc', weaponMode: 0,
     drops: [
         { itemName: 'Mystic Frozen', rate: 0.18 },
         { itemName: 'Gill', rate: 90 },
@@ -4619,6 +4770,7 @@ RO_MONSTER_TEMPLATES['marc'] = {
 // ──── Kobold (ID: 1133) ──── Level 36 | HP 3,893 | NORMAL | demihuman/neutral1 | passive
 RO_MONSTER_TEMPLATES['kobold_1'] = {
     id: 1133, name: 'Kobold', aegisName: 'KOBOLD_1',
+    spriteClass: 'kobold', weaponMode: 0,
     level: 36, maxHealth: 3893, baseExp: 988, jobExp: 625, mvpExp: 0,
     attack: 265, attack2: 318, defense: 15, magicDefense: 10,
     str: 0, agi: 90, vit: 36, int: 30, dex: 52, luk: 20,
@@ -4644,6 +4796,7 @@ RO_MONSTER_TEMPLATES['kobold_1'] = {
 // ──── Lude (ID: 1509) ──── Level 36 | HP 3,214 | NORMAL | undead/undead1 | aggressive
 RO_MONSTER_TEMPLATES['lude'] = {
     id: 1509, name: 'Lude', aegisName: 'LUDE',
+    spriteClass: 'lude', weaponMode: 0,
     level: 36, maxHealth: 3214, baseExp: 392, jobExp: 247, mvpExp: 0,
     attack: 287, attack2: 451, defense: 14, magicDefense: 10,
     str: 0, agi: 59, vit: 21, int: 18, dex: 36, luk: 21,
@@ -4679,6 +4832,7 @@ RO_MONSTER_TEMPLATES['mole'] = {
     raceGroups: {},
     stats: { str: 24, agi: 18, vit: 23, int: 30, dex: 45, luk: 5, level: 36, weaponATK: 52 },
     modes: {},
+    spriteClass: 'mole', weaponMode: 0,
     drops: [
         { itemName: 'Mole Whiskers', rate: 50 },
         { itemName: 'Mole Claw', rate: 50 },
@@ -4692,6 +4846,7 @@ RO_MONSTER_TEMPLATES['mole'] = {
 // ──── Mummy (ID: 1041) ──── Level 37 | HP 5,176 | NORMAL | undead/undead2 | aggressive
 RO_MONSTER_TEMPLATES['mummy'] = {
     id: 1041, name: 'Mummy', aegisName: 'MUMMY',
+    spriteClass: 'mummy', weaponMode: 0,
     level: 37, maxHealth: 5176, baseExp: 800, jobExp: 602, mvpExp: 0,
     attack: 305, attack2: 360, defense: 0, magicDefense: 10,
     str: 28, agi: 19, vit: 32, int: 0, dex: 63, luk: 20,
@@ -4718,6 +4873,7 @@ RO_MONSTER_TEMPLATES['mummy'] = {
 // ──── Verit (ID: 1032) ──── Level 38 | HP 5,272 | NORMAL | undead/undead1 | passive
 RO_MONSTER_TEMPLATES['verit'] = {
     id: 1032, name: 'Verit', aegisName: 'VERIT',
+    spriteClass: 'verit', weaponMode: 0,
     level: 38, maxHealth: 5272, baseExp: 835, jobExp: 517, mvpExp: 0,
     attack: 389, attack2: 469, defense: 0, magicDefense: 5,
     str: 0, agi: 19, vit: 38, int: 0, dex: 38, luk: 20,
@@ -4779,6 +4935,7 @@ RO_MONSTER_TEMPLATES['myst'] = {
     raceGroups: {},
     stats: { str: 0, agi: 38, vit: 18, int: 0, dex: 53, luk: 10, level: 38, weaponATK: 365 },
     modes: {},
+    spriteClass: 'myst', weaponMode: 0,
     drops: [
         { itemName: 'Gas Mask', rate: 0.02 },
         { itemName: 'Wooden Block', rate: 8 },
@@ -4831,6 +4988,7 @@ RO_MONSTER_TEMPLATES['mystcase'] = {
     raceGroups: {},
     stats: { str: 65, agi: 50, vit: 25, int: 5, dex: 48, luk: 75, level: 38, weaponATK: 160 },
     modes: {},
+    spriteClass: 'mystcase', weaponMode: 0,
     drops: [
         { itemName: 'Candy Cane', rate: 0.9 },
         { itemName: 'Zargon', rate: 15 },
@@ -4857,6 +5015,7 @@ RO_MONSTER_TEMPLATES['wild_rose'] = {
     raceGroups: {},
     stats: { str: 65, agi: 85, vit: 15, int: 35, dex: 65, luk: 80, level: 38, weaponATK: 315 },
     modes: {},
+    spriteClass: 'wild_rose', weaponMode: 0,
     drops: [
         { itemName: 'Cyfar', rate: 53.35 },
         { itemName: 'Witherless Rose', rate: 0.5 },
@@ -4883,6 +5042,7 @@ RO_MONSTER_TEMPLATES['leaf_cat'] = {
     raceGroups: {},
     stats: { str: 25, agi: 67, vit: 12, int: 45, dex: 60, luk: 29, level: 38, weaponATK: 266 },
     modes: {},
+    spriteClass: 'leaf_cat', weaponMode: 0,
     drops: [
         { itemName: 'Huge Leaf', rate: 43.65 },
         { itemName: 'Hinalle Leaflet', rate: 3 },
@@ -4909,6 +5069,7 @@ RO_MONSTER_TEMPLATES['iceicle'] = {
     raceGroups: {},
     stats: { str: 0, agi: 10, vit: 10, int: 10, dex: 172, luk: 5, level: 38, weaponATK: 241 },
     modes: {},
+    spriteClass: 'iceicle', weaponMode: 0,
     drops: [
         { itemName: 'Ice Piece', rate: 10 },
         { itemName: 'Ice Piece', rate: 10 },
@@ -4925,6 +5086,7 @@ RO_MONSTER_TEMPLATES['iceicle'] = {
 // ──── Wootan Shooter (ID: 1498) ──── Level 39 | HP 3,977 | NORMAL | demihuman/earth2 | aggressive
 RO_MONSTER_TEMPLATES['wootan_shooter'] = {
     id: 1498, name: 'Wootan Shooter', aegisName: 'WOOTAN_SHOOTER',
+    spriteClass: 'wootan_shooter', weaponMode: 3,
     level: 39, maxHealth: 3977, baseExp: 886, jobExp: 453, mvpExp: 0,
     attack: 84, attack2: 105, defense: 10, magicDefense: 28,
     str: 15, agi: 35, vit: 29, int: 15, dex: 100, luk: 42,
@@ -4951,6 +5113,7 @@ RO_MONSTER_TEMPLATES['wootan_shooter'] = {
 // ──── Ghoul (ID: 1036) ──── Level 40 | HP 5,418 | NORMAL | undead/undead2 | aggressive
 RO_MONSTER_TEMPLATES['ghoul'] = {
     id: 1036, name: 'Ghoul', aegisName: 'GHOUL',
+    spriteClass: 'ghoul', weaponMode: 0,
     level: 40, maxHealth: 5418, baseExp: 1088, jobExp: 622, mvpExp: 0,
     attack: 420, attack2: 500, defense: 5, magicDefense: 20,
     str: 0, agi: 20, vit: 29, int: 0, dex: 45, luk: 20,
@@ -4977,6 +5140,7 @@ RO_MONSTER_TEMPLATES['ghoul'] = {
 // ──── Marduk (ID: 1140) ──── Level 40 | HP 4,214 | NORMAL | demihuman/fire1 | aggressive
 RO_MONSTER_TEMPLATES['marduk'] = {
     id: 1140, name: 'Marduk', aegisName: 'MARDUK',
+    spriteClass: 'marduk', weaponMode: 0,
     level: 40, maxHealth: 4214, baseExp: 1238, jobExp: 752, mvpExp: 0,
     attack: 315, attack2: 382, defense: 0, magicDefense: 60,
     str: 0, agi: 40, vit: 20, int: 79, dex: 78, luk: 20,
@@ -5013,6 +5177,7 @@ RO_MONSTER_TEMPLATES['stem_worm'] = {
     raceGroups: {},
     stats: { str: 0, agi: 30, vit: 26, int: 15, dex: 79, luk: 35, level: 40, weaponATK: 290 },
     modes: {},
+    spriteClass: 'stem_worm', weaponMode: 0,
     drops: [
         { itemName: 'Tough Scalelike Stem', rate: 53.35 },
         { itemName: 'White Herb', rate: 18 },
@@ -5039,6 +5204,7 @@ RO_MONSTER_TEMPLATES['neraid'] = {
     raceGroups: {},
     stats: { str: 0, agi: 45, vit: 50, int: 5, dex: 64, luk: 5, level: 40, weaponATK: 325 },
     modes: {},
+    spriteClass: 'neraid', weaponMode: 0,
     drops: [
         { itemName: 'Earthworm Peeling', rate: 51 },
         { itemName: 'Cyfar', rate: 10 },
@@ -5065,6 +5231,7 @@ RO_MONSTER_TEMPLATES['pest'] = {
     raceGroups: {},
     stats: { str: 0, agi: 60, vit: 22, int: 5, dex: 80, luk: 5, level: 40, weaponATK: 375 },
     modes: {},
+    spriteClass: 'pest', weaponMode: 0,
     drops: [
         { itemName: 'Earthworm Peeling', rate: 55 },
         { itemName: 'Brigan', rate: 2 },
@@ -5090,6 +5257,7 @@ RO_MONSTER_TEMPLATES['greatest_general'] = {
     raceGroups: {},
     stats: { str: 0, agi: 20, vit: 60, int: 55, dex: 82, luk: 140, level: 40, weaponATK: 350 },
     modes: {},
+    spriteClass: 'greatest_general', weaponMode: 0,
     drops: [
         { itemName: 'Brigan', rate: 20 },
         { itemName: 'Wooden Block', rate: 20 },
@@ -5116,6 +5284,7 @@ RO_MONSTER_TEMPLATES['quve'] = {
     raceGroups: {},
     stats: { str: 0, agi: 61, vit: 24, int: 19, dex: 37, luk: 24, level: 40, weaponATK: 299 },
     modes: {},
+    spriteClass: 'quve', weaponMode: 0,
     drops: [
         { itemName: 'Piece of Black Cloth', rate: 32 },
         { itemName: 'Ectoplasm', rate: 57.23 },
@@ -5130,6 +5299,7 @@ RO_MONSTER_TEMPLATES['quve'] = {
 // ──── Mime Monkey (ID: 1585) ──── Level 40 | HP 6,000 | NORMAL | plant/water1 | passive
 RO_MONSTER_TEMPLATES['mime_monkey'] = {
     id: 1585, name: 'Mime Monkey', aegisName: 'MIME_MONKEY',
+    spriteClass: 'mime_monkey', weaponMode: 0,
     level: 40, maxHealth: 6000, baseExp: 200, jobExp: 22, mvpExp: 0,
     attack: 300, attack2: 350, defense: 40, magicDefense: 40,
     str: 0, agi: 40, vit: 40, int: 40, dex: 40, luk: 30,
@@ -5165,6 +5335,8 @@ RO_MONSTER_TEMPLATES['magmaring'] = {
     raceGroups: {},
     stats: { str: 40, agi: 60, vit: 30, int: 10, dex: 60, luk: 17, level: 40, weaponATK: 550 },
     modes: {},
+
+    spriteClass: 'magmaring', weaponMode: 0,
     drops: [
         { itemName: 'Burning Heart', rate: 30 },
         { itemName: 'Rough Elunium', rate: 0.34 },
@@ -5186,6 +5358,8 @@ RO_MONSTER_TEMPLATES['argiope'] = {
     raceGroups: {},
     stats: { str: 0, agi: 41, vit: 31, int: 10, dex: 56, luk: 30, level: 41, weaponATK: 395 },
     modes: { detector: true },
+
+    spriteClass: 'argiope', weaponMode: 0,
     drops: [
         { itemName: 'Bug Leg', rate: 53.35 },
         { itemName: 'Zargon', rate: 12 },
@@ -5201,6 +5375,7 @@ RO_MONSTER_TEMPLATES['argiope'] = {
 // ──── Marionette (ID: 1143) ──── Level 41 | HP 3,222 | NORMAL | demon/ghost3 | aggressive
 RO_MONSTER_TEMPLATES['marionette'] = {
     id: 1143, name: 'Marionette', aegisName: 'MARIONETTE',
+    spriteClass: 'marionette', weaponMode: 0,
     level: 41, maxHealth: 3222, baseExp: 1078, jobExp: 1276, mvpExp: 0,
     attack: 355, attack2: 422, defense: 0, magicDefense: 25,
     str: 0, agi: 62, vit: 36, int: 44, dex: 69, luk: 45,
@@ -5237,6 +5412,8 @@ RO_MONSTER_TEMPLATES['kapha'] = {
     raceGroups: {},
     stats: { str: 0, agi: 51, vit: 49, int: 22, dex: 73, luk: 45, level: 41, weaponATK: 399 },
     modes: {},
+
+    spriteClass: 'kapha', weaponMode: 0,
     drops: [
         { itemName: 'Yellow Plate', rate: 65 },
         { itemName: 'Cyfar', rate: 35 },
@@ -5253,6 +5430,7 @@ RO_MONSTER_TEMPLATES['kapha'] = {
 // ──── Wootan Fighter (ID: 1499) ──── Level 41 | HP 4,457 | NORMAL | demihuman/fire2 | aggressive
 RO_MONSTER_TEMPLATES['wootan_fighter'] = {
     id: 1499, name: 'Wootan Fighter', aegisName: 'WOOTAN_FIGHTER',
+    spriteClass: 'wootan_fighter', weaponMode: 0,
     level: 41, maxHealth: 4457, baseExp: 1790, jobExp: 833, mvpExp: 0,
     attack: 395, attack2: 480, defense: 30, magicDefense: 19,
     str: 0, agi: 41, vit: 31, int: 10, dex: 45, luk: 30,
@@ -5289,6 +5467,8 @@ RO_MONSTER_TEMPLATES['hunter_fly'] = {
     raceGroups: {},
     stats: { str: 33, agi: 105, vit: 32, int: 15, dex: 72, luk: 30, level: 42, weaponATK: 246 },
     modes: { detector: true },
+
+    spriteClass: 'hunter_fly', weaponMode: 0,
     drops: [
         { itemName: 'Rough Wind', rate: 0.3 },
         { itemName: 'Steel', rate: 1 },
@@ -5341,6 +5521,8 @@ RO_MONSTER_TEMPLATES['alligator'] = {
     raceGroups: {},
     stats: { str: 0, agi: 45, vit: 50, int: 10, dex: 69, luk: 65, level: 42, weaponATK: 315 },
     modes: {},
+
+    spriteClass: 'alligator', weaponMode: 0,
     drops: [
         { itemName: 'Zargon', rate: 10 },
         { itemName: 'Worn-out Prison Uniform', rate: 6 },
@@ -5365,6 +5547,8 @@ RO_MONSTER_TEMPLATES['stone_shooter'] = {
     raceGroups: {},
     stats: { str: 0, agi: 40, vit: 20, int: 79, dex: 92, luk: 20, level: 42, weaponATK: 309 },
     modes: {},
+
+    spriteClass: 'stone_shooter', weaponMode: 0,
     drops: [
         { itemName: 'Strong Branch', rate: 50 },
         { itemName: 'Log', rate: 50 },
@@ -5414,6 +5598,8 @@ RO_MONSTER_TEMPLATES['novus'] = {
     raceGroups: {},
     stats: { str: 0, agi: 56, vit: 43, int: 45, dex: 124, luk: 43, level: 42, weaponATK: 284 },
     modes: {},
+
+    spriteClass: 'novus', weaponMode: 0,
     drops: [
         { itemName: 'Green Herb', rate: 30 },
         { itemName: 'Cyfar', rate: 10.35 },
@@ -5459,6 +5645,8 @@ RO_MONSTER_TEMPLATES['side_winder'] = {
     raceGroups: {},
     stats: { str: 38, agi: 43, vit: 40, int: 15, dex: 115, luk: 20, level: 43, weaponATK: 240 },
     modes: {},
+
+    spriteClass: 'side_winder', weaponMode: 0,
     drops: [
         { itemName: 'Shining Scale', rate: 53.35 },
         { itemName: 'Zargon', rate: 14 },
@@ -5485,6 +5673,8 @@ RO_MONSTER_TEMPLATES['punk'] = {
     raceGroups: {},
     stats: { str: 0, agi: 105, vit: 5, int: 45, dex: 65, luk: 20, level: 43, weaponATK: 292 },
     modes: {},
+
+    spriteClass: 'punk', weaponMode: 0,
     drops: [
         { itemName: 'Mould Powder', rate: 53.35 },
         { itemName: 'Yellow Gemstone', rate: 8 },
@@ -5511,6 +5701,8 @@ RO_MONSTER_TEMPLATES['choco'] = {
     raceGroups: {},
     stats: { str: 65, agi: 68, vit: 55, int: 45, dex: 65, luk: 25, level: 43, weaponATK: 315 },
     modes: {},
+
+    spriteClass: 'choco', weaponMode: 0,
     drops: [
         { itemName: 'Claw of Monkey', rate: 53.35 },
         { itemName: 'Yoyo Tail', rate: 70 },
@@ -5537,6 +5729,8 @@ RO_MONSTER_TEMPLATES['sageworm'] = {
     raceGroups: {},
     stats: { str: 0, agi: 52, vit: 24, int: 88, dex: 79, luk: 55, level: 43, weaponATK: 120 },
     modes: {},
+
+    spriteClass: 'sageworm', weaponMode: 0,
     drops: [
         { itemName: 'Librarian Glove', rate: 0.05 },
         { itemName: 'Worn Out Page', rate: 10 },
@@ -5563,6 +5757,8 @@ RO_MONSTER_TEMPLATES['blazzer'] = {
     raceGroups: {},
     stats: { str: 0, agi: 52, vit: 50, int: 39, dex: 69, luk: 40, level: 43, weaponATK: 533 },
     modes: { detector: true },
+
+    spriteClass: 'blazzer', weaponMode: 0,
     drops: [
         { itemName: 'Burning Heart', rate: 48.5 },
         { itemName: 'Live Coal', rate: 34 },
@@ -5575,6 +5771,7 @@ RO_MONSTER_TEMPLATES['blazzer'] = {
 // ──── Pitman (ID: 1616) ──── Level 43 | HP 5,015 | NORMAL | undead/earth2 | aggressive
 RO_MONSTER_TEMPLATES['pitman'] = {
     id: 1616, name: 'Pitman', aegisName: 'PITMAN',
+    spriteClass: 'pitman', weaponMode: 0,
     level: 43, maxHealth: 5015, baseExp: 1799, jobExp: 1083, mvpExp: 0,
     attack: 290, attack2: 486, defense: 22, magicDefense: 26,
     str: 0, agi: 15, vit: 5, int: 5, dex: 52, luk: 36,
@@ -5632,6 +5829,8 @@ RO_MONSTER_TEMPLATES['plasma_r'] = {
     raceGroups: {},
     stats: { str: 0, agi: 30, vit: 5, int: 56, dex: 90, luk: 30, level: 43, weaponATK: 300 },
     modes: {},
+
+    spriteClass: 'plasma', weaponMode: 0, spriteTint: [1.5, 0.6, 0.6],
     drops: [
         { itemName: 'Scell', rate: 1 },
         { itemName: 'Gift Box', rate: 0.1 },
@@ -5656,6 +5855,8 @@ RO_MONSTER_TEMPLATES['novus_'] = {
     raceGroups: {},
     stats: { str: 0, agi: 60, vit: 43, int: 39, dex: 119, luk: 43, level: 43, weaponATK: 314 },
     modes: {},
+
+    spriteClass: 'novus', weaponMode: 0,
     drops: [
         { itemName: 'Yellow Herb', rate: 20 },
         { itemName: 'Cyfar', rate: 10.35 },
@@ -5678,6 +5879,7 @@ RO_MONSTER_TEMPLATES['dragon_egg'] = {
     raceGroups: {},
     stats: { str: 0, agi: 0, vit: 56, int: 67, dex: 0, luk: 63, level: 43, weaponATK: 1 },
     modes: {},
+    spriteClass: 'dragon_egg', weaponMode: 0,
     drops: [
         { itemName: 'Elunium', rate: 0.05 },
         { itemName: 'Piece of Egg Shell', rate: 1 },
@@ -5694,6 +5896,7 @@ RO_MONSTER_TEMPLATES['dragon_egg'] = {
 // ──── Bathory (ID: 1102) ──── Level 44 | HP 5,415 | NORMAL | demihuman/shadow1 | aggressive
 RO_MONSTER_TEMPLATES['bathory'] = {
     id: 1102, name: 'Bathory', aegisName: 'BATHORY',
+    spriteClass: 'bathory', weaponMode: 0,
     level: 44, maxHealth: 5415, baseExp: 2503, jobExp: 1034, mvpExp: 0,
     attack: 198, attack2: 398, defense: 0, magicDefense: 60,
     str: 0, agi: 76, vit: 24, int: 85, dex: 65, luk: 15,
@@ -5730,6 +5933,8 @@ RO_MONSTER_TEMPLATES['petit'] = {
     raceGroups: {},
     stats: { str: 0, agi: 44, vit: 62, int: 55, dex: 79, luk: 60, level: 44, weaponATK: 360 },
     modes: {},
+
+    spriteClass: 'petit', weaponMode: 0,
     drops: [
         { itemName: 'Dragon Canine', rate: 53.35 },
         { itemName: 'Dragon Tail', rate: 3 },
@@ -5756,6 +5961,8 @@ RO_MONSTER_TEMPLATES['plasma_b'] = {
     raceGroups: {},
     stats: { str: 0, agi: 30, vit: 5, int: 73, dex: 90, luk: 30, level: 44, weaponATK: 300 },
     modes: {},
+
+    spriteClass: 'plasma', weaponMode: 0, spriteTint: [0.6, 0.6, 1.5],
     drops: [
         { itemName: 'Scell', rate: 1 },
         { itemName: 'Gift Box', rate: 0.1 },
@@ -5780,6 +5987,8 @@ RO_MONSTER_TEMPLATES['galion'] = {
     raceGroups: {},
     stats: { str: 51, agi: 52, vit: 59, int: 25, dex: 72, luk: 32, level: 44, weaponATK: 336 },
     modes: {},
+
+    spriteClass: 'galion', weaponMode: 0,
     drops: [
         { itemName: 'Rotten Meat', rate: 30 },
         { itemName: 'Animal\'s Skin', rate: 30 },
@@ -5803,6 +6012,8 @@ RO_MONSTER_TEMPLATES['petit_'] = {
     raceGroups: {},
     stats: { str: 0, agi: 113, vit: 45, int: 55, dex: 73, luk: 80, level: 45, weaponATK: 300 },
     modes: {},
+
+    spriteClass: 'petit_', weaponMode: 0,
     drops: [
         { itemName: 'Dragon Scale', rate: 53.35 },
         { itemName: 'Dragon Tail', rate: 3 },
@@ -5819,6 +6030,7 @@ RO_MONSTER_TEMPLATES['petit_'] = {
 // ──── Megalith (ID: 1274) ──── Level 45 | HP 5,300 | NORMAL | formless/neutral4 | passive
 RO_MONSTER_TEMPLATES['megalith'] = {
     id: 1274, name: 'Megalith', aegisName: 'MEGALITH',
+    spriteClass: 'megalith', weaponMode: 3,
     level: 45, maxHealth: 5300, baseExp: 1758, jobExp: 1075, mvpExp: 0,
     attack: 264, attack2: 314, defense: 50, magicDefense: 25,
     str: 0, agi: 45, vit: 60, int: 5, dex: 95, luk: 5,
@@ -5866,6 +6078,7 @@ RO_MONSTER_TEMPLATES['hill_wind_1'] = {
 // ──── Deviruchi (ID: 1109) ──── Level 46 | HP 6,666 | NORMAL | demon/shadow1 | aggressive
 RO_MONSTER_TEMPLATES['deviruchi'] = {
     id: 1109, name: 'Deviruchi', aegisName: 'DEVIRUCHI',
+    spriteClass: 'deviruchi', weaponMode: 0,
     level: 46, maxHealth: 6666, baseExp: 2662, jobExp: 1278, mvpExp: 0,
     attack: 475, attack2: 560, defense: 10, magicDefense: 25,
     str: 0, agi: 69, vit: 40, int: 55, dex: 70, luk: 30,
@@ -5902,6 +6115,8 @@ RO_MONSTER_TEMPLATES['brilight'] = {
     raceGroups: {},
     stats: { str: 0, agi: 90, vit: 15, int: 10, dex: 50, luk: 35, level: 46, weaponATK: 298 },
     modes: { detector: true },
+
+    spriteClass: 'brilight', weaponMode: 0,
     drops: [
         { itemName: 'Glitter Shell', rate: 53.35 },
         { itemName: 'Wind of Verdure', rate: 2 },
@@ -5928,6 +6143,8 @@ RO_MONSTER_TEMPLATES['explosion'] = {
     raceGroups: {},
     stats: { str: 0, agi: 61, vit: 56, int: 50, dex: 66, luk: 38, level: 46, weaponATK: 336 },
     modes: {},
+
+    spriteClass: 'explosion', weaponMode: 0,
     drops: [
         { itemName: 'Wing of Red Bat', rate: 55 },
         { itemName: 'Burning Heart', rate: 22 },
@@ -5952,6 +6169,8 @@ RO_MONSTER_TEMPLATES['poison_toad'] = {
     raceGroups: {},
     stats: { str: 20, agi: 34, vit: 19, int: 14, dex: 66, luk: 55, level: 46, weaponATK: 288 },
     modes: {},
+
+    spriteClass: 'poison_toad', weaponMode: 0,
     drops: [
         { itemName: 'Poison Toad\'s Skin', rate: 55 },
         { itemName: 'Poisonous Powder', rate: 24 },
@@ -5978,6 +6197,7 @@ RO_MONSTER_TEMPLATES['wild_ginseng'] = {
     raceGroups: {},
     stats: { str: 13, agi: 42, vit: 36, int: 55, dex: 66, luk: 30, level: 46, weaponATK: 220 },
     modes: {},
+    spriteClass: 'hermit_plant', weaponMode: 0,
     drops: [
         { itemName: 'Hinalle Leaflet', rate: 35 },
         { itemName: 'Aloe Leaflet', rate: 35 },
@@ -6004,6 +6224,8 @@ RO_MONSTER_TEMPLATES['drosera'] = {
     raceGroups: {},
     stats: { str: 0, agi: 30, vit: 27, int: 17, dex: 76, luk: 41, level: 46, weaponATK: 389 },
     modes: {},
+
+    spriteClass: 'drosera', weaponMode: 0,
     drops: [
         { itemName: 'Sticky Poison', rate: 30 },
         { itemName: 'Sticky Mucus', rate: 30 },
@@ -6029,6 +6251,8 @@ RO_MONSTER_TEMPLATES['isis'] = {
     raceGroups: {},
     stats: { str: 38, agi: 65, vit: 43, int: 50, dex: 66, luk: 15, level: 47, weaponATK: 423 },
     modes: { detector: true },
+
+    spriteClass: 'isis', weaponMode: 0,
     drops: [
         { itemName: 'Scale Shell', rate: 53.35 },
         { itemName: 'Circlet', rate: 0.05 },
@@ -6055,6 +6279,8 @@ RO_MONSTER_TEMPLATES['deviace'] = {
     raceGroups: {},
     stats: { str: 0, agi: 47, vit: 62, int: 48, dex: 62, luk: 25, level: 47, weaponATK: 514 },
     modes: {},
+
+    spriteClass: 'deviace', weaponMode: 0,
     drops: [
         { itemName: 'Mystic Frozen', rate: 0.25 },
         { itemName: 'Ancient Tooth', rate: 90 },
@@ -6132,6 +6358,8 @@ RO_MONSTER_TEMPLATES['plasma_g'] = {
     raceGroups: {},
     stats: { str: 0, agi: 30, vit: 5, int: 61, dex: 90, luk: 30, level: 47, weaponATK: 300 },
     modes: {},
+
+    spriteClass: 'plasma', weaponMode: 0, spriteTint: [0.6, 1.5, 0.6],
     drops: [
         { itemName: 'Scell', rate: 1 },
         { itemName: 'Gift Box', rate: 0.1 },
@@ -6196,6 +6424,7 @@ RO_MONSTER_TEMPLATES['gargoyle'] = {
 // ──── Jing Guai (ID: 1517) ──── Level 48 | HP 5,920 | NORMAL | demon/earth3 | aggressive
 RO_MONSTER_TEMPLATES['li_me_mang_ryang'] = {
     id: 1517, name: 'Jing Guai', aegisName: 'LI_ME_MANG_RYANG',
+    spriteClass: 'jing_guai', weaponMode: 0,
     level: 48, maxHealth: 5920, baseExp: 1643, jobExp: 1643, mvpExp: 0,
     attack: 434, attack2: 633, defense: 23, magicDefense: 16,
     str: 46, agi: 51, vit: 19, int: 8, dex: 57, luk: 30,
@@ -6229,6 +6458,8 @@ RO_MONSTER_TEMPLATES['nightmare'] = {
     raceGroups: {},
     stats: { str: 0, agi: 74, vit: 25, int: 15, dex: 64, luk: 10, level: 49, weaponATK: 447 },
     modes: { detector: true },
+
+    spriteClass: 'nightmare', weaponMode: 0,
     drops: [
         { itemName: 'Horseshoe', rate: 60 },
         { itemName: 'Blue Herb', rate: 5 },
@@ -6281,6 +6512,8 @@ RO_MONSTER_TEMPLATES['parasite'] = {
     raceGroups: {},
     stats: { str: 0, agi: 40, vit: 30, int: 30, dex: 90, luk: 50, level: 49, weaponATK: 215 },
     modes: {},
+
+    spriteClass: 'parasite', weaponMode: 0,
     drops: [
         { itemName: 'Sprout', rate: 55 },
         { itemName: 'Soft Blade of Grass', rate: 20 },
@@ -6332,6 +6565,8 @@ RO_MONSTER_TEMPLATES['plasma_p'] = {
     raceGroups: {},
     stats: { str: 0, agi: 30, vit: 5, int: 54, dex: 90, luk: 30, level: 49, weaponATK: 300 },
     modes: {},
+
+    spriteClass: 'plasma', weaponMode: 0, spriteTint: [1.3, 0.6, 1.5],
     drops: [
         { itemName: 'Scell', rate: 1 },
         { itemName: 'Gift Box', rate: 0.1 },
@@ -6346,6 +6581,7 @@ RO_MONSTER_TEMPLATES['plasma_p'] = {
 // ──── Baphomet Jr. (ID: 1101) ──── Level 50 | HP 8,578 | NORMAL | demon/shadow1 | aggressive
 RO_MONSTER_TEMPLATES['baphomet_'] = {
     id: 1101, name: 'Baphomet Jr.', aegisName: 'BAPHOMET_',
+    spriteClass: 'baphomet_jr', weaponMode: 0,
     level: 50, maxHealth: 8578, baseExp: 2706, jobExp: 1480, mvpExp: 0,
     attack: 487, attack2: 590, defense: 15, magicDefense: 25,
     str: 0, agi: 75, vit: 55, int: 0, dex: 93, luk: 45,
@@ -6382,6 +6618,8 @@ RO_MONSTER_TEMPLATES['dryad'] = {
     raceGroups: {},
     stats: { str: 0, agi: 75, vit: 55, int: 0, dex: 78, luk: 45, level: 50, weaponATK: 499 },
     modes: {},
+
+    spriteClass: 'dryad', weaponMode: 0,
     drops: [
         { itemName: 'Tough Vines', rate: 53.35 },
         { itemName: 'Huge Leaf', rate: 10 },
@@ -6408,6 +6646,8 @@ RO_MONSTER_TEMPLATES['kraben'] = {
     raceGroups: {},
     stats: { str: 50, agi: 125, vit: 0, int: 66, dex: 75, luk: 50, level: 50, weaponATK: 125 },
     modes: {},
+
+    spriteClass: 'kraben', weaponMode: 0,
     drops: [
         { itemName: 'Zargon', rate: 35 },
         { itemName: 'Milk', rate: 30 },
@@ -6449,6 +6689,7 @@ RO_MONSTER_TEMPLATES['obsidian'] = {
 // ──── Knocker (ID: 1838) ──── Level 50 | HP 7,755 | NORMAL | demon/earth1 | aggressive
 RO_MONSTER_TEMPLATES['knocker'] = {
     id: 1838, name: 'Knocker', aegisName: 'KNOCKER',
+    spriteClass: 'knocker', weaponMode: 0,
     level: 50, maxHealth: 7755, baseExp: 2202, jobExp: 4023, mvpExp: 0,
     attack: 889, attack2: 990, defense: 28, magicDefense: 50,
     str: 25, agi: 44, vit: 50, int: 62, dex: 65, luk: 60,

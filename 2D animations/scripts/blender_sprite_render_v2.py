@@ -134,9 +134,11 @@ def parse_args():
     parser.add_argument("--no-cel-shade", action="store_true")
     parser.add_argument("--no-outline", action="store_true")
     parser.add_argument("--outline-width", type=float, default=0.002)
-    parser.add_argument("--cel-shadow", type=float, default=0.45,
+    # Lighting defaults match the current standard (see feedback-render-pipeline-standard.md):
+    # shadow 0.92, mid 0.98 = soft posterized RO Classic look.
+    parser.add_argument("--cel-shadow", type=float, default=0.92,
                         help="Shadow brightness 0-1 (higher = brighter shadows)")
-    parser.add_argument("--cel-mid", type=float, default=0.78,
+    parser.add_argument("--cel-mid", type=float, default=0.98,
                         help="Midtone brightness 0-1")
     parser.add_argument("--anims", nargs="*",
                         help="Additional FBX animation files")
@@ -175,6 +177,9 @@ def parse_args():
                         help="FBX file used when positioning equipment in Blender. "
                              "The script sets the armature to this animation's pose "
                              "before computing bone transforms for correct alignment.")
+    parser.add_argument("--model-rotation", type=float, default=0.0,
+                        help="Rotate armature around Z axis (degrees) before render. "
+                             "Use 180 to flip facing direction.")
 
     return parser.parse_args(argv)
 
@@ -821,6 +826,12 @@ def render_sprites(cam_obj, output_dir, args):
             armature = obj
             break
 
+    # Apply --model-rotation Z rotation to armature
+    if armature and abs(args.model_rotation) > 0.001:
+        armature.rotation_euler.z = math.radians(args.model_rotation)
+        bpy.context.view_layer.update()
+        print(f"[ROTATION] Applied {args.model_rotation}° Z rotation to armature")
+
     # Classify all actions — use original FBX filename as key for folder/file naming,
     # classification only determines frame sampling count
     animations = {}
@@ -892,6 +903,9 @@ def render_sprites(cam_obj, output_dir, args):
                 if armature:
                     armature.location.x = 0
                     armature.location.y = 0
+                    # Re-apply --model-rotation each frame (Mixamo actions can overwrite armature rotation)
+                    if abs(args.model_rotation) > 0.001:
+                        armature.rotation_euler.z = math.radians(args.model_rotation)
                     if armature.pose:
                         for bone_name in ['Hips', 'mixamorig:Hips', 'Root']:
                             bone = armature.pose.bones.get(bone_name)

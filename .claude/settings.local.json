@@ -23,7 +23,11 @@
       "Bash(\"C:/UE_5.7/Engine/Build/BatchFiles/Build.bat\" SabriMMOEditor:*)",
       "Bash(tasklist | grep -i -E \"Unreal|SabriMMO\" 2>/dev/null)",
       "mcp__unrealMCP__get_blueprint_variable_details",
-      "Bash(claude config:*)"
+      "Bash(claude config:*)",
+      "Bash(rm -rf \"C:/Sabri_MMO/2D animations/sprites/render_output/_test_weapon_mace_f\"/*)",
+      "Bash('C:/Blender 5.1/blender.exe' 'C:/Sabri_MMO/2D animations/3d_models/weapon_templates/mace/mace_f.blend' --background --python 'C:/Sabri_MMO/2D animations/scripts/render_blend_all_visible.py' -- --anim-dir 'C:/Sabri_MMO/2D animations/3d_models/animations/characters/base_f/' --body-output 'C:/Sabri_MMO/2D animations/sprites/render_output/_unused' --weapon-output 'C:/Sabri_MMO/2D animations/sprites/render_output/_test_weapon_mace_f' --weapon-only --render-size 512 --camera-angle 10 --camera-target-z 0.7 --cel-shadow 0.92 --cel-mid 0.98 --test-frame)",
+      "Bash(rm -rf \"C:/Sabri_MMO/2D animations/sprites/render_output/weapon_knuckle_f\"/*)",
+      "Bash(mkdir -p \"C:/Sabri_MMO/2D animations/sprites/render_output/weapon_knuckle_f\")"
     ]
   }
 }

@@ -1,7 +1,7 @@
 # Monk Skills Audit & Fix Plan
 
 > **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Skill_System](../03_Server_Side/Skill_System.md) | [Monk_Class_Research](Monk_Class_Research.md)
-> **Status**: COMPLETED — All audit items resolved
+> **Status**: RESOLVED 2026-04-26 — All 12 audit BUGS + 3 deferred items + 4 newly-discovered bugs fixed.
 
 ## Audit Scope
 All 16 Monk skills (IDs 1600-1615) compared against RO Classic pre-renewal behavior.
@@ -834,3 +834,84 @@ After all fixes, verify:
 - [ ] Blade Stop: Lv4 allows Chain Combo (bypasses TA requirement)
 - [ ] Blade Stop: Lv5 allows Asura Strike during root lock
 - [ ] Blade Stop: does NOT catch Boss attacks, skills, or ranged
+
+---
+
+## RESOLUTION LOG (2026-04-26)
+
+End-to-end re-audit confirmed all 12 audit BUGS fixed and all 3 deferred items completed. Re-audit also surfaced 4 new bugs not in the original report — all fixed in this pass.
+
+### Confirmed fixed (audit items, with verification line numbers)
+
+| Item | Where | Verified at |
+|------|-------|-------------|
+| C1 Steel Body DEF/MDEF override | `ro_damage_formulas.js:734-735, 992-993` | `overrideHardDEF`/`overrideHardMDEF` consumed in physical + magical pipelines ✓ |
+| C2 Asura standalone sphere=5 | `index.js:20480` | `asuraMinSpheres = isComboAsura ? 1 : 5` ✓ |
+| H1 Investigate excludes mastery | `index.js:20329-20340` | StatusATK = STR + bonus + DEX/5 + LUK/3 (no passiveATK); flat after multipliers ✓ |
+| H2 Ki Explosion splash damage | `index.js:20609-20613` | `calculateSkillDamage` per splash enemy ✓ |
+| H3 Finger Offensive cast time | `ro_skill_data_2nd.js:182` | `castTime: (i+2)*500` → 1000-3000ms per level ✓ |
+| H4 Finger Offensive Lex Aeterna | `index.js:20422-20431` | Check before hit loop, doubles all hits ✓ |
+| H5 Absorb sphere check before SP | `index.js:20230-20234` | Self-cast: validates spheres > 0 before SP deduction ✓ |
+| H6 Asura SP cap 6000 | `index.js:20508` | `Math.min(asRemainingMP, 6000)` in damage formula ✓ |
+| M1 Ki Explosion ACD 2000 | `ro_skill_data_2nd.js:193` | `afterCastDelay: 2000` ✓ |
+| M2 Absorb monster targeting | `index.js:20206-20227` | 20% chance, SP=mob.level*2, boss-immune ✓ |
+| M3 Combo Finish no knockback | `index.js:20791-20821` | Splash loop has no `knockbackTarget()` calls ✓ |
+| M4 Investigate monster softDEF | `index.js:20333` | `targetSoftDEF = invEnemy.stats.vit \|\| 0` (raw VIT) ✓ |
+| L1 Spirits Recovery | `index.js:29330+` | Sitting tick with bypasses for Fury/Asura SP blocks ✓ |
+| L2 Blade Stop | `index.js:20846+` | Counter stance + root_lock paired buff + per-level skill whitelist ✓ |
+| L3 Ki Translation | `index.js:20880+` | Sphere transfer to party Monk, validates class + max spheres ✓ |
+
+### Newly-discovered bugs (FIXED 2026-04-26)
+
+#### N1 — Ki Explosion stun call passes object instead of number
+
+**File:** `server/src/index.js:20633-20636`
+
+The stun call passed `{ duration: 2000 }` as the 5th argument to `applyStatusEffect(source, target, type, baseChance, overrideDuration)`. The function expects `overrideDuration` to be a number (ms). Passing an object made `Date.now() + duration` produce a string like `"1777225031806[object Object]"`, corrupting the `expiresAt` field — stun behavior was unpredictable (likely never expired or never registered).
+
+**Fix:** Replaced with raw number `2000`. Verified: `Date.now() + 2000` produces a valid integer.
+
+#### N2 — Critical Explosion handler doesn't emit `player:stats`
+
+**File:** `server/src/index.js:20254-20272`
+
+Fury correctly added `+critBonus` to `mods.bonusCritical` (which feeds `getEffectiveStats().bonusCritical` and propagates into damage calcs). However the handler never re-emitted `player:stats`, so the F8 panel's displayed CRIT value stayed at the pre-Fury number until something else triggered a stat refresh. Same root cause as Priest's Gloria/Impositio bugs.
+
+**Fix:** Added `getEffectiveStats()` + `roDerivedStats()` + `player:stats` emit after `applyBuff`.
+
+#### N3 — Steel Body handler doesn't emit `player:stats`
+
+**File:** `server/src/index.js:20277-20299`
+
+Same pattern as N2. Steel Body's ASPD reduction (-25%), move speed reduction (-25%), and DEF/MDEF override correctly applied in damage/ASPD pipelines, but the F8 panel didn't refresh until next stat trigger.
+
+**Fix:** Added `player:stats` re-emit after `applyBuff`. Also added `effects: { overrideHardDEF: 90, overrideHardMDEF: 90 }` to the broadcast for symmetry with other buffs.
+
+#### N4 — Steel Body's overrideHardDEF/MDEF not surfaced in displayed stats
+
+**File:** `server/src/index.js` — `buildFullStatsPayload`
+
+Even with N3 fixed and `player:stats` re-emitted, the displayed `stats.hardDef` / `stats.hardMdef` were computed from `player.hardDef + bonusHardDef` without checking `buffMods.overrideHardDEF`. So with Steel Body active, the F8 panel would show base DEF (e.g. 30 from armor) instead of the override (90).
+
+**Fix:** Added override check at the top of `buildFullStatsPayload`:
+```js
+const payloadBuffMods = getCombinedModifiers(player);
+const displayedHardDef = (payloadBuffMods.overrideHardDEF != null)
+    ? payloadBuffMods.overrideHardDEF
+    : ((player.hardDef || 0) + (effectiveStats.bonusHardDef || 0));
+const displayedHardMdef = (payloadBuffMods.overrideHardMDEF != null)
+    ? payloadBuffMods.overrideHardMDEF
+    : ((player.hardMdef || 0) + (effectiveStats.bonusHardMDEF || 0));
+```
+
+### Files modified (this pass)
+
+- `server/src/index.js` — Ki Explosion stun fix (N1), Critical Explosion player:stats emit (N2), Steel Body player:stats emit + effects field (N3), buildFullStatsPayload override surfacing (N4)
+- `docsNew/05_Development/Monk_Skills_Audit_And_Fix_Plan.md` — header + this resolution log
+
+### Verification
+
+- ✅ `node --check server/src/index.js` passes
+- ✅ Ki Explosion stun: `Date.now() + 2000` = valid integer (was corrupt string)
+- ✅ All 12 audit fixes spot-checked and confirmed
+- ✅ N4 surfacing pattern matches the Steel Body case in `getCombinedModifiers` — `overrideHardDEF != null` correctly handles 0 as a valid override value

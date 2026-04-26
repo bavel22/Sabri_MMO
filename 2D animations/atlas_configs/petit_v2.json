@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "character": "petit",
+  "cell_size": 1024,
+  "animations": [
+    { "folder": "Idle Sniff", "state": "idle", "group": "shared" },
+    { "folder": "Trot Forward", "state": "walk", "group": "shared" },
+    { "folder": "Charge Attack", "state": "attack", "group": "shared" },
+    { "folder": "Stumble Flinch", "state": "hit", "group": "shared" },
+    { "folder": "Collapse Death", "state": "death", "group": "shared" }
+  ]
+}

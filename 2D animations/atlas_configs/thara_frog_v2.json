@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "character": "thara_frog",
+  "cell_size": 1024,
+  "animations": [
+    { "folder": "Idle Croak", "state": "idle", "group": "shared" },
+    { "folder": "Frog Leap", "state": "walk", "group": "shared" },
+    { "folder": "Tongue Snap", "state": "attack", "group": "shared" },
+    { "folder": "Hit Flinch", "state": "hit", "group": "shared" },
+    { "folder": "Belly Up Death", "state": "death", "group": "shared" }
+  ]
+}

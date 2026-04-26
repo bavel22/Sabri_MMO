@@ -1,4 +1,10 @@
-# Ground Item & Drop System — Complete Research & Implementation Plan
+# Ground Item & Drop System — Implementation Reference
+
+> **STATUS: IMPLEMENTATION COMPLETE (server 2026-04-09, client 2026-04-10)**
+> **Server** — RO Classic ownership phases (3s/5s/7s normal, 10s/20s/22s MVP), scatter offsets (SE/W/N cycle), 60s despawn, party share, damage-ranking priority, 6 socket events, ~207 lines added.
+> **Client** — `GroundItemSubsystem` (368 lines) + `AGroundItemActor` (230 lines, billboard sprite + tier color + click-to-pickup + spawn-arc animation), 4 socket handlers (spawned_batch / despawned_batch / ground_list / picked_up).
+> **Remaining**: end-to-end in-game testing + rate-table verification (see `_journal/Dashboard.md` → Ground Item section).
+> Memory: `memory/ground-item-system.md`. Skill: `/sabrimmo-item-drop-system`.
 
 **Date:** 2026-04-09
 **Scope:** Monster item drops, ground item entities, drop ownership, pickup mechanics, player item dropping, and all cross-system integrations.

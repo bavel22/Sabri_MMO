@@ -508,6 +508,20 @@ TSharedRef<SWidget> SOptionsWidget::BuildVideoContent()
 			&QualityLevelOptions, &FoliageCombo,
 			QUALITY_GETTER(GetFoliageQuality), QUALITY_SETTER(SetFoliageQuality)) ]
 
+		// ---- Sprite Quality (this project's runtime LOD bias on character/enemy/equipment atlases) ----
+		+ SScrollBox::Slot().Padding(0, 2)
+		[ BuildDropdownRow(FText::FromString(TEXT("Sprite Quality")),
+			&SpriteQualityOptions, &SpriteQualityCombo,
+			MakeShared<TFunction<int32()>>([this]() -> int32 {
+				if (UOptionsSubsystem* Sub = OwningSubsystem.Get())
+					return FMath::Clamp(Sub->GetSpriteQuality(), 0, 3);
+				return 1;
+			}),
+			MakeShared<TFunction<void(int32)>>([this](int32 Idx) {
+				if (UOptionsSubsystem* Sub = OwningSubsystem.Get())
+					Sub->SetSpriteQuality(Idx);
+			})) ]
+
 		// ---- Apply / Auto-Detect buttons ----
 		+ SScrollBox::Slot().Padding(0, 8, 0, 2)
 		[
@@ -557,6 +571,13 @@ void SOptionsWidget::PopulateVideoOptions()
 	// Overall quality (same + Custom for mixed state)
 	OverallQualityOptions = QualityLevelOptions;
 	OverallQualityOptions.Add(MakeShared<FString>(TEXT("Custom")));
+
+	// Sprite Quality — index = LODBias (0=Ultra, 1=High, 2=Medium, 3=Low).
+	// Order intentionally inverted from the other quality dropdowns so index 0 is best.
+	SpriteQualityOptions.Add(MakeShared<FString>(TEXT("Ultra")));
+	SpriteQualityOptions.Add(MakeShared<FString>(TEXT("High")));
+	SpriteQualityOptions.Add(MakeShared<FString>(TEXT("Medium")));
+	SpriteQualityOptions.Add(MakeShared<FString>(TEXT("Low")));
 
 	// Resolutions from RHI
 	FScreenResolutionArray RawResolutions;

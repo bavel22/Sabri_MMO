@@ -328,3 +328,9 @@ UniRig/
 # Temp files
 _tmp_*
 temp_*
+
+# Mixamo API token (personal auth, never commit)
+2D animations/scripts/.mixamo_token
+
+# Scratch / pasted-token files (never commit — has caught Adobe tokens before)
+**/New Text Document*.txt

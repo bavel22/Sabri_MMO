@@ -9,21 +9,22 @@
 - [Global Rules](../docsNew/00_Global_Rules/Global_Rules.md) — Design standards
 - [CLAUDE.md](../CLAUDE.md) — Claude Code project instructions
 
-## Current Stats (2026-04-14)
+## Current Stats (2026-04-22)
 | Metric | Count |
 |--------|-------|
-| Server lines | ~36,800 + 12 modules (~6,300) |
-| Socket events | 115 (+6 ground item) |
+| Server lines | ~35,300 (index.js) + 11 data modules (~6,300) |
+| Socket handlers | 106 `socket.on(...)` in index.js |
 | REST endpoints | 11 |
-| C++ Subsystems | 39 (+AudioSubsystem, +GroundItemSubsystem) |
-| Skill definitions | 293 (69 + 224) |
+| C++ UI Subsystems | 40 (+AudioSubsystem, +GroundItemSubsystem) |
+| Skill definitions | 293 (69 first + 224 second) |
 | Buff types | 95 |
 | Status effects | 10 |
 | Items in DB | 6,169 |
 | Cards | 538 |
-| Monster templates | 509 (~20 with spriteClass) |
-| Active spawns | 46 |
+| Monster templates | 509 (**~183 now have spriteClass**, ~150 sprites rendered) |
+| Active spawns | ~250 (grid layout across Prontera South, Y=-11000..+1500) |
 | Zones | 4 |
+| DB migrations | 28 |
 | VFX configs | 97 |
 | Classes | 19 (6 first + 13 second) |
 | Textures | 1,061 (AI + RO originals) |
@@ -32,7 +33,10 @@
 | Scatter meshes | 135 (75 V1 + 60 V3) |
 | Environment scripts | 80+ |
 | Audio files | 121 BGM tracks + 626 ROSFX |
-| Enemy 3D models | ~20 GLBs (Tripo3D) |
+| Enemy 3D models | ~205 GLBs (Tripo3D) |
+| Enemy atlas configs | 191 `_v2.json` files |
+| Enemy atlas folders (in UE5) | 162 in `Body/enemies/` |
+| UE5 import batch scripts | 13 (`import_batch3.py` through `import_batch13.py`) |
 | Monster animation presets | 12 (blob + 10 new body types + humanoid) |
 
 ## What's Implemented
@@ -98,6 +102,15 @@
 - [x] Ground strike VFX — SpawnGroundStrikeEffect (NS_Dark_Stone_Impact, green earth tint) for ranged ground attacks like Mandragora
 - [x] Render pipeline: thicken modifier (--thicken for thin geometry), lunge offset interpolation in render_all()
 - [x] Mandragora fix — attackRange 200→450, aiType passive→aggressive
+- [x] `spriteTint` field end-to-end — monster template → server adapter → 4 enemy:spawn broadcast paths → client parser + SetLayerTint (enables recolored variants)
+- [x] Tint system scaled — plasma validates with 4 siblings (plasma_r/b/g/p), Eclipse (Lunatic variant) implemented and spawned
+- [x] **150/509 enemies have sprites** — 13 production batches (04-13 through 04-21), grid spawn layout in Prontera South (Y=-11000..+1500), variant inheritance (meta_X / provoke_X / X_) auto-covers 35+ additional templates for free
+- [x] EnemySubsystem client-side field plumbing — `FEnemyEntry.SpriteTint` (FLinearColor), `bCanMove` (stationary gate), `size`→sprite scale mapping (0.5x/1.0x/1.5x), `spriteScale` per-template override. Respawn re-applies tint
+- [x] Server all-5-emit-path parity — `size` / `canMove` / `spriteTint` / `spriteScale` now broadcast on spawnEnemy, respawn, player:join, zone:ready, and via the `ENEMY_TEMPLATES` adapter
+- [x] `.add_batchN.js` template-edit pattern — idempotent (skip-if-spriteClass-exists) JS scripts replace hand-editing 30KB of monster templates per batch. 14 batch scripts now in `_prompts/`
+- [x] `render_monster.py --model-z-offset` flag — lifts mesh before render for flying creatures; preserves across lunge interpolation
+- [x] Lighting defaults bumped — `--cel-shadow 0.92 --cel-mid 0.98` is now the default for both render_monster.py and blender_sprite_render_v2.py (matches RO Classic posterized look)
+- [x] Ranged attack visual swap — EnemySubsystem ranged attacks now spawn a scaled-down billboard sprite burst (using attacker's sprite class) instead of the vine decal, so the effect is visible from any camera angle
 
 ## What's Next
 
@@ -172,7 +185,8 @@ See [Skill_VFX_Execution_Plan](../docsNew/05_Development/Skill_VFX_Execution_Pla
 - [x] **10 monster animation presets** — caterpillar, rabbit, egg, frog, tree, bird, flying insect, bat, quadruped, plant (~1000 lines in render_monster.py)
 - [x] **~20 enemy 3D models** downloaded from Tripo3D (fabre through yoyo)
 - [x] **spriteClass + weaponMode** added to ~20 monster templates
-- [ ] **Render enemy sprite atlases** — rocker animated .blend ready, other enemies need rigging first
+- [x] **Render enemy sprite atlases** — rocker + 149 others complete; **150 / 509 monsters have sprites** (13 production batches through 04-21). 104 more have GLBs ready for render
+- [ ] **Drain the 104 `pending (GLB ready)` pool** — see `_prompts/enemy_sprite_session_resume.md` for the queue. Next candidates: Lv 22-28 goblin bloc (goblin_1..5, orc_warrior, orc_zombie, smoking_orc, orc_xmas, munak, zenorc), then Lv 31-40 (archer_skeleton, kobold_1..3, kobold_archer, mummy, verit, jakk, bon_gun, wootan_shooter/fighter, ghoul, marduk, steam_goblin, zipper_bear, etc.)
 - [ ] **More weapon .blend templates** (sword, staff, rod, katar, spear, mace, axe — dagger + bow done)
   - [x] Figure out weapon positioning across different classes/genders
 - [x] **NavMesh pathfinding** — implemented server-side (recast-navigation, de-aggro, all movement patched)
@@ -181,7 +195,7 @@ See [Skill_VFX_Execution_Plan](../docsNew/05_Development/Skill_VFX_Execution_Pla
 - [x] Hair color tint system (9 RO colors, material TintColor multiply)
 - [x] Headgear sprite layer (holdout occlusion, Egg Shell Hat)
 - [ ] Male hair style 1 atlas (female done, male not yet)
-- [ ] More enemy sprites — rig + animate remaining ~18 downloaded GLBs, render atlases
+- [x] `spriteScale` override + `canMove` gate + billboard ranged attack — enemy visual polish systems complete
 
 ### 3D World — Next Steps
 - [ ] Apply materials and decals to Prontera zone (first complete zone)
@@ -237,6 +251,19 @@ See [Skill_VFX_Execution_Plan](../docsNew/05_Development/Skill_VFX_Execution_Pla
 - [ ] Phase 3: Strip descriptions from server payload (164KB → ~20KB)
 - [ ] Phase 4: Incremental weight + itemDef Map on server
 
+### Hosting / Packaging / Distribution (research complete 2026-04-16, implementation pending)
+- [x] Deep research pass — 4 deliverable docs authored (~153 KB total). See `docsNew/05_Development/Hosting_Packaging_Distribution_Plan.md` for the master plan + 3 companion docs
+- [ ] Implement endpoint config per `Client_Endpoint_Config_Design.md` — `SABRI_DEFAULT_MASTER_URL` define in Target.cs, CLI parse in `UMMOGameInstance::Init`, `CustomServerUrl` UPROPERTY on `UOptionsSaveGame`, advanced panel entry in `SOptionsWidget`
+- [ ] Swap `http://` → `https://` and `ws://` → `wss://` in URL assembly for Shipping, keep `http://localhost` dev fallback
+- [ ] Add `version` field to server `/health` response (currently only `status`/`timestamp`/`message`); client fetches + compares before socket connect; mismatch UX blocks login
+- [ ] Verify UE5.7 SocketIOClient plugin speaks WSS, or rebuild with WSS enabled
+- [ ] First local Shipping build validation (package → run with `-server=localhost:3001` → verify login + zone + combat)
+- [ ] Register domain (check `sabrimmo.com` at Cloudflare Registrar, $10.46/yr)
+- [ ] Create Tailscale account + tailnet (Scenario A — 5 friends prereq)
+- [ ] Add `server/.env.example` with every required variable (currently absent; runbooks assume it)
+- [ ] Set up itch.io Restricted page + install `butler` CLI for bulk-key delivery
+- [ ] **NEVER** use: Steam (RO IP exposure, Dreadmyst 2026 NCsoft precedent), AWS/Azure/GCP (egress cliff + burstable throttle), Upstash PAYG (potential $13K/mo bill on 20 Hz tick × 100 CCU), Neon scale-to-zero (cold-start freezes combat)
+
 ### Remaining Features
 - [ ] Client-side homunculus actor + position broadcast
 - [ ] PvP system
@@ -249,6 +276,14 @@ See [Skill_VFX_Execution_Plan](../docsNew/05_Development/Skill_VFX_Execution_Pla
 
 ## Recent Sessions
 <!-- Add links to session logs here, newest first -->
+- **2026-04-22** — Tail-end imports (alligator / blazzer / stone_shooter / plasma / metaller — 6 atlas folders into `Body/enemies/`). `metaller` late render (Lv 22 insect, biped_insect preset). Journal catch-up for 04-19 / 04-20 / 04-21 / 04-22 — filled 4-day gap, Dashboard + Session Tracker updated. Closes out the sprite-production week. ([daily note](2026-04-22.md))
+- **2026-04-21** — Batches 10-13 finale: 28 new atlas configs / renders / imports across `magmaring` → `kraben` range. **Plasma tint siblings** — plasma base atlas + 4 tint variants (plasma_r `[1.5,0.6,0.6]`, plasma_b `[0.6,0.6,1.5]`, plasma_g `[0.6,1.5,0.6]`, plasma_p `[1.3,0.6,1.5]`) validates tint system beyond Eclipse. `.add_batchN.js` pattern formalized (5 batch scripts: 10 / 11 / 12 / 13 / blazzer). Late additions: `vocal`, `blazzer` (GLB arrived mid-day), `orc_baby`. Progress now **150 done / 104 pending / 255 no GLB / 509 total**. ([daily note](2026-04-21.md))
+- **2026-04-20** — MASSIVE production day. Batches 2 through 9 — ~90 renders, ~70 UE5 imports. **EnemySubsystem C++ hardening**: `FEnemyEntry.SpriteTint` + `bCanMove`, size→scale parser (small/medium/large = 0.5x/1.0x/1.5x), `spriteScale` per-template override, `canMove` gate on attack lunge (stationary mobs thrash in place), ranged attack swap from vine decal → billboard sprite burst. Server: `size` / `canMove` / `spriteTint` / `spriteScale` added to all 5 emit paths (spawnEnemy / respawn / player:join / zone:ready / adapter). `render_monster.py --model-z-offset` for flying creatures + default lighting 0.92/0.98. 195-line spawn grid in `ro_zone_data.js` (Y=-11000..-3000). Navmesh rebuilt (+5243 lines). ([daily note](2026-04-20.md))
+- **2026-04-19** — Sprite production organization day. `_prompts/lv1_50_model_matching.md` (~550 lines) — every GLB cross-referenced against Lv 1-50 roster with direct/alias/shared/tint/none tags. **Batch 0**: stationary sprites (plants / mushrooms / eggs, 13 atlases rendered, egg + tree preset). Mass UE5 import (35 atlas folders) catching up 04-13 through 04-15 backlog. `_prompts/resume_sprite_pipeline_session.md` created as sprite-session re-entry prompt. ([daily note](2026-04-19.md))
+- **2026-04-18** — Enemy enumeration scripts (`_prompts/build_enemy_list.js` + `build_enemy_markdown.js`) — dumps every monster template, cross-references `3d_models/enemies/*.glb` and `atlas_configs/*_v2.json`, produces 605-row Level 1-99+ sprite-status table (status column: done / done (tinted) / pending (GLB ready) / no GLB). Regenerated `_prompts/enemy_sprite_session_resume.md` to 778 lines. Journal catch-up for 04-16/17/18 + Dashboard + Session Tracker updates. ([daily note](2026-04-18.md))
+- **2026-04-17** — Light day. No commits, no code / doc / config edits. Only artifact: `Screenshot 2026-04-17 201201.png` at 20:12 (500 KB full-frame, likely in-game smoke test). Screenshot purpose undocumented — flagged for manual triage. ([daily note](2026-04-17.md))
+- **2026-04-16** — Hosting / Packaging / Distribution **deep research day**. 4 major docs authored (~153 KB) in one session: `Hosting_Packaging_Distribution_Plan.md` (67 KB, 3-scenario decision matrix + executive summary + Scenario A end-to-end runbook), `Server_Deployment_Runbook.md` (38 KB, 4 hardware tracks), `Client_Packaging_Runbook.md` (21 KB, UE5.7 Shipping + Inno Setup), `Client_Endpoint_Config_Design.md` (27 KB, CLI → SaveGame → compile-time resolution + `/health` version handshake w/ C++ diffs). Research prompt filed. CLAUDE.md / Global_Rules.md skill-selection polish ("prefer loading MORE skills" rule + 5 new SKILL INVOCATION rows). Nothing implemented yet — plan-only. ([daily note](2026-04-16.md))
+- **2026-04-15** — Two threads: (1) sprite tint system — `spriteTint:[r,g,b]` threaded end-to-end (template → adapter → 4 enemy:spawn emit paths → client `SetLayerTint` with respawn re-apply), Eclipse proves tint-only Lunatic variant. Ranged-attack decal replaced with a billboard `ASpriteCharacterActor` burst (attacker's sprite class, 0.6x, Attack anim). 8 new atlas configs (eclipse/thief_bug/thief_bug_f/dragon_fly/desert_wolf_b/plankton/spore/toad) + matching `spriteClass` in templates + Prontera South test spawn block. Navmesh rebuilt. (2) Full doc review — audited 8 plans + 7 core system docs for drift; added STATUS headers to 6 stale plans (Damage Numbers, Map, Kafra/Trading, Ground Item, Skill VFX, 3D World); synced stats across Project Overview / Enemy System / Event Reference / Networking Protocol / DocsNewINDEX / Dashboard / Session Tracker. ([daily note](2026-04-15.md))
 - **2026-04-14** — Enemy attack polish: melee lunge system (wind-up→lunge→return via ServerTargetPos), ranged vine decal for Mandragora-style attacks, SpawnGroundStrikeEffect VFX, render_monster --thicken + lunge_offsets, Mandragora attackRange/aiType fix. Journal backfill + major commit `dea49b4` (172 files). ([daily note](2026-04-14.md))
 - **2026-04-13** — Enemy sprite batch production: 10 new shape key animation presets (~1000 lines), ~20 spriteClass fields added to monster templates, egg/larva enemies made immobile, UniRig AI rigging pipeline installed + proved on rocker (40 bones, 6 anims), Blender 5.x FBX import fix, ~8 more enemy GLBs downloaded. ([daily note](2026-04-13.md))
 - **2026-04-12** — Asset generation day: ~10 enemy 3D models downloaded from Tripo3D (drops, fabre, lunatic, pupa, willow, condor, hornet, roda_frog, savage_babe), enemy spawn priority reviewed. ([daily note](2026-04-12.md))

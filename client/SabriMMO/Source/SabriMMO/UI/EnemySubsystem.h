@@ -29,6 +29,8 @@ struct FEnemyEntry
 	FString EnemyName;
 	FString SpriteClass;          // atlas manifest name (e.g. "skeleton")
 	int32 WeaponMode = 0;        // 0=unarmed, 1=onehand, 2=twohand, 3=bow
+	FLinearColor SpriteTint = FLinearColor::White;  // Body tint multiplier (recolored variants)
+	bool bCanMove = true;        // Server mode flag — false = stationary (no attack lunge)
 	int32 EnemyLevel = 0;
 	double Health = 0.0;
 	double MaxHealth = 0.0;

@@ -111,7 +111,7 @@
 - Mouse scroll zoom (200–1500 units)
 - Character faces movement direction
 
-### UI System — Pure C++ Slate (34 UWorldSubsystems)
+### UI System — Pure C++ Slate (40 UWorldSubsystems)
 
 > **Note:** All 23 UMG Blueprint widgets (WBP_*) and all Blueprint actor components (AC_HUDManager, AC_TargetingSystem, AC_CameraController) have been replaced by C++ Slate widgets + UWorldSubsystems. BP_GameFlow was replaced by LoginFlowSubsystem. The Blueprint assets may still exist in the Content Browser but are fully dead code.
 
@@ -123,7 +123,7 @@
 - `SCharacterCreateWidget` — Name field, gender toggle, hair style/color pickers (arrow buttons), locked Novice class
 - `SLoadingOverlayWidget` — Dimmed fullscreen overlay with "Please Wait" dialog and progress bar
 
-#### Game HUD (Pure C++ Slate — 33 UWorldSubsystems)
+#### Game HUD (Pure C++ Slate)
 - `SWorldHealthBarOverlay` — Floating HP/SP bars above characters (Z=8)
 - `STargetFrameWidget` — Auto-attack target name + HP bar, RO brown/gold theme (Z=9, via CombatActionSubsystem)
 - `SBasicInfoWidget` — Draggable HUD panel: player name, job, HP/SP bars, base/job EXP bars, weight, zuzucoin (Z=10)
@@ -277,7 +277,7 @@ C:/Sabri_MMO/
 │   │   ├── OtherCharacterMovementComponent.*  # Remote player movement
 │   │   ├── SabriMMO.*            # Module definition + log category
 │   │   ├── SabriMMO.Build.cs     # Build config (17 module dependencies)
-│   │   ├── UI/                    # 33 subsystems + 30+ Slate widgets (66 files)
+│   │   ├── UI/                    # 40 subsystems + 30+ Slate widgets (80+ files)
 │   │   │   ├── LoginFlowSubsystem.*  # Login flow state machine (replaces BP_GameFlow)
 │   │   │   ├── SLoginWidget.*      # Login screen
 │   │   │   ├── SServerSelectWidget.* # Server selection screen
@@ -293,14 +293,14 @@ C:/Sabri_MMO/
 │   ├── Content/SabriMMO/         # Blueprint assets (.uasset — not in git)
 │   └── SabriMMO.uproject         # UE5 5.7 project file
 ├── server/
-│   ├── src/index.js              # Monolithic server (~32,200 lines)
-│   ├── src/ro_*.js               # 12 data modules (~6,000+ lines, includes ro_navmesh.js)
+│   ├── src/index.js              # Monolithic server (35,281 lines as of 2026-04-15)
+│   ├── src/ro_*.js               # 21 data modules (~7,000+ lines — combat/skills/monsters/items/cards/buffs/status/AI/navmesh/world map/etc.)
 │   ├── package.json              # 10 dependencies
 │   ├── .env                      # DB credentials, JWT secret
 │   └── logs/                     # Runtime logs
 ├── database/
 │   ├── init.sql                  # Schema: users, characters, items, character_inventory, character_hotbar
-│   ├── migrations/                # 25 migration files (see INDEX.md for full list)
+│   ├── migrations/                # 28 migration files (see INDEX.md for full list)
 │   ├── create_test_users.*       # Test user scripts
 │   └── insert_test_user.sql
 ├── scripts/                      # Utility scripts
@@ -348,7 +348,7 @@ UMG, Slate, HTTP, Json, JsonUtilities
 
 ## Current Status
 
-**Last Updated**: 2026-03-20
+**Last Updated**: 2026-04-15
 
 - **Completed**: Foundation, Multiplayer, Combat, Stats, Inventory, Equipment, Hotbar, NPC Shops, Zone System, Skill VFX, Status Effect & Buff System (Phase 2), Element Table & Formula Audit (Phase 3), Persistent Socket Connection (Phase 4), Passive Skills & First Class Completion (Phase 5), Dual Wield System (Assassin), Blueprint-to-C++ Migration Phase 1 (Camera+Input) + Phase 2 (Targeting+Combat), Second Class Foundation (Phase 0: data fixes + ground effects + mount system), Second Class Phase 1 (Assassin+Priest+Knight), Phase 2 (Crusader+Wizard+Sage), Phase 3 (Monk+Hunter), Phase 4 (Bard+Dancer), Phase 5 (Blacksmith+Rogue+Forging/Refining), Phase 6 (Alchemist+Homunculus), Deferred Systems Remediation (Magic Rod, Ensembles, ASPD Potions, Scrolls, Stat Foods, Ore Discovery, Weapon Repair, Abracadabra, Elemental Converters, Elemental Change, Redemptio, Homunculus Combat/Skills/Evolution, Monster Summoning/Metamorphosis), Merchant UI Systems (Cart Inventory, Vending Setup/Browse with vendor self-view + live sale updates + movement lock + buyer quantity input + click-to-browse, Item Appraisal, Unidentified Items)
 - **Monsters**: 509 RO templates loaded, 46 spawns active (zones 1-3), full AI state machine with CC lock + hidden player detection, monster skill system (40+ NPC_ skills, summoning, metamorphosis), enemy sprite system (SpriteCharacterActor with walk/attack/hit/death animations, spriteClass/weaponMode per template), NavMesh pathfinding (recast-navigation v0.42.1, OBJ export from UE5, binary cache, de-aggro system)
@@ -357,15 +357,21 @@ UMG, Slate, HTTP, Json, JsonUtilities
 - **Classes**: All 6 first classes fully playable + 13 second classes: Assassin, Priest, Knight, Crusader, Wizard, Sage, Hunter, Bard, Dancer, Monk, Rogue, Blacksmith, Alchemist
 - **Combat Data**: Element table (10×10×4 = 400 values) verified against rAthena pre-renewal `attr_fix.yml`, size penalty table (18 weapons × 3 sizes) verified, card modifier stacking fixed (per-category multiplicative), card compound system with `rebuildCardBonuses()` integration, race ATK/DEF passive bonuses (Demon Bane, Divine Protection), dual wield per-hand card/element for auto-attacks, Lex Aeterna consumption in 8 damage paths, weapon element override via buff system (Aspersio/Enchant Poison), Magic Rod absorption in 8 single-target magic paths
 - **Dual Wield**: Assassin/Assassin Cross dual wield (8 phases complete). Both hands hit per cycle, per-hand mastery penalties, per-hand cards/elements, ASPD combined formula, Katar/DW mutual exclusivity, combat stats display
-- **UI**: 34 C++ Slate subsystems + 30+ Slate widgets (all Blueprint widgets replaced), BuffBar with timer icons, Cart/Vending/Identify merchant UIs, Party UI, Crafting popup, Summon overlay, Pet/Homunculus management, Advanced Stats panel, Minimap (SceneCapture2D, 5 zoom, 3 opacity, entity dots), World Map (12x8 grid, hover tooltips, party dots)
+- **UI**: 40 C++ Slate subsystems + 30+ Slate widgets (all Blueprint widgets replaced), BuffBar with timer icons, Cart/Vending/Identify merchant UIs, Party UI, Crafting popup, Summon overlay, Pet/Homunculus management, Advanced Stats panel, Minimap (SceneCapture2D, 5 zoom, 3 opacity, entity dots), World Map (12x8 grid, hover tooltips, party dots), Kafra Storage, Player Trading, ESC menu, Login screen, Options menu (14 settings, SaveGame), Damage numbers (sine arc + crit starburst + combo total), Hit impact (flash/particles/flinch/sounds), AudioSubsystem, GroundItemSubsystem
 - **Zones**: 4 zones (prontera, prt_south, prt_north, prt_dungeon_01)
 - **Homunculus**: Companion system for Alchemist class — 4 homunculus types with growth tables, auto-attack in combat tick, EXP sharing, hunger/intimacy system, full DB persistence, evolution via Stone of Sage, 8 active skills across 4 types, enemies can target and damage homunculi
 - **Consumables**: ASPD potions (3 tiers with class restrictions), stat food (+1 to +10 per stat), itemskill scrolls (bolt/heal), elemental converter endow items
 - **Ensemble**: 9 Bard/Dancer ensemble skills (Lullaby, Mr. Kim, Eternal Chaos, Drum, Nibelungen, Loki's Veil, Into the Abyss, Siegfried, Moonlit Water Mill)
 - **Deferred Systems Remediation**: ALL 38 audit items fixed, zero remaining (10/10 phases complete)
-- **Server**: 32,200 lines in `index.js` + 11 data modules (~6,000 lines), 79 socket event handlers, 11 REST endpoints
-- **Next**: Client-side homunculus actor, homunculus position broadcast, PvP/WoE systems
-- **Roadmap**: See [Strategic_Implementation_Plan_v3.md](05_Development/Strategic_Implementation_Plan_v3.md)
+- **Audio System** (2026-04-07): `AudioSubsystem` (2,847 lines) — enemy SFX (60 monsters, body material soft/hard/metal/undead layering, attack/die/move/stand variant arrays), player SFX (per-weapon-type swing/hit + per-class fallback + body material reaction + level up + heal), BGM zone mapping (121 tracks), skill SFX (`SkillImpactSoundMap` + magical exclusion set + weapon-type overlay), 3 dedicated audio skills. See `docsNew/05_Development/RO_Audio_System_Research.md`.
+- **Ground Item / Loot Drop System** (2026-04-09 server / 04-10 client): RO Classic ownership phases (3s/5s/7s normal, 10s/20s/22s MVP), scatter offsets, 60s despawn, party share modes (each_take / party_share), damage-ranking priority, 6 socket events, `GroundItemSubsystem` + `AGroundItemActor` (billboard sprite, tier color, spawn-arc animation, click-to-pickup). See `docsNew/05_Development/Ground_Item_And_Drop_System_Research.md`.
+- **Enemy Sprite Pipeline** (2026-03-26 onwards): `SpriteCharacterActor` runs both players and enemies. 30 monsters with `spriteClass`/`weaponMode`/`spriteTint` in templates (tint added 2026-04-15 for recolored variants). Skeleton (humanoid Mixamo-rigged), Poring + ~20 more (shape key anims via `render_monster.py`, 12 body-type presets including blob/caterpillar/rabbit/egg/frog/tree/bird/flying_insect/bat/quadruped/plant/biped_insect). UniRig AI rigging pipeline installed for non-humanoid enemies.
+- **Damage Number & Hit Impact** (2026-04-05/06): RO Classic sine-arc numbers with per-type curves (damage/miss/heal) + element tinting + status custom colors, crit starburst, combo total (multi-hit buffer), target flinch (Hit anim + `enemy:move` guard), hit flash + hit particles + positional hit sounds with pitch jitter. Sprite-vs-world rendering (BLEND_Translucent + bDisableDepthTest + line-trace + per-pixel depth + post-process cutout stencil).
+- **Map System** (2026-04-02): Minimap (134x134 draggable, 5 zoom, 3 opacity, SceneCapture2D), World Map (12x8 grid, 62 zones, hover tooltips), Loading Screen (Ken Burns + sparkles + progress bar), Guide NPC marks, `/where` command, preferences persistence.
+- **Economy UX** (2026-04-03/04): Kafra Storage (account-shared 300-slot, 10 socket handlers, split/sort/auto-stack/search), Player-to-Player Trading (10 items + zeny, two-step confirm, 13 cancel paths, atomic transfer), Right-click player context menu (Trade/Party Invite/Whisper), ESC menu → Character Select return, Login screen, Options menu (14 settings with SaveGame persistence), item icon mapping for all 6,169 items.
+- **Server**: 35,281 lines in `index.js` + 21 data modules (~7,000 lines), 106 socket event handlers (`socket.on`), 11 REST endpoints, 28 DB migrations
+- **Next**: Render 8 new enemy atlases (thief_bug/eclipse/dragon_fly/desert_wolf_b/thief_bug_f/toad/plankton/spore), rig remaining ~10 GLBs, inventory performance Phase 1-4, end-to-end audio + ground item testing, PvP/WoE systems, additional zones (Payon, Geffen, Morroc), Niagara template build (Skill VFX Phases 6/7/11)
+- **Roadmap**: See [Strategic_Implementation_Plan_v3.md](05_Development/Strategic_Implementation_Plan_v3.md) and `_journal/Dashboard.md` for live task state.
 
 ---
 

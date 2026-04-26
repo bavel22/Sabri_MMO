@@ -1,0 +1,23 @@
+{
+  "version": 2,
+  "character": "raggler",
+  "cell_size": 1024,
+  "animations": [
+    { "folder": "Idle", "state": "idle", "group": "unarmed" },
+    { "folder": "2hand Idle", "state": "idle", "group": "twohand" },
+    { "folder": "Walking", "state": "walk", "group": "unarmed" },
+    { "folder": "Run With Sword", "state": "walk", "group": "onehand,twohand" },
+    { "folder": "Mutant Punch", "state": "attack", "group": "unarmed" },
+    { "folder": "Stable Sword Inward Slash", "state": "attack", "group": "onehand" },
+    { "folder": "Great Sword Slash", "state": "attack", "group": "twohand" },
+    { "folder": "Standing Draw Arrow", "state": "attack", "group": "bow" },
+    { "folder": "Standing 1H Cast Spell 01", "state": "cast_single", "group": "shared" },
+    { "folder": "Standing 1H Magic Attack 01", "state": "cast_self", "group": "shared" },
+    { "folder": "Standing 2H Magic Area Attack 01", "state": "cast_ground", "group": "shared" },
+    { "folder": "Standing 2H Magic Area Attack 02", "state": "cast_aoe", "group": "shared" },
+    { "folder": "Reaction", "state": "hit", "group": "shared" },
+    { "folder": "Dying", "state": "death", "group": "shared" },
+    { "folder": "Sword And Shield Block", "state": "block", "group": "onehand" },
+    { "folder": "Sitting Idle", "state": "sit", "group": "shared" }
+  ]
+}

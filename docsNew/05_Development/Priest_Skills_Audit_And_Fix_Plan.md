@@ -1,10 +1,10 @@
 # Priest Skills Comprehensive Audit & Fix Plan
 
 > **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Skill_System](../03_Server_Side/Skill_System.md) | [Priest_Class_Research](Priest_Class_Research.md)
-> **Status**: COMPLETED — All audit items resolved
+> **Status**: RESOLVED 2026-04-26 — All 29 audit issues + 3 user-reported UI bugs fixed.
 
-**Date:** 2026-03-16
-**Status:** AUDIT COMPLETE (v2 — deep research verified) — FIXES PENDING
+**Date:** 2026-03-16 (audit) / 2026-04-26 (fixes applied)
+**Status:** ALL FIXES APPLIED. See "Resolution Log" section at end of file.
 **Scope:** All 19 Priest skills (IDs 1000-1018) vs canonical RO Classic pre-renewal
 **Sources:** rAthena `battle.cpp`, `skill.cpp`, `status.cpp`, `pre-re/skill_db.yml` (GitHub master); iRO Wiki Classic; RateMyServer; rAthena issues #275, #947; `ro_ground_effects.js` AOE_RADIUS constants
 
@@ -526,3 +526,43 @@ NOT consumed by: DoT (poison/bleeding), healing, misses, status effects, Shield 
 Duration: infinite until consumed or relog
 ACD: 3000ms (reducible by Bragi). NOT a cooldown.
 ```
+
+---
+
+## RESOLUTION LOG (2026-04-26)
+
+All 29 audit issues + 3 newly-discovered UI bugs were fixed in a single pass.
+
+### Files modified
+- `server/src/ro_skill_data_2nd.js` — 7 skill definitions (Resurrection, Magnus Exorcismus, Lex Aeterna, Impositio Manus, Suffragium, Aspersio, B.S. Sacramenti)
+- `server/src/ro_buff_system.js` — Magnificat case (HP regen multiplier removed)
+- `server/src/index.js` — Magnificat handler, HP regen tick, SP regen tick, Gloria handler, Impositio handler, Sanctuary handler + ground tick, Magnus Exorcismus handler + ground tick, Turn Undead handler, Status Recovery handler, Slow Poison drain comment, SKILL_CATALYSTS, buildFullStatsPayload (spRegen multiplier)
+
+### Critical fixes applied
+- **C1-C5 Turn Undead**: full handler rewrite — formula uses `20*Lv + LUK + INT + BaseLv + 200 - floor(200*HP/MaxHP)`, capped at 700 (70%); boss immunity (always falls through to fail damage); fail damage `BaseLv + INT + Lv*10` (no `*2`) with Holy element modifier via `getElementModifier`. Verified with formula test: Lv10/99/99/30 vs full HP = 42.8%, vs 1 HP = 62.8%, vs 50% HP = 52.8%.
+- **C6 Magnificat HP**: removed `hpRegenMultiplier` from buff system case, handler buff payload, broadcast effects, AND HP regen tick. SP-only doubling preserved per rAthena `status.cpp`.
+- **C7-C11, M10 Magnus Exorcismus**: radius 350→175, +30% renewal-only bonus removed, Shadow element + Undead race removed from filter (Undead element OR Demon race only), duration `4000+(i+1)*1000` → 5-14s, multi-hit per wave (`SkillLv` hits × 100% MATK Holy bundled per event).
+- **C12-C15, C19 Sanctuary**: radius 250→125, Demon race added to damage filter, Holy element modifier applied, 2-cell knockback added via `knockbackTarget`, lifetime `damageBudget = 3 + skillLv` decremented per damage hit (Sanctuary self-destructs when 0), per-tick heal cap removed (heals ALL players in range).
+- **C16 Status Recovery**: cleanse list expanded to `['freeze', 'stone', 'petrifying', 'stun', 'sleep']`.
+- **C17, C18 cast time corrections**: Aspersio `castTime: 0, afterCastDelay: 2000`. B.S. Sacramenti `castTime: 0`.
+
+### Moderate fixes applied
+- **M1 Lex Aeterna**: `cooldown: 0, afterCastDelay: 3000` (Bragi can now reduce it).
+- **M2 Slow Poison drain**: behavior preserved (drain reversed to net-zero) with explanatory comment — functionally equivalent to "skip entirely".
+- **M3 Slow Poison regen**: SP regen tick now allows regen when `slow_poison` active, target is poisoned, AND not also bleeding.
+- **M4 Impositio Manus**: `afterCastDelay: 3000`.
+- **M5 Suffragium**: `afterCastDelay: 2000` per level.
+- **M7 Resurrection**: per-level `afterCastDelay: [0, 1000, 2000, 3000]`.
+- **M8 B.S. Sacramenti**: prerequisite Aspersio Lv5 (was Lv3).
+- **M9 B.S. Sacramenti**: removed Holy Water from `SKILL_CATALYSTS`.
+
+### Newly-discovered bugs fixed (not in original audit)
+- **N1 Gloria UI**: handler now emits `player:stats` after `applyBuff` so the F8 panel shows +30 LUK and downstream derived stats (CRIT, perfect dodge, status resist).
+- **N2 Impositio Manus UI**: handler now emits `player:stats` to the buff target's socket so the F8 ATK display reflects +ATK.
+- **N3 Magnificat UI**: handler now emits `player:stats`. `buildFullStatsPayload` applies `spRegenMultiplier` from `getCombinedModifiers` to the displayed `derived.spRegen` so the panel reflects the actual doubled regen rate.
+
+### Verification
+- All three modified files pass `node --check`.
+- Magnus duration formula: 5,6,7,8,9,10,11,12,13,14 ✓
+- Turn Undead rate (Lv10/99/99/30): 42.8% full HP, 62.8% 1 HP — matches audit predictions ✓
+- Sanctuary damage budget: 4-13 hits at Lv1-10 ✓

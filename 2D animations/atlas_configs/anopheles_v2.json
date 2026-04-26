@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "character": "anopheles",
+  "cell_size": 1024,
+  "animations": [
+    { "folder": "Hover Buzz", "state": "idle", "group": "shared" },
+    { "folder": "Dart Forward", "state": "walk", "group": "shared" },
+    { "folder": "Sting Attack", "state": "attack", "group": "shared" },
+    { "folder": "Swat Flinch", "state": "hit", "group": "shared" },
+    { "folder": "Swatted Death", "state": "death", "group": "shared" }
+  ]
+}

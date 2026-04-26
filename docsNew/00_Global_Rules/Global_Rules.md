@@ -48,8 +48,12 @@
 | Test, verify, Jest, unit test, integration test, validate | `test` or `tester` |
 | Build, compile, UBT, UnrealBuildTool, Live Coding, linker error, compilation error, DLL | `sabrimmo-build-compile` |
 | Art, model, mesh, hair, animation, texture, LOD, costume, skeletal mesh, character appearance, sprite, outfit | `sabrimmo-art` (+ `sabrimmo-ui` if character customization UI) |
-| Audio, BGM, SFX, music, sound, MetaSounds, Sound Class, zone music, ambient, background music | `sabrimmo-audio` (+ `sabrimmo-zone` if per-zone music) |
+| Audio, BGM, SFX, music, sound, MetaSounds, Sound Class, zone music, ambient, background music | `sabrimmo-audio` + `sabrimmo-audio-player` (+ `sabrimmo-zone` if per-zone music, + `sabrimmo-options` if volume sliders) |
+| Monster SFX, enemy attack/die/move/stand sound, body material (soft/hard/metal/undead), frame-sync move SFX, OnAnimCycleComplete, variant SFX array, status:applied sound | `sabrimmo-audio-enemy` + `sabrimmo-audio` + `sabrimmo-enemy` (+ `sabrimmo-debuff` if status sounds) |
+| Player SFX, weapon swing sound, weapon hit sound, per-weapon-type audio, per-class fallback sound, level up chime, heal sound, body material reaction, BGM zone music, zone music transition, ambient zone audio, two-tier resolution, volume slider, mute | `sabrimmo-audio-player` + `sabrimmo-audio` (+ `sabrimmo-zone` if per-zone BGM, + `sabrimmo-options` if volume, + `sabrimmo-combat` if swing on attack) |
 | Icon, skill icon, generate icon, Stable Diffusion, icon art, pixel art icon | `sabrimmo-generate-icons` |
+| UniRig, non-humanoid rigging, auto-rig, insect rigging, multi-legged creature, arbitrary topology, bone placement review, cast_shadow crash, conda env UniRig, flash_attn patch, RTX 5090 cu128, zone-based weights, procedural Blender animation, animate_rocker, rebuild_from_fixed, Tripo3D mesh decimation | `sabrimmo-rig-animate` + `sabrimmo-enemy` + `sabrimmo-sprites` (+ `sabrimmo-3d-to-2d` if rendering sprites after) |
+| Game system design, RO-style formula design, balance tradeoff, stat curve, server-side game logic architecture, new system invention | `agent-architect` + relevant system skills (`sabrimmo-stats`/`sabrimmo-combat`/`sabrimmo-skills`/`enemy-ai`) + `planner` |
 
 ### Game System Skills (sabrimmo-*)
 
@@ -60,7 +64,8 @@
 | **Skills (General)**: skill tree, cast time, cooldown, ACD, after cast delay, SP cost, skill level, skill point, prerequisite, targetType, ro_skill_data, ro_skill_data_2nd, skill handler, skill:use, skill:cast, SKILL_CATALYSTS, gem requirement, catalyst, executeCastComplete, skill:cast_start, skill:cast_end, skill reset | `sabrimmo-skills` | + class-specific skill if specific skill names mentioned |
 | **Buffs**: buff, buff bar, stat modifier, stat bonus, positive status, buff icon, buff duration, buff stacking, applyBuff, removeBuff, HasBuff, buffs:update, ro_buff_system, clearBuffsOnDeath, BUFFS_SURVIVE_DEATH, buff cancel, buff expiry, buff persist | `sabrimmo-buff` | + `sabrimmo-debuff` **ALWAYS** (shared status system) |
 | **Debuffs/Status Effects**: debuff, status effect, stun, freeze, stone curse, petrify, petrification, blind, silence, sleep, curse, poison (status), bleeding, confusion, hallucination, burning, coma, CC, crowd control, disable, immobilize, root, ankle_snare, strip, break, weapon break, armor break, helm break, shield break, divest, applyStatusEffect, removeStatusEffect, status resistance, status immunity, boss immune, ro_status_effects, DoT, periodic damage, damage-break | `sabrimmo-debuff` | + `sabrimmo-buff` **ALWAYS** (shared status system) |
-| **Items/Equipment**: item, equipment, equip, unequip, weapon, armor, shield, garment, shoes, accessory, headgear, inventory, drop, loot, item type, weapon type, weapon level, slot, ro_item_mapping, ro_item_effects, ro_item_groups, getPlayerInventory, equip slot, equip position, item description, identified, unidentified, InventorySubsystem, EquipmentSubsystem, FInventoryItem, inventory:update, inventory:equipment_update, addFullItemToInventory | `sabrimmo-items` | + `sabrimmo-weight` if weight/carry; + `sabrimmo-cards` if card/slot; + `sabrimmo-refine` if refine/upgrade; + `sabrimmo-economy` if buy/sell/trade |
+| **Items/Equipment**: item, equipment, equip, unequip, weapon, armor, shield, garment, shoes, accessory, headgear, inventory, drop, loot, item type, weapon type, weapon level, slot, ro_item_mapping, ro_item_effects, ro_item_groups, getPlayerInventory, equip slot, equip position, item description, identified, unidentified, InventorySubsystem, EquipmentSubsystem, FInventoryItem, inventory:update, inventory:equipment_update, addFullItemToInventory | `sabrimmo-items` | + `sabrimmo-weight` if weight/carry; + `sabrimmo-cards` if card/slot; + `sabrimmo-refine` if refine/upgrade; + `sabrimmo-economy` if buy/sell/trade; + `sabrimmo-item-drop-system` if ground drops/pickup |
+| **Ground Items / Drops / Pickup**: ground item, item drop, drop loot, pickup, walk-to-pickup, ground loot, AGroundItemActor, GroundItemSubsystem, groundItems Map, zoneGroundItems, loot owner, ownership priority, 3/2/2s timers, MVP 10/10/2s, party loot mode, each take, party share, Bubble Gum, HE Bubble Gum, drop rate modifier, 90% cap, Greed (skill), Looter AI, ground item despawn 60s, drop sound tier, drop arc, pickup animation, UBoxComponent click, drag outside inventory, player drop confirmation, ground_item:spawned_batch, ground_item:despawned_batch, ground_item:picked_up | `sabrimmo-item-drop-system` | + `sabrimmo-items` + `sabrimmo-enemy`; + `sabrimmo-party` if loot mode; + `sabrimmo-buff` if Bubble Gum/drop rate; + `sabrimmo-skill-blacksmith` if Greed; + `sabrimmo-options` if drop sound toggles; + `sabrimmo-sprites` if pickup animation |
 | **Weight**: weight, overweight, weight limit, weight threshold, 50%/90%/100% weight, regen block, attack block, skill block, weight:status, cachedWeight, carry capacity, Enlarge Weight Limit, getWeightRatio, STR*30 | `sabrimmo-weight` | + `sabrimmo-items` |
 | **Refine/Upgrade**: refine, upgrade, overupgrade, safe limit, refine ATK, refine DEF, weapon refine, armor refine, Oridecon, Elunium, Phracon, Emveretarcon, refine:request, +2/+3/+5/+7, refine rate, REFINE_EXCLUDE_SKILLS, overrefine, Shield Boomerang refine | `sabrimmo-refine` | + `sabrimmo-items` + `sabrimmo-combat` |
 | **Cards**: card, compound, card bonus, card slot, card effect, card prefix, card suffix, card naming, cardMods, cardModsRight, cardModsLeft, offensive card, defensive card, armor element card, card drain, card autocast, card status proc, autobonus, SCardCompoundPopup, ro_card_effects, ro_card_prefix_suffix, rebuildCardBonuses, processCard, card:compound, GetDisplayName | `sabrimmo-cards` | + `sabrimmo-items` + `sabrimmo-combat` |
@@ -217,6 +222,21 @@ These skill pairs share underlying systems. When EITHER skill's keywords appear,
 | `sabrimmo-map` ↔ `sabrimmo-npcs` | Guide NPC marks display on the world map. |
 | `sabrimmo-damage-numbers` ↔ `sabrimmo-combat` | Damage numbers render results of the combat pipeline. |
 | `sabrimmo-audio-combat` ↔ `sabrimmo-combat` | Combat events trigger hit sounds via the audio subsystem. |
+| `sabrimmo-audio` ↔ `sabrimmo-audio-player` / `sabrimmo-audio-enemy` / `sabrimmo-audio-combat` | Parent audio skill + the three subskills share AudioSubsystem, SoundBase loading, attenuation. Load parent WITH any subskill touched. |
+| `sabrimmo-audio-player` ↔ `sabrimmo-options` | Volume sliders (Master/BGM/SFX/Ambient/UI) persist via UOptionsSaveGame and push to AudioSubsystem components. |
+| `sabrimmo-audio-player` ↔ `sabrimmo-zone` | BGM switches on zone transition via Zone_BGM_Table. Ambient layers also swap per zone. |
+| `sabrimmo-audio-player` ↔ `sabrimmo-login-screen` | Login screen has its own BGM (separate from in-game zone music). |
+| `sabrimmo-audio-enemy` ↔ `sabrimmo-enemy` | Monster SFX timing ties to attack/die/move events on `FEnemyEntry`. Move SFX fires on OnAnimCycleComplete; status sounds fire on status:applied. |
+| `sabrimmo-audio-enemy` ↔ `sabrimmo-debuff` | Status:applied events drive freeze/stun/etc. SFX via audio-enemy. |
+| `sabrimmo-item-drop-system` ↔ `sabrimmo-items` | Ground items become `FInventoryItem` on pickup (preserves refine/cards). |
+| `sabrimmo-item-drop-system` ↔ `sabrimmo-enemy` | Enemy death triggers drop rolls and spawns ground item actors. |
+| `sabrimmo-item-drop-system` ↔ `sabrimmo-party` | Party loot modes (Each Take / Party Share / Individual / Shared) gate pickup eligibility. |
+| `sabrimmo-item-drop-system` ↔ `sabrimmo-buff` | Bubble Gum / HE Bubble Gum multiply drop rates (90% cap). |
+| `sabrimmo-item-drop-system` ↔ `sabrimmo-skill-blacksmith` | Greed is the Blacksmith AoE pickup skill. |
+| `sabrimmo-item-drop-system` ↔ `sabrimmo-options` | Drop sound tier toggles live in OptionsSubsystem (6 tiers). |
+| `sabrimmo-rig-animate` ↔ `sabrimmo-3d-to-2d` | UniRig produces skeletons + animations that feed into the render/pack atlas pipeline. |
+| `sabrimmo-rig-animate` ↔ `sabrimmo-enemy` | Non-humanoid monsters rigged via UniRig render as `SpriteCharacterActor` enemies. |
+| `sabrimmo-rig-animate` ↔ `sabrimmo-sprites` | Rigged animations drive per-animation atlas folders consumed by the sprite runtime system. |
 | `sabrimmo-login-screen` ↔ `sabrimmo-resolution` | Login screen uses deferred widget creation due to standalone viewport timing. |
 | `sabrimmo-esc-menu` ↔ `sabrimmo-login-screen` | Return-to-char-select flow transitions through LoginFlowSubsystem. |
 | `sabrimmo-esc-menu` ↔ `sabrimmo-death` | Respawn button in ESC menu during death state. |
@@ -246,6 +266,17 @@ Load ALL listed skills. When uncertain, load more:
 - "Death penalty not working" → `sabrimmo-death` + `sabrimmo-stats` + `debugger`
 - "MVP not spawning slaves" → `sabrimmo-mvp` + `enemy-ai` + `sabrimmo-monster-skills` + `debugger`
 - "Ground effect not ticking" → `sabrimmo-skills` + `sabrimmo-combat` + class-specific skill + `debugger`
+- "Ground item issues (not dropping, pickup fail, icon missing, floating, sound not playing)" → `sabrimmo-item-drop-system` + `debugger` (+ `sabrimmo-party` if loot modes, + `sabrimmo-buff` if drop rate buff, + `sabrimmo-enemy` if death-triggered drops, + `sabrimmo-options` if drop sounds, + `sabrimmo-items` if pickup-to-inventory)
+- "Drop rate verification or rAthena table check" → `sabrimmo-item-drop-system` + `sabrimmo-items` + `enemy-ai`
+- "Rig + animate a non-humanoid enemy (UniRig)" → `sabrimmo-rig-animate` + `sabrimmo-enemy` + `sabrimmo-sprites` + `sabrimmo-3d-to-2d` + `sabrimmo-art`
+- "UniRig crash / bone placement wrong" → `sabrimmo-rig-animate` + `debugger`
+- "BGM not playing / zone music wrong / BGM loop broken" → `sabrimmo-audio-player` + `sabrimmo-audio` + `debugger` (+ `sabrimmo-zone` if per-zone, + `sabrimmo-login-screen` if login BGM, + `sabrimmo-persistent-socket` if zone change)
+- "Volume slider / mute / audio options not saving" → `sabrimmo-audio-player` + `sabrimmo-options` + `debugger`
+- "Player SFX (swing, hit, level up, heal, equip, potion, UI click)" → `sabrimmo-audio-player` + `sabrimmo-audio` + target system skill (`sabrimmo-combat` / `sabrimmo-items` / `sabrimmo-stats` / `sabrimmo-ui`)
+- "Monster SFX (attack, die, move, stand, body material, status)" → `sabrimmo-audio-enemy` + `sabrimmo-audio` + `sabrimmo-enemy` + `debugger` (+ `sabrimmo-debuff` if status sounds)
+- "Combat hit / skill impact SFX" → `sabrimmo-audio-combat` + `sabrimmo-audio-player` + `sabrimmo-audio` (+ `sabrimmo-skills-vfx` if skill impact, + `sabrimmo-combat` if auto-attack)
+- "Ambient zone audio (water, wind, birds)" → `sabrimmo-audio-player` + `sabrimmo-audio` + `sabrimmo-zone`
+- "Design a new game system (balance, RO-style formula, server logic)" → `agent-architect` + `planner` + relevant system skill (`sabrimmo-stats` / `sabrimmo-combat` / `sabrimmo-skills` / `enemy-ai`) + `full-stack`
 
 See `CLAUDE.md` → "Multi-System Tasks" for 60+ additional examples.
 

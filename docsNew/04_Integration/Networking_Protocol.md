@@ -1,6 +1,7 @@
 # Networking Protocol
 
 > **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Multiplayer_Architecture](../01_Architecture/Multiplayer_Architecture.md) | [Event_Reference](../06_Reference/Event_Reference.md) | [Authentication_Flow](Authentication_Flow.md)
+> **Last verified**: 2026-04-15 — 106 `socket.on(...)` handlers in `server/src/index.js`, 11 REST endpoints.
 
 ## Overview
 
@@ -9,6 +10,15 @@ Sabri_MMO uses two networking protocols:
 2. **Socket.io** — Real-time game events (via SocketIOClient UE5 plugin)
 
 Both communicate over TCP port 3001 to the same Node.js server.
+
+### `enemy:spawn` payload (updated 2026-04-15)
+
+The `enemy:spawn` broadcast carries optional sprite metadata:
+- `spriteClass` — atlas manifest name (e.g., `"skeleton"`). Omit / `null` for default BP mesh.
+- `weaponMode` — `0` unarmed / `1` onehand / `2` twohand / `3` bow.
+- `spriteTint` — optional `[r,g,b]` multiplier for recolored variants sharing a parent atlas. Applied on spawn **and on respawn** via `SetLayerTint(Body, ...)`.
+
+All 4 emit paths (`spawnEnemy`, respawn, `player:join` loop, `zone:ready` loop) send the same shape. The `zone:ready` path is the one the client actually consumes — during `player:join`, the client is in `OpenLevel` and subsystems drop events. See `docsNew/06_Reference/Event_Reference.md` → enemy:spawn for the full example payload.
 
 ## JSON Communication Format
 

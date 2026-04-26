@@ -1,7 +1,7 @@
 # Alchemist Skills Audit & Fix Plan
 
 > **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Skill_System](../03_Server_Side/Skill_System.md) | [Alchemist_Class_Research](Alchemist_Class_Research.md)
-> **Status**: COMPLETED — All audit items resolved
+> **Status**: RESOLVED 2026-04-26 — All 13 original audit fixes confirmed + 2 newly-discovered bugs fixed.
 
 **Date:** 2026-03-16
 **Status:** ALL 13 FIXES APPLIED (7 initial + 6 from deep research)
@@ -445,3 +445,64 @@ if (finalDemoDmg > 0 && enemy.activeBuffs) {
 | Homunculus evolution | 1812+ | Needs Stone of Sage, evolved forms | Phase 10+ |
 | Homunculus skill casting | All 4 types | Needs homunculus skill execution engine | Phase 10+ |
 | Homunculus client actor | 1813 | Needs UE5 companion actor, HP bar, follow AI | Phase 10+ |
+
+---
+
+## RESOLUTION LOG (2026-04-26)
+
+End-to-end re-audit confirmed all 13 audit fixes are present in code. Re-audit also surfaced 2 new bugs that the original audit missed (both broken since initial implementation).
+
+### Confirmed fixed (audit items, with verification line numbers)
+
+| Item | Where | Verified at |
+|------|-------|-------------|
+| BUG 1 Demonstration prereq Lv4 | `ro_skill_data_2nd.js:259` | `prerequisites: [{ skillId: 1800, level: 4 }]` ✓ |
+| BUG 2 Demonstration ATK 120-200 | `ro_skill_data_2nd.js:259` | `effectValue: 120+i*20` ✓ |
+| BUG 3 Acid Terror Pneuma check | `index.js:22619-22624` | `getGroundEffectsAtPosition` Pneuma check, sets damage=0, status applies anyway ✓ |
+| BUG 4 Demonstration Lex Aeterna in tick | `index.js:30750-30758` | Per-target Lex Aeterna check + consume in ground tick ✓ |
+| Catalyst IDs corrected | `index.js:394-399` SKILL_CATALYSTS | Acid Bottle=7136, Bottle Grenade=7135, Glistening Coat=7139 ✓ |
+| Acid Terror bleeding 120s | `index.js:22663` | `duration: 120000` (was 60000) ✓ |
+| Armor break 30s→120s | `index.js:22651` | `duration: 120000` ✓ |
+| Demonstration tickInterval 1000ms | `index.js:22734` | Per rAthena Unit/Interval ✓ |
+| CP Helm SP 25 (pre-renewal) | `ro_skill_data_2nd.js:265` | `spCost: 25` ✓ |
+| Potion Pitcher VIT*2 + INT*2 | `index.js:22820-22822` | Hercules formula with stat multiplier ✓ |
+| Inc HP Recovery in Potion Pitcher | `index.js:22823-22826` | `(100 + smRecoveryLv*10) / 100` ✓ |
+| Potion Research in inventory:use | `index.js:24604-24607, 24618-24620` | Applies to both HP and SP potions ✓ |
+| Pharmacy crafting | `index.js:22933+` | 14 recipes, success rate scaled to 0-100% ✓ |
+| Summon Flora | `index.js:22988+` | 5 plant types, runtime registry, healer flag ✓ |
+| Summon Marine Sphere | `index.js:23058+` | Max 3, 30s timer, fire 11x11 detonation ✓ |
+| Homunculus system | `index.js:23108+`, `ro_homunculus_data.js`, `add_homunculus_table.sql` | 4 types, hunger/intimacy, EXP sharing, evolution, 8 skills ✓ |
+
+### Newly-discovered bugs (FIXED 2026-04-26)
+
+#### N1 — `armor_break` buff applied but never read
+
+**File:** `server/src/index.js:22651` + `server/src/ro_buff_system.js`
+
+Acid Terror's armor break chance roll succeeds and applies a buff named `armor_break` with `hardDefReduction: 100`, but `getBuffModifiers` had no `case 'armor_break'` — the buff data was silently ignored. Net effect: armor break did nothing despite the proc roll firing. Audit verified the chance roll but not the effect.
+
+**Fix:**
+1. Added `case 'armor_break'` to `ro_buff_system.js` — `mods.hardDefReduction += buff.hardDefReduction`
+2. Changed Acid Terror handler to use the fraction format `hardDefReduction: 1.0` (1.0 = 100% reduction → enemy hard DEF effectively 0, matching RO Classic where armor break removes all armor DEF)
+
+#### N2 — `weapon_break` buff applied but never read + wrong value format
+
+**File:** `server/src/index.js:30782` + `server/src/ro_buff_system.js`
+
+Same root cause as N1 for Demonstration tick. Additionally, the buff value was `atkReduction: 50`, which (had any handler existed) would have used the wrong scale — `strip_weapon` (the existing precedent) uses fraction format `0.25 = 25%`. A naive case addition would have done `1 - 50 = -49`, inverting damage.
+
+**Fix:**
+1. Added `case 'weapon_break'` to `ro_buff_system.js` — `mods.atkMultiplier *= (1 - buff.atkReduction)`
+2. Changed Demonstration tick to use `atkReduction: 0.5` (0-1 fraction format, 50% ATK reduction on the affected entity)
+
+### Files modified (this pass)
+
+- `server/src/ro_buff_system.js` — Added `armor_break` + `weapon_break` cases
+- `server/src/index.js` — Acid Terror buff value (1.0 fraction), Demonstration tick buff value (0.5 fraction)
+- `docsNew/05_Development/Alchemist_Skills_Audit_And_Fix_Plan.md` — header + this resolution log
+
+### Verification
+
+- ✅ `node --check server/src/index.js` passes
+- ✅ `node --check server/src/ro_buff_system.js` passes
+- ✅ Both buffs now have handlers using the same fraction format pattern as `strip_weapon` / `strip_shield`

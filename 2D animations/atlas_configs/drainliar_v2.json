@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "character": "drainliar",
+  "cell_size": 1024,
+  "animations": [
+    { "folder": "Wing Beat Hover", "state": "idle", "group": "shared" },
+    { "folder": "Swoop Flight", "state": "walk", "group": "shared" },
+    { "folder": "Dive Bite", "state": "attack", "group": "shared" },
+    { "folder": "Wing Recoil", "state": "hit", "group": "shared" },
+    { "folder": "Plummet Death", "state": "death", "group": "shared" }
+  ]
+}

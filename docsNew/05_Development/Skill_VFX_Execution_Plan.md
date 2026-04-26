@@ -1,5 +1,11 @@
 # Skill VFX Execution Plan — Step-by-Step
 
+> **STATUS (as of 2026-04-15)**
+> - **Complete**: Phases 0, 3, 4, 5 (partial), 8, 9, 10 — 97+ VFX configs live in `SkillVFXSubsystem`, casting circle actor shipped, socket event integration done, multiplayer broadcast done.
+> - **Pending**: Phases 6 (Niagara template creation), 7 (texture/asset generation), 11 (in-game testing pass).
+> - **Deferred**: Phase 1 (ChiR24 full automation) — blocked, fallback Path B/C in use instead.
+> - **Open VFX bugs** are tracked in `_journal/Dashboard.md` → "VFX Bugs to fix" (Frost Diver persistence, frozen-enemy movement, Bolt impact VFX, Fireball multiplayer, Soul Strike travel, Stone Curse color).
+
 **Created**: 2026-03-05
 **Purpose**: Single source of truth for Claude Code to follow. Every step is explicit. No gaps.
 **Strategy**: Try full automation (ChiR24 MCP) → Fall back to hybrid (existing MCP + Python + manual) → All C++ written by Claude

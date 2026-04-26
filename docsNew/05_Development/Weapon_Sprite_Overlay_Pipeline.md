@@ -205,11 +205,23 @@ UE5 caches textures in `.uasset` files. If you replace the source PNGs on disk, 
    - `swordsman_m_fighting_idle.*` (removed animation)
    - `weapon_dagger_*.*` (wrong naming — must be weapon_1)
 4. **Open UE5** — it will auto-import the PNGs as new textures
-5. **Set texture properties** on all new textures:
-   - Compression: **UserInterface2D** (no DXT artifacts)
-   - Filter: **Nearest** (no blur)
-   - Mip Gen Settings: **NoMipmaps**
+5. **Set texture properties** on all new textures (REQUIRED — all six settings):
+   - Compression: **BC7** (`TC_BC7`)
+   - Filter: **Nearest** (`TF_NEAREST`) — no blur
+   - Mip Gen Settings: **NoMipmaps** (`TMGS_NO_MIPMAPS`)
    - Never Stream: **On**
+   - sRGB: **Off** (linear color so cel-shade ramp stays accurate)
+   - **Texture Group: UI** (`TEXTUREGROUP_UI`) — sprite atlases are UI textures, not world textures
+
+   The proven Python block (reusable in all import scripts):
+   ```python
+   texture.set_editor_property("compression_settings", unreal.TextureCompressionSettings.TC_BC7)
+   texture.set_editor_property("filter", unreal.TextureFilter.TF_NEAREST)
+   texture.set_editor_property("mip_gen_settings", unreal.TextureMipGenSettings.TMGS_NO_MIPMAPS)
+   texture.set_editor_property("never_stream", True)
+   texture.set_editor_property("srgb", False)
+   texture.set_editor_property("lod_group", unreal.TextureGroup.TEXTUREGROUP_UI)
+   ```
 
 ---
 

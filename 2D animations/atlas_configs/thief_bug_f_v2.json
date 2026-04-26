@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "character": "thief_bug_f",
+  "cell_size": 1024,
+  "animations": [
+    { "folder": "Idle Fidget", "state": "idle", "group": "shared" },
+    { "folder": "Skitter Walk", "state": "walk", "group": "shared" },
+    { "folder": "Claw Swipe", "state": "attack", "group": "shared" },
+    { "folder": "Flinch Reel", "state": "hit", "group": "shared" },
+    { "folder": "Crumple Death", "state": "death", "group": "shared" }
+  ]
+}

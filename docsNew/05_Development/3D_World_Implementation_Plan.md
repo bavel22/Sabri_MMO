@@ -1,5 +1,11 @@
 # 3D World Implementation Plan — Ragnarok Online Classic Style
 
+> **STATUS (as of 2026-04-15)**
+> - **Phase 0 — Post-Process Foundation**: **IMPLEMENTED** in C++ (PostProcessSubsystem, CastingCircleActor, blob shadow material, custom stencil). Runtime materials auto-create if editor assets are missing.
+> - **Ground/Material system — SHIPPED (out-of-plan, 2026-03-30 → 2026-04-01)**: 1,061 AI + RO textures, 17 material versions, 2,700+ variants, DBuffer decals (91), Landscape Grass V3 (60 sprites, 13 zones), 80+ scripts. See `_meta/01–05_*` guides and `/sabrimmo-landscape`, `/sabrimmo-ground-textures`, `/sabrimmo-material-decals`, `/sabrimmo-environment-grass` skills.
+> - **Phases 1–7 — NOT STARTED**: terrain sculpting / AI-generated prop assembly / per-zone build-out. Blocked on editor work (Prontera first, then Payon/Geffen/Morroc). C++ foundation is ready to consume assets as they land.
+> - **Rendering decision (2026-04-06)**: sprite-vs-world uses BLEND_Translucent + bDisableDepthTest + binary alpha + per-pixel depth occlusion (post-process cutout via PPI_CustomStencil). See `memory/sprite-rendering-2026-04-06.md`.
+
 ## Context
 
 Sabri_MMO has a fully working 2D sprite system (characters, enemies, equipment layers) rendered as billboards in a 3D UE5 world. The 3D world itself is currently placeholder geometry (basic cubes/planes from LevelPrototyping). This plan adds the visual 3D environment — cel-shaded post-processing, stylized materials, terrain, buildings, props, and dungeon kits — to make the world look like Ragnarok Online Classic with an "HD-2D Plus" aesthetic.

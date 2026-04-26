@@ -1,7 +1,12 @@
-# Map System Implementation Plan — Minimap, World Map & Navigation
+# Map System Implementation Reference
 
-> Full implementation plan for RO Classic-style map UI in Sabri_MMO.
-> Research source: `RagnaCloneDocs/16_Map_Minimap_WorldMap_Complete_Research.md`
+> **STATUS: ALL 9 PHASES COMPLETE (2026-04-02)**
+> Minimap (134x134 draggable, SceneCapture2D, 5 zoom × 3 opacity), World Map (12x8 grid, 62 zones), Loading Screen (Ken Burns + sparkles + progress bar), Guide NPC marks, `/where` command, preferences persistence — all shipped.
+> ~1,429 lines across 6 new + 2 modified files, 5 socket events.
+> Feature summary: `_journal/Dashboard.md` → Map system line. Memory: `memory/map-system.md`. Skill: `/sabrimmo-map`.
+> **Follow-up needed**: generate the world map illustration and loading-screen art (prompts ready in `_prompts/world_map_generation_prompt.md`, `_prompts/loading_screen_generation_prompts.md`).
+
+> Original plan source: `RagnaCloneDocs/16_Map_Minimap_WorldMap_Complete_Research.md`
 > Existing zone system: 4 zones (prontera, prontera_south, prontera_north, prt_dungeon_01) with full warp/Kafra/transition support.
 
 ---

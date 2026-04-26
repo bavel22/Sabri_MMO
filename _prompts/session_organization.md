@@ -5,7 +5,7 @@ Use at the start of a new day to organize yesterday's work.
 ## Prompt
 
 ```
-can you look at the work done yesterday and organize it. record the sessions, what was the goal and accomplished/done in each sessions, and add the blockers to the proper locations so we can come back to them later, file any prompts recorded away, fill in the session details sections, and add the next sessions to the list of things to do. anything that wasnt completed should be added to the next day's daily log. make sure you create the next day log
+ i didnt update daily log for a few days can you look at the work done yesterday and organize it.can you look at the work done yesterday and organize it. can you looka the sessions and see what i worked on and record everything for me? record the sessions, what was the goal and accomplished/done in each sessions, and add the blockers to the proper locations so we can come back to them later, file any prompts recorded away, fill in the session details sections, and add the next sessions to the list of things to do. anything that wasnt completed should be added to the next day's daily log. make sure you create the next day log
 ```
 
 ## What It Does

@@ -314,6 +314,9 @@ void UEnemySubsystem::HandleEnemySpawn(const TSharedPtr<FJsonValue>& Data)
 				Existing->SpriteActor->EnableClickCollision();
 				if (Existing->SpriteActor->IsBodyReady())
 					Existing->SpriteActor->SetAnimState(ESpriteAnimState::Idle);
+				// Re-apply tint (persists on MID, but refresh in case template changed)
+				if (Existing->SpriteTint != FLinearColor::White)
+					Existing->SpriteActor->SetLayerTint(ESpriteLayer::Body, Existing->SpriteTint);
 			}
 
 			if (!Existing->SpriteClass.IsEmpty())
@@ -367,6 +370,35 @@ void UEnemySubsystem::HandleEnemySpawn(const TSharedPtr<FJsonValue>& Data)
 	Obj->TryGetNumberField(TEXT("weaponMode"), WeaponModeD);
 	int32 WeaponMode = (int32)WeaponModeD;
 
+	// Parse optional spriteTint [r, g, b] array (0-1 multipliers for recolored variants)
+	FLinearColor SpriteTint = FLinearColor::White;
+	const TArray<TSharedPtr<FJsonValue>>* TintArray = nullptr;
+	if (Obj->TryGetArrayField(TEXT("spriteTint"), TintArray) && TintArray && TintArray->Num() >= 3)
+	{
+		SpriteTint.R = (float)(*TintArray)[0]->AsNumber();
+		SpriteTint.G = (float)(*TintArray)[1]->AsNumber();
+		SpriteTint.B = (float)(*TintArray)[2]->AsNumber();
+		SpriteTint.A = 1.0f;
+	}
+
+	// Parse size → sprite scale. Medium (default) = 1.0, small = 0.5, large = 1.5.
+	FString Size;
+	Obj->TryGetStringField(TEXT("size"), Size);
+	float SpriteScale = 1.0f;
+	if (Size.Equals(TEXT("small"), ESearchCase::IgnoreCase))      SpriteScale = 0.5f;
+	else if (Size.Equals(TEXT("large"), ESearchCase::IgnoreCase)) SpriteScale = 1.5f;
+
+	// Optional per-template override (e.g. whisper_boss = 0.75 to be 1.5× regular whisper).
+	double SpriteScaleOverrideD = 0;
+	if (Obj->TryGetNumberField(TEXT("spriteScale"), SpriteScaleOverrideD) && SpriteScaleOverrideD > 0)
+	{
+		SpriteScale = (float)SpriteScaleOverrideD;
+	}
+
+	// Parse canMove — stationary enemies (plants, crystals, eggs) must skip attack lunge.
+	bool bCanMove = true;
+	Obj->TryGetBoolField(TEXT("canMove"), bCanMove);
+
 	UE_LOG(LogEnemySubsystem, Warning, TEXT("Enemy %d (%s) spriteClass='%s' weaponMode=%d"),
 		EnemyId, *Name, *SpriteClass, WeaponMode);
 
@@ -385,6 +417,10 @@ void UEnemySubsystem::HandleEnemySpawn(const TSharedPtr<FJsonValue>& Data)
 		}
 
 		Sprite->SetBodyClass(SpriteClass);
+		if (SpriteTint != FLinearColor::White)
+			Sprite->SetLayerTint(ESpriteLayer::Body, SpriteTint);
+		if (!FMath::IsNearlyEqual(SpriteScale, 1.0f))
+			Sprite->SetActorScale3D(FVector(SpriteScale));
 		Sprite->EnableClickCollision();
 		Sprite->ServerTargetPos = Pos;
 		Sprite->bUseServerMovement = true;
@@ -428,6 +464,8 @@ void UEnemySubsystem::HandleEnemySpawn(const TSharedPtr<FJsonValue>& Data)
 	Entry.EnemyName = Name;
 	Entry.SpriteClass = SpriteClass;
 	Entry.WeaponMode = WeaponMode;
+	Entry.SpriteTint = SpriteTint;
+	Entry.bCanMove = bCanMove;
 	Entry.EnemyLevel = Level;
 	Entry.Health = HealthD;
 	Entry.MaxHealth = MaxHealthD;
@@ -797,7 +835,8 @@ void UEnemySubsystem::HandleEnemyAttack(const TSharedPtr<FJsonValue>& Data)
 				float MaxLunge = FMath::Max(0.f, DistToTarget - MinClearance);
 				float ActualLunge = FMath::Min(LungeDistance, MaxLunge);
 
-				if (ActualLunge >= 5.f && DistToTarget <= MeleeThreshold)
+				// Stationary enemies (plants, crystals, eggs) never lunge — they thrash in place.
+				if (Entry->bCanMove && ActualLunge >= 5.f && DistToTarget <= MeleeThreshold)
 				{
 					// ---- Melee: wind-up + lunge toward target ----
 					FVector Dir = (TargetPos - EnemyPos).GetSafeNormal2D();
@@ -834,24 +873,46 @@ void UEnemySubsystem::HandleEnemyAttack(const TSharedPtr<FJsonValue>& Data)
 				}
 				else if (DistToTarget > MeleeThreshold)
 				{
-					// ---- Ranged: ground vine decal at target's feet ----
-					// Spawns a temporary RootTendril/CrackedEarth decal that fades after 0.8s
-					UMaterialInterface* VineDecalMat = Cast<UMaterialInterface>(
-						StaticLoadObject(UMaterialInterface::StaticClass(), nullptr,
-							TEXT("/Game/SabriMMO/Materials/Environment/Decals/Instances/MI_T_Decal_RootTendril.MI_T_Decal_RootTendril")));
-					if (!VineDecalMat)
-						VineDecalMat = Cast<UMaterialInterface>(StaticLoadObject(
-							UMaterialInterface::StaticClass(), nullptr,
-							TEXT("/Game/SabriMMO/Materials/Environment/Decals/Instances/MI_T_Decal_CrackedEarth.MI_T_Decal_CrackedEarth")));
+					// ---- Ranged: billboard sprite burst at target's feet ----
+					// Spawns a temporary sprite actor that's visible from any camera angle.
+					// Uses the attacker's own sprite class so it looks like the enemy's
+					// "energy" erupting at the target. Scales up then auto-destroys.
+					UE_LOG(LogEnemySubsystem, Warning, TEXT("Ranged attack from enemy %d at dist=%.0f — spawning ground strike sprite"),
+						EnemyId, DistToTarget);
 
-					if (VineDecalMat)
+					FActorSpawnParameters StrikeParams;
+					StrikeParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+					// Spawn at player's feet
+					FVector StrikePos = TargetPos;
+					StrikePos.Z -= 80.f; // offset below player center to feet level
+
+					ASpriteCharacterActor* StrikeSprite = GetWorld()->SpawnActor<ASpriteCharacterActor>(
+						StrikePos, FRotator::ZeroRotator, StrikeParams);
+
+					if (StrikeSprite)
 					{
-						FVector DecalSize(80.f, 80.f, 80.f);
-						FRotator DecalRot(-90.f, FMath::FRandRange(0.f, 360.f), 0.f);
-						UGameplayStatics::SpawnDecalAtLocation(
-							GetWorld(), VineDecalMat, DecalSize,
-							TargetPos, DecalRot, 0.8f);
+						// Use the attacking enemy's sprite class for visual consistency
+						StrikeSprite->SetBodyClass(Entry->SpriteClass);
+						StrikeSprite->SetAnimState(ESpriteAnimState::Attack);
+						StrikeSprite->SetActorScale3D(FVector(0.6f)); // smaller than the actual enemy
+
+						// Auto-destroy after attack animation plays
+						FTimerHandle DestroyTimer;
+						TWeakObjectPtr<AActor> WeakStrike(StrikeSprite);
+						GetWorld()->GetTimerManager().SetTimer(DestroyTimer,
+							[WeakStrike]()
+							{
+								if (WeakStrike.IsValid())
+									WeakStrike->Destroy();
+							},
+							0.8f, false);
 					}
+				}
+				else
+				{
+					UE_LOG(LogEnemySubsystem, Log, TEXT("Enemy %d attack: dist=%.0f, lunge=%.1f, threshold=%.0f — no lunge (too close)"),
+						EnemyId, DistToTarget, ActualLunge, MeleeThreshold);
 				}
 			}
 		}

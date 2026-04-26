@@ -1,11 +1,11 @@
 # Assassin Skills Comprehensive Audit & Fix Plan
 
 > **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Skill_System](../03_Server_Side/Skill_System.md) | [Assassin_Class_Research](Assassin_Class_Research.md)
-> **Status**: COMPLETED — All audit items resolved
+> **Status**: RESOLVED 2026-04-26 — All 10 BUGS + 4 of 5 ISSUES + 2 newly-discovered bugs fixed (I3 intentionally deferred per Priority 8).
 
-**Date:** 2026-03-16
+**Date:** 2026-03-16 (audit) / 2026-04-26 (fixes confirmed + 2 new bugs fixed)
 **Scope:** All 12 Assassin skills (IDs 1100-1111) — Full RO Classic pre-renewal compliance audit
-**Status:** AUDIT COMPLETE — Fixes pending
+**Status:** ALL ACTIONABLE FIXES APPLIED. See "Resolution Log" section at end of file.
 **Sources:** rAthena pre-re source (authoritative), iRO Wiki Classic, RateMyServer, Divine Pride
 
 ---
@@ -609,3 +609,67 @@ In pre-renewal, Double Attack provides a passive `(1 + 2*SkillLv)%` additional A
 | P6: Venom Splasher (B7,B8,I5) | 15 min | ~15 lines |
 | P7: Minor fixes (I1,I2,I4) | 10 min | ~10 lines |
 | **Total** | **~62 min** | **~64 lines** |
+
+---
+
+## RESOLUTION LOG (2026-04-26)
+
+End-to-end re-audit of all 12 Assassin skills against current code confirmed every BUG and ISSUE from the original audit was fixed (except I3, intentionally deferred per Priority 8). The re-audit also surfaced 2 new bugs not in the original report — both fixed in this pass.
+
+### Confirmed fixed (audit items)
+
+| Item | Where | Verified at |
+|------|-------|-------------|
+| B1 Sonic Blow damage 350-800% | `ro_skill_data_2nd.js:197` | `effectValue: 350+i*50` ✓ |
+| B2 Enchant Poison endow names | `index.js:18909` (EP) + Aspersio handler | `endow_fire/water/wind/earth` ✓ |
+| B3 Katar CRI doubled | `ro_damage_formulas.js:311` | `if (weaponType === 'katar') critical *= 2` ✓ (after all CRI bonuses) |
+| B4 Poison React Mode B full Envenom | `index.js:33776-33782` | `calculateSkillDamage(... 100, ..., 'poison')` + 75 flat ✓ |
+| B5 PR envenom limits `floor(Lv/2)` | `index.js:18950` | `Math.floor(learnedLevel / 2)` ✓ |
+| B6 Venom Dust radius=50, ground=60s, poison=5×Lv | `index.js:19004,19012,19016` + tick `30967` | All three confirmed ✓ |
+| B7 Venom Splasher uses weapon element | `ro_skill_data_2nd.js:206` + `index.js:27473` | `element: 'neutral'` + `skillElement: null` ✓ |
+| B8 VS damage split by inner-3×3 count | `index.js:27457-27463` | `vsSplitDivisor = max(1, innerCount)` ✓ |
+| B9 Throw Venom Knife SP=15 | `ro_skill_data_2nd.js:207` | `spCost: 15` ✓ |
+| B10 VS cooldown 8000-12500ms | `ro_skill_data_2nd.js:206` | `cooldown: 7500+500*(i+1)` ✓ |
+| I1 TVK Envenom guard | `index.js:19199` | `if (envenomLv > 0)` before poison roll ✓ |
+| I2 TVK weight cache update | `index.js:19153` | `await updatePlayerWeightCache()` ✓ |
+| I4 EP weapon switch removal | `inventory:equip` handler | Equip + unequip both clear endow buffs ✓ |
+| I5 VS Poison React passive bonus | `index.js:27440-27443` | `vsEffectVal += 30 * prLv` ✓ |
+
+### Intentionally deferred (audit Priority 8)
+
+- **I3 Grimtooth melee/ranged classification** — Lv1-2 should be melee (Safety Wall blocks), Lv3-5 should be ranged (Pneuma blocks). Per the audit's Priority 8: "Wire when Safety Wall/Pneuma blocking is active". Current Grimtooth handler does not pass `isRanged` or check Safety Wall / Pneuma ground effects. Low impact.
+
+### Newly-discovered bugs (FIXED 2026-04-26)
+
+#### N1 — Sonic Acceleration HIT bonus silently dropped
+
+**File:** `server/src/index.js:18674`
+
+The Sonic Blow handler attempted to apply a +50% multiplicative HIT bonus from the Sonic Acceleration quest passive by setting `sbSkillOpts.hitBonus = 1.5`. However, `calculatePhysicalDamage` does NOT recognize a `hitBonus` field — it only accepts `skillHitBonus` (flat additive to HIT) and `hitRatePercent` (multiplicative % to hit rate). The assignment was silently dropped, so Sonic Accel only applied its +50% damage portion (line 18663) but the +50% HIT was a no-op.
+
+**Fix:** Replaced with `sbSkillOpts.hitRatePercent = 50;` so `calculateHitRate` applies `hitRate * (100 + 50) / 100` per the formula at `ro_damage_formulas.js:406-407`.
+
+#### N2 — Poison React Mode B can proc once at Lv1 (envenomLimit=0)
+
+**File:** `server/src/index.js:33770`
+
+At PR Lv1, `envenomLimit = floor(1/2) = 0`. The original Mode B logic ran the 50% proc roll FIRST, then incremented `envenomUsed` to 1 and checked `1 >= 0` → removed the buff. Net effect: Lv1 PR could trigger Mode B exactly once before being removed. rAthena spec: Mode B should NEVER trigger at Lv1.
+
+**Fix:** Gated the proc roll behind `envenomCountersLeft > 0`:
+```js
+const envenomCountersLeft = (prBuff.envenomLimit || 0) - (prBuff.envenomUsed || 0);
+if (envenomCountersLeft > 0 && Math.random() < 0.5 && enemy.health > 0) { ... }
+```
+
+Verified per-level: Lv1 = NO Mode B. Lv2-3 = 1 use. Lv4-5 = 2 uses. ... Lv10 = 5 uses.
+
+### Files modified (this pass)
+
+- `server/src/index.js` — Sonic Blow handler (N1 fix), Poison React Mode B handler (N2 fix)
+- `docsNew/05_Development/Assassin_Skills_Audit_And_Fix_Plan.md` — header + this resolution log
+
+### Verification
+
+- ✅ `node --check server/src/index.js` passes
+- ✅ Per-level PR Mode B counter test: Lv1 NO, Lv2-3 = 1, Lv4-5 = 2, ..., Lv10 = 5 (matches rAthena `floor(Lv/2)`)
+- ✅ Sonic Accel HIT scaling: base 80% → 95% (capped); base 40% → 60%

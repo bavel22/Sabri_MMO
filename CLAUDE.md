@@ -157,13 +157,18 @@ Widget prefix: `WBP_`. Blueprint prefix: `BP_`. Interface prefix: `BPI_`.
 
 **BEFORE starting any task, ALWAYS load the relevant skills and documentation for that task.** This project is large and growing — context from skills and docs prevents regressions, missed patterns, and architectural drift.
 
+**Rule (from user's standing instruction)**: Prefer loading MORE skills than strictly necessary over missing ones. A false-positive skill load costs only context window; a missing skill costs correctness — wrong pattern, silent regression, or architectural drift. When uncertain whether a skill applies, LOAD IT. When two skills might overlap, load BOTH.
+
 ### How to Load Context
 
-1. **Identify which systems the task touches** (UI? Server? VFX? Zones? Combat? Stats? Items? etc.)
+1. **Identify ALL systems the task might touch** (UI? Server? VFX? Zones? Combat? Stats? Items? Audio? Persistence? Socket? Sprite rendering?) — err on the side of "touches more than I think"
 2. **Load the matching skill(s)** using the Skill tool — skills contain architectural rules, file locations, naming conventions, and common patterns that MUST be followed
-3. **Read relevant source files** before modifying them — never assume code structure
-4. **Check `docsNew/`** for system-specific documentation when the skill references it
-5. **Check `RagnaCloneDocs/`** for RO Classic game design reference when implementing new game systems
+3. **Also load overlapping-skill partners** from `docsNew/00_Global_Rules/Global_Rules.md` → "Overlapping Skills — ALWAYS Load Both" table
+4. **Read relevant source files** before modifying them — never assume code structure
+5. **Check `docsNew/`** for system-specific documentation when the skill references it
+6. **Check `RagnaCloneDocs/`** for RO Classic game design reference when implementing new game systems
+
+**If the task is ambiguous** (single sentence, no file paths): load 3-5 likely-relevant skills up front, read the request's target files, then refine. Do NOT start editing until skills and files are loaded.
 
 ### Skill Selection Guide
 
@@ -254,6 +259,7 @@ Widget prefix: `WBP_`. Blueprint prefix: `BP_`. Interface prefix: `BPI_`.
 | Art, models, animations, hair | `/sabrimmo-art` | `RagnaCloneDocs/14_Art_Visual_Style.md` |
 | 3D-to-2D sprite pipeline, Blender render, Tripo3D | `/sabrimmo-3d-to-2d` | `2D animations/SESSION_CONTEXT.md` |
 | New feature planning | `/planner` | `RagnaCloneDocs/00_Master_Build_Plan.md` |
+| Game system design, RO-style formula design, balance tradeoffs, server-side game logic architecture | `/agent-architect` + `/planner` | `RagnaCloneDocs/00_Master_Build_Plan.md`, `RagnaCloneDocs/01_Stats_Leveling_JobSystem.md` |
 | Complex architecture decisions | `/opus-45-thinking` | `/project-docs` |
 | Full project context dump | `/project-docs` | All of `docsNew/` |
 | Code style, refactoring, audits | `/code-quality` | — |
@@ -330,8 +336,19 @@ Many tasks touch multiple systems. **Load ALL relevant skills.** Examples:
 
 ## Personal Skills Available
 
-74 sabrimmo-* skills (20 class + 54 system) + 17 utility skills. Invoke with `/skill-name`. Located at `C:/Users/pladr/.claude/skills/`.
+76 sabrimmo-* skills (20 class + 56 system) + 17 utility skills = **93 total**. Invoke with `/skill-name`. Located at `C:/Users/pladr/.claude/skills/`.
+
+**Recent additions** (if not in the Skill Selection Guide above, load them when their domain comes up):
+- `/sabrimmo-audio-enemy` — monster SFX, body material layering, frame-sync move SFX, status sounds
+- `/sabrimmo-audio-player` — player SFX (weapon swing/hit/fallback/level-up/heal), BGM zone music, ambient layers, volume options
+- `/sabrimmo-audio-combat` — supplementary combat hit thunks / skill impact SFX
+- `/sabrimmo-item-drop-system` — ground items, drop rolls, pickup, party loot modes, ownership priority, Greed, Looter AI
+- `/sabrimmo-rig-animate` — UniRig non-humanoid rigging + procedural Blender animation pipeline
+- `/agent-architect` — game system design / RO-style formula design / balance tradeoffs (broad AI+systems reasoning)
+
 See `docsNew/00_Global_Rules/Global_Rules.md` → **SKILL INVOCATION** for comprehensive keyword-to-skill mapping, co-load rules, and overlapping skill pairs.
+
+**Rule of thumb**: When a request touches a domain, load the **domain skill** AND its **overlapping partners** from the Global Rules "Overlapping Skills" table. Loading more than strictly necessary is preferred over missing context — false-positive skill loads cost context, false-negative loads cost correctness.
 
 ---
 

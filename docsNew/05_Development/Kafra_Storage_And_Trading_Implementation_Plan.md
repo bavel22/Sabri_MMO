@@ -1,4 +1,9 @@
-# Kafra Storage & Player-to-Player Trading — Complete Implementation Plan
+# Kafra Storage & Player-to-Player Trading — Implementation Reference
+
+> **STATUS: BOTH SYSTEMS COMPLETE (2026-04-03)**
+> **Kafra Storage** — account-shared 300-slot storage, 10 socket handlers (6 storage + 4 inventory QoL: split/sort/auto-stack/search), 40z Kafra fee, JSONB compounded_cards, 4 bugs fixed during implementation.
+> **Player Trading** — TradeSession class, 9 socket handlers, two-step confirm (OK → Trade), 13 cancel paths, atomic transfer, trade_logs audit trail, `/trade` chat command, STradeWidget (Z=22), 4 bugs fixed.
+> Memory: `memory/storage-system.md`, `memory/trading-system.md`. Skills: `/sabrimmo-storage`, `/sabrimmo-trading`.
 
 **Created:** 2026-04-02
 **Systems:** Kafra Storage (Account-Shared) + Direct Player Trading

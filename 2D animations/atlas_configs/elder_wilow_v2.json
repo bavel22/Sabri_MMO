@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "character": "elder_wilow",
+  "cell_size": 1024,
+  "animations": [
+    { "folder": "Idle Sway", "state": "idle", "group": "shared" },
+    { "folder": "Root Waddle", "state": "walk", "group": "shared" },
+    { "folder": "Branch Swipe", "state": "attack", "group": "shared" },
+    { "folder": "Trunk Shudder", "state": "hit", "group": "shared" },
+    { "folder": "Timber Death", "state": "death", "group": "shared" }
+  ]
+}

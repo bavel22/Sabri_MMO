@@ -10,9 +10,13 @@
 #include "CastBarSubsystem.h"
 #include "ChatSubsystem.h"
 #include "SDamageNumberOverlay.h"
+#include "Sprite/SpriteAtlasData.h"
 #include "Audio/AudioSubsystem.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "Engine/Texture2D.h"
+#include "UObject/UObjectIterator.h"
+#include "UObject/Package.h"
 #include "Widgets/SWeakWidget.h"
 #include "Widgets/Layout/SBox.h"
 #include "TimerManager.h"
@@ -75,6 +79,11 @@ void UOptionsSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	bNoShift = GI->bOptionNoShift;
 	bAutoDeclineTrades = GI->bOptionAutoDeclineTrades;
 	bAutoDeclineParty = GI->bOptionAutoDeclineParty;
+	iSpriteQuality = GI->iOptionSpriteQuality;
+
+	// Push sprite quality to the global before any sprite textures load.
+	// Applies to every atlas loaded from this point onward via EnsureTextureLoaded().
+	FSingleAnimAtlasInfo::GlobalLODBias = FMath::Clamp(iSpriteQuality, 0, 3);
 
 	AddOptionsWidgetToViewport();
 
@@ -220,6 +229,7 @@ void UOptionsSubsystem::SaveToGameInstance()
 	GI->bOptionNoShift = bNoShift;
 	GI->bOptionAutoDeclineTrades = bAutoDeclineTrades;
 	GI->bOptionAutoDeclineParty = bAutoDeclineParty;
+	GI->iOptionSpriteQuality = iSpriteQuality;
 	GI->SaveGameOptions();
 }
 
@@ -456,6 +466,48 @@ void UOptionsSubsystem::SetAutoDeclineParty(bool bEnabled)
 {
 	bAutoDeclineParty = bEnabled;
 	SaveToGameInstance();
+}
+
+// ============================================================
+// Sprite Quality (LODBias)
+// ============================================================
+
+void UOptionsSubsystem::SetSpriteQuality(int32 NewValue)
+{
+	const int32 Clamped = FMath::Clamp(NewValue, 0, 3);
+	if (Clamped == iSpriteQuality) return;
+
+	iSpriteQuality = Clamped;
+	FSingleAnimAtlasInfo::GlobalLODBias = Clamped;
+
+	ApplySpriteQualityToLoadedTextures();
+	SaveToGameInstance();
+}
+
+void UOptionsSubsystem::ApplySpriteQualityToLoadedTextures()
+{
+	const int32 NewBias = iSpriteQuality;
+	const FString SpriteRoot = TEXT("/Game/SabriMMO/Sprites/Atlases/");
+
+	// One-shot pass over every loaded UTexture2D. UPDATE causes a per-texture
+	// reupload — the user just changed quality, so a brief hitch is expected.
+	int32 Updated = 0;
+	for (TObjectIterator<UTexture2D> It; It; ++It)
+	{
+		UTexture2D* Tex = *It;
+		if (!IsValid(Tex)) continue;
+		const UPackage* Pkg = Tex->GetOutermost();
+		if (!Pkg) continue;
+		if (!Pkg->GetName().StartsWith(SpriteRoot)) continue;
+		if (Tex->LODBias == NewBias) continue;
+
+		Tex->LODBias = NewBias;
+		Tex->UpdateResource();
+		++Updated;
+	}
+
+	UE_LOG(LogOptions, Log, TEXT("SpriteQuality: applied LODBias=%d to %d already-loaded atlases"),
+		NewBias, Updated);
 }
 
 // ============================================================

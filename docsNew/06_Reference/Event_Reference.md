@@ -1,8 +1,8 @@
 # Socket.io Event Reference — Detailed Payloads
 
 > **Navigation**: [Documentation Index](DocsNewINDEX.md) | [Networking_Protocol](../04_Integration/Networking_Protocol.md) | [Multiplayer_Architecture](../01_Architecture/Multiplayer_Architecture.md) | [NodeJS_Server](../03_Server_Side/NodeJS_Server.md)
-> **Total**: 79 socket event handlers in `server/src/index.js`
-> **Note**: This reference covers core events (player, combat, enemy, chat, inventory, shop, hotbar, card, loot). Events added in later phases (homunculus, party, vending, cart, crafting, pet, mount, warp portal, identify) are documented in their respective system docs but not yet added to this reference.
+> **Total**: 106 `socket.on(...)` handlers in `server/src/index.js` (verified 2026-04-15).
+> **Note**: This reference covers core events (player, combat, enemy, chat, inventory, shop, hotbar, card, loot). Events added in later phases (homunculus, party, vending, cart, crafting, pet, mount, warp portal, identify, storage, trading, map, ground_item, audio/options, skill targeting) are implemented and broadcast but per-payload docs live in their respective system docs / skills (e.g., `/sabrimmo-storage`, `/sabrimmo-trading`, `/sabrimmo-map`, `/sabrimmo-item-drop-system`). This file focuses on the core MMO event set.
 
 ## Player Events
 
@@ -239,15 +239,23 @@ Server broadcasts:
 ```json
 {
     "enemyId": 2000001,
-    "templateId": "blobby",
-    "name": "Blobby",
-    "level": 1,
-    "health": 50,
-    "maxHealth": 50,
-    "x": 500, "y": 500, "z": 300
+    "templateId": "skeleton",
+    "name": "Skeleton",
+    "level": 15,
+    "health": 900,
+    "maxHealth": 900,
+    "x": 500, "y": 500, "z": 300,
+    "spriteClass": "skeleton",
+    "weaponMode": 0,
+    "spriteTint": [0.3, 0.3, 0.45]
 }
 ```
-**Sent**: On server startup (12 initial enemies), on respawn timer, and to joining players for existing enemies.
+**Fields**:
+- `spriteClass` — atlas manifest name (e.g., `"skeleton"`, `"poring"`, `"eclipse"`). Omitted or `null` for enemies still using the default BP mesh.
+- `weaponMode` — 0=unarmed, 1=onehand, 2=twohand, 3=bow. Selects the animation set from the atlas config.
+- `spriteTint` — optional `[r,g,b]` multiplier (0.0–1.0 per channel) for recolored variants sharing a parent atlas. Added 2026-04-15. Client applies via `SetLayerTint(ESpriteLayer::Body, ...)` and re-applies on respawn. Omit the field entirely for un-tinted enemies.
+
+**Emitted from 4 server locations** (all carry the same payload shape): `spawnEnemy()` on startup, `processEnemyDeathFromSkill()` respawn, the `player:join` zone loop (client may drop this during `OpenLevel`), and the `zone:ready` zone loop (**this is the one clients actually consume**).
 
 ### enemy:move (Server → All)
 ```json

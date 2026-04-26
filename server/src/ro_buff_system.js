@@ -743,8 +743,9 @@ function getBuffModifiers(target) {
                 break;
 
             case 'magnificat':
+                // rAthena status.cpp SC_MAGNIFICAT: doubles SP regen ONLY (NOT HP).
+                // Confirmed by rAthena issue #275 + Aegis testing.
                 mods.spRegenMultiplier = buff.spRegenMultiplier || 2;
-                mods.hpRegenMultiplier = buff.hpRegenMultiplier || 2;
                 break;
 
             case 'suffragium':
@@ -1048,6 +1049,18 @@ function getBuffModifiers(target) {
                 break;
             case 'strip_helm':
                 mods.intMultiplier = (mods.intMultiplier || 1.0) * (1 - (buff.intReduction || 0)); // 0.40 = 40% INT reduction
+                break;
+
+            // --- Alchemist debuffs (Acid Terror armor break, Demonstration weapon break) ---
+            case 'armor_break':
+                // Pre-renewal: armor break removes hard DEF entirely (sets to 0).
+                // Stored as fraction 0-1 (1.0 = 100% reduction → DEF effectively 0).
+                mods.hardDefReduction = (mods.hardDefReduction || 0) + (buff.hardDefReduction || 0);
+                break;
+            case 'weapon_break':
+                // Pre-renewal weapon break: equipped weapon disabled. In PvE we treat as a fractional
+                // ATK debuff on the affected entity (same fraction format as strip_weapon).
+                mods.atkMultiplier *= (1 - (buff.atkReduction || 0));
                 break;
             case 'raid_debuff':
                 // Pre-renewal: +20% incoming damage (bosses +10%), expires after 5s OR 7 hits

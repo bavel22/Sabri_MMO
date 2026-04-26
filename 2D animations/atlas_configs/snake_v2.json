@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "character": "snake",
+  "cell_size": 1024,
+  "animations": [
+    { "folder": "Idle Wiggle", "state": "idle", "group": "shared" },
+    { "folder": "Crawl Forward", "state": "walk", "group": "shared" },
+    { "folder": "Bite Attack", "state": "attack", "group": "shared" },
+    { "folder": "Hit Recoil", "state": "hit", "group": "shared" },
+    { "folder": "Curl Death", "state": "death", "group": "shared" }
+  ]
+}

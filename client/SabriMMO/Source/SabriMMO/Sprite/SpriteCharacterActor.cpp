@@ -30,6 +30,10 @@
 #include "Materials/MaterialExpressionVectorParameter.h"
 #include "Materials/MaterialExpressionTextureCoordinate.h"
 
+// Global sprite LOD bias — driven by Options > Video > Sprite Quality.
+// Read by FSingleAnimAtlasInfo::EnsureTextureLoaded() when textures load.
+int32 FSingleAnimAtlasInfo::GlobalLODBias = 0;
+
 // State name → enum mapping for JSON parsing
 static const TMap<FString, ESpriteAnimState> StateNameMap = {
 	{TEXT("idle"),         ESpriteAnimState::Idle},
@@ -2140,6 +2144,8 @@ void ASpriteCharacterActor::AttachToOwnerActor(AActor* Actor, bool bIsLocalPlaye
 				{
 					if (Weapon.WeaponType == TEXT("bow"))
 						NewMode = ESpriteWeaponMode::Bow;
+					else if (Weapon.WeaponType == TEXT("knuckle"))
+						NewMode = ESpriteWeaponMode::None;
 					else if (Weapon.WeaponType == TEXT("katar") || !Weapon.bTwoHanded)
 						NewMode = ESpriteWeaponMode::OneHand;
 					else
@@ -2180,6 +2186,7 @@ void ASpriteCharacterActor::AttachToOwnerActor(AActor* Actor, bool bIsLocalPlaye
 			if (!Weapon.Name.IsEmpty() && Weapon.EquipSlot == TEXT("weapon"))
 			{
 				ESpriteWeaponMode InitMode = Weapon.WeaponType == TEXT("bow") ? ESpriteWeaponMode::Bow
+				: Weapon.WeaponType == TEXT("knuckle") ? ESpriteWeaponMode::None
 				: (Weapon.WeaponType == TEXT("katar") || !Weapon.bTwoHanded) ? ESpriteWeaponMode::OneHand : ESpriteWeaponMode::TwoHand;
 				SetWeaponMode(InitMode);
 			}

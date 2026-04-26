@@ -1,6 +1,12 @@
-# Damage Number & Hit Impact — Remaining Features Implementation Plan
+# Damage Number & Hit Impact — Implementation Reference
 
-**Date**: 2026-04-05
+> **STATUS: ALL 6 PHASES COMPLETE (2026-04-05/06)**
+> Hit Flash, Hit Particles, Crit Starburst, Combo Total, Target Flinch, Hit Sounds — all shipped.
+> Carryover items from 04-05 (crit starburst readability, target flinch verification, hit particle replacement) closed 2026-04-06.
+> Feature list: `_journal/Dashboard.md` → Hit impact system line. Skill reference: `/sabrimmo-damage-numbers`.
+> This document is retained as an implementation reference for future similar work.
+
+**Original Date**: 2026-04-05
 **Depends on**: RO Classic damage number overhaul (completed 2026-04-05)
 **Research**: `Damage_Number_RO_Classic_Research.md`, roBrowser source, rAthena source
 **Skill**: `/sabrimmo-damage-numbers`

@@ -597,20 +597,22 @@ Enemies can use the same `SpriteCharacterActor` 3D-to-2D sprite system as player
 
 ### Template Fields
 
-Two optional fields on monster templates in `ro_monster_templates.js`:
+Three optional fields on monster templates in `ro_monster_templates.js`:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `spriteClass` | string | `undefined` | Atlas manifest name (e.g., `'skeleton'`). Maps to `Body/enemies/{name}/` in UE5 Content. If absent or empty, the enemy uses the default BP mesh. |
 | `weaponMode` | number | `0` | Weapon animation set: 0=unarmed, 1=onehand, 2=twohand, 3=bow. Selects which weapon group animations to play from the atlas config. |
+| `spriteTint` | `[r,g,b]` array | `null` | Body layer tint multiplier (0.0–1.0 per channel), used for recolored variants that share an atlas with a base monster. Applied client-side via `SetLayerTint(ESpriteLayer::Body, ...)` and re-applied on respawn. Added 2026-04-15. |
 
 ### Adapter
 
-The `ENEMY_TEMPLATES` adapter in `index.js` (~line 4308) copies these fields from `RO_MONSTER_TEMPLATES`:
+The `ENEMY_TEMPLATES` adapter in `index.js` copies these fields from `RO_MONSTER_TEMPLATES`:
 
 ```javascript
-spriteClass: ro.spriteClass || '',
-weaponMode: ro.weaponMode || 0,
+spriteClass: ro.spriteClass || null,
+weaponMode: ro.weaponMode != null ? ro.weaponMode : 0,
+spriteTint: ro.spriteTint || null
 ```
 
 ### enemy:spawn Emit Locations
@@ -626,17 +628,20 @@ All 4 `enemy:spawn` emit locations include `spriteClass` and `weaponMode`:
 
 **CRITICAL**: The `zone:ready` emit is the one that matters. During `player:join`, the client is performing `OpenLevel()` -- all subsystems are destroyed and recreated, so socket events are silently dropped. By `zone:ready`, all C++ subsystem handlers are registered and will process the spawn data including sprite fields.
 
-### enemy:spawn Payload (updated)
+### enemy:spawn Payload (updated 2026-04-15)
 
 ```javascript
 {
     enemyId, templateId, name, level, health, maxHealth,
     monsterClass, size, race, element,
     x, y, z,
-    spriteClass,   // NEW: atlas manifest name (e.g., 'skeleton')
-    weaponMode     // NEW: 0=unarmed, 1=onehand, 2=twohand, 3=bow
+    spriteClass,   // atlas manifest name (e.g., 'skeleton')
+    weaponMode,    // 0=unarmed, 1=onehand, 2=twohand, 3=bow
+    spriteTint     // [r,g,b] OR omitted — applied only when present (recolored variants)
 }
 ```
+
+All 4 emit paths (`spawnEnemy`, `respawnEnemy`, `player:join` zone loop, `zone:ready` zone loop) include `spriteTint` conditionally — `if (enemy.spriteTint) payload.spriteTint = enemy.spriteTint;` — so un-tinted monsters still emit a minimal payload.
 
 ### Weapon Variant System
 
@@ -651,8 +656,17 @@ One atlas config can define multiple weapon groups (unarmed, onehand, twohand, b
 
 ### Monsters with Sprites
 
-| Monster | Template ID | spriteClass | weaponMode |
-|---------|------------|-------------|------------|
-| Skeleton | 1028 | `skeleton` | 0 (unarmed) |
+As of 2026-04-15, **30 monster templates** carry `spriteClass`. Highlights:
 
-**Last Updated**: 2026-03-26 -- Enemy sprite system: spriteClass/weaponMode fields, 4 emit locations, weapon variant system
+| Monster | spriteClass | weaponMode | Notes |
+|---------|-------------|------------|-------|
+| Skeleton | `skeleton` | 0 (unarmed) | First humanoid sprite (Mixamo-rigged, 2026-03-26) |
+| Poring | `poring` | 0 | First blob sprite (`render_monster.py`, `--model-rotation -90`, 2026-03-26) |
+| Fabre, Drops, Lunatic, Pupa, Willow, Chonchon, Creamy, Mandragora, Peco Peco, Poison Spore, Poporing, Smokie, Rocker, Farmiliar, Yoyo, Savage Babe, Condor, Hornet, Roda Frog | (various) | (various) | Added 2026-04-12/13 |
+| thief_bug, thief_bug_ (female), eclipse, dragon_fly, desert_wolf_b, toad, plankton, spore | (same names) | 0 | **Added 2026-04-15** — templates + 8 new Prontera South spawns wired, atlas configs written, atlases not yet rendered. Dragon_fly expected to use `--thicken` (wings). |
+
+For the live list, `grep "spriteClass:" server/src/ro_monster_templates.js`.
+
+**Recoloured variants** (e.g., Poporing = green Poring) share a parent atlas via `spriteClass` and are differentiated via `spriteTint: [r,g,b]` in the template.
+
+**Last Updated**: 2026-04-15 — added `spriteTint` field, 8 new Prontera South sprite spawns, updated sprite count to 30.

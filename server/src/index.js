@@ -380,7 +380,7 @@ const SKILL_CATALYSTS = {
     'venom_dust':        [{ itemId: 716, quantity: 1 }],
     'venom_splasher':    [{ itemId: 716, quantity: 1 }],
     'safety_wall_priest': [{ itemId: 717, quantity: 1 }],
-    'bs_sacramenti':     [{ itemId: 523, quantity: 1 }],
+    // (B.S. Sacramenti has no ItemCost in rAthena skill_db.yml — removed)
     // Sage endow catalysts (Phase 2C)
     'endow_blaze':       [{ itemId: 990, quantity: 1 }],  // Red Blood
     'endow_tsunami':     [{ itemId: 991, quantity: 1 }],  // Crystal Blue
@@ -441,7 +441,7 @@ async function broadcastEquipAppearance(characterId, player) {
             }
             // Weapon mode detection (works even if weapon has no sprite atlas yet)
             if ((pos === 'weapon' || row.equip_slot === 'weapon') && pos !== 'ammo') {
-                weaponMode = row.weapon_type === 'bow' ? 3 : (row.weapon_type === 'katar' || !row.two_handed) ? 1 : 2;
+                weaponMode = row.weapon_type === 'bow' ? 3 : row.weapon_type === 'knuckle' ? 0 : (row.weapon_type === 'katar' || !row.two_handed) ? 1 : 2;
             }
         }
         player.equipVisuals = ev;
@@ -2812,11 +2812,15 @@ async function processEnemyDeathFromSkill(enemy, attacker, attackerId, io) {
         const respawnPayload = {
             enemyId: enemy.enemyId, templateId: enemy.templateId, name: enemy.name,
             level: enemy.level, health: enemy.health, maxHealth: enemy.maxHealth,
+            size: enemy.size,
+            canMove: !!(enemy.modeFlags && enemy.modeFlags.canMove),
             x: enemy.x, y: enemy.y, z: enemy.z
         };
         if (enemy.spriteClass) {
             respawnPayload.spriteClass = enemy.spriteClass;
             respawnPayload.weaponMode = enemy.spriteWeaponMode;
+            if (enemy.spriteTint) respawnPayload.spriteTint = enemy.spriteTint;
+            if (enemy.spriteScale) respawnPayload.spriteScale = enemy.spriteScale;
         }
         broadcastToZone(enemy.zone, 'enemy:spawn', respawnPayload);
     }, respawnDelay);
@@ -4440,14 +4444,23 @@ function buildFullStatsPayload(characterId, player, effectiveStats, derived, fin
         }
     }
 
+    // Steel Body override: surface DEF/MDEF=90 in the F8 panel when the buff is active
+    const payloadBuffMods = getCombinedModifiers(player);
+    const displayedHardDef = (payloadBuffMods.overrideHardDEF != null)
+        ? payloadBuffMods.overrideHardDEF
+        : ((player.hardDef || 0) + (effectiveStats.bonusHardDef || 0));
+    const displayedHardMdef = (payloadBuffMods.overrideHardMDEF != null)
+        ? payloadBuffMods.overrideHardMDEF
+        : ((player.hardMdef || 0) + (effectiveStats.bonusHardMDEF || 0));
+
     return {
         characterId,
         stats: {
             ...player.stats,
             str: effectiveStats.str, agi: effectiveStats.agi, vit: effectiveStats.vit,
             int: effectiveStats.int, dex: effectiveStats.dex, luk: effectiveStats.luk,
-            hardDef: (player.hardDef || 0) + (effectiveStats.bonusHardDef || 0),
-            hardMdef: (player.hardMdef || 0) + (effectiveStats.bonusHardMDEF || 0),
+            hardDef: displayedHardDef,
+            hardMdef: displayedHardMdef,
             weaponMATK: player.weaponMATK || 0,
             passiveATK: effectiveStats.passiveATK || 0,
             refineATK: getAttackerInfo(player).refineATK || 0,
@@ -4463,12 +4476,15 @@ function buildFullStatsPayload(characterId, player, effectiveStats, derived, fin
             const statBuffMods = getCombinedModifiers(player);
             const angelusDEF = (statBuffMods.defPercent || 0) > 0 ? (1 + statBuffMods.defPercent / 100) : 1;
             const buffMoveSpeedBonus = statBuffMods.moveSpeedBonus || 0;
+            // Magnificat: doubles SP regen rate (rAthena status.cpp regen->rate.sp += 100)
+            const spRegenMul = statBuffMods.spRegenMultiplier || 1;
             return {
                 ...derived,
                 statusATK: Math.floor(derived.statusATK * (effectiveStats.buffAtkMultiplier || 1)),
                 softDEF: Math.floor(derived.softDEF * (effectiveStats.buffDefMultiplier || 1) * angelusDEF),
                 softMDEF: derived.softMDEF + (effectiveStats.buffBonusMDEF || 0),
                 aspd: finalAspd,
+                spRegen: typeof derived.spRegen === 'number' ? Math.floor(derived.spRegen * spRegenMul) : derived.spRegen,
                 // Movement speed (base 150ms/cell, lower = faster)
                 moveSpeed: Math.max(20, Math.floor(
                     150 * (100 - (player.cardSpeedRate || 0)) / 100
@@ -4589,7 +4605,9 @@ for (const [key, ro] of Object.entries(RO_MONSTER_TEMPLATES)) {
         })),
         // Sprite rendering (optional — client skips if absent)
         spriteClass: ro.spriteClass || null,
-        weaponMode: ro.weaponMode != null ? ro.weaponMode : 0
+        weaponMode: ro.weaponMode != null ? ro.weaponMode : 0,
+        spriteTint: ro.spriteTint || null,
+        spriteScale: ro.spriteScale || null
     };
 }
 
@@ -4769,6 +4787,8 @@ function spawnEnemy(spawnConfig) {
         // Sprite rendering fields (optional — client skips if absent)
         spriteClass: template.spriteClass || null,
         spriteWeaponMode: template.weaponMode != null ? template.weaponMode : 0,
+        spriteTint: template.spriteTint || null,
+        spriteScale: template.spriteScale || null,  // override size-based scale (e.g. 0.75 for whisper_boss)
         // NavMesh pathfinding fields
         _navPath: [],
         _navPathIdx: 0,
@@ -4793,11 +4813,14 @@ function spawnEnemy(spawnConfig) {
         level: enemy.level, health: enemy.health, maxHealth: enemy.maxHealth,
         monsterClass: enemy.monsterClass, size: enemy.size, race: enemy.race,
         element: enemy.element,
+        canMove: !!(enemy.modeFlags && enemy.modeFlags.canMove),
         x: enemy.x, y: enemy.y, z: enemy.z
     };
     if (enemy.spriteClass) {
         spawnPayload.spriteClass = enemy.spriteClass;
         spawnPayload.weaponMode = enemy.spriteWeaponMode;
+        if (enemy.spriteTint) spawnPayload.spriteTint = enemy.spriteTint;
+        if (enemy.spriteScale) spawnPayload.spriteScale = enemy.spriteScale;
     }
     broadcastToZone(enemy.zone, 'enemy:spawn', spawnPayload);
     return enemy;
@@ -5948,7 +5971,7 @@ io.on('connection', (socket) => {
                             earlyEquipViz[vpos] = vr.view_sprite;
                         }
                         if ((vpos === 'weapon' || vr.equip_slot === 'weapon') && vpos !== 'ammo') {
-                            earlyWeaponMode = vr.weapon_type === 'bow' ? 3 : (vr.weapon_type === 'katar' || !vr.two_handed) ? 1 : 2;
+                            earlyWeaponMode = vr.weapon_type === 'bow' ? 3 : vr.weapon_type === 'knuckle' ? 0 : (vr.weapon_type === 'katar' || !vr.two_handed) ? 1 : 2;
                         }
                     }
                 } catch (vizErr) {
@@ -6174,7 +6197,7 @@ io.on('connection', (socket) => {
                     equipVisuals[pos] = row.view_sprite;
                 }
                 if ((pos === 'weapon' || row.equip_slot === 'weapon') && pos !== 'ammo') {
-                    initialWeaponMode = row.weapon_type === 'bow' ? 3 : (row.weapon_type === 'katar' || !row.two_handed) ? 1 : 2;
+                    initialWeaponMode = row.weapon_type === 'bow' ? 3 : row.weapon_type === 'knuckle' ? 0 : (row.weapon_type === 'katar' || !row.two_handed) ? 1 : 2;
                 }
             }
             // NOTE: player object doesn't exist yet — weaponMode is set via connectedPlayers.set() later
@@ -6604,11 +6627,15 @@ io.on('connection', (socket) => {
                 const joinPayload = {
                     enemyId: eid, templateId: enemy.templateId, name: enemy.name,
                     level: enemy.level, health: enemy.health, maxHealth: enemy.maxHealth,
+                    size: enemy.size,
+                    canMove: !!(enemy.modeFlags && enemy.modeFlags.canMove),
                     x: enemy.x, y: enemy.y, z: enemy.z
                 };
                 if (enemy.spriteClass) {
                     joinPayload.spriteClass = enemy.spriteClass;
                     joinPayload.weaponMode = enemy.spriteWeaponMode;
+                    if (enemy.spriteTint) joinPayload.spriteTint = enemy.spriteTint;
+                    if (enemy.spriteScale) joinPayload.spriteScale = enemy.spriteScale;
                 }
                 socket.emit('enemy:spawn', joinPayload);
             }
@@ -7184,11 +7211,15 @@ io.on('connection', (socket) => {
                 const zoneReadyPayload = {
                     enemyId: eid, templateId: enemy.templateId, name: enemy.name,
                     level: enemy.level, health: enemy.health, maxHealth: enemy.maxHealth,
+                    size: enemy.size,
+                    canMove: !!(enemy.modeFlags && enemy.modeFlags.canMove),
                     x: enemy.x, y: enemy.y, z: enemy.z
                 };
                 if (enemy.spriteClass) {
                     zoneReadyPayload.spriteClass = enemy.spriteClass;
                     zoneReadyPayload.weaponMode = enemy.spriteWeaponMode;
+                    if (enemy.spriteTint) zoneReadyPayload.spriteTint = enemy.spriteTint;
+                    if (enemy.spriteScale) zoneReadyPayload.spriteScale = enemy.spriteScale;
                 }
                 socket.emit('enemy:spawn', zoneReadyPayload);
             }
@@ -18647,9 +18678,11 @@ io.on('connection', (socket) => {
             const sbAtkInfo = getAttackerInfo(player);
             sbAtkInfo.buffMods = atkBuffMods;
 
-            // Sonic Acceleration also grants +50% to effective hit rate
+            // Sonic Acceleration also grants +50% to effective hit rate (multiplicative)
+            // calculatePhysicalDamage uses `hitRatePercent` for multiplicative hit rate bonuses
+            // (line 406-407 in ro_damage_formulas.js: hitRate * (100 + hitRatePercent) / 100)
             const sbSkillOpts = { skillElement: null, forceHit: false };
-            if (hasSonicAccel) sbSkillOpts.hitBonus = 1.5; // multiplicative hit rate bonus
+            if (hasSonicAccel) sbSkillOpts.hitRatePercent = 50;
 
             const sbResult = calculateSkillDamage(
                 getEffectiveStats(player), enemy.stats, enemy.hardDef || 0,
@@ -19218,11 +19251,12 @@ io.on('connection', (socket) => {
                 type: 'sanctuary', casterId: characterId, casterName: player.characterName,
                 zone: player.zone || 'prontera_south',
                 x: sanctPos.x, y: sanctPos.y, z: sanctPos.z || 0,
-                radius: 250, // 5x5 cells
+                radius: 125, // 5x5 cells (AOE_RADIUS['5x5'])
                 duration: sanctDuration,
                 healPerTick: sanctHeal,
                 skillLevel: learnedLevel,
-                maxTargets: 3 + learnedLevel
+                // Lifetime damage budget: each damage hit decrements this; Sanctuary destroyed when 0
+                damageBudget: 3 + learnedLevel
             });
 
             const sanctZone = player.zone || 'prontera_south';
@@ -19230,7 +19264,7 @@ io.on('connection', (socket) => {
                 effectId: sanctEffectId, type: 'sanctuary',
                 casterId: characterId, casterName: player.characterName,
                 x: sanctPos.x, y: sanctPos.y, z: sanctPos.z || 0,
-                duration: sanctDuration, radius: 250, healPerTick: sanctHeal
+                duration: sanctDuration, radius: 125, healPerTick: sanctHeal
             });
             logger.info(`[SKILL-COMBAT] ${player.characterName} Sanctuary Lv${learnedLevel}: heal ${sanctHeal}/tick at (${Math.floor(sanctPos.x)}, ${Math.floor(sanctPos.y)}), ${sanctDuration / 1000}s`);
 
@@ -19278,7 +19312,7 @@ io.on('connection', (socket) => {
             return;
         }
 
-        // --- MAGNIFICAT (ID 1002) — Double regen ---
+        // --- MAGNIFICAT (ID 1002) — Double SP regen (NOT HP — rAthena verified) ---
         if (skill.name === 'magnificat') {
             player.mana = Math.max(0, player.mana - spCost);
             applySkillDelays(characterId, player, skillId, levelData, socket);
@@ -19286,16 +19320,21 @@ io.on('connection', (socket) => {
             const magnDuration = duration || (30000 + learnedLevel * 15000);
             applyBuff(player, {
                 skillId, name: 'magnificat', casterId: characterId, casterName: player.characterName,
-                spRegenMultiplier: 2, hpRegenMultiplier: 2,
+                spRegenMultiplier: 2,
                 duration: magnDuration
             });
             broadcastToZone(player.zone || 'prontera_south', 'skill:buff_applied', {
                 targetId: characterId, targetName: player.characterName, isEnemy: false,
                 casterId: characterId, casterName: player.characterName,
                 skillId, buffName: 'Magnificat', duration: magnDuration,
-                effects: { spRegenMultiplier: 2, hpRegenMultiplier: 2 }
+                effects: { spRegenMultiplier: 2 }
             });
-            logger.info(`[SKILL-COMBAT] ${player.characterName} Magnificat Lv${learnedLevel}: double regen for ${magnDuration / 1000}s`);
+            logger.info(`[SKILL-COMBAT] ${player.characterName} Magnificat Lv${learnedLevel}: double SP regen for ${magnDuration / 1000}s`);
+
+            // Re-emit player:stats so the F8 panel reflects the doubled SP regen rate
+            const magnEffStats = getEffectiveStats(player);
+            const magnDerived = roDerivedStats(magnEffStats);
+            socket.emit('player:stats', buildFullStatsPayload(characterId, player, magnEffStats, magnDerived, Math.min(COMBAT.ASPD_CAP, magnDerived.aspd + (player.weaponAspdMod || 0))));
 
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
             socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
@@ -19320,6 +19359,11 @@ io.on('connection', (socket) => {
                 effects: { lukBonus: 30 }
             });
             logger.info(`[SKILL-COMBAT] ${player.characterName} Gloria Lv${learnedLevel}: +30 LUK for ${gloriaDuration / 1000}s`);
+
+            // Re-emit player:stats so the F8 panel reflects +30 LUK and downstream derived stats (CRIT, perfect dodge, status resist)
+            const glEffStats = getEffectiveStats(player);
+            const glDerived = roDerivedStats(glEffStats);
+            socket.emit('player:stats', buildFullStatsPayload(characterId, player, glEffStats, glDerived, Math.min(COMBAT.ASPD_CAP, glDerived.aspd + (player.weaponAspdMod || 0))));
 
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
             socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
@@ -19385,7 +19429,7 @@ io.on('connection', (socket) => {
                 type: 'magnus_exorcismus', casterId: characterId, casterName: player.characterName,
                 zone: player.zone || 'prontera_south',
                 x: mePos.x, y: mePos.y, z: mePos.z || 0,
-                radius: 350, // 7x7 cells
+                radius: 175, // 7x7 cells (AOE_RADIUS['7x7'])
                 duration: meDuration,
                 numWaves: meWaves, wavesCompleted: 0,
                 skillLevel: learnedLevel
@@ -19396,7 +19440,7 @@ io.on('connection', (socket) => {
                 effectId: meEffectId, type: 'magnus_exorcismus',
                 casterId: characterId, casterName: player.characterName,
                 x: mePos.x, y: mePos.y, z: mePos.z || 0,
-                duration: meDuration, radius: 350, numWaves: meWaves
+                duration: meDuration, radius: 175, numWaves: meWaves
             });
             logger.info(`[SKILL-COMBAT] ${player.characterName} Magnus Exorcismus Lv${learnedLevel}: ${meWaves} waves at (${Math.floor(mePos.x)}, ${Math.floor(mePos.y)}), ${meDuration / 1000}s`);
 
@@ -19431,12 +19475,24 @@ io.on('connection', (socket) => {
             const baseLv = tuStats.level || 1;
             const intStat = tuStats.int || 1;
             const lukStat = tuStats.luk || 1;
-            // rAthena: rate = 200*SkillLv + BaseLv + INT + LUK, compared vs rand()%1000
-            // So percentage = rate / 10 (capped at 100%)
-            const tuChance = Math.min(100, (200 * learnedLevel + baseLv + intStat + lukStat) / 10);
+            const tuEleLv = (tuEnemy.element && tuEnemy.element.level) || 1;
+            const enemyMaxHP = tuEnemy.maxHealth || 1;
+            const isBoss = (tuEnemy.modeFlags && (tuEnemy.modeFlags.boss || tuEnemy.modeFlags.isBoss || tuEnemy.modeFlags.statusImmune))
+                || tuEnemy.monsterClass === 'boss' || tuEnemy.monsterClass === 'mvp' || tuEnemy.isBoss || tuEnemy.isMVP;
+
+            // rAthena battle.cpp PR_TURNUNDEAD:
+            //   rate = 20*SkillLv + LUK + INT + BaseLv + 200 - floor(200 * TargetHP / TargetMaxHP)
+            //   cap at 700 (70%); roll: rnd()%1000 < rate
+            //   Bosses: IMMUNE (always fail damage)
+            let tuRate = 20 * learnedLevel + lukStat + intStat + baseLv
+                       + 200 - Math.floor(200 * tuEnemy.health / enemyMaxHP);
+            tuRate = Math.min(700, Math.max(0, tuRate));
+            const tuPct = (tuRate / 10).toFixed(1);
             const tuZone = player.zone || 'prontera_south';
 
-            if (Math.random() * 100 < tuChance) {
+            const instantKill = !isBoss && (Math.random() * 1000 < tuRate);
+
+            if (instantKill) {
                 // Instant kill
                 tuEnemy.health = 0;
                 tuEnemy.lastDamageTime = Date.now();
@@ -19452,10 +19508,14 @@ io.on('connection', (socket) => {
                 });
                 broadcastToZone(tuZone, 'enemy:health_update', { enemyId: targetId, health: 0, maxHealth: tuEnemy.maxHealth, inCombat: true });
                 await processEnemyDeathFromSkill(tuEnemy, player, characterId, io);
-                logger.info(`[SKILL-COMBAT] ${player.characterName} Turn Undead Lv${learnedLevel} INSTANT KILL on ${tuEnemy.name} (${Math.floor(tuChance)}% chance)`);
+                logger.info(`[SKILL-COMBAT] ${player.characterName} Turn Undead Lv${learnedLevel} INSTANT KILL on ${tuEnemy.name} (${tuPct}% rate)`);
             } else {
-                // Fail: Piercing Holy damage (ignores MDEF) — canonical rAthena formula
-                const tuDmg = Math.max(1, (baseLv + intStat + learnedLevel * 10) * 2);
+                // Fail damage: BaseLv + INT + SkillLv*10 (NO *2), with Holy element modifier
+                // Ignores MDEF (IgnoreDefense flag in rAthena)
+                let tuDmg = Math.max(1, baseLv + intStat + learnedLevel * 10);
+                const tuEleMod = getElementModifier('holy', tuEleType, tuEleLv);
+                tuDmg = Math.max(1, Math.floor(tuDmg * tuEleMod / 100));
+
                 tuEnemy.health = Math.max(0, tuEnemy.health - tuDmg);
                 tuEnemy.lastDamageTime = Date.now();
                 if (typeof setEnemyAggro === 'function') setEnemyAggro(tuEnemy, characterId, 'skill');
@@ -19476,7 +19536,7 @@ io.on('connection', (socket) => {
                 });
                 broadcastToZone(tuZone, 'enemy:health_update', { enemyId: targetId, health: tuEnemy.health, maxHealth: tuEnemy.maxHealth, inCombat: true });
                 if (tuEnemy.health <= 0) await processEnemyDeathFromSkill(tuEnemy, player, characterId, io);
-                logger.info(`[SKILL-COMBAT] ${player.characterName} Turn Undead Lv${learnedLevel} FAILED on ${tuEnemy.name}: ${tuDmg} Holy piercing dmg (${Math.floor(tuChance)}% chance)`);
+                logger.info(`[SKILL-COMBAT] ${player.characterName} Turn Undead Lv${learnedLevel} ${isBoss ? '(BOSS — auto-fail)' : 'FAILED'} on ${tuEnemy.name}: ${tuDmg} Holy dmg (${tuPct}% rate)`);
             }
 
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
@@ -19590,6 +19650,12 @@ io.on('connection', (socket) => {
                 effects: { bonusATK: imATK }
             });
             logger.info(`[SKILL-COMBAT] ${player.characterName} Impositio Manus Lv${learnedLevel} on ${imTarget.characterName}: +${imATK} ATK for ${imDuration / 1000}s`);
+
+            // Re-emit player:stats to the buff target so the F8 ATK display reflects the +ATK
+            const imEffStats = getEffectiveStats(imTarget);
+            const imDerived = roDerivedStats(imEffStats);
+            const imSock = io.sockets.sockets.get(imTarget.socketId);
+            if (imSock) imSock.emit('player:stats', buildFullStatsPayload(imTargetId, imTarget, imEffStats, imDerived, Math.min(COMBAT.ASPD_CAP, imDerived.aspd + (imTarget.weaponAspdMod || 0))));
 
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
             socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
@@ -19751,7 +19817,8 @@ io.on('connection', (socket) => {
             player.mana = Math.max(0, player.mana - spCost);
             applySkillDelays(characterId, player, skillId, levelData, socket);
 
-            const removed = cleanseStatusEffects(srTarget, ['freeze', 'stone', 'stun']);
+            // rAthena commit 7cc1cf0: Status Recovery cures Frozen, Stone, Petrifying (StoneWait), Stun, Sleep
+            const removed = cleanseStatusEffects(srTarget, ['freeze', 'stone', 'petrifying', 'stun', 'sleep']);
             const srZone = player.zone || 'prontera_south';
             for (const type of removed) {
                 broadcastToZone(srZone, 'status:removed', { targetId: srTargetId, isEnemy: false, statusType: type, reason: 'status_recovery' });
@@ -20209,6 +20276,12 @@ io.on('connection', (socket) => {
                 duration: 180000 // 3 minutes
             });
             broadcastToZone(zone, 'skill:buff_applied', { targetId: characterId, targetName: player.characterName, isEnemy: false, casterId: characterId, casterName: player.characterName, skillId, buffName: 'critical_explosion', duration: 180000, effects: { critBonus } });
+
+            // Re-emit player:stats so the F8 panel reflects the +CRIT bonus from Fury
+            const ceEffStats = getEffectiveStats(player);
+            const ceDerived = roDerivedStats(ceEffStats);
+            socket.emit('player:stats', buildFullStatsPayload(characterId, player, ceEffStats, ceDerived, Math.min(COMBAT.ASPD_CAP, ceDerived.aspd + (player.weaponAspdMod || 0))));
+
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
             socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
             logger.info(`[MONK] ${player.characterName} Critical Explosion Lv${learnedLevel}: Fury active, +${critBonus} CRIT, SP regen disabled`);
@@ -20234,7 +20307,13 @@ io.on('connection', (socket) => {
                 overrideHardDEF: 90, overrideHardMDEF: 90,
                 duration: sbDuration
             });
-            broadcastToZone(zone, 'skill:buff_applied', { targetId: characterId, targetName: player.characterName, isEnemy: false, casterId: characterId, casterName: player.characterName, skillId, buffName: 'steel_body', duration: sbDuration });
+            broadcastToZone(zone, 'skill:buff_applied', { targetId: characterId, targetName: player.characterName, isEnemy: false, casterId: characterId, casterName: player.characterName, skillId, buffName: 'steel_body', duration: sbDuration, effects: { overrideHardDEF: 90, overrideHardMDEF: 90 } });
+
+            // Re-emit player:stats so the F8 panel reflects DEF/MDEF=90 + ASPD/move speed reduction
+            const sbEffStats = getEffectiveStats(player);
+            const sbDerived = roDerivedStats(sbEffStats);
+            socket.emit('player:stats', buildFullStatsPayload(characterId, player, sbEffStats, sbDerived, Math.min(COMBAT.ASPD_CAP, sbDerived.aspd + (player.weaponAspdMod || 0))));
+
             socket.emit('skill:used', { skillId, skillName: skill.displayName, level: learnedLevel, spCost, remainingMana: player.mana, maxMana: player.maxMana });
             socket.emit('combat:health_update', { characterId, health: player.health, maxHealth: player.maxHealth, mana: player.mana, maxMana: player.maxMana });
             logger.info(`[MONK] ${player.characterName} Steel Body Lv${learnedLevel}: DEF/MDEF=90, ${sbDuration / 1000}s`);
@@ -20571,10 +20650,12 @@ io.on('connection', (socket) => {
                     // Knockback 5 cells
                     if (!enemy.isDead) knockbackTarget(enemy, keResult.targetPos.x, keResult.targetPos.y, 5, keResult.zone, io);
                     // 70% stun, 2s
+                    // applyStatusEffect signature: (source, target, statusType, baseChance, overrideDuration)
+                    // overrideDuration MUST be a number (ms). Passing { duration: 2000 } corrupts Date.now()+duration.
                     if (!enemy.isDead && Math.random() < 0.70 && !enemy.modeFlags?.statusImmune) {
                         const stunResult = applyStatusEffect(
                             { level: player.stats.level || 1 },
-                            enemy, 'stun', 100, { duration: 2000 }
+                            enemy, 'stun', 100, 2000
                         );
                         if (stunResult && stunResult.applied) {
                             broadcastToZone(keZone, 'status:applied', { targetId: eid, isEnemy: true, statusType: 'stun', duration: 2000 });
@@ -22567,7 +22648,8 @@ io.on('connection', (socket) => {
             const armorBreakChances = [3, 7, 10, 12, 13];
             const armorBreakPct = armorBreakChances[learnedLevel - 1] || 0;
             if (armorBreakPct > 0 && !enemy.modeFlags?.statusImmune && !hasBuff(enemy, 'chemical_protection_armor') && Math.random() * 100 < armorBreakPct) {
-                applyBuff(enemy, { skillId, name: 'armor_break', casterId: characterId, casterName: player.characterName, hardDefReduction: 100, duration: 120000 });
+                // hardDefReduction is a fraction 0-1 (1.0 = 100% reduction → DEF=0). Read by 'armor_break' case in ro_buff_system.js.
+                applyBuff(enemy, { skillId, name: 'armor_break', casterId: characterId, casterName: player.characterName, hardDefReduction: 1.0, duration: 120000 });
                 broadcastToZone(zone, 'skill:buff_applied', {
                     targetId, targetName: enemy.name, isEnemy: true, casterId: characterId, casterName: player.characterName,
                     skillId, buffName: 'armor_break', duration: 120000
@@ -28556,13 +28638,21 @@ setInterval(async () => {
                             initEnemyWanderState(enemy);
 
                             logger.info(`[ENEMY] Respawned ${enemy.name} (ID: ${enemy.enemyId})`);
-                            broadcastToZone(respawnEnemyZone, 'enemy:spawn', {
+                            const combatRespawnPayload = {
                                 enemyId: enemy.enemyId, templateId: enemy.templateId, name: enemy.name,
                                 level: enemy.level, health: enemy.health, maxHealth: enemy.maxHealth,
                                 monsterClass: enemy.monsterClass, size: enemy.size, race: enemy.race,
                                 element: enemy.element,
+                                canMove: !!(enemy.modeFlags && enemy.modeFlags.canMove),
                                 x: enemy.x, y: enemy.y, z: enemy.z
-                            });
+                            };
+                            if (enemy.spriteClass) {
+                                combatRespawnPayload.spriteClass = enemy.spriteClass;
+                                combatRespawnPayload.weaponMode = enemy.spriteWeaponMode;
+                                if (enemy.spriteTint) combatRespawnPayload.spriteTint = enemy.spriteTint;
+                                if (enemy.spriteScale) combatRespawnPayload.spriteScale = enemy.spriteScale;
+                            }
+                            broadcastToZone(respawnEnemyZone, 'enemy:spawn', combatRespawnPayload);
                         }, enemy.respawnMs);
                     }
                 }
@@ -29126,8 +29216,7 @@ setInterval(() => {
         // RO Classic: sitting doubles natural HP regen
         if (player.isSitting) hpRegen *= 2;
 
-        // Magnificat: double HP regen
-        if (hasBuff(player, 'magnificat')) hpRegen *= 2;
+        // (Magnificat does NOT double HP regen — rAthena status.cpp SC_MAGNIFICAT only adds regen->rate.sp)
 
         const oldHP = player.health;
         player.health = Math.min(player.maxHealth, player.health + hpRegen);
@@ -29150,7 +29239,15 @@ setInterval(() => {
         if (player.mana >= player.maxMana) continue;
         // Status effects can block SP regen (poison, bleeding)
         const spRegenMods = getCombinedModifiers(player);
-        if (spRegenMods.blocksSPRegen) continue;
+        if (spRegenMods.blocksSPRegen) {
+            // rAthena: Slow Poison suppresses poison's regen block (status.cpp checks SC_POISON && !SC_SLOWPOISON).
+            // If bleeding is also present, regen stays blocked because bleeding's block stands on its own.
+            const hasPoison = player.activeStatusEffects && player.activeStatusEffects.has('poison');
+            const hasBleeding = player.activeStatusEffects && player.activeStatusEffects.has('bleeding');
+            const slowPoisonActive = hasBuff(player, 'slow_poison');
+            const onlyPoisonBlock = hasPoison && !hasBleeding;
+            if (!(slowPoisonActive && onlyPoisonBlock)) continue;
+        }
 
         // Fury / Asura lockout: disableSPRegen blocks natural SP regen
         if (spRegenMods.disableSPRegen) continue;
@@ -29345,9 +29442,11 @@ setInterval(() => {
             broadcastToZone(playerZone, 'skill:buff_applied', { targetId: charId, targetName: player.characterName, isEnemy: false, casterId: 0, casterName: 'SYSTEM', skillId: 206, buffName: 'Stone Curse', duration: t.duration, effects: { petrified: true } });
         }
         for (const d of statusDrains) {
-            // Slow Poison: block poison HP drain while buff is active
+            // Slow Poison: poison HP drain is suppressed while the buff is active.
+            // tickStatusEffects already applied the drain — undo it. Net effect = drain skipped.
+            // Per rAthena: Slow Poison does NOT cure poison; the poison timer keeps ticking,
+            // but its HP drain is paused for the duration of the buff.
             if (d.type === 'poison' && hasBuff(player, 'slow_poison')) {
-                // Undo the drain — restore HP
                 player.health = Math.min(player.maxHealth, player.health + d.drain);
                 continue;
             }
@@ -30681,7 +30780,8 @@ setInterval(async () => {
 
                 // Weapon break chance per tick (1-5%) — blocked by Chemical Protection Weapon
                 if ((effect.weaponBreakChance || 0) > 0 && !enemy.modeFlags?.statusImmune && !hasBuff(enemy, 'chemical_protection_weapon') && Math.random() * 100 < effect.weaponBreakChance) {
-                    applyBuff(enemy, { skillId: 1802, name: 'weapon_break', casterId: effect.casterId, casterName: effect.casterName, atkReduction: 50, duration: 30000 });
+                    // atkReduction is a fraction 0-1 (0.5 = 50% ATK reduction). Read by 'weapon_break' case in ro_buff_system.js.
+                    applyBuff(enemy, { skillId: 1802, name: 'weapon_break', casterId: effect.casterId, casterName: effect.casterName, atkReduction: 0.5, duration: 30000 });
                     broadcastToZone(effect.zone, 'skill:buff_applied', {
                         targetId: eid, targetName: enemy.name, isEnemy: true,
                         casterId: effect.casterId, casterName: effect.casterName,
@@ -30906,32 +31006,23 @@ setInterval(async () => {
         if (effect.type === 'sanctuary') {
             if (!effect.lastTickTime || now - effect.lastTickTime >= 1000) {
                 effect.lastTickTime = now;
-                const sanctRadius = effect.radius || 250;
+                const sanctRadius = effect.radius || 125;
                 const healPerTick = effect.healPerTick || 100;
                 const sanctZone = effect.zone || 'prontera_south';
-                let targetsHealed = 0;
 
-                // Heal players in radius (limited to maxTargets, closest first)
-                const maxTargets = effect.maxTargets || 13;
-                const playersInRange = [];
+                // Heal ALL players in range (rAthena: no per-tick cap)
                 for (const [charId, player] of connectedPlayers.entries()) {
                     if (player.isDead) continue;
                     if ((player.zone || 'prontera_south') !== sanctZone) continue;
                     if (player.health >= player.maxHealth) continue;
                     const pPos = { x: player.lastX || 0, y: player.lastY || 0 };
                     const dx = pPos.x - effect.x, dy = pPos.y - effect.y;
-                    const dist = Math.sqrt(dx * dx + dy * dy);
-                    if (dist > sanctRadius) continue;
-                    playersInRange.push({ charId, player, pPos, dist });
-                }
-                const sortedPlayers = playersInRange.sort((a, b) => a.dist - b.dist).slice(0, maxTargets);
+                    if (Math.sqrt(dx * dx + dy * dy) > sanctRadius) continue;
 
-                for (const { charId, player, pPos } of sortedPlayers) {
                     const oldHP = player.health;
                     player.health = Math.min(player.maxHealth, player.health + healPerTick);
                     const healed = player.health - oldHP;
                     if (healed > 0) {
-                        targetsHealed++;
                         broadcastToZone(sanctZone, 'skill:effect_damage', {
                             attackerId: effect.casterId, attackerName: effect.casterName || '',
                             targetId: charId, targetName: player.characterName, isEnemy: false,
@@ -30947,19 +31038,33 @@ setInterval(async () => {
                     }
                 }
 
-                // Damage Undead enemies in radius (half heal as Holy damage)
-                const holyDmg = Math.floor(healPerTick / 2);
+                // Damage Undead-element OR Demon-race enemies in range, applying Holy element modifier
+                // Each damage hit decrements lifetime damageBudget; Sanctuary self-destructs when budget reaches 0
+                const baseHolyDmg = Math.floor(healPerTick / 2);
+                let budgetExhausted = false;
                 for (const [eid, enemy] of enemies.entries()) {
+                    if (budgetExhausted) break;
                     if (enemy.isDead) continue;
                     if ((enemy.zone || 'prontera_south') !== sanctZone) continue;
                     const enemyEle = (enemy.element && enemy.element.type) || 'neutral';
-                    if (enemyEle !== 'undead') continue;
+                    const enemyEleLv = (enemy.element && enemy.element.level) || 1;
+                    const enemyRace = enemy.race || 'formless';
+                    // rAthena: Undead element OR Demon race
+                    if (enemyEle !== 'undead' && enemyRace !== 'demon') continue;
                     const dx = enemy.x - effect.x, dy = enemy.y - effect.y;
                     if (Math.sqrt(dx * dx + dy * dy) > sanctRadius) continue;
+
+                    // Apply Holy element modifier (ignores MDEF — IgnoreDefense flag in rAthena)
+                    const eleMod = getElementModifier('holy', enemyEle, enemyEleLv);
+                    const holyDmg = Math.max(1, Math.floor(baseHolyDmg * eleMod / 100));
 
                     enemy.health = Math.max(0, enemy.health - holyDmg);
                     enemy.lastDamageTime = now;
                     if (typeof setEnemyAggro === 'function') setEnemyAggro(enemy, effect.casterId, 'skill');
+                    const broken = checkDamageBreakStatuses(enemy);
+                    for (const bt of broken) {
+                        broadcastToZone(sanctZone, 'status:removed', { targetId: eid, isEnemy: true, statusType: bt, reason: 'damage_break' });
+                    }
                     broadcastToZone(sanctZone, 'skill:effect_damage', {
                         attackerId: effect.casterId, attackerName: effect.casterName || '',
                         targetId: eid, targetName: enemy.name, isEnemy: true,
@@ -30970,9 +31075,24 @@ setInterval(async () => {
                         timestamp: now
                     });
                     broadcastToZone(sanctZone, 'enemy:health_update', { enemyId: eid, health: enemy.health, maxHealth: enemy.maxHealth, inCombat: true });
+
+                    // 2-cell knockback away from Sanctuary center
+                    if (typeof knockbackTarget === 'function' && enemy.health > 0) {
+                        knockbackTarget(enemy, effect.x, effect.y, 2, sanctZone, io);
+                    }
+
                     if (enemy.health <= 0) {
                         const caster = connectedPlayers.get(effect.casterId);
                         if (caster) await processEnemyDeathFromSkill(enemy, caster, effect.casterId, io);
+                    }
+
+                    // Decrement lifetime damage budget — Sanctuary destroyed when exhausted
+                    if (typeof effect.damageBudget === 'number') {
+                        effect.damageBudget -= 1;
+                        if (effect.damageBudget <= 0) {
+                            budgetExhausted = true;
+                            effectsToRemove.push(effect.id);
+                        }
                     }
                 }
             }
@@ -30984,19 +31104,21 @@ setInterval(async () => {
                 if ((effect.wavesCompleted || 0) < (effect.numWaves || 1)) {
                     effect.lastWaveTime = now;
                     effect.wavesCompleted = (effect.wavesCompleted || 0) + 1;
-                    const meRadius = effect.radius || 350;
+                    const meRadius = effect.radius || 175;
                     const meZone = effect.zone || 'prontera_south';
                     const meCaster = connectedPlayers.get(effect.casterId);
+                    const meSkillLv = effect.skillLevel || 1;
                     if (!effect.lastHitTargets) effect.lastHitTargets = {};
 
                     for (const [eid, enemy] of enemies.entries()) {
                         if (enemy.isDead) continue;
                         if ((enemy.zone || 'prontera_south') !== meZone) continue;
 
-                        // Only damages Undead element OR Demon race
+                        // Pre-renewal rAthena: ONLY Undead element OR Demon race
+                        // (NOT Undead race, NOT Shadow element — those are renewal-only behaviors)
                         const enemyEle = (enemy.element && enemy.element.type) || 'neutral';
                         const enemyRace = enemy.race || 'formless';
-                        if (enemyEle !== 'undead' && enemyRace !== 'undead' && enemyRace !== 'demon') continue;
+                        if (enemyEle !== 'undead' && enemyRace !== 'demon') continue;
 
                         const dx = enemy.x - effect.x, dy = enemy.y - effect.y;
                         if (Math.sqrt(dx * dx + dy * dy) > meRadius) continue;
@@ -31006,22 +31128,20 @@ setInterval(async () => {
                         if (effect.lastHitTargets[targetKey] && now - effect.lastHitTargets[targetKey] < 3000) continue;
                         effect.lastHitTargets[targetKey] = now;
 
-                        // 100% MATK Holy damage
-                        let meDmg = 1;
+                        // rAthena pre-renewal: each wave fires SkillLv hits of 100% MATK Holy.
+                        // Bundle as one event with total damage (+30% bonus is renewal-only — REMOVED)
+                        let totalDmg = 0;
                         if (meCaster) {
                             const casterStats = getEffectiveStats(meCaster);
-                            const meResult = calculateMagicSkillDamage(casterStats, enemy.stats, enemy.hardMdef || 0, 100, 'holy', getEnemyTargetInfo(enemy));
-                            meDmg = Math.max(1, meResult.damage || 0);
+                            for (let h = 0; h < meSkillLv; h++) {
+                                const meResult = calculateMagicSkillDamage(casterStats, enemy.stats, enemy.hardMdef || 0, 100, 'holy', getEnemyTargetInfo(enemy));
+                                totalDmg += Math.max(1, meResult.damage || 0);
+                            }
+                        } else {
+                            totalDmg = meSkillLv; // Fallback if caster disconnected mid-cast
                         }
 
-                        // +30% bonus vs Undead race, Demon race, Shadow element, Undead element
-                        const meRace = enemy.race || 'formless';
-                        const meEle = (enemy.element && enemy.element.type) || 'neutral';
-                        if (meRace === 'undead' || meRace === 'demon' || meEle === 'shadow' || meEle === 'undead') {
-                            meDmg = Math.floor(meDmg * 1.3);
-                        }
-
-                        enemy.health = Math.max(0, enemy.health - meDmg);
+                        enemy.health = Math.max(0, enemy.health - totalDmg);
                         enemy.lastDamageTime = now;
                         if (typeof setEnemyAggro === 'function') setEnemyAggro(enemy, effect.casterId, 'skill');
                         const broken = checkDamageBreakStatuses(enemy);
@@ -31032,8 +31152,8 @@ setInterval(async () => {
                         broadcastToZone(meZone, 'skill:effect_damage', {
                             attackerId: effect.casterId, attackerName: effect.casterName || '',
                             targetId: eid, targetName: enemy.name, isEnemy: true,
-                            skillId: 1005, skillName: 'Magnus Exorcismus', element: 'holy',
-                            damage: meDmg, isCritical: false, isMiss: false, hitType: 'skill',
+                            skillId: 1005, skillName: 'Magnus Exorcismus', skillLevel: meSkillLv, element: 'holy',
+                            damage: totalDmg, hits: meSkillLv, isCritical: false, isMiss: false, hitType: 'skill',
                             targetHealth: enemy.health, targetMaxHealth: enemy.maxHealth,
                             targetX: enemy.x, targetY: enemy.y, targetZ: enemy.z,
                             timestamp: now
@@ -32465,8 +32585,11 @@ function enemyMoveToward(enemy, targetX, targetY, now, speed) {
         enemy._navPathTarget = { x: targetX, y: targetY };
     }
 
-    // Advance past any reached waypoints (within 20 units)
-    while (enemy._navPathIdx < enemy._navPath.length) {
+    // Advance past INTERMEDIATE reached waypoints (within 20 units).
+    // Never skip the final waypoint — it's the destination; stopping short
+    // creates a dead-zone where processWander (arrives <10u) can't reconcile
+    // with the advance threshold (20u), leaving the enemy stuck in place.
+    while (enemy._navPathIdx < enemy._navPath.length - 1) {
         const wp = enemy._navPath[enemy._navPathIdx];
         const wpDx = wp.x - enemy.x;
         const wpDy = wp.y - enemy.y;
@@ -33671,7 +33794,9 @@ setInterval(async () => {
                         } else if (attackElement !== 'poison') {
                             // Mode B: Non-poison attack — 50% chance auto-Envenom Lv5
                             // Full Envenom Lv5: 100% ATK physical damage + 75 flat poison (bypasses DEF)
-                            if (Math.random() < 0.5 && enemy.health > 0) {
+                            // rAthena: gate behind envenomLimit BEFORE the proc roll, so Lv1 (limit=0) cannot trigger.
+                            const envenomCountersLeft = (prBuff.envenomLimit || 0) - (prBuff.envenomUsed || 0);
+                            if (envenomCountersLeft > 0 && Math.random() < 0.5 && enemy.health > 0) {
                                 const envStats = getEffectiveStats(atkTarget);
                                 const envTargetInfo = getEnemyTargetInfo(enemy);
                                 const envAtkInfo = getAttackerInfo(atkTarget);

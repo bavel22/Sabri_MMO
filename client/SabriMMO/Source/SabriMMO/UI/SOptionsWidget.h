@@ -83,6 +83,7 @@ private:
 	TArray<TSharedPtr<FString>> FrameRateLimitOptions;
 	TArray<TSharedPtr<FString>> QualityLevelOptions;
 	TArray<TSharedPtr<FString>> OverallQualityOptions;
+	TArray<TSharedPtr<FString>> SpriteQualityOptions;
 	TArray<FIntPoint> ResolutionValues;
 	TArray<float> FrameRateLimitValues;
 
@@ -98,6 +99,7 @@ private:
 	TSharedPtr<SComboBox<TSharedPtr<FString>>> ViewDistCombo;
 	TSharedPtr<SComboBox<TSharedPtr<FString>>> PostProcCombo;
 	TSharedPtr<SComboBox<TSharedPtr<FString>>> FoliageCombo;
+	TSharedPtr<SComboBox<TSharedPtr<FString>>> SpriteQualityCombo;
 
 	// ---- Resolution confirmation ----
 	TSharedPtr<SWidget> ConfirmOverlay;

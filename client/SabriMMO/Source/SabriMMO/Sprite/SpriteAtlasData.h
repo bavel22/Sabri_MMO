@@ -186,6 +186,11 @@ struct FSingleAnimAtlasInfo
 	 *  Indexed as [Frame * 8 + Direction]. Empty = always in front (default). */
 	TArray<bool> DepthFront;
 
+	/** Global LOD bias applied to every sprite atlas at load time.
+	 *  Driven by Options > Video > Sprite Quality. 0=Ultra (mip 0), 1=High,
+	 *  2=Medium, 3=Low. Set by UOptionsSubsystem::SetSpriteQuality(). */
+	SABRIMMO_API static int32 GlobalLODBias;
+
 	/** Lazy-load the texture from AssetPath if not already loaded */
 	void EnsureTextureLoaded()
 	{
@@ -193,6 +198,11 @@ struct FSingleAnimAtlasInfo
 		{
 			AtlasTexture = Cast<UTexture2D>(
 				StaticLoadObject(UTexture2D::StaticClass(), nullptr, *AssetPath));
+			if (AtlasTexture && AtlasTexture->LODBias != GlobalLODBias)
+			{
+				AtlasTexture->LODBias = GlobalLODBias;
+				AtlasTexture->UpdateResource();
+			}
 		}
 	}
 

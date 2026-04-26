@@ -59,6 +59,8 @@ public:
 	UPROPERTY() float fBgmVolume     = 0.7f;
 	UPROPERTY() float fSfxVolume     = 1.0f;
 	UPROPERTY() float fAmbientVolume = 0.5f;
+	// Video — Sprite Quality (0=Ultra, 1=High, 2=Medium, 3=Low). Maps to LODBias on every sprite atlas.
+	UPROPERTY() int32 iSpriteQuality = 1;
 	// Login
 	UPROPERTY() bool bRememberUsername = false;
 	UPROPERTY() FString RememberedUsername;
@@ -294,6 +296,8 @@ public:
     float fOptionBgmVolume     = 0.7f;
     float fOptionSfxVolume     = 1.0f;
     float fOptionAmbientVolume = 0.5f;
+    // Video
+    int32 iOptionSpriteQuality = 1;  // 0=Ultra, 1=High, 2=Medium, 3=Low
 
     void SaveGameOptions();
     void LoadGameOptions();

@@ -1,0 +1,32 @@
+{
+  "version": 2,
+  "character": "ice_crystal",
+  "cell_size": 1024,
+  "animations": [
+    {
+      "folder": "Idle Wobble",
+      "state": "idle",
+      "group": "shared"
+    },
+    {
+      "folder": "Hit Jiggle",
+      "state": "hit",
+      "group": "shared"
+    },
+    {
+      "folder": "Crack Death",
+      "state": "death",
+      "group": "shared"
+    },
+    {
+      "folder": "Idle Wobble",
+      "state": "walk",
+      "group": "shared"
+    },
+    {
+      "folder": "Idle Wobble",
+      "state": "attack",
+      "group": "shared"
+    }
+  ]
+}

@@ -122,7 +122,17 @@ public:
 	bool IsAutoDeclineParty() const { return bAutoDeclineParty; }
 	void SetAutoDeclineParty(bool bEnabled);
 
+	// ---- Video / Sprite Quality ----
+	// 0 = Ultra (full res), 1 = High, 2 = Medium, 3 = Low — maps to LODBias on every sprite atlas.
+	int32 GetSpriteQuality() const { return iSpriteQuality; }
+	void SetSpriteQuality(int32 NewValue);
+
 private:
+	/** Iterate already-loaded sprite atlas textures and apply current LODBias.
+	 *  Called when SetSpriteQuality changes value. New atlases loaded after this
+	 *  pick up the bias automatically via FSingleAnimAtlasInfo::GlobalLODBias. */
+	void ApplySpriteQualityToLoadedTextures();
+
 	bool bOptionsPanelVisible = false;
 	bool bOptionsWidgetAdded = false;
 	bool bFPSOverlayAdded = false;
@@ -158,6 +168,7 @@ private:
 	bool bNoShift = false;
 	bool bAutoDeclineTrades = false;
 	bool bAutoDeclineParty = false;
+	int32 iSpriteQuality = 1;  // High by default (LODBias 1 → effective half-res)
 
 	TSharedPtr<SOptionsWidget> OptionsWidget;
 	TSharedPtr<SWidget> OptionsAlignmentWrapper;

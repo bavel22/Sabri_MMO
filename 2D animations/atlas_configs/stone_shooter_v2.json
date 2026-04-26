@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "character": "stone_shooter",
+  "cell_size": 1024,
+  "animations": [
+    { "folder": "Idle Sway", "state": "idle", "group": "shared" },
+    { "folder": "Idle Sway", "state": "walk", "group": "shared" },
+    { "folder": "Tentacle Thrash", "state": "attack", "group": "shared" },
+    { "folder": "Recoil Flinch", "state": "hit", "group": "shared" },
+    { "folder": "Wilt Death", "state": "death", "group": "shared" }
+  ]
+}
