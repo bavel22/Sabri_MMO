@@ -7,12 +7,20 @@ Run inside the UE5 Editor's Python console:
 What it does:
   1. For each weapon_12_*.png in Content/SabriMMO/Sprites/Atlases/Weapon/knuckle/female/,
      finds or creates the corresponding Texture2D asset.
-  2. Sets the standard sprite atlas texture properties:
-       - Compression: BC7 (TC_BC7)
-       - Filter: Nearest (TF_Nearest)
-       - Mip Gen Settings: NoMipmaps
-       - Never Stream: True
-       - sRGB: False (linear color so atlas pixels are color-precise)
+  2. Sets the canonical sprite atlas texture properties (2026-04-27 — see
+     memory/feedback-sprite-texture-group-ui.md):
+       - Compression:                       BC7 (TC_BC7)
+       - Filter:                            Nearest (TF_Nearest)
+       - Mip Gen Settings:                  SimpleAverage
+       - Use New Mip Filter:                True
+       - Do Scale Mips For Alpha Coverage:  True
+       - Alpha Coverage Thresholds:         (0, 0, 0, 0.5)
+       - Maximum Texture Size:              0   (no cap)
+       - Never Stream:                      False
+       - LOD Group:                         TEXTUREGROUP_UI
+       - sRGB:                              True (body sprite material samples as
+                                                  Color/sRGB; srgb=False makes
+                                                  the sprite invisible)
   3. Saves all modified assets.
 
 Prerequisites:
@@ -61,21 +69,29 @@ def import_png_if_needed(png_path, dest_dir):
 
 
 def configure_sprite_texture(texture):
-    """Apply the standard sprite atlas settings."""
+    """Canonical Sabri_MMO sprite atlas settings (UPDATED 2026-04-27).
+
+    Required for the runtime Sprite Quality slider, ZonePreloadSubsystem
+    async-load, and Path C deferred equipment swap to work correctly.
+    See memory `feedback-sprite-texture-group-ui.md` for full reference.
+    """
     if texture is None:
         return False
 
-    # Compression: BC7 for high-quality color + alpha
     texture.set_editor_property("compression_settings", unreal.TextureCompressionSettings.TC_BC7)
-    # Filter: Nearest (no blur on pixel art)
     texture.set_editor_property("filter", unreal.TextureFilter.TF_NEAREST)
-    # No mips
-    texture.set_editor_property("mip_gen_settings", unreal.TextureMipGenSettings.TMGS_NO_MIPMAPS)
-    # Never stream — load full resolution always
-    texture.set_editor_property("never_stream", True)
-    # sRGB OFF — linear color space so the cel-shade ramp colors stay accurate
-    texture.set_editor_property("srgb", False)
-    # Texture Group: UI (sprite atlases are UI textures, not world textures)
+    # Mip pyramid (was NoMipmaps) — required for the runtime LOD slider
+    texture.set_editor_property("mip_gen_settings", unreal.TextureMipGenSettings.TMGS_SIMPLE_AVERAGE)
+    texture.set_editor_property("use_new_mip_filter", True)
+    # Alpha coverage scaling (W=0.5) — preserves sprite edges at lower mip levels
+    texture.set_editor_property("do_scale_mips_for_alpha_coverage", True)
+    texture.set_editor_property("alpha_coverage_thresholds",
+        unreal.Vector4(0.0, 0.0, 0.0, 0.5))
+    # No fixed cap — non-square atlases (walk/attack) need uniform mip downscale
+    texture.set_editor_property("max_texture_size", 0)
+    # Streaming on (was NeverStream=true) — required for LODBias to release VRAM
+    texture.set_editor_property("never_stream", False)
+    texture.set_editor_property("srgb", True)  # MUST be True — body sprite material samples as Color (sRGB)
     texture.set_editor_property("lod_group", unreal.TextureGroup.TEXTUREGROUP_UI)
 
     # Save

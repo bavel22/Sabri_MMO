@@ -11,6 +11,7 @@
 class UShopSubsystem;
 class SBox;
 class SVerticalBox;
+class SHorizontalBox;
 class SScrollBox;
 class SEditableTextBox;
 class SOverlay;
@@ -51,8 +52,14 @@ private:
 	// Buy mode sub-builders
 	void RebuildShopItemList();
 	void RebuildBuyCart();
+	void RebuildTabBar();
 	TSharedRef<SWidget> BuildShopItemRow(int32 ItemIndex);
 	TSharedRef<SWidget> BuildBuyCartRow(int32 CartIndex);
+
+	// Tab bar state — one tab per unique item.Category in the current shop.
+	// "All" is always first; clicking a tab filters the shop list client-side.
+	FString CurrentShopTab = TEXT("All");
+	TSharedPtr<SHorizontalBox> TabBarContainer;
 
 	// Sell mode sub-builders
 	void RebuildSellItemList();

@@ -66,7 +66,12 @@ FOLDERS = [
 
 
 def apply_sprite_settings(asset_path):
-    """Apply sprite texture settings. Returns True if asset was configured."""
+    """Canonical Sabri_MMO sprite atlas settings (UPDATED 2026-04-27).
+
+    Required for the runtime Sprite Quality slider, ZonePreloadSubsystem
+    async-load, and Path C deferred equipment swap to work correctly.
+    See memory `feedback-sprite-texture-group-ui.md` for full reference.
+    """
     clean = asset_path.split(".")[0]
     tex = unreal.load_asset(clean)
     if not tex or not isinstance(tex, unreal.Texture2D):
@@ -75,9 +80,15 @@ def apply_sprite_settings(asset_path):
     tex.set_editor_property("compression_settings",
         unreal.TextureCompressionSettings.TC_BC7)
     tex.set_editor_property("mip_gen_settings",
-        unreal.TextureMipGenSettings.TMGS_NO_MIPMAPS)
+        unreal.TextureMipGenSettings.TMGS_SIMPLE_AVERAGE)
+    tex.set_editor_property("use_new_mip_filter", True)
+    tex.set_editor_property("do_scale_mips_for_alpha_coverage", True)
+    tex.set_editor_property("alpha_coverage_thresholds",
+        unreal.Vector4(0.0, 0.0, 0.0, 0.5))
+    tex.set_editor_property("max_texture_size", 0)
+    tex.set_editor_property("never_stream", False)
     tex.set_editor_property("lod_group", unreal.TextureGroup.TEXTUREGROUP_UI)
-    tex.set_editor_property("never_stream", True)
+    tex.set_editor_property("srgb", True)
     eal.save_asset(clean)
     return True
 

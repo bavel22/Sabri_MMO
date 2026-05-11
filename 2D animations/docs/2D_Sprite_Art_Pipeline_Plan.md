@@ -807,11 +807,16 @@ Paper2D is **still supported** in UE5.7 and provides:
 1. Import sprite sheet PNG into UE5 Content Browser
 2. Right-click → Sprite Actions → "Extract Sprites"
    - Or use "Create Flipbook" for automatic animation setup
-3. Set Sprite → Texture Settings:
-   - Filter: Nearest (NO bilinear filtering — preserves pixel art crispness)
-   - Compression: UserInterface2D (lossless)
-   - sRGB: ON
-   - Mip Gen Settings: NoMipmaps (critical for pixel art)
+3. Set Sprite → Texture Settings (canonical 2026-04-27 — see memory `feedback-sprite-texture-group-ui.md`):
+   - Filter: Nearest
+   - Compression Settings: BC7
+   - sRGB: OFF
+   - Mip Gen Settings: SimpleAverage (with alpha coverage)
+   - Use Improved Image Processing: ON
+   - Do Scale Mips For Alpha Coverage: ON, thresholds (0, 0, 0, 0.5)
+   - Maximum Texture Size: 0
+   - Never Stream: OFF
+   - LOD Group: UI
 4. Create Flipbook asset for each animation
 5. Set frame rate: 8-12 FPS
 ```

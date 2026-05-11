@@ -96,11 +96,19 @@ Create `2D animations/atlas_configs/{monster_name}_v2.json`:
 
 ### Step 6: Import into UE5
 
-Import PNGs at `Content/SabriMMO/Sprites/Atlases/Body/enemies/{monster_name}/`. Texture settings:
-- Compression: **UserInterface2D**
+Import PNGs at `Content/SabriMMO/Sprites/Atlases/Body/enemies/{monster_name}/`. Texture settings (UPDATED 2026-04-27 — required for runtime Sprite Quality slider, ZonePreloadSubsystem, Path C deferred swap):
+- Compression Settings: **BC7**
 - Filter: **Nearest**
-- Mip Gen Settings: **NoMipmaps**
-- Never Stream: **On**
+- **Mip Gen Settings**: **SimpleAverage**
+- **Use Improved Image Processing**: **On**
+- **Do Scale Mips For Alpha Coverage**: **On**
+- **Alpha Coverage Thresholds**: **(0, 0, 0, 0.5)** (W=0.5)
+- **Maximum Texture Size**: **0** (no cap)
+- **Never Stream**: **Off**
+- Texture Group: **UI**
+- **sRGB: On** (body sprite material samples as Color/sRGB; Off makes the sprite invisible — verified 2026-04-28)
+
+Full reference: memory `feedback-sprite-texture-group-ui.md`.
 
 ### Step 7: Update Server — Set spriteClass
 

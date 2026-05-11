@@ -29,6 +29,16 @@ public:
 	// ---- public API ----
 	void RequestWarp(const FString& WarpId);
 
+	/** Show the loading overlay optimistically. Used by client-side triggers that
+	 *  expect a zone change but won't get the zone:change response for ~60-250ms
+	 *  (Kafra teleport, Butterfly Wing). Hidden automatically by HandleZoneError
+	 *  on rejection, or re-applied with the destination name by HandleZoneChange. */
+	void ShowExpectedZoneChange(const FString& StatusText = TEXT("Loading..."));
+
+	/** Hide an optimistic overlay shown by ShowExpectedZoneChange when the expected
+	 *  zone change was rejected by a non-zone:error path (e.g., kafra:error). */
+	void HideExpectedZoneChange();
+
 	/** Snap a teleport location to the nearest walkable ground.
 	 *  NavMesh projection first, line trace fallback.
 	 *  Adds CapsuleHalfHeight offset so the character stands ON the surface. */
@@ -49,6 +59,10 @@ private:
 	void CheckTransitionComplete();
 	void TeleportPawnToSpawn();
 
+	// Polls UZonePreloadSubsystem until all atlas async loads complete (or timeout),
+	// then hides the loading overlay. Called after zone:ready is emitted.
+	void WaitForPreloadAndHideOverlay();
+
 	// ---- loading overlay ----
 	void ShowLoadingOverlay(const FString& StatusText);
 	void HideLoadingOverlay();
@@ -62,6 +76,9 @@ private:
 	int32 LocalCharacterId = 0;
 	int32 TransitionCheckCount = 0;
 	FTimerHandle TransitionCheckTimer;
+	FTimerHandle PreloadWaitTimer;
+	double PreloadStableSinceTime = 0.0;
+	double PreloadWaitStartTime = 0.0;
 
 	TSharedPtr<SWidget> LoadingWidget;
 	TSharedPtr<SWidget> LoadingOverlay;

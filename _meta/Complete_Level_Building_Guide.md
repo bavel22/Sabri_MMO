@@ -455,13 +455,14 @@ decal_comp.set_decal_material(unreal.load_asset(material_path))
 
 ### 4.7 Decal Placement Settings
 
-| Setting | Value | Why |
-|---------|-------|-----|
-| **Rotation Pitch** | -90 | Projects straight down onto terrain |
-| **Rotation Yaw** | 0-360 (randomize) | Varies direction per decal for organic look |
-| **Scale X** | 1.5 - 5.0 | Controls projection depth (how far into surfaces) |
-| **Scale Y/Z** | 1.5 - 5.0 | Controls width/height on ground |
-| **Location Z** | Slightly above terrain | Decal projects downward from this height |
+| Setting            | Value                  | Why                                               |
+| ------------------ | ---------------------- | ------------------------------------------------- |
+| **Rotation Pitch** | -90                    | Projects straight down onto terrain               |
+| **Rotation Yaw**   | 0-360 (randomize)      | Varies direction per decal for organic look       |
+| **Scale X**        | 1.5 - 5.0              | Controls projection depth (how far into surfaces) |
+| **Scale Y/Z**      | 1.5 - 5.0              | Controls width/height on ground                   |
+| **Location Z**     | Slightly above terrain | Decal projects downward from this height          |
+|                    |                        |                                                   |
 
 ### 4.8 Artistic Placement Tips
 
@@ -474,18 +475,18 @@ decal_comp.set_decal_material(unreal.load_asset(material_path))
 
 ### 4.9 Per-Zone Decal Recommendations
 
-| Zone | Decal Types to Use | Recommended Count | Artistic Direction |
-|------|-------------------|-------------------|-------------------|
-| **Prontera Fields** | Dirt paths, flower scatter, stone patches | 40-60 | Warm, welcoming, pastoral |
-| **Geffen** | Moss, cracks, arcane stains | 30-50 | Cool, mysterious, old |
-| **Payon Forest** | Leaf scatter, moss, root tendrils, mushroom marks | 50-70 | Dense forest floor, organic |
-| **Morroc Desert** | Sand drift, cracked earth, bone scatter | 30-50 | Sparse, sun-bleached, hot |
-| **Lutie Snow** | Ice patches, frost patterns, snow drifts | 30-50 | Cold, clean, festive |
-| **Glast Heim** | Blood stains, bone scatter, claw marks, slime | 50-80 | Horror detail, heavy coverage |
-| **Niflheim** | Dark stains, shadow pools, dead patches | 30-50 | Desaturated, lifeless |
-| **Veins Volcanic** | Lava cracks, scorch marks, sulfur deposits | 40-60 | Hot, dangerous |
-| **Amatsu** | Cherry petals, bamboo leaves, zen rake lines | 30-50 | Serene, cultural detail |
-| **Dungeons** | Cracks, puddles, dark stains, rubble | 40-60 | Underground, worn |
+| Zone                | Decal Types to Use                                | Recommended Count | Artistic Direction            |
+| ------------------- | ------------------------------------------------- | ----------------- | ----------------------------- |
+| **Prontera Fields** | Dirt paths, flower scatter, stone patches         | 40-60             | Warm, welcoming, pastoral     |
+| **Geffen**          | Moss, cracks, arcane stains                       | 30-50             | Cool, mysterious, old         |
+| **Payon Forest**    | Leaf scatter, moss, root tendrils, mushroom marks | 50-70             | Dense forest floor, organic   |
+| **Morroc Desert**   | Sand drift, cracked earth, bone scatter           | 30-50             | Sparse, sun-bleached, hot     |
+| **Lutie Snow**      | Ice patches, frost patterns, snow drifts          | 30-50             | Cold, clean, festive          |
+| **Glast Heim**      | Blood stains, bone scatter, claw marks, slime     | 50-80             | Horror detail, heavy coverage |
+| **Niflheim**        | Dark stains, shadow pools, dead patches           | 30-50             | Desaturated, lifeless         |
+| **Veins Volcanic**  | Lava cracks, scorch marks, sulfur deposits        | 40-60             | Hot, dangerous                |
+| **Amatsu**          | Cherry petals, bamboo leaves, zen rake lines      | 30-50             | Serene, cultural detail       |
+| **Dungeons**        | Cracks, puddles, dark stains, rubble              | 40-60             | Underground, worn             |
 
 ### 4.10 Prerequisites
 
@@ -687,13 +688,13 @@ exec(open(r"C:\Sabri_MMO\client\SabriMMO\Scripts\Environment\setup_grass_v3_fixe
 
 #### What Each Parameter Does
 
-| Parameter | What It Controls | Low Value | High Value |
-|-----------|-----------------|-----------|------------|
-| **Bloom** | Glow around bright areas | 0.0 = no glow | 1.0 = heavy glow |
-| **Vignette** | Dark edges around screen | 0.0 = none | 1.0 = heavy darkening |
-| **Exposure Bias** | Overall brightness compensation | 0.0 = darker (dungeon) | 1.5+ = brighter (outdoor, compensates for Unlit sprite darkening) |
-| **White Temp** | Color temperature of scene | 5000K = cool/blue | 7000K = warm/golden |
-| **Color Gain Highlights** | Color tint on bright areas | R > 1.0 = warmer highlights | B > 1.0 = cooler highlights |
+| Parameter                 | What It Controls                | Low Value                   | High Value                                                        |
+| ------------------------- | ------------------------------- | --------------------------- | ----------------------------------------------------------------- |
+| **Bloom**                 | Glow around bright areas        | 0.0 = no glow               | 1.0 = heavy glow                                                  |
+| **Vignette**              | Dark edges around screen        | 0.0 = none                  | 1.0 = heavy darkening                                             |
+| **Exposure Bias**         | Overall brightness compensation | 0.0 = darker (dungeon)      | 1.5+ = brighter (outdoor, compensates for Unlit sprite darkening) |
+| **White Temp**            | Color temperature of scene      | 5000K = cool/blue           | 7000K = warm/golden                                               |
+| **Color Gain Highlights** | Color tint on bright areas      | R > 1.0 = warmer highlights | B > 1.0 = cooler highlights                                       |
 
 ### 6.5 Global Post-Process Settings (All Zones)
 
@@ -770,15 +771,15 @@ Static mesh props placed in the level for visual richness — trees, rocks, buil
 
 All assets scale relative to `SM_RO_Tree_01` (Blender Z=145 = correct in-game size):
 
-| Asset Type | Target Z (Blender units) | Proportion to Tree |
-|-----------|--------------------------|---------------------|
-| Tall tree | 180 | 1.2x |
-| Standard tree | 145 | 1.0x (reference) |
-| Wide/bushy tree | 110 | 0.75x |
-| Building | 130 | 0.9x |
-| Large rock | 35 | 0.24x |
-| Bush | 25 | 0.17x |
-| Small rock cluster | 12 | 0.08x |
+| Asset Type         | Target Z (Blender units) | Proportion to Tree |
+| ------------------ | ------------------------ | ------------------ |
+| Tall tree          | 180                      | 1.2x               |
+| Standard tree      | 145                      | 1.0x (reference)   |
+| Wide/bushy tree    | 110                      | 0.75x              |
+| Building           | 130                      | 0.9x               |
+| Large rock         | 35                       | 0.24x              |
+| Bush               | 25                       | 0.17x              |
+| Small rock cluster | 12                       | 0.08x              |
 
 ### 7.2 Blender FBX Export Settings
 
@@ -833,11 +834,11 @@ Installed at `C:/Sabri_MMO/_tools/TRELLIS/` with all models.
 
 ### 7.6 Available Blender Generation Scripts
 
-| Script | Run Command | What It Creates |
-|--------|------------|----------------|
-| `blender_make_ro_tree.py` | `"C:/Blender 5.1/blender.exe" --background --python _tools/blender_make_ro_tree.py` | Single RO-style tree (tapered trunk + puffy canopy) |
-| `blender_make_ro_assets.py` | `"C:/Blender 5.1/blender.exe" --background --python _tools/blender_make_ro_assets.py` | 6 untextured assets (2 trees, 2 rocks, 1 bush, 1 building) |
-| `blender_make_ro_assets_textured.py` | `"C:/Blender 5.1/blender.exe" --background --python _tools/blender_make_ro_assets_textured.py` | 6 textured assets with AI textures applied |
+| Script                               | Run Command                                                                                    | What It Creates                                            |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| `blender_make_ro_tree.py`            | `"C:/Blender 5.1/blender.exe" --background --python _tools/blender_make_ro_tree.py`            | Single RO-style tree (tapered trunk + puffy canopy)        |
+| `blender_make_ro_assets.py`          | `"C:/Blender 5.1/blender.exe" --background --python _tools/blender_make_ro_assets.py`          | 6 untextured assets (2 trees, 2 rocks, 1 bush, 1 building) |
+| `blender_make_ro_assets_textured.py` | `"C:/Blender 5.1/blender.exe" --background --python _tools/blender_make_ro_assets_textured.py` | 6 textured assets with AI textures applied                 |
 
 ---
 
@@ -1172,15 +1173,15 @@ Every zone has a distinct color identity. Use these when configuring material Wa
 
 Hard limit: 16 texture sampler slots per material. Landscape reserves ~4.
 
-| Current Usage | Samplers |
-|--------------|----------|
-| GrassWarm + Normal | 2 |
-| GrassCool + Normal | 2 |
-| Dirt + Normal | 2 |
-| Rock + Normal | 2 |
-| AO | 1 |
-| MacroVariation | 1 |
-| **Total** | **10 of 12 available** |
+| Current Usage      | Samplers               |
+| ------------------ | ---------------------- |
+| GrassWarm + Normal | 2                      |
+| GrassCool + Normal | 2                      |
+| Dirt + Normal      | 2                      |
+| Rock + Normal      | 2                      |
+| AO                 | 1                      |
+| MacroVariation     | 1                      |
+| **Total**          | **10 of 12 available** |
 
 ### Overall Frame Budget
 

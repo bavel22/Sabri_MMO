@@ -1,18 +1,23 @@
-"""Applies the correct sprite texture settings to all 17 female knuckle atlases.
+"""Applies the canonical sprite atlas settings (2026-04-27) to all 17 female
+knuckle atlases.
 
 Run in UE5 editor Python console:
     py "C:/Sabri_MMO/client/SabriMMO/Scripts/Environment/fix_knuckle_atlas_settings.py"
 
 Sets, on each weapon_12_*.uasset texture in /Game/SabriMMO/Sprites/Atlases/Weapon/knuckle/female/:
-    - filter=Nearest          (no bilinear blur on pixel-aligned sprites)
-    - compression=BC7         (high-quality color)
-    - mip_gen=NoMipmaps       (sprite atlases never use mips)
-    - lod_group=UI            (UE5 keeps these resident)
-    - never_stream=True       (no streaming pop-in)
-    - srgb=False              (CRITICAL — sprite material samples Linear Color;
-                                if sRGB=true the material compile fails and
-                                the weapon overlay vanishes)
+    - filter                            = TF_NEAREST
+    - compression_settings              = TC_BC7
+    - mip_gen_settings                  = TMGS_SIMPLE_AVERAGE
+    - use_new_mip_filter                = True
+    - do_scale_mips_for_alpha_coverage  = True
+    - alpha_coverage_thresholds         = (0, 0, 0, 0.5)
+    - max_texture_size                  = 0      (no cap)
+    - never_stream                      = False  (lets LODBias free VRAM)
+    - lod_group                         = TEXTUREGROUP_UI
+    - srgb                              = True  (CRITICAL — sprite material
+                                                  samples Linear Color)
 
+See memory/feedback-sprite-texture-group-ui.md for the full rule set.
 Saves each modified asset.
 """
 import unreal
@@ -31,6 +36,8 @@ def apply_sprite_settings(asset_path):
     if not tex or not isinstance(tex, unreal.Texture2D):
         return False, "not a Texture2D"
 
+    # Canonical sprite settings (UPDATED 2026-04-27).
+    # See memory `feedback-sprite-texture-group-ui.md` for full reference.
     changes = []
     if tex.get_editor_property("filter") != unreal.TextureFilter.TF_NEAREST:
         tex.set_editor_property("filter", unreal.TextureFilter.TF_NEAREST)
@@ -38,17 +45,31 @@ def apply_sprite_settings(asset_path):
     if tex.get_editor_property("compression_settings") != unreal.TextureCompressionSettings.TC_BC7:
         tex.set_editor_property("compression_settings", unreal.TextureCompressionSettings.TC_BC7)
         changes.append("compression")
-    if tex.get_editor_property("mip_gen_settings") != unreal.TextureMipGenSettings.TMGS_NO_MIPMAPS:
-        tex.set_editor_property("mip_gen_settings", unreal.TextureMipGenSettings.TMGS_NO_MIPMAPS)
+    if tex.get_editor_property("mip_gen_settings") != unreal.TextureMipGenSettings.TMGS_SIMPLE_AVERAGE:
+        tex.set_editor_property("mip_gen_settings", unreal.TextureMipGenSettings.TMGS_SIMPLE_AVERAGE)
         changes.append("mip_gen")
+    if not tex.get_editor_property("use_new_mip_filter"):
+        tex.set_editor_property("use_new_mip_filter", True)
+        changes.append("use_new_mip_filter")
+    if not tex.get_editor_property("do_scale_mips_for_alpha_coverage"):
+        tex.set_editor_property("do_scale_mips_for_alpha_coverage", True)
+        changes.append("alpha_coverage_on")
+    cur_thresholds = tex.get_editor_property("alpha_coverage_thresholds")
+    if not cur_thresholds or abs(cur_thresholds.w - 0.5) > 0.001:
+        tex.set_editor_property("alpha_coverage_thresholds",
+            unreal.Vector4(0.0, 0.0, 0.0, 0.5))
+        changes.append("alpha_coverage_thresholds")
+    if tex.get_editor_property("max_texture_size") != 0:
+        tex.set_editor_property("max_texture_size", 0)
+        changes.append("max_texture_size")
+    if tex.get_editor_property("never_stream"):
+        tex.set_editor_property("never_stream", False)
+        changes.append("never_stream")
     if tex.get_editor_property("lod_group") != unreal.TextureGroup.TEXTUREGROUP_UI:
         tex.set_editor_property("lod_group", unreal.TextureGroup.TEXTUREGROUP_UI)
         changes.append("lod_group")
-    if not tex.get_editor_property("never_stream"):
-        tex.set_editor_property("never_stream", True)
-        changes.append("never_stream")
-    if tex.get_editor_property("srgb"):
-        tex.set_editor_property("srgb", False)
+    if not tex.get_editor_property("srgb"):
+        tex.set_editor_property("srgb", True)
         changes.append("srgb")
 
     if changes:

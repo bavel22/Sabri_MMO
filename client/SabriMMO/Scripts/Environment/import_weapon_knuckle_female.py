@@ -25,12 +25,18 @@ def apply_sprite_settings(asset_path):
     tex.set_editor_property("compression_settings",
         unreal.TextureCompressionSettings.TC_BC7)
     tex.set_editor_property("mip_gen_settings",
-        unreal.TextureMipGenSettings.TMGS_NO_MIPMAPS)
+        unreal.TextureMipGenSettings.TMGS_SIMPLE_AVERAGE)
+    tex.set_editor_property("use_new_mip_filter", True)
+    tex.set_editor_property("do_scale_mips_for_alpha_coverage", True)
+    tex.set_editor_property("alpha_coverage_thresholds",
+        unreal.Vector4(0.0, 0.0, 0.0, 0.5))
+    tex.set_editor_property("max_texture_size", 0)
+    tex.set_editor_property("never_stream", False)
     tex.set_editor_property("lod_group", unreal.TextureGroup.TEXTUREGROUP_UI)
-    tex.set_editor_property("never_stream", True)
-    # NOTE: do NOT explicitly set sRGB. UE5's default after import matches the
-    # sprite material's SAMPLERTYPE_Color sampler. Forcing sRGB=False here
-    # caused the material to fall back to the default gray (knuckle invisible).
+    tex.set_editor_property("srgb", True)
+    # MUST be True — body sprite material's TextureSampleParameter2D uses Sampler
+    # type=Color (sRGB-expecting). Forcing sRGB=False makes the material fall back
+    # to the default gray and the knuckle becomes invisible. Verified 2026-04-28.
     eal.save_asset(clean)
     return True
 

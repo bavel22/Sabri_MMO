@@ -2,12 +2,17 @@
 # Bulk import batch-4 enemy sprite atlases:
 # boiled_rice, stainer, steel_chonchon, andre, coco, rafflesia, muka.
 #
-# Settings:
-#   Filter:          Nearest
-#   Compression:     BC7
-#   Mip Gen:         NoMipmaps
-#   Texture Group:   UI
-#   Never Stream:    True
+# Settings (canonical 2026-04-27 — see memory/feedback-sprite-texture-group-ui.md):
+#   Filter:                          Nearest
+#   Compression:                     BC7
+#   Mip Gen:                         SimpleAverage
+#   Use New Mip Filter:              True
+#   Do Scale Mips For Alpha Cov.:    True
+#   Alpha Coverage Thresholds:       (0, 0, 0, 0.5)
+#   Maximum Texture Size:            0   (no cap)
+#   Never Stream:                    False
+#   Texture Group:                   UI
+#   sRGB:                            True
 #
 # Run from UE5 Editor Python console:
 #   py "C:/Sabri_MMO/client/SabriMMO/Scripts/Environment/import_batch4.py"
@@ -40,9 +45,15 @@ def apply_sprite_settings(asset_path):
     tex.set_editor_property("compression_settings",
         unreal.TextureCompressionSettings.TC_BC7)
     tex.set_editor_property("mip_gen_settings",
-        unreal.TextureMipGenSettings.TMGS_NO_MIPMAPS)
+        unreal.TextureMipGenSettings.TMGS_SIMPLE_AVERAGE)
+    tex.set_editor_property("use_new_mip_filter", True)
+    tex.set_editor_property("do_scale_mips_for_alpha_coverage", True)
+    tex.set_editor_property("alpha_coverage_thresholds",
+        unreal.Vector4(0.0, 0.0, 0.0, 0.5))
+    tex.set_editor_property("max_texture_size", 0)
+    tex.set_editor_property("never_stream", False)
     tex.set_editor_property("lod_group", unreal.TextureGroup.TEXTUREGROUP_UI)
-    tex.set_editor_property("never_stream", True)
+    tex.set_editor_property("srgb", True)
     eal.save_asset(clean)
     return True
 

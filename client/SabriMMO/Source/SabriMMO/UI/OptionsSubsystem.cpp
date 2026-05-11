@@ -83,7 +83,7 @@ void UOptionsSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 
 	// Push sprite quality to the global before any sprite textures load.
 	// Applies to every atlas loaded from this point onward via EnsureTextureLoaded().
-	FSingleAnimAtlasInfo::GlobalLODBias = FMath::Clamp(iSpriteQuality, 0, 3);
+	FSingleAnimAtlasInfo::GlobalLODBias = FMath::Clamp(iSpriteQuality, 0, 4);
 
 	AddOptionsWidgetToViewport();
 
@@ -474,7 +474,7 @@ void UOptionsSubsystem::SetAutoDeclineParty(bool bEnabled)
 
 void UOptionsSubsystem::SetSpriteQuality(int32 NewValue)
 {
-	const int32 Clamped = FMath::Clamp(NewValue, 0, 3);
+	const int32 Clamped = FMath::Clamp(NewValue, 0, 4);
 	if (Clamped == iSpriteQuality) return;
 
 	iSpriteQuality = Clamped;

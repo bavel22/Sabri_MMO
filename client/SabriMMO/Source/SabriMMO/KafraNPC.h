@@ -10,6 +10,7 @@
 
 class UCapsuleComponent;
 class UStaticMeshComponent;
+class ASpriteCharacterActor;
 
 UCLASS()
 class SABRIMMO_API AKafraNPC : public AActor
@@ -31,6 +32,20 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Kafra NPC")
 	float InteractionRadius = 300.f;
 
+	/** Body atlas name to load — must match a folder under Sprites/Atlases/Body/ or Body/enemies/. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Kafra NPC")
+	FString SpriteAtlasName = TEXT("miyabi_doll");
+
+	/** Sprite billboard size in UE units (width, height). Default sized for humanoid NPC. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Kafra NPC")
+	FVector2D SpriteSize = FVector2D(200.f, 200.f);
+
+	/** Vertical adjustment in UE units. Positive = raise the sprite, negative = lower it.
+	 * Use to compensate for atlases where the visible character isn't at the cell bottom
+	 * (e.g., short / centered characters). Default 0 works for tall humanoids like miyabi_doll. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Kafra NPC")
+	float SpriteZAdjust = 0.f;
+
 	/** Called from C++ when player clicks this NPC. Opens the Kafra UI. */
 	UFUNCTION(BlueprintCallable, Category = "Kafra NPC")
 	void Interact();
@@ -41,8 +56,13 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "Components")
 	UCapsuleComponent* CapsuleComp;
 
+	// Invisible at runtime — sprite renders the visual. Kept for click-trace collision.
 	UPROPERTY(VisibleAnywhere, Category = "Components")
 	UStaticMeshComponent* MeshComp;
+
+	/** Spawned in BeginPlay, parented via Owner. Renders the Kafra as a 2D billboard. */
+	UPROPERTY()
+	TObjectPtr<ASpriteCharacterActor> SpriteActor;
 
 private:
 	double LastInteractTime = 0.0;

@@ -49,7 +49,7 @@ for search_path in SEARCH_PATHS:
                     unreal.TextureCompressionSettings.TC_NORMALMAP)
                 changed = True
             if tex.get_editor_property("srgb"):
-                tex.set_editor_property("srgb", False)
+                tex.set_editor_property("srgb", True)
                 changed = True
 
         elif is_gray:
@@ -59,7 +59,7 @@ for search_path in SEARCH_PATHS:
                     unreal.TextureCompressionSettings.TC_GRAYSCALE)
                 changed = True
             if tex.get_editor_property("srgb"):
-                tex.set_editor_property("srgb", False)
+                tex.set_editor_property("srgb", True)
                 changed = True
 
         # Ensure wrap tiling

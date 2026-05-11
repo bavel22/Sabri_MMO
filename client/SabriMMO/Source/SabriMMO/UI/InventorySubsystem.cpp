@@ -9,6 +9,7 @@
 #include "CartSubsystem.h"
 #include "StorageSubsystem.h"
 #include "TradeSubsystem.h"
+#include "ZoneTransitionSubsystem.h"
 #include "MMOGameInstance.h"
 #include "SocketEventRouter.h"
 #include "Audio/AudioSubsystem.h"
@@ -1093,6 +1094,21 @@ void UInventorySubsystem::UseItem(int32 InventoryId)
 	Payload->SetNumberField(TEXT("inventoryId"), InventoryId);
 	GI->EmitSocketEvent(TEXT("inventory:use"), Payload);
 	UE_LOG(LogInventory, Log, TEXT("Sent inventory:use for inv_id=%d"), InventoryId);
+
+	// Butterfly Wing (item_id 1028) teleports to save point — likely a zone change.
+	// Show overlay optimistically; HandleZoneError hides it if blocked by noreturn flag
+	// or any other failure path. Fly Wing (1029) is intentionally excluded — it's a
+	// same-zone random teleport with no level transition.
+	if (FInventoryItem* Item = FindItemByInventoryId(InventoryId))
+	{
+		if (Item->ItemId == 1028)
+		{
+			if (UZoneTransitionSubsystem* ZoneSub = GetWorld()->GetSubsystem<UZoneTransitionSubsystem>())
+			{
+				ZoneSub->ShowExpectedZoneChange();
+			}
+		}
+	}
 }
 
 void UInventorySubsystem::EquipItem(int32 InventoryId)

@@ -105,7 +105,7 @@ md += `2. Run the render command using the suggested preset (see top of this fil
 md += `3. Pack with \`pack_atlas.py\` to \`Body/enemies/{name}/\`.\n`;
 md += `4. Add \`spriteClass: '{name}', weaponMode: 0\` to the template in \`ro_monster_templates.js\`.\n`;
 md += `5. Any \`pending (shares {name} GLB)\` entries will auto-update to \`done (shares {name})\` on next regen.\n`;
-md += `6. Import PNGs into UE5 (UserInterface2D, Nearest, NoMipmaps, Never Stream). Restart server.\n\n`;
+md += `6. Import PNGs into UE5 with canonical sprite settings (BC7, UI group, Nearest, SimpleAverage mips, AlphaCoverage W=0.5, MaxTextureSize=0, NeverStream=False — see memory feedback-sprite-texture-group-ui.md). Restart server.\n\n`;
 md += `### Regenerating This List\n`;
 md += `After rendering more sprites or adding more GLBs, run:\n`;
 md += `\`\`\`bash\n`;

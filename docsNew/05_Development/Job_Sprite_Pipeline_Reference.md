@@ -361,13 +361,22 @@ Edit the new file — **only change the `"character"` field**:
 1. Open Unreal Editor
 2. Navigate to `Content/SabriMMO/Sprites/Atlases/Body/{class}_{gender}/`
 3. Drag all 17 `.png` files into the folder (or use Import)
-4. For EACH imported texture, set these properties:
+4. For EACH imported texture, set these properties (canonical 2026-04-27 — required for the runtime Sprite Quality slider, ZonePreloadSubsystem, and Path C deferred swap):
    | Property | Value |
    |----------|-------|
-   | **Compression** | `UserInterface2D` |
+   | **Compression Settings** | `BC7` |
    | **Filter** | `Nearest` |
-   | **Mip Gen Settings** | `NoMipmaps` |
-   | **Never Stream** | `On` (checked) |
+   | **Mip Gen Settings** | `SimpleAverage` |
+   | **Use Improved Image Processing** | `On` |
+   | **Do Scale Mips For Alpha Coverage** | `On` |
+   | **Alpha Coverage Thresholds** | `(0, 0, 0, 0.5)` (W=0.5) |
+   | **Maximum Texture Size** | `0` |
+   | **Never Stream** | `Off` |
+   | **Texture Group (LOD Group)** | `UI` |
+   | **sRGB** | `On` (body sprite material samples as Color/sRGB; Off makes the sprite invisible) |
+
+   Full reference: memory `feedback-sprite-texture-group-ui.md`.
+
 5. Save all
 6. **Important**: The `.json` files must also be in the same directory on disk (they're loaded at runtime via FPaths, not as assets)
 
@@ -608,7 +617,7 @@ Also download: `T-Pose.fbx` (used as base import in Blender rigging step, not re
 |---------|-------|-----|
 | **No sprite shows** | Missing manifest.json or PNGs not imported | Verify files exist in `Body/{class}_{gender}/` and PNGs are imported as .uasset |
 | **Blurry sprites** | Wrong texture filter | Set Filter=Nearest on all atlas textures |
-| **DXT compression artifacts** | Wrong compression | Set Compression=UserInterface2D |
+| **DXT compression artifacts** | Wrong compression | Set Compression Settings=BC7 (canonical) |
 | **Old sprite still showing** | UE5 cached old .uasset | Delete old .uasset files before reimporting |
 | **Wrong animation plays** | Config group mapping wrong | Verify group field matches expected weapon mode |
 | **Weapon sprites misaligned** | Class uses per-class rig, weapon uses shared | Both MUST use same armature (shared). Migrate class to shared armature. |

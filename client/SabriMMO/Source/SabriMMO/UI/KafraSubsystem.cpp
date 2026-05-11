@@ -5,6 +5,7 @@
 #include "SKafraWidget.h"
 #include "MMOGameInstance.h"
 #include "SocketEventRouter.h"
+#include "ZoneTransitionSubsystem.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
 #include "TimerManager.h"
@@ -185,6 +186,12 @@ void UKafraSubsystem::HandleKafraError(const TSharedPtr<FJsonValue>& Data)
 		StatusExpireTime = FPlatformTime::Seconds() + 4.0;
 		UE_LOG(LogKafra, Warning, TEXT("Kafra error: %s"), *Msg);
 	}
+
+	// If RequestTeleport showed an optimistic overlay, hide it on error.
+	if (UZoneTransitionSubsystem* ZoneSub = GetWorld()->GetSubsystem<UZoneTransitionSubsystem>())
+	{
+		ZoneSub->HideExpectedZoneChange();
+	}
 }
 
 // ============================================================
@@ -224,6 +231,13 @@ void UKafraSubsystem::RequestTeleport(const FString& DestZone)
 
 	GI->EmitSocketEvent(TEXT("kafra:teleport"), Payload);
 	UE_LOG(LogKafra, Log, TEXT("Requesting Kafra teleport to %s"), *DestZone);
+
+	// Show loading overlay immediately — server's zone:change response is ~60-250ms away.
+	// Hidden by HandleZoneError on rejection (e.g., insufficient zeny), or replaced by HandleZoneChange.
+	if (UZoneTransitionSubsystem* ZoneSub = GetWorld()->GetSubsystem<UZoneTransitionSubsystem>())
+	{
+		ZoneSub->ShowExpectedZoneChange();
+	}
 }
 
 void UKafraSubsystem::RequestRentCart()

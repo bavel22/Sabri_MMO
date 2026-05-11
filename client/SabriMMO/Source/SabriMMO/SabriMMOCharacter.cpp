@@ -28,6 +28,7 @@
 #include "UI/ChatSubsystem.h"
 #include "ShopNPC.h"
 #include "KafraNPC.h"
+#include "JobChangeNPC.h"
 #include "UI/ZoneTransitionSubsystem.h"
 #include "UI/PlayerInputSubsystem.h"
 #include "UI/CameraSubsystem.h"
@@ -673,15 +674,33 @@ bool ASabriMMOCharacter::TryInteractWithNPC(AActor* HitActor)
 {
 	if (!HitActor) return false;
 
-	if (AShopNPC* ShopNPC = Cast<AShopNPC>(HitActor))
+	// Walk the Owner chain to resolve sprite-wrapped NPCs.
+	// When AKafraNPC / AShopNPC / AJobChangeNPC use a billboard sprite for their visual + click target,
+	// the trace hits the ASpriteCharacterActor child, not the wrapper actor. The wrapper
+	// is set as the sprite's Owner at spawn, so we walk up to find it.
+	AActor* Resolved = HitActor;
+	for (int32 Hops = 0; Hops < 4 && Resolved; ++Hops)
+	{
+		if (Cast<AShopNPC>(Resolved) || Cast<AKafraNPC>(Resolved) || Cast<AJobChangeNPC>(Resolved)) break;
+		Resolved = Resolved->GetOwner();
+	}
+	if (!Resolved) return false;
+
+	if (AShopNPC* ShopNPC = Cast<AShopNPC>(Resolved))
 	{
 		ShopNPC->Interact();
 		return true;
 	}
 
-	if (AKafraNPC* KafraNPC = Cast<AKafraNPC>(HitActor))
+	if (AKafraNPC* KafraNPC = Cast<AKafraNPC>(Resolved))
 	{
 		KafraNPC->Interact();
+		return true;
+	}
+
+	if (AJobChangeNPC* JobNPC = Cast<AJobChangeNPC>(Resolved))
+	{
+		JobNPC->Interact();
 		return true;
 	}
 

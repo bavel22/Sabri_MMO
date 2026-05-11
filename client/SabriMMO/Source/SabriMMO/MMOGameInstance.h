@@ -59,8 +59,8 @@ public:
 	UPROPERTY() float fBgmVolume     = 0.7f;
 	UPROPERTY() float fSfxVolume     = 1.0f;
 	UPROPERTY() float fAmbientVolume = 0.5f;
-	// Video — Sprite Quality (0=Ultra, 1=High, 2=Medium, 3=Low). Maps to LODBias on every sprite atlas.
-	UPROPERTY() int32 iSpriteQuality = 1;
+	// Video — Sprite Quality (0=Ultra, 1=High, 2=Medium, 3=Low, 4=Very Low). Maps to LODBias on every sprite atlas.
+	UPROPERTY() int32 iSpriteQuality = 2;
 	// Login
 	UPROPERTY() bool bRememberUsername = false;
 	UPROPERTY() FString RememberedUsername;
@@ -169,6 +169,10 @@ public:
 
     UFUNCTION(BlueprintPure, Category = "MMO Auth")
     FCharacterData GetSelectedCharacter() const;
+
+    /** Update the cached SelectedCharacter's JobClass after a successful job:change. */
+    UFUNCTION(BlueprintCallable, Category = "MMO Auth")
+    void SetSelectedCharacterJobClass(const FString& NewJobClass);
 
     // Server selection
     UFUNCTION(BlueprintCallable, Category = "MMO Server")
@@ -297,7 +301,7 @@ public:
     float fOptionSfxVolume     = 1.0f;
     float fOptionAmbientVolume = 0.5f;
     // Video
-    int32 iOptionSpriteQuality = 1;  // 0=Ultra, 1=High, 2=Medium, 3=Low
+    int32 iOptionSpriteQuality = 2;  // 0=Ultra, 1=High, 2=Medium, 3=Low, 4=Very Low
 
     void SaveGameOptions();
     void LoadGameOptions();

@@ -6,7 +6,7 @@
 ASabriMMOGameMode::ASabriMMOGameMode()
 {
 	// Do NOT set DefaultPawnClass here.
-	// BP_SocketManager spawns the player character after socket connection.
+	// The Level Blueprint spawns + possesses BP_MMOCharacter from saved character data.
 	// Setting DefaultPawnClass causes a duplicate pawn at the PlayerStart/origin.
 	DefaultPawnClass = nullptr;
 }

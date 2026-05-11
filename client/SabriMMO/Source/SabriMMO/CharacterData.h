@@ -283,6 +283,7 @@ struct FShopItem
 	FString Description;
 	FString FullDescription;
 	FString ItemType;       // weapon, armor, consumable, etc
+	FString Category;       // shop tab label (Dagger / Headgear / Healing / Quiver / ...)
 	FString Icon;
 	int32 BuyPrice = 0;     // NPC buy price (after Discount if applicable)
 	int32 SellPrice = 0;    // NPC sell price (after Overcharge if applicable)

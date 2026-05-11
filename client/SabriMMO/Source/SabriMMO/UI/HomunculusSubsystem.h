@@ -32,6 +32,13 @@ public:
 	bool bIsEvolved = false;
 	bool bIsAlive = true;
 
+	// Skill levels + remaining points (for the widget allocate/use buttons)
+	int32 Skill1Level = 0;
+	int32 Skill2Level = 0;
+	int32 Skill3Level = 0;
+	int32 SkillPoints = 0;
+	FString CurrentCommand = TEXT("follow");
+
 	// ---- lifecycle ----
 	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
@@ -60,18 +67,32 @@ private:
 	void DespawnHomunculusActor();
 	void TickFollowOwner();
 
+	// ---- remote homunculus rendering (other players' homunculi) ----
+	void HandleOtherSummoned(const TSharedPtr<FJsonValue>& Data);
+	void HandleOtherDismissed(const TSharedPtr<FJsonValue>& Data);
+	void HandlePosition(const TSharedPtr<FJsonValue>& Data);
+
+	// ---- skill / allocate / evolve / command emit helpers (Phase 6) ----
+public:
+	void UseSkill(int32 SkillSlot);
+	void AllocateSkillPoint(int32 SkillSlot);
+	void EvolveHomunculus();
+	void SetCommand(const FString& Command);
+private:
+
 	TSharedPtr<SHomunculusWidget> HomWidget;
 	TSharedPtr<SWidget> AlignmentWrapper;
 	TSharedPtr<SWidget> ViewportOverlay;
 	bool bWidgetAdded = false;
 	bool bWidgetVisible = false;
 
-	// ---- homunculus actor (placeholder: BP_EnemyCharacter scaled) ----
-	UPROPERTY()
-	UClass* HomActorClass = nullptr;
-
+	// ---- homunculus actor (sprite-based: ASpriteCharacterActor with type-specific atlas) ----
 	UPROPERTY()
 	AActor* HomActor = nullptr;
+
+	// Remote homunculi: ownerId → ASpriteCharacterActor*
+	UPROPERTY()
+	TMap<int32, AActor*> RemoteHomActors;
 
 	FTimerHandle FollowTimerHandle;
 };

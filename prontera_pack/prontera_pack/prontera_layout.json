@@ -1,0 +1,283 @@
+{
+  "metadata": {
+    "name": "Prontera Classic - Ragnarok Online inspired city",
+    "engine_target": "Unreal Engine 5",
+    "units": "meters (UE5 uses cm: multiply all positions by 100 on import)",
+    "coordinate_system": "right-handed Y-up (glTF). UE5 is left-handed Z-up, but UE's glTF importer auto-converts.",
+    "world_size_meters": [200, 200],
+    "ground_plane_y": 0,
+    "north_axis": "+Z",
+    "notes": "All rotations are euler degrees (yaw around Y/up). Scale 1.0 means use the GLB at the bbox_size requested. Adjust per-asset if needed."
+  },
+  "assets": {
+    "fountain_central":   { "file": "models/fountain_central.glb",   "category": "landmark"   },
+    "castle_palace":      { "file": "models/castle_palace.glb",      "category": "landmark"   },
+    "house_small":        { "file": "models/house_small.glb",        "category": "building"   },
+    "house_shop_medium":  { "file": "models/house_shop_medium.glb",  "category": "building"   },
+    "house_inn_large":    { "file": "models/house_inn_large.glb",    "category": "building"   },
+    "wall_segment":       { "file": "models/wall_segment.glb",       "category": "wall"       },
+    "wall_corner_tower":  { "file": "models/wall_corner_tower.glb",  "category": "wall"       },
+    "gate_main":          { "file": "models/gate_main.glb",          "category": "wall"       },
+    "tree":               { "file": "models/tree.glb",               "category": "foliage"    },
+    "lamp_post":          { "file": "models/lamp_post.glb",          "category": "prop"       },
+    "bench":              { "file": "models/bench.glb",              "category": "prop"       },
+    "shop_sign":          { "file": "models/shop_sign.glb",          "category": "prop"       },
+    "well":               { "file": "models/well.glb",               "category": "prop"       },
+    "flower_planter":     { "file": "models/flower_planter.glb",     "category": "prop"       },
+    "barrel":             { "file": "models/barrel.glb",             "category": "prop"       },
+    "crates":             { "file": "models/crates.glb",             "category": "prop"       },
+    "market_stall":       { "file": "models/market_stall.glb",       "category": "prop"       }
+  },
+
+  "ground": {
+    "size_meters": [200, 200],
+    "material": "M_Cobblestone (use T_Cobblestone_Albedo, tile 25x25)",
+    "decals": [
+      { "material": "M_Grass", "rect": [-95, -95, -55, -55], "tile": 8 },
+      { "material": "M_Grass", "rect": [55, -95, 95, -55],   "tile": 8 },
+      { "material": "M_Grass", "rect": [-95, 55, -55, 95],   "tile": 8 },
+      { "material": "M_Grass", "rect": [55, 55, 95, 95],     "tile": 8 },
+      { "material": "M_Dirt",  "rect": [-3, -100, 3, 100],    "tile": 24, "comment": "Main north-south road" },
+      { "material": "M_Dirt",  "rect": [-100, -3, 100, 3],    "tile": 24, "comment": "Main east-west road" }
+    ]
+  },
+
+  "perimeter_walls": {
+    "comment": "Square perimeter, 200x200m. Wall segment is 12m long, 6m tall. 4 corner towers, 4 gates (one mid each side). Sides are split by a center gate.",
+    "instances": [
+      { "asset": "wall_corner_tower", "position_xyz": [-100, 0, -100], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "wall_corner_tower", "position_xyz": [ 100, 0, -100], "rotation_y": 90,  "scale": 1.0 },
+      { "asset": "wall_corner_tower", "position_xyz": [ 100, 0,  100], "rotation_y": 180, "scale": 1.0 },
+      { "asset": "wall_corner_tower", "position_xyz": [-100, 0,  100], "rotation_y": 270, "scale": 1.0 },
+
+      { "asset": "gate_main", "position_xyz": [0, 0, -100], "rotation_y": 0,   "scale": 1.0, "comment": "South gate (main entrance)" },
+      { "asset": "gate_main", "position_xyz": [0, 0,  100], "rotation_y": 180, "scale": 1.0, "comment": "North gate" },
+      { "asset": "gate_main", "position_xyz": [-100, 0, 0], "rotation_y": 270, "scale": 1.0, "comment": "West gate" },
+      { "asset": "gate_main", "position_xyz": [ 100, 0, 0], "rotation_y": 90,  "scale": 1.0, "comment": "East gate" },
+
+      { "asset": "wall_segment", "position_xyz": [-43, 0, -100], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [-31, 0, -100], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [-19, 0, -100], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [ 19, 0, -100], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [ 31, 0, -100], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [ 43, 0, -100], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [-55, 0, -100], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [-67, 0, -100], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [-79, 0, -100], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [-91, 0, -100], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [ 55, 0, -100], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [ 67, 0, -100], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [ 79, 0, -100], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [ 91, 0, -100], "rotation_y": 0,   "scale": 1.0 },
+
+      { "asset": "wall_segment", "position_xyz": [-43, 0,  100], "rotation_y": 180, "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [-31, 0,  100], "rotation_y": 180, "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [-19, 0,  100], "rotation_y": 180, "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [ 19, 0,  100], "rotation_y": 180, "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [ 31, 0,  100], "rotation_y": 180, "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [ 43, 0,  100], "rotation_y": 180, "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [-55, 0,  100], "rotation_y": 180, "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [-67, 0,  100], "rotation_y": 180, "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [-79, 0,  100], "rotation_y": 180, "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [-91, 0,  100], "rotation_y": 180, "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [ 55, 0,  100], "rotation_y": 180, "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [ 67, 0,  100], "rotation_y": 180, "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [ 79, 0,  100], "rotation_y": 180, "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [ 91, 0,  100], "rotation_y": 180, "scale": 1.0 },
+
+      { "asset": "wall_segment", "position_xyz": [-100, 0, -91], "rotation_y": 90,  "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [-100, 0, -79], "rotation_y": 90,  "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [-100, 0, -67], "rotation_y": 90,  "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [-100, 0, -55], "rotation_y": 90,  "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [-100, 0, -43], "rotation_y": 90,  "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [-100, 0, -31], "rotation_y": 90,  "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [-100, 0, -19], "rotation_y": 90,  "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [-100, 0,  19], "rotation_y": 90,  "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [-100, 0,  31], "rotation_y": 90,  "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [-100, 0,  43], "rotation_y": 90,  "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [-100, 0,  55], "rotation_y": 90,  "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [-100, 0,  67], "rotation_y": 90,  "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [-100, 0,  79], "rotation_y": 90,  "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [-100, 0,  91], "rotation_y": 90,  "scale": 1.0 },
+
+      { "asset": "wall_segment", "position_xyz": [ 100, 0, -91], "rotation_y": 270, "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [ 100, 0, -79], "rotation_y": 270, "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [ 100, 0, -67], "rotation_y": 270, "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [ 100, 0, -55], "rotation_y": 270, "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [ 100, 0, -43], "rotation_y": 270, "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [ 100, 0, -31], "rotation_y": 270, "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [ 100, 0, -19], "rotation_y": 270, "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [ 100, 0,  19], "rotation_y": 270, "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [ 100, 0,  31], "rotation_y": 270, "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [ 100, 0,  43], "rotation_y": 270, "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [ 100, 0,  55], "rotation_y": 270, "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [ 100, 0,  67], "rotation_y": 270, "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [ 100, 0,  79], "rotation_y": 270, "scale": 1.0 },
+      { "asset": "wall_segment", "position_xyz": [ 100, 0,  91], "rotation_y": 270, "scale": 1.0 }
+    ]
+  },
+
+  "central_plaza": {
+    "comment": "30m radius circle around origin (0,0,0). Fountain centered, 8 lamp posts, 4 benches.",
+    "instances": [
+      { "asset": "fountain_central", "position_xyz": [0, 0, 0],   "rotation_y": 0,   "scale": 1.0 },
+
+      { "asset": "lamp_post", "position_xyz": [ 12, 0,   0], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "lamp_post", "position_xyz": [-12, 0,   0], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "lamp_post", "position_xyz": [  0, 0,  12], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "lamp_post", "position_xyz": [  0, 0, -12], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "lamp_post", "position_xyz": [  9, 0,   9], "rotation_y": 45,  "scale": 1.0 },
+      { "asset": "lamp_post", "position_xyz": [ -9, 0,   9], "rotation_y": 315, "scale": 1.0 },
+      { "asset": "lamp_post", "position_xyz": [  9, 0,  -9], "rotation_y": 135, "scale": 1.0 },
+      { "asset": "lamp_post", "position_xyz": [ -9, 0,  -9], "rotation_y": 225, "scale": 1.0 },
+
+      { "asset": "bench", "position_xyz": [ 14, 0,  4], "rotation_y": 270, "scale": 1.0 },
+      { "asset": "bench", "position_xyz": [ 14, 0, -4], "rotation_y": 270, "scale": 1.0 },
+      { "asset": "bench", "position_xyz": [-14, 0,  4], "rotation_y": 90,  "scale": 1.0 },
+      { "asset": "bench", "position_xyz": [-14, 0, -4], "rotation_y": 90,  "scale": 1.0 },
+
+      { "asset": "flower_planter", "position_xyz": [ 7, 0,  7], "rotation_y": 0, "scale": 1.0 },
+      { "asset": "flower_planter", "position_xyz": [-7, 0,  7], "rotation_y": 0, "scale": 1.0 },
+      { "asset": "flower_planter", "position_xyz": [ 7, 0, -7], "rotation_y": 0, "scale": 1.0 },
+      { "asset": "flower_planter", "position_xyz": [-7, 0, -7], "rotation_y": 0, "scale": 1.0 }
+    ]
+  },
+
+  "castle_district": {
+    "comment": "North quarter (high Z). Castle is the centerpiece, flanked by trees and a guard well.",
+    "instances": [
+      { "asset": "castle_palace", "position_xyz": [0, 0, 70], "rotation_y": 180, "scale": 1.0 },
+      { "asset": "tree",          "position_xyz": [-25, 0, 55], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "tree",          "position_xyz": [ 25, 0, 55], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "tree",          "position_xyz": [-30, 0, 75], "rotation_y": 0,   "scale": 1.1 },
+      { "asset": "tree",          "position_xyz": [ 30, 0, 75], "rotation_y": 0,   "scale": 1.1 },
+      { "asset": "well",          "position_xyz": [-18, 0, 45], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "lamp_post",     "position_xyz": [-12, 0, 50], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "lamp_post",     "position_xyz": [ 12, 0, 50], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "flower_planter","position_xyz": [-8,  0, 55], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "flower_planter","position_xyz": [ 8,  0, 55], "rotation_y": 0,   "scale": 1.0 }
+    ]
+  },
+
+  "south_residential": {
+    "comment": "South quarter (low Z, near south gate). Mix of small houses and shops along streets.",
+    "instances": [
+      { "asset": "house_small",       "position_xyz": [-30, 0, -40], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "house_small",       "position_xyz": [-20, 0, -40], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "house_shop_medium", "position_xyz": [-10, 0, -40], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "house_small",       "position_xyz": [ 10, 0, -40], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "house_shop_medium", "position_xyz": [ 22, 0, -40], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "house_small",       "position_xyz": [ 32, 0, -40], "rotation_y": 0,   "scale": 1.0 },
+
+      { "asset": "house_small",       "position_xyz": [-30, 0, -60], "rotation_y": 180, "scale": 1.0 },
+      { "asset": "house_inn_large",   "position_xyz": [-15, 0, -65], "rotation_y": 180, "scale": 1.0 },
+      { "asset": "house_shop_medium", "position_xyz": [  5, 0, -60], "rotation_y": 180, "scale": 1.0 },
+      { "asset": "house_small",       "position_xyz": [ 18, 0, -60], "rotation_y": 180, "scale": 1.0 },
+      { "asset": "house_small",       "position_xyz": [ 30, 0, -60], "rotation_y": 180, "scale": 1.0 },
+
+      { "asset": "tree",       "position_xyz": [-40, 0, -50], "rotation_y": 0, "scale": 1.0 },
+      { "asset": "tree",       "position_xyz": [ 40, 0, -50], "rotation_y": 0, "scale": 1.0 },
+      { "asset": "tree",       "position_xyz": [  0, 0, -75], "rotation_y": 0, "scale": 1.0 },
+      { "asset": "lamp_post",  "position_xyz": [-15, 0, -50], "rotation_y": 0, "scale": 1.0 },
+      { "asset": "lamp_post",  "position_xyz": [ 15, 0, -50], "rotation_y": 0, "scale": 1.0 },
+      { "asset": "lamp_post",  "position_xyz": [  0, 0, -50], "rotation_y": 0, "scale": 1.0 },
+      { "asset": "shop_sign",  "position_xyz": [-10, 0, -38], "rotation_y": 0, "scale": 1.0 },
+      { "asset": "shop_sign",  "position_xyz": [ 22, 0, -38], "rotation_y": 0, "scale": 1.0 },
+      { "asset": "market_stall","position_xyz": [-5,  0, -45], "rotation_y": 0, "scale": 1.0 },
+      { "asset": "market_stall","position_xyz": [  5, 0, -45], "rotation_y": 180, "scale": 1.0 },
+      { "asset": "barrel",     "position_xyz": [-13, 0, -42], "rotation_y": 0, "scale": 1.0 },
+      { "asset": "crates",     "position_xyz": [-12, 0, -43], "rotation_y": 0, "scale": 1.0 }
+    ]
+  },
+
+  "east_market_district": {
+    "comment": "East quarter - shops and market stalls.",
+    "instances": [
+      { "asset": "house_shop_medium", "position_xyz": [40,  0, -20], "rotation_y": 270, "scale": 1.0 },
+      { "asset": "house_shop_medium", "position_xyz": [40,  0, -10], "rotation_y": 270, "scale": 1.0 },
+      { "asset": "house_shop_medium", "position_xyz": [40,  0,  10], "rotation_y": 270, "scale": 1.0 },
+      { "asset": "house_shop_medium", "position_xyz": [40,  0,  20], "rotation_y": 270, "scale": 1.0 },
+
+      { "asset": "house_small",       "position_xyz": [60,  0, -20], "rotation_y": 90,  "scale": 1.0 },
+      { "asset": "house_small",       "position_xyz": [60,  0,  -8], "rotation_y": 90,  "scale": 1.0 },
+      { "asset": "house_inn_large",   "position_xyz": [65,  0,  10], "rotation_y": 90,  "scale": 1.0 },
+      { "asset": "house_small",       "position_xyz": [60,  0,  25], "rotation_y": 90,  "scale": 1.0 },
+
+      { "asset": "market_stall", "position_xyz": [50, 0, -15], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "market_stall", "position_xyz": [50, 0,  -5], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "market_stall", "position_xyz": [50, 0,   5], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "market_stall", "position_xyz": [50, 0,  15], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "shop_sign",   "position_xyz": [42, 0, -10], "rotation_y": 270, "scale": 1.0 },
+      { "asset": "shop_sign",   "position_xyz": [42, 0,  10], "rotation_y": 270, "scale": 1.0 },
+      { "asset": "barrel",      "position_xyz": [48, 0, -18], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "crates",      "position_xyz": [52, 0,  20], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "lamp_post",   "position_xyz": [50, 0, -25], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "lamp_post",   "position_xyz": [50, 0,  25], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "tree",        "position_xyz": [55, 0, -30], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "tree",        "position_xyz": [55, 0,  30], "rotation_y": 0,   "scale": 1.0 }
+    ]
+  },
+
+  "west_residential": {
+    "comment": "West quarter - quieter residential area.",
+    "instances": [
+      { "asset": "house_small",       "position_xyz": [-40, 0, -20], "rotation_y": 90,  "scale": 1.0 },
+      { "asset": "house_small",       "position_xyz": [-40, 0, -10], "rotation_y": 90,  "scale": 1.0 },
+      { "asset": "house_shop_medium", "position_xyz": [-40, 0,  10], "rotation_y": 90,  "scale": 1.0 },
+      { "asset": "house_small",       "position_xyz": [-40, 0,  22], "rotation_y": 90,  "scale": 1.0 },
+      { "asset": "house_small",       "position_xyz": [-60, 0, -20], "rotation_y": 270, "scale": 1.0 },
+      { "asset": "house_inn_large",   "position_xyz": [-65, 0,  -5], "rotation_y": 270, "scale": 1.0 },
+      { "asset": "house_small",       "position_xyz": [-60, 0,  15], "rotation_y": 270, "scale": 1.0 },
+      { "asset": "house_shop_medium", "position_xyz": [-60, 0,  28], "rotation_y": 270, "scale": 1.0 },
+      { "asset": "tree",       "position_xyz": [-50, 0, -30], "rotation_y": 0, "scale": 1.0 },
+      { "asset": "tree",       "position_xyz": [-50, 0,  30], "rotation_y": 0, "scale": 1.0 },
+      { "asset": "tree",       "position_xyz": [-75, 0,  0],  "rotation_y": 0, "scale": 1.1 },
+      { "asset": "well",       "position_xyz": [-50, 0,  0],  "rotation_y": 0, "scale": 1.0 },
+      { "asset": "lamp_post",  "position_xyz": [-50, 0, -10], "rotation_y": 0, "scale": 1.0 },
+      { "asset": "lamp_post",  "position_xyz": [-50, 0,  10], "rotation_y": 0, "scale": 1.0 }
+    ]
+  },
+
+  "park_corners": {
+    "comment": "Four corner parks with extra trees and benches between districts and walls.",
+    "instances": [
+      { "asset": "tree",  "position_xyz": [-80, 0, -80], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "tree",  "position_xyz": [-72, 0, -85], "rotation_y": 0,   "scale": 1.1 },
+      { "asset": "tree",  "position_xyz": [-85, 0, -72], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "bench", "position_xyz": [-78, 0, -78], "rotation_y": 45,  "scale": 1.0 },
+
+      { "asset": "tree",  "position_xyz": [ 80, 0, -80], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "tree",  "position_xyz": [ 72, 0, -85], "rotation_y": 0,   "scale": 1.1 },
+      { "asset": "tree",  "position_xyz": [ 85, 0, -72], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "bench", "position_xyz": [ 78, 0, -78], "rotation_y": 315, "scale": 1.0 },
+
+      { "asset": "tree",  "position_xyz": [-80, 0,  80], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "tree",  "position_xyz": [-72, 0,  85], "rotation_y": 0,   "scale": 1.1 },
+      { "asset": "tree",  "position_xyz": [-85, 0,  72], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "bench", "position_xyz": [-78, 0,  78], "rotation_y": 135, "scale": 1.0 },
+
+      { "asset": "tree",  "position_xyz": [ 80, 0,  80], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "tree",  "position_xyz": [ 72, 0,  85], "rotation_y": 0,   "scale": 1.1 },
+      { "asset": "tree",  "position_xyz": [ 85, 0,  72], "rotation_y": 0,   "scale": 1.0 },
+      { "asset": "bench", "position_xyz": [ 78, 0,  78], "rotation_y": 225, "scale": 1.0 }
+    ]
+  },
+
+  "lighting": {
+    "directional_light": {
+      "rotation_pitch_yaw_roll_deg": [-45, 35, 0],
+      "intensity_lux": 75000,
+      "color_kelvin": 6000,
+      "comment": "Bright daytime sun"
+    },
+    "sky_atmosphere": true,
+    "skylight": { "intensity": 1.0, "source": "captured scene or HDRI" },
+    "exponential_height_fog": { "density": 0.001, "color_rgb": [0.78, 0.86, 0.95] },
+    "post_process": {
+      "auto_exposure_min": 1.0,
+      "auto_exposure_max": 1.5,
+      "bloom_intensity": 0.6,
+      "vignette_intensity": 0.2
+    }
+  }
+}

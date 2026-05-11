@@ -168,7 +168,7 @@ private:
 	bool bNoShift = false;
 	bool bAutoDeclineTrades = false;
 	bool bAutoDeclineParty = false;
-	int32 iSpriteQuality = 1;  // High by default (LODBias 1 → effective half-res)
+	int32 iSpriteQuality = 2;  // Medium by default (LODBias 2). 0=Ultra, 1=High, 2=Medium, 3=Low, 4=Very Low
 
 	TSharedPtr<SOptionsWidget> OptionsWidget;
 	TSharedPtr<SWidget> OptionsAlignmentWrapper;

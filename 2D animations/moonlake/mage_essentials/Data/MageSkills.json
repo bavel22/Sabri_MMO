@@ -1,0 +1,119 @@
+{
+  "_meta": {
+    "title": "Mage Essentials Skill Data",
+    "version": "1.0",
+    "ro_reference": "iRO/kRO classic Mage skills as of pre-Renewal era.",
+    "scaling_rules": {
+      "FIRE_BOLT":      "BoltCount = SkillLevel. CastTime = 1.5 + 0.2*(Level-1). 1 hit per bolt; each bolt rolls damage independently.",
+      "COLD_BOLT":      "BoltCount = SkillLevel. CastTime = 1.5 + 0.2*(Level-1). Element Water; useful in elemental endow combos.",
+      "LIGHTNING_BOLT": "BoltCount = SkillLevel. CastTime = 1.5 + 0.2*(Level-1). Element Wind.",
+      "FIRE_WALL":      "Width = 3 cells; persists for ~5s OR HitsPerCell hits, whichever comes first. HitsPerCell increases with level."
+    },
+    "damage_formula": "BoltDamage = (MATK_min..MATK_max) * DamageMultiplier * ElementalModifier * (1 - TargetMDef%) - TargetMDef_flat. Re-rolled per bolt.",
+    "element_modifiers": {
+      "Fire->Earth":  1.5,  "Fire->Water":  0.5,  "Fire->Fire": 0.25, "Fire->Wind":   1.0,
+      "Water->Fire": 1.5,   "Water->Earth": 1.0,  "Water->Water":0.25,"Water->Wind":  0.5,
+      "Wind->Water": 1.5,   "Wind->Earth":  0.5,  "Wind->Fire":  1.0, "Wind->Wind":   0.25
+    },
+    "vfx_pipeline": {
+      "cast_glow":  "Loop on caster's hand/staff for full CastTime. Stop on cast finish or interrupt.",
+      "projectile": "Spawn at caster -> seek target. One projectile per BoltCount, fired at BoltInterval seconds apart.",
+      "impact":     "One-shot at hit position. Plays for ~0.5s.",
+      "fire_wall_burst":  "One-shot ignition at each cell on cast.",
+      "fire_wall_pillar": "Loop at each cell for the wall's lifetime."
+    }
+  },
+  "skills": {
+    "FIRE_BOLT": {
+      "id": "FIRE_BOLT",
+      "display_name": "Fire Bolt",
+      "element": "Fire",
+      "category": "Targeted",
+      "vfx": {
+        "cast_glow_sheet":  "SpriteSheets/vfx_fire_cast_glow_spritesheet.png",
+        "projectile_sheet": "SpriteSheets/vfx_fire_bolt_proj_spritesheet.png",
+        "impact_sheet":     "SpriteSheets/vfx_fire_impact_spritesheet.png"
+      },
+      "levels": [
+        {"level":1,"sp":9, "cast_time":1.5,"global_cd":1.0,"delay_after":0.8,"bolt_count":1, "bolt_interval":0.5,"dmg_mult":1.0,"range":9},
+        {"level":2,"sp":9, "cast_time":1.7,"global_cd":1.0,"delay_after":0.8,"bolt_count":2, "bolt_interval":0.5,"dmg_mult":1.0,"range":9},
+        {"level":3,"sp":12,"cast_time":1.9,"global_cd":1.0,"delay_after":0.8,"bolt_count":3, "bolt_interval":0.5,"dmg_mult":1.0,"range":9},
+        {"level":4,"sp":12,"cast_time":2.1,"global_cd":1.0,"delay_after":0.8,"bolt_count":4, "bolt_interval":0.5,"dmg_mult":1.0,"range":9},
+        {"level":5,"sp":15,"cast_time":2.3,"global_cd":1.0,"delay_after":0.8,"bolt_count":5, "bolt_interval":0.5,"dmg_mult":1.0,"range":9},
+        {"level":6,"sp":15,"cast_time":2.5,"global_cd":1.0,"delay_after":0.8,"bolt_count":6, "bolt_interval":0.5,"dmg_mult":1.0,"range":9},
+        {"level":7,"sp":18,"cast_time":2.7,"global_cd":1.0,"delay_after":0.8,"bolt_count":7, "bolt_interval":0.5,"dmg_mult":1.0,"range":9},
+        {"level":8,"sp":18,"cast_time":2.9,"global_cd":1.0,"delay_after":0.8,"bolt_count":8, "bolt_interval":0.5,"dmg_mult":1.0,"range":9},
+        {"level":9,"sp":21,"cast_time":3.1,"global_cd":1.0,"delay_after":0.8,"bolt_count":9, "bolt_interval":0.5,"dmg_mult":1.0,"range":9},
+        {"level":10,"sp":21,"cast_time":3.3,"global_cd":1.0,"delay_after":0.8,"bolt_count":10,"bolt_interval":0.5,"dmg_mult":1.0,"range":9}
+      ]
+    },
+    "COLD_BOLT": {
+      "id": "COLD_BOLT",
+      "display_name": "Cold Bolt",
+      "element": "Water",
+      "category": "Targeted",
+      "vfx": {
+        "cast_glow_sheet":  "SpriteSheets/vfx_cold_cast_glow_spritesheet.png",
+        "projectile_sheet": "SpriteSheets/vfx_cold_bolt_proj_spritesheet.png",
+        "impact_sheet":     "SpriteSheets/vfx_cold_impact_spritesheet.png"
+      },
+      "levels": [
+        {"level":1,"sp":9, "cast_time":1.5,"global_cd":1.0,"delay_after":0.8,"bolt_count":1, "bolt_interval":0.5,"dmg_mult":1.0,"range":9},
+        {"level":2,"sp":9, "cast_time":1.7,"global_cd":1.0,"delay_after":0.8,"bolt_count":2, "bolt_interval":0.5,"dmg_mult":1.0,"range":9},
+        {"level":3,"sp":12,"cast_time":1.9,"global_cd":1.0,"delay_after":0.8,"bolt_count":3, "bolt_interval":0.5,"dmg_mult":1.0,"range":9},
+        {"level":4,"sp":12,"cast_time":2.1,"global_cd":1.0,"delay_after":0.8,"bolt_count":4, "bolt_interval":0.5,"dmg_mult":1.0,"range":9},
+        {"level":5,"sp":15,"cast_time":2.3,"global_cd":1.0,"delay_after":0.8,"bolt_count":5, "bolt_interval":0.5,"dmg_mult":1.0,"range":9},
+        {"level":6,"sp":15,"cast_time":2.5,"global_cd":1.0,"delay_after":0.8,"bolt_count":6, "bolt_interval":0.5,"dmg_mult":1.0,"range":9},
+        {"level":7,"sp":18,"cast_time":2.7,"global_cd":1.0,"delay_after":0.8,"bolt_count":7, "bolt_interval":0.5,"dmg_mult":1.0,"range":9},
+        {"level":8,"sp":18,"cast_time":2.9,"global_cd":1.0,"delay_after":0.8,"bolt_count":8, "bolt_interval":0.5,"dmg_mult":1.0,"range":9},
+        {"level":9,"sp":21,"cast_time":3.1,"global_cd":1.0,"delay_after":0.8,"bolt_count":9, "bolt_interval":0.5,"dmg_mult":1.0,"range":9},
+        {"level":10,"sp":21,"cast_time":3.3,"global_cd":1.0,"delay_after":0.8,"bolt_count":10,"bolt_interval":0.5,"dmg_mult":1.0,"range":9}
+      ]
+    },
+    "LIGHTNING_BOLT": {
+      "id": "LIGHTNING_BOLT",
+      "display_name": "Lightning Bolt",
+      "element": "Wind",
+      "category": "Targeted",
+      "vfx": {
+        "cast_glow_sheet":  "SpriteSheets/vfx_lightning_cast_glow_spritesheet.png",
+        "projectile_sheet": "SpriteSheets/vfx_lightning_bolt_proj_spritesheet.png",
+        "impact_sheet":     "SpriteSheets/vfx_lightning_impact_spritesheet.png"
+      },
+      "levels": [
+        {"level":1,"sp":9, "cast_time":1.5,"global_cd":1.0,"delay_after":0.8,"bolt_count":1, "bolt_interval":0.5,"dmg_mult":1.0,"range":9},
+        {"level":2,"sp":9, "cast_time":1.7,"global_cd":1.0,"delay_after":0.8,"bolt_count":2, "bolt_interval":0.5,"dmg_mult":1.0,"range":9},
+        {"level":3,"sp":12,"cast_time":1.9,"global_cd":1.0,"delay_after":0.8,"bolt_count":3, "bolt_interval":0.5,"dmg_mult":1.0,"range":9},
+        {"level":4,"sp":12,"cast_time":2.1,"global_cd":1.0,"delay_after":0.8,"bolt_count":4, "bolt_interval":0.5,"dmg_mult":1.0,"range":9},
+        {"level":5,"sp":15,"cast_time":2.3,"global_cd":1.0,"delay_after":0.8,"bolt_count":5, "bolt_interval":0.5,"dmg_mult":1.0,"range":9},
+        {"level":6,"sp":15,"cast_time":2.5,"global_cd":1.0,"delay_after":0.8,"bolt_count":6, "bolt_interval":0.5,"dmg_mult":1.0,"range":9},
+        {"level":7,"sp":18,"cast_time":2.7,"global_cd":1.0,"delay_after":0.8,"bolt_count":7, "bolt_interval":0.5,"dmg_mult":1.0,"range":9},
+        {"level":8,"sp":18,"cast_time":2.9,"global_cd":1.0,"delay_after":0.8,"bolt_count":8, "bolt_interval":0.5,"dmg_mult":1.0,"range":9},
+        {"level":9,"sp":21,"cast_time":3.1,"global_cd":1.0,"delay_after":0.8,"bolt_count":9, "bolt_interval":0.5,"dmg_mult":1.0,"range":9},
+        {"level":10,"sp":21,"cast_time":3.3,"global_cd":1.0,"delay_after":0.8,"bolt_count":10,"bolt_interval":0.5,"dmg_mult":1.0,"range":9}
+      ]
+    },
+    "FIRE_WALL": {
+      "id": "FIRE_WALL",
+      "display_name": "Fire Wall",
+      "element": "Fire",
+      "category": "Ground",
+      "vfx": {
+        "burst_sheet":  "SpriteSheets/vfx_fire_wall_burst_spritesheet.png",
+        "pillar_sheet": "SpriteSheets/vfx_fire_wall_pillar_spritesheet.png"
+      },
+      "levels": [
+        {"level":1, "sp":40,"cast_time":0.5,"global_cd":1.0,"delay_after":1.0,"width_cells":3,"hits_per_cell":3, "lifetime_seconds":5,"dmg_mult":0.50,"range":3},
+        {"level":2, "sp":40,"cast_time":0.5,"global_cd":1.0,"delay_after":1.0,"width_cells":3,"hits_per_cell":4, "lifetime_seconds":5,"dmg_mult":0.55,"range":3},
+        {"level":3, "sp":40,"cast_time":0.5,"global_cd":1.0,"delay_after":1.0,"width_cells":3,"hits_per_cell":5, "lifetime_seconds":5,"dmg_mult":0.60,"range":3},
+        {"level":4, "sp":40,"cast_time":0.5,"global_cd":1.0,"delay_after":1.0,"width_cells":3,"hits_per_cell":6, "lifetime_seconds":5,"dmg_mult":0.65,"range":3},
+        {"level":5, "sp":40,"cast_time":0.5,"global_cd":1.0,"delay_after":1.0,"width_cells":3,"hits_per_cell":7, "lifetime_seconds":5,"dmg_mult":0.70,"range":3},
+        {"level":6, "sp":40,"cast_time":0.5,"global_cd":1.0,"delay_after":1.0,"width_cells":3,"hits_per_cell":8, "lifetime_seconds":5,"dmg_mult":0.75,"range":3},
+        {"level":7, "sp":40,"cast_time":0.5,"global_cd":1.0,"delay_after":1.0,"width_cells":3,"hits_per_cell":9, "lifetime_seconds":5,"dmg_mult":0.80,"range":3},
+        {"level":8, "sp":40,"cast_time":0.5,"global_cd":1.0,"delay_after":1.0,"width_cells":3,"hits_per_cell":10,"lifetime_seconds":5,"dmg_mult":0.85,"range":3},
+        {"level":9, "sp":40,"cast_time":0.5,"global_cd":1.0,"delay_after":1.0,"width_cells":3,"hits_per_cell":11,"lifetime_seconds":5,"dmg_mult":0.90,"range":3},
+        {"level":10,"sp":40,"cast_time":0.5,"global_cd":1.0,"delay_after":1.0,"width_cells":3,"hits_per_cell":12,"lifetime_seconds":5,"dmg_mult":1.00,"range":3}
+      ]
+    }
+  }
+}

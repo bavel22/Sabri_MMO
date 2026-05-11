@@ -4,7 +4,7 @@
 // ============================================================
 
 const { ZONE_REGISTRY } = require('./ro_zone_data');
-const { ENEMY_TEMPLATES } = require('./ro_monster_templates');
+const { RO_MONSTER_TEMPLATES: ENEMY_TEMPLATES } = require('./ro_monster_templates');
 
 // ════════════════════════════════════════════════════════════
 // World Map Grid System
@@ -33,6 +33,8 @@ const ZONE_INFO = {
     prt_fild01:     { displayName: 'Prontera Field 01',     category: 'field',   levelRange: '1-10',   biome: 'temperate_meadow' },
     prt_fild02:     { displayName: 'Prontera Field 02',     category: 'field',   levelRange: '5-15',   biome: 'temperate_meadow' },
     prt_dungeon_01: { displayName: 'Prontera Dungeon 1F',   category: 'dungeon', levelRange: '15-30',  biome: 'underground' },
+    SewerDungeon01: { displayName: 'Sewer Dungeon F1',      category: 'dungeon', levelRange: '15-25',  biome: 'underground' },
+    Pryth:          { displayName: 'Pryth',                 category: 'town',    levelRange: '',       biome: 'temperate_meadow' },
     izlude:         { displayName: 'Izlude',                category: 'town',    levelRange: '',       biome: 'coastal' },
     iz_fild01:      { displayName: 'Izlude Field',          category: 'field',   levelRange: '5-20',   biome: 'coastal' },
     alberta:        { displayName: 'Alberta',               category: 'town',    levelRange: '',       biome: 'coastal' },
@@ -166,10 +168,10 @@ const WORLD_MAP_GRID = [
     [ 'rachel',      'ra_fild02',   'glast_heim',  'gef_fild02', 'prontera_north', 'coal_mine', 'yuno_fild01', 'yuno_fild02', 'lighthalzen', null,        null,          null          ],
     // Row 3 — Center: geffen, prontera, izlude, payon
     [ 'ice_dun01',   'ra_fild01',   'geffen',      'gef_fild01', 'prontera',   'prt_fild01', 'prt_fild02',  'izlude',      'iz_fild01',   'payon',       'louyang',     null          ],
-    // Row 4 — Lower-mid: orc territory, prontera south, payon forest
-    [ 'ice_dun02',   'gef_fild03',  'gef_fild04',  'morroc',     'prontera_south', 'prt_dungeon_01', 'alb_fild01', 'pay_fild01', 'pay_fild02', 'pay_fild03', null,       null          ],
+    // Row 4 — Lower-mid: orc territory, prontera south, payon forest, pryth (east capital)
+    [ 'ice_dun02',   'gef_fild03',  'gef_fild04',  'morroc',     'prontera_south', 'prt_dungeon_01', 'alb_fild01', 'pay_fild01', 'pay_fild02', 'pay_fild03', 'Pryth',    null          ],
     // Row 5 — South: desert, pyramids, alberta, payon
-    [ null,          'cmd_fild01',  'moc_fild01',  'moc_fild02', 'moc_fild03', 'moc_pryd',   'alberta',     'sphinx',      null,          null,          null,          'ayothaya'    ],
+    [ null,          'cmd_fild01',  'moc_fild01',  'moc_fild02', 'moc_fild03', 'moc_pryd',   'alberta',     'sphinx',      'SewerDungeon01', null,        null,          'ayothaya'    ],
     // Row 6 — Far South: comodo, deep desert, coast
     [ null,          'comodo',      'cmd_fild02',  'moc_fild04', 'moc_fild05', null,          null,          null,          null,          null,          null,          null          ],
     // Row 7 — Southernmost: niflheim island, ocean
@@ -224,19 +226,26 @@ function buildWorldMapData() {
             zones[zoneName].displayName = zone.displayName; // prefer ZONE_REGISTRY name
         }
 
-        // Build monster summary
+        // Build monster summary — covers both enemySpawns (fixed) and spawnPool (random)
         const monsterSummary = [];
         const seenTemplates = new Set();
-        for (const spawn of (zone.enemySpawns || [])) {
-            if (seenTemplates.has(spawn.template)) continue;
+        const collect = (spawn) => {
+            if (seenTemplates.has(spawn.template)) return;
             seenTemplates.add(spawn.template);
             const tmpl = ENEMY_TEMPLATES ? ENEMY_TEMPLATES[spawn.template] : null;
+            // Element is now {type, level} on templates; older code expected a string
+            const elementRaw = tmpl ? tmpl.element : null;
+            const elementStr = (typeof elementRaw === 'string')
+                ? elementRaw
+                : (elementRaw && elementRaw.type) || 'neutral';
             monsterSummary.push({
                 name: tmpl ? (tmpl.displayName || tmpl.name || spawn.template) : spawn.template,
                 level: tmpl ? (tmpl.level || 1) : 1,
-                element: tmpl ? (tmpl.element || 'neutral') : 'neutral'
+                element: elementStr
             });
-        }
+        };
+        for (const spawn of (zone.enemySpawns || [])) collect(spawn);
+        for (const spawn of (zone.spawnPool   || [])) collect(spawn);
         monsterSummary.sort((a, b) => a.level - b.level);
         zones[zoneName].monsters = monsterSummary;
 

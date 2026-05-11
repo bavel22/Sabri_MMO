@@ -6,6 +6,38 @@ RO Classic's water is a simple animated plane with alpha blending — no physics
 
 ---
 
+## Implementation Status (as of 2026-05-06)
+
+The water system is implemented in `AWaterArea` (`client/SabriMMO/Source/SabriMMO/WaterArea.{h,cpp}`) with the following deviations and extensions vs. the original research recommendations below. For the canonical day-to-day reference, load the `/sabrimmo-water` skill.
+
+### Deviations from research
+
+1. **Material uses DefaultLit translucent, NOT Single Layer Water.** SLW was considered but the runtime-build path was simpler with translucent + manual depth gradient via `SceneDepth − PixelDepth`. Provides equivalent depth-aware coloring/opacity at lower complexity.
+2. **No editor material asset.** The material is built at runtime in `CreateWaterMaterial()` using only standard `UMaterialExpression*` nodes. Custom HLSL was tested and confirmed *not* to animate at runtime (HLSL is compiled once and cached) — only standard nodes update per-frame.
+3. **Mixed shallow/deep within one actor.** Implemented via auto-detection (raycast grid + greedy rectangle merge) — see below. The original research suggested separating shallow and deep into different volumes; we collapsed both into a single `AWaterArea` with auto-detection.
+
+### Extensions beyond research
+
+4. **Auto-detect deep cells (raycast grid).** At `OnConstruction`, fires NxN downward line traces (default 16x16 = 256 samples). Cells with `WaterLevel − HitZ ≥ DeepDepthThreshold` (default 200u) are flagged deep. No-floor cells default to deep.
+5. **Greedy rectangle merge.** Coalesces deep cells into the smallest set of axis-aligned rectangles, then spawns one `UBoxComponent` per rectangle as a NavMesh modifier (`bCanEverAffectNavigation=true`, `AreaClassOverride=UNavArea_Null`). UE5 navmesh cuts each rect; multiple overlapping cuts stack cleanly.
+6. **Three-stop depth gradient (shallow → deep → abyss).** Material uses two chained lerps:
+    - Stage 1: `lerp(ShallowColor, DeepColor, saturate(WaterDepth / DepthFalloff))` across [0, 250u]
+    - Stage 2: `lerp(Stage1Color, AbyssColor, saturate((WaterDepth − DepthFalloff) / (AbyssDepth − DepthFalloff)))` across [250u, 900u]
+    Color, opacity, roughness, specular, and ripple amplitude all respond. Abyss reaches `AbyssOpacity` (default 1.0) — fully opaque.
+7. **Reference-counted server tracking.** `player.activeWaterAreas` is a `Map<areaId, { isDeep }>`. `inWater = (Map.size > 0)`. Overlapping AWaterArea actors don't break state — leaving one while still inside another keeps `inWater=true`.
+8. **Two-layer movement validation.** Server `player:position` handler rejects with `reason: 'deep_water'` (fast AABB against zone-data deep entries) or `reason: 'off_navmesh'` (general navmesh validation, snap distance > 100u). The navmesh check catches mixed-mode deep cells without per-cell server data.
+9. **Spawn snap-and-warn.** `spawnEnemy()` snaps spawn points to nearest navmesh point, warns when snap distance > 100u — designer typos (spawn inside deep water) self-heal with logged warning.
+
+### Deferred / not yet implemented
+
+- Splash particles, wading sound, caustics, vertex displacement (all listed in skill's "Future Enhancements")
+- Per-zone default tint, editor preview material asset
+- Oriented bounding box (OBB) server-side check for rotated water actors — currently AABB only
+
+The original research findings below remain valid as design rationale.
+
+---
+
 ## Key Finding 1: How RO Classic Handles Water
 
 **Confidence:** High

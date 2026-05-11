@@ -506,3 +506,67 @@ Same root cause as N1 for Demonstration tick. Additionally, the buff value was `
 - ✅ `node --check server/src/index.js` passes
 - ✅ `node --check server/src/ro_buff_system.js` passes
 - ✅ Both buffs now have handlers using the same fraction format pattern as `strip_weapon` / `strip_shield`
+
+---
+
+## HOMUNCULUS SYSTEM COMPLETION LOG (2026-04-26)
+
+End-to-end re-audit of the Homunculus system surfaced 10 gaps. 7 fixed in this pass; 1 partial (Lif autocast only); 2 deferred with notes.
+
+### Fixed
+
+| Gap | Where | What changed |
+|-----|-------|--------------|
+| **G4** Skill point allocation never persisted to DB | `index.js` `homunculus:skill_up` handler | Added `UPDATE character_homunculus SET skill_1_level=..., skill_2_level=..., skill_3_level=..., skill_points=...` after the in-memory mutation. Skill points now survive disconnect/crash. |
+| **G7** Server didn't broadcast homunculus position | `index.js` new 200ms position tick | Server lerps homunculus toward owner-back-left at 600 UE/s base, emits `homunculus:position` to zone when moved >2 UE. Other players' homunculi can now be rendered remotely. |
+| **G8** Placeholder visuals (BP_EnemyCharacter at 60% scale) | `HomunculusSubsystem.cpp` `SpawnHomunculusActor` | Replaced with `ASpriteCharacterActor` + `SetBodyClass()` mapping. Lif=poring, Amistr=poporing, Filir=picky, Vanilmirth=drops. ~70% scale. Each type now has a distinct sprite. |
+| **G9** Urgent Escape speed bonus stored but never used | `index.js` position tick | New tick reads `hom.urgentEscapeSpeedBonus` (already stored by the existing Urgent Escape handler at `index.js:23770`) and multiplies movement speed accordingly: `speedPerSec = 600 * (1 + bonus/100)`. |
+| **G10** `homunculus:command` accepted invalid attack targets | `index.js` `homunculus:command` handler | Validates `targetId` is a real, alive enemy in the same zone before setting attack mode. Emits `skill:error` on validation failure. |
+| **G1+G3+G5+G6** No client UI for skills / skill points / evolve / command | `HomunculusSubsystem.cpp` `SHomunculusWidget` | Added 8 new buttons: 3× "Use Skill" (1/2/3), 3× "Allocate Skill Point" (S1+/S2+/S3+), 1× Mode cycle (follow→attack→standby), 1× Evolve (only visible when `intimacy >= 911 && !evolved`). All emit existing socket events the server already handles. |
+| **N3 (server side)** Server emits inconsistent field names | (`HandleSummoned` field reads) | Fixed client to read `maxHp`/`maxSp`/`evolved` (server's canonical names) and unpack the `skills` nested object. Previously HP bar showed 0/0 until first regen tick. |
+
+### Newly added: Remote homunculus rendering
+
+- 3 new socket handlers in `HomunculusSubsystem.cpp`: `homunculus:other_summoned`, `homunculus:other_dismissed`, `homunculus:position`
+- New `RemoteHomActors` map: `ownerId → ASpriteCharacterActor*`
+- Other players' homunculi now spawn locally with `bUseServerMovement = true` and `ServerTargetPos` updated from position broadcasts. Distinct sprite per type (poring/poporing/picky/drops).
+
+### Partial: Autocast AI (G2)
+
+- Implemented Lif Healing Hands autocast only. Lif auto-heals owner when:
+  - Owner HP < 50%
+  - Lif has Healing Hands learned (skill1Level > 0)
+  - Lif has SP for cast
+  - Skill not on cooldown
+- Uses the same heal formula as the manual handler (line 23729). Tick interval 2s.
+- Other types (Amistr Bulwark / Filir Moonlight / Vanilmirth Caprice / etc.) remain manual via the new "Use Skill" buttons. A full per-type AI is a larger design pass — recommend planning separately.
+
+### Deferred (with notes)
+
+| Item | Why deferred | Workaround |
+|------|--------------|------------|
+| Per-type custom homunculus sprites | Requires running the 3D-to-2D pipeline for 4 new sprites + atlas configs | Using poring/poporing/picky/drops as visually distinct placeholders |
+| Full autocast AI for all 4 types | Per-type behavior trees with cooldown/threat/SP awareness — needs design pass | Players can manually trigger via "Use 1/2/3" widget buttons |
+
+### Files modified (homunculus pass)
+
+- `server/src/index.js` — G4 DB UPDATE, G7+G9 position tick, G2 partial Lif autocast tick, G10 command validation
+- `client/SabriMMO/Source/SabriMMO/UI/HomunculusSubsystem.h` — added Skill1Level/Skill2Level/Skill3Level/SkillPoints/CurrentCommand state, new public API (UseSkill/AllocateSkillPoint/EvolveHomunculus/SetCommand), RemoteHomActors map, 3 new private handler decls
+- `client/SabriMMO/Source/SabriMMO/UI/HomunculusSubsystem.cpp` — sprite swap (ASpriteCharacterActor + GetSpriteClassForHomunculusType helper), 3 new socket handlers, 4 new emit helpers, 8 new widget buttons (BuildSlotButton + BuildUseSkillButton helpers), HandleSummoned field-name fixes (maxHp/maxSp/evolved + nested skills object), HandleResurrected maxHp fix, homunculus:skill_updated + homunculus:command_ack handlers
+
+### Verification
+
+- ✅ `node --check server/src/index.js` passes
+- ✅ Client C++ files saved; UE5 build via Live Coding (Ctrl+Alt+F11) or full rebuild
+
+### Player-facing impact
+
+After restart + UE5 rebuild:
+- Your homunculus now appears as a visible sprite (Poring/Poporing/Picky/Drops by type)
+- Other players can see your homunculus too (remote rendering via position broadcast)
+- Widget shows skill level + remaining skill points
+- 3 "Use Skill" buttons cast slots 1/2/3 manually
+- 3 "Allocate" buttons spend skill points
+- Mode button cycles Follow/Attack/Standby
+- Evolve button appears once intimacy ≥ 911
+- Lif passively heals you when you drop below 50% HP

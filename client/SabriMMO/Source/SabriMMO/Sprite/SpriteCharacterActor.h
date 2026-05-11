@@ -46,6 +46,16 @@ struct FSpriteLayerState
 	UPROPERTY()
 	UTexture2D* ActiveLayerTexture = nullptr;
 	bool bUsingLayerV2 = false;
+
+	// Path C: deferred equipment swap. When equipping a new item whose atlas
+	// texture is still streaming (NeverStream=false + high mips not yet resident),
+	// LoadEquipmentLayer parks the new registry here and Tick finalizes the swap
+	// once HasPendingInitOrStreaming() goes false. Until then, the old equipment
+	// stays visible — eliminates pop-in on weapon/hair/headgear changes.
+	TMap<FSpriteAtlasKey, TArray<FSingleAnimAtlasInfo>> PendingLayerAtlasRegistry;
+	UPROPERTY()
+	UTexture2D* PendingSwapTexture = nullptr;
+	float PendingSwapTimeoutSeconds = 0.0f;
 };
 
 /**
@@ -262,6 +272,10 @@ public:
 
 	/** Equipment layer: resolve active atlas for a non-body layer based on current state */
 	void ResolveLayerAtlas(FSpriteLayerState& Layer);
+
+	/** Path C: apply a pending equipment swap (move PendingLayerAtlasRegistry → LayerAtlasRegistry,
+	 *  swap material/texture). Called from Tick when streaming completes or timeout fires. */
+	void FinalizeEquipmentSwap(FSpriteLayerState& Layer, ESpriteLayer LayerType);
 
 	/** Equipment layer: resolve all active equipment layer atlases */
 	void ResolveAllEquipmentAtlases();

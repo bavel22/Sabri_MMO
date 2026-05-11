@@ -88,6 +88,8 @@ Each RO template contains:
 }
 ```
 
+`respawnMs` accepts either a fixed number (`5500`) or a `[min, max]` range (`[120000, 360000]`) for uniform random delay. See **Death & Respawn → respawnMs format** below.
+
 ### Adapter (RO → Game format)
 
 `index.js` builds `ENEMY_TEMPLATES` from `RO_MONSTER_TEMPLATES`:
@@ -528,12 +530,12 @@ These extra drops are configured in `EXISTING_ITEM_EXTRA_DROPS` and injected int
 4. Broadcast enemy:death to all
 5. Award EXP to killer (base + job), process level ups
 6. Roll drops → addItemToInventory for killer → emit loot:drop
-7. setTimeout(respawn, enemy.respawnMs)
+7. setTimeout(respawn, resolveRespawnMs(enemy.respawnMs))
 ```
 
 ### Respawn
 ```
-After respawnMs timer fires:
+After respawn timer fires (delay resolved by resolveRespawnMs):
 1. enemy.health = enemy.maxHealth
 2. enemy.isDead = false
 3. Reset position to spawn point
@@ -542,6 +544,40 @@ After respawnMs timer fires:
 6. initEnemyWanderState(enemy) — resets aiState to IDLE, clears all AI fields
 7. Broadcast enemy:spawn to all
 ```
+
+### respawnMs format
+
+`respawnMs` accepts two forms:
+
+| Form | Example | Behavior |
+|------|---------|----------|
+| Number | `respawnMs: 5500` | Fixed delay in ms (default for ambient mobs) |
+| `[min, max]` array | `respawnMs: [120000, 360000]` | Uniform random delay between min and max ms |
+
+Resolution helper at `server/src/index.js` ~line 100:
+
+```js
+function resolveRespawnMs(value) {
+    if (Array.isArray(value) && value.length === 2) {
+        const min = value[0];
+        const max = value[1];
+        return min + Math.floor(Math.random() * Math.max(0, max - min + 1));
+    }
+    return value || 15000;
+}
+```
+
+Used at two consumption sites:
+- Status-event respawn (`index.js` ~line 2793) — death from poison / curse tick
+- Combat-death respawn (`index.js` ~line 28799) — `setTimeout(..., resolveRespawnMs(enemy.respawnMs))`
+
+**MVP/boss variance is hardcoded** in the death handler (120–130 min for MVP, 60–70 min for boss) and **does NOT** flow through `resolveRespawnMs`. Ranges are for non-MVP "rare named" / farming spawns to break respawn-camping.
+
+The other touch-points in `index.js` (~lines 4577, 4812, 32591) only copy the value forward (template adapter, enemy spawn init, template change). Array vs number passes through transparently. **Do not wrap them in `resolveRespawnMs`** — only the two delay sites need it.
+
+**When to use range vs fixed:**
+- **Range** — rare, elite, or farming-target spawns (plants, named insects, valuable card-droppers). Examples currently using ranges: `blue_plant` `[300000, 600000]`, `green_plant` `[300000, 600000]`, `black_mushroom` `[120000, 360000]`, `vocal` `[900000, 1500000]`.
+- **Fixed** — ambient field mobs where predictable density is the goal (poring, fabre, lunatic, etc.).
 
 ## Socket.io Events
 

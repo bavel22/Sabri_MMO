@@ -58,6 +58,28 @@ FCharacterData UMMOGameInstance::GetSelectedCharacter() const
     return SelectedCharacter;
 }
 
+void UMMOGameInstance::SetSelectedCharacterJobClass(const FString& NewJobClass)
+{
+    SelectedCharacter.JobClass = NewJobClass;
+    SelectedCharacter.JobLevel = 1;
+    SelectedCharacter.JobExp = 0;
+
+    // Mirror the change in CharacterList so the character-select screen
+    // (after Logout + Login or ReturnToCharacterSelect) shows the new class.
+    for (FCharacterData& Character : CharacterList)
+    {
+        if (Character.CharacterId == SelectedCharacter.CharacterId)
+        {
+            Character.JobClass = NewJobClass;
+            Character.JobLevel = 1;
+            Character.JobExp = 0;
+            break;
+        }
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("SelectedCharacter job class set to %s"), *NewJobClass);
+}
+
 bool UMMOGameInstance::IsAuthenticated() const
 {
     return bIsLoggedIn && !AuthToken.IsEmpty();
@@ -227,7 +249,7 @@ void UMMOGameInstance::LoadGameOptions()
     fOptionSfxVolume     = Save->fSfxVolume;
     fOptionAmbientVolume = Save->fAmbientVolume;
     // Video
-    iOptionSpriteQuality = FMath::Clamp(Save->iSpriteQuality, 0, 3);
+    iOptionSpriteQuality = FMath::Clamp(Save->iSpriteQuality, 0, 4);
     // Login
     bRememberUsername = Save->bRememberUsername;
     if (bRememberUsername)

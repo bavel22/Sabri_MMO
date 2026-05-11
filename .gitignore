@@ -334,3 +334,17 @@ temp_*
 
 # Scratch / pasted-token files (never commit — has caught Adobe tokens before)
 **/New Text Document*.txt
+
+# Runtime lock files
+.claude/scheduled_tasks.lock
+.claude/*.lock
+
+# Stray screenshots at root (use docs/img/ for intentional ones)
+/[0-9].png
+/[0-9][0-9].png
+/Screenshot *.png
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo

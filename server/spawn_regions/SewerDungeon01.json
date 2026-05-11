@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "zone": "SewerDungeon01",
+  "allow": [
+    {
+      "min": [-3750.00, -3750.00, 70.00],
+      "max": [3750.00, 3750.00, 570.00],
+      "tag": "SpawnAllowVolume_UAID_107C6107A5F7E0D802_1343136082",
+      "filter": []
+    }
+  ],
+  "deny": [
+    {
+      "min": [-3750.00, -3750.00, -350.00],
+      "max": [3750.00, 3750.00, 150.00],
+      "tag": "SpawnDenyVolume_UAID_107C6107A5F7E0D802_1679124084",
+      "filter": []
+    }
+  ]
+}

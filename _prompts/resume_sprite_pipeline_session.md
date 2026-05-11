@@ -69,7 +69,7 @@ In `C:/Sabri_MMO/_prompts/`:
 
 In `C:/Sabri_MMO/client/SabriMMO/Scripts/Environment/`:
 - `import_enemy_sprites.py` — generic (scan all `Body/enemies/`)
-- `import_batchN.py` (N=3..9) — per-batch importers with BC7, UI group, NoMipmaps, Nearest, Never Stream
+- `import_batchN.py` (N=3..9) — per-batch importers with the canonical sprite atlas settings (2026-04-28): BC7, TEXTUREGROUP_UI, Nearest, **SimpleAverage mips** (was NoMipmaps), `use_new_mip_filter=True`, `do_scale_mips_for_alpha_coverage=True`, `alpha_coverage_thresholds=(0,0,0,0.5)`, `max_texture_size=0`, **`never_stream=False`** (was True), **`srgb=True`** (body sprite material samples as Color/sRGB; `srgb=False` makes the sprite invisible). See `memory/feedback-sprite-texture-group-ui.md`.
 - `reimport_hermit_plant.py` — template for force-reimport (replaces existing uassets)
 
 ## Pipeline cheatsheet

@@ -510,14 +510,38 @@ UMaterialInstanceDynamic* ASpriteCharacterActor::CreateSpriteMaterial(UTexture2D
 	UMaterialExpressionSceneDepth* SceneDepthNode = NewObject<UMaterialExpressionSceneDepth>(Mat);
 	Mat->GetExpressionCollection().AddExpression(SceneDepthNode);
 
-	// Opacity: just the binary alpha. Always write the sprite stencil, regardless
-	// of occlusion (so the post-process can read it).
+	// Foliage occlusion threshold — pixels with an occluder in front by less than this
+	// distance (in UU) get discarded, letting grass/flowers/debris hide the sprite.
+	// Larger occluders (walls) fall through to the silhouette path in EmissiveCompute.
+	UMaterialExpressionScalarParameter* FoliageDist =
+		NewObject<UMaterialExpressionScalarParameter>(Mat);
+	FoliageDist->ParameterName = TEXT("FoliageOcclusionDist");
+	FoliageDist->DefaultValue = 80.f;
+	Mat->GetExpressionCollection().AddExpression(FoliageDist);
+
+	// Opacity: binary alpha, plus discard for foliage-range occluders so grass/flowers
+	// can hide the sprite without invoking the wall-silhouette path.
+	// Walls (Behind > FoliageOcclusionDist) keep drawing; EmissiveCompute swaps in scene
+	// color for those pixels via the line-trace + per-pixel depth check.
 	UMaterialExpressionCustom* OpacityCompute = NewObject<UMaterialExpressionCustom>(Mat);
 	OpacityCompute->OutputType = CMOT_Float1;
-	OpacityCompute->Code = TEXT("return InAlpha > 0.333 ? 1.0 : 0.0;");
+	OpacityCompute->Code = TEXT(
+		"float Behind = InPixelDepth - InSceneDepth;\n"
+		"float FoliageHide = (Behind > 1.0 && Behind < InFoliageDist) ? 0.0 : 1.0;\n"
+		"return (InAlpha > 0.333) ? FoliageHide : 0.0;"
+	);
 	FCustomInput& AlphaIn = OpacityCompute->Inputs.AddDefaulted_GetRef();
 	AlphaIn.InputName = TEXT("InAlpha");
 	AlphaIn.Input.Connect(4, TexSample);
+	FCustomInput& OpPixDepthIn = OpacityCompute->Inputs.AddDefaulted_GetRef();
+	OpPixDepthIn.InputName = TEXT("InPixelDepth");
+	OpPixDepthIn.Input.Connect(0, PixelDepthNode);
+	FCustomInput& OpScDepthIn = OpacityCompute->Inputs.AddDefaulted_GetRef();
+	OpScDepthIn.InputName = TEXT("InSceneDepth");
+	OpScDepthIn.Input.Connect(0, SceneDepthNode);
+	FCustomInput& OpFoliageIn = OpacityCompute->Inputs.AddDefaulted_GetRef();
+	OpFoliageIn.InputName = TEXT("InFoliageDist");
+	OpFoliageIn.Input.Connect(0, FoliageDist);
 	Mat->GetExpressionCollection().AddExpression(OpacityCompute);
 
 	// Emissive: combines feet/head trace results with per-pixel depth check.
@@ -942,6 +966,24 @@ void ASpriteCharacterActor::Tick(float DeltaTime)
 	UpdateBillboard();
 	UpdateDirection();
 	UpdateAnimation(DeltaTime);
+
+	// Path C: finalize deferred equipment swaps once their textures finish streaming.
+	// While pending, the OLD equipment material/registry stays in place so the player
+	// keeps seeing the previous gear until the new one is crisp — no pop-in.
+	for (int32 i = 0; i < static_cast<int32>(ESpriteLayer::MAX); i++)
+	{
+		FSpriteLayerState& L = Layers[i];
+		if (!L.PendingSwapTexture) continue;
+
+		L.PendingSwapTimeoutSeconds -= DeltaTime;
+		const bool bReady = !L.PendingSwapTexture->HasPendingInitOrStreaming();
+		const bool bTimedOut = L.PendingSwapTimeoutSeconds <= 0.0f;
+
+		if (bReady || bTimedOut)
+		{
+			FinalizeEquipmentSwap(L, static_cast<ESpriteLayer>(i));
+		}
+	}
 
 	// Hit flash: restore original tints after flash duration
 	if (bHitFlashing)
@@ -1506,6 +1548,10 @@ void ASpriteCharacterActor::LoadEquipmentLayer(ESpriteLayer Layer, int32 ViewSpr
 		L.bUsingLayerV2 = false;
 		L.LayerAtlasRegistry.Empty();
 		L.ActiveLayerAtlas = nullptr;
+		// Cancel any in-flight deferred swap — unequip overrides it.
+		L.PendingLayerAtlasRegistry.Empty();
+		L.PendingSwapTexture = nullptr;
+		L.PendingSwapTimeoutSeconds = 0.0f;
 		return;
 	}
 
@@ -1600,9 +1646,11 @@ void ASpriteCharacterActor::LoadEquipmentLayer(ESpriteLayer Layer, int32 ViewSpr
 		}
 	}
 
-	L.LayerAtlasRegistry.Empty();
-	L.ActiveLayerAtlas = nullptr;
-	L.bUsingLayerV2 = true;
+	// Build into a TEMP registry instead of clobbering L.LayerAtlasRegistry up-front.
+	// If the new texture is still streaming (NeverStream=false + high mips not yet resident),
+	// we'll park this in L.PendingLayerAtlasRegistry and let Tick finalize the swap once ready
+	// — keeping the OLD equipment visible until then (Path C: no pop-in on equipment swaps).
+	TMap<FSpriteAtlasKey, TArray<FSingleAnimAtlasInfo>> NewRegistry;
 
 	const TArray<TSharedPtr<FJsonValue>>* AtlasArr;
 	if (!Root->TryGetArrayField(TEXT("atlases"), AtlasArr))
@@ -1688,7 +1736,7 @@ void ASpriteCharacterActor::LoadEquipmentLayer(ESpriteLayer Layer, int32 ViewSpr
 				for (int32 m = 0; m < static_cast<int32>(ESpriteWeaponMode::MAX); m++)
 				{
 					FSpriteAtlasKey Key{static_cast<ESpriteWeaponMode>(m), *StateEnum};
-					L.LayerAtlasRegistry.FindOrAdd(Key).Add(Info);
+					NewRegistry.FindOrAdd(Key).Add(Info);
 				}
 			}
 			else
@@ -1697,7 +1745,7 @@ void ASpriteCharacterActor::LoadEquipmentLayer(ESpriteLayer Layer, int32 ViewSpr
 				if (Mode)
 				{
 					FSpriteAtlasKey Key{*Mode, *StateEnum};
-					L.LayerAtlasRegistry.FindOrAdd(Key).Add(Info);
+					NewRegistry.FindOrAdd(Key).Add(Info);
 				}
 			}
 		}
@@ -1707,32 +1755,127 @@ void ASpriteCharacterActor::LoadEquipmentLayer(ESpriteLayer Layer, int32 ViewSpr
 
 	if (LoadedCount > 0)
 	{
-		// Resolve initial atlas and create material
-		ResolveLayerAtlas(L);
-
-		if (L.ActiveLayerAtlas && L.ActiveLayerAtlas->AtlasTexture && L.MeshComp)
+		// Find the texture we'd display first for the current state, so we can
+		// check whether it's already streamed in (apply now) or needs to wait (defer).
+		UTexture2D* TargetTex = nullptr;
 		{
-			L.MaterialInst = CreateSpriteMaterial(L.ActiveLayerAtlas->AtlasTexture);
-			if (L.MaterialInst)
+			FSpriteAtlasKey Key{CurrentWeaponMode, CurrentAnimState};
+			TArray<FSingleAnimAtlasInfo>* Variants = NewRegistry.Find(Key);
+			if (!Variants || Variants->Num() == 0)
 			{
-				L.MeshComp->SetMaterial(0, L.MaterialInst);
+				Key.WeaponMode = ESpriteWeaponMode::None;
+				Variants = NewRegistry.Find(Key);
 			}
-
-			// Don't show hair layer if headgear is hiding it
-			bool bShouldShow = !(Layer == ESpriteLayer::Hair && bHairHiddenByHeadgear);
-			L.MeshComp->SetVisibility(bShouldShow);
-			L.bActive = bShouldShow;
-			L.ActiveLayerTexture = L.ActiveLayerAtlas->AtlasTexture;
+			if (Variants && Variants->Num() > 0)
+			{
+				FSingleAnimAtlasInfo& Target = (*Variants)[0];
+				Target.EnsureTextureLoaded();  // load asset (may not have all mips resident yet)
+				TargetTex = Target.AtlasTexture;
+			}
 		}
 
-		UE_LOG(LogTemp, Log, TEXT("SpriteEquip: Loaded %s (viewSprite=%d, %d atlases)"),
-			*SubDir, ViewSpriteId, LoadedCount);
+		// Defer the swap only when ALL of:
+		//   - we have a target texture (else apply normally and let it sort out)
+		//   - we already have a material (this is a swap, not a first-time load)
+		//   - the new texture's high mips are not yet resident
+		const bool bDeferSwap = (TargetTex != nullptr
+			&& IsValid(L.MaterialInst)
+			&& TargetTex->HasPendingInitOrStreaming());
+
+		if (bDeferSwap)
+		{
+			// Pin high mips so the streaming system actually loads them, then park
+			// the new registry until Tick sees streaming complete.
+			TargetTex->SetForceMipLevelsToBeResident(60.0f, 0);
+			L.PendingLayerAtlasRegistry = MoveTemp(NewRegistry);
+			L.PendingSwapTexture = TargetTex;
+			L.PendingSwapTimeoutSeconds = 1.0f;  // force-apply after this even if still streaming
+
+			UE_LOG(LogTemp, Log, TEXT("SpriteEquip: Deferred swap %s viewSprite=%d "
+				"(streaming high mips; old equipment stays visible until ready)"),
+				*SubDir, ViewSpriteId);
+		}
+		else
+		{
+			// Apply now (first load, or texture is already fully streamed in).
+			L.LayerAtlasRegistry = MoveTemp(NewRegistry);
+			L.ActiveLayerAtlas = nullptr;
+			L.bUsingLayerV2 = true;
+
+			ResolveLayerAtlas(L);
+
+			if (L.ActiveLayerAtlas && L.ActiveLayerAtlas->AtlasTexture && L.MeshComp)
+			{
+				// Only create a NEW material on first load. Recreating the MID on every
+				// LoadEquipmentLayer call (which fires for every slot every time
+				// OnEquipmentChanged broadcasts — including just opening the inventory)
+				// destroys the bound material for one frame → visible flicker on the
+				// helmet/weapon/etc. ResolveLayerAtlas above already updated the existing
+				// MID's "Atlas" texture parameter when the texture changed, so we don't
+				// need a fresh material when one already exists for this layer.
+				if (!IsValid(L.MaterialInst))
+				{
+					L.MaterialInst = CreateSpriteMaterial(L.ActiveLayerAtlas->AtlasTexture);
+					if (L.MaterialInst)
+					{
+						L.MeshComp->SetMaterial(0, L.MaterialInst);
+					}
+				}
+
+				// Don't show hair layer if headgear is hiding it
+				bool bShouldShow = !(Layer == ESpriteLayer::Hair && bHairHiddenByHeadgear);
+				L.MeshComp->SetVisibility(bShouldShow);
+				L.bActive = bShouldShow;
+				L.ActiveLayerTexture = L.ActiveLayerAtlas->AtlasTexture;
+			}
+
+			UE_LOG(LogTemp, Log, TEXT("SpriteEquip: Loaded %s (viewSprite=%d, %d atlases)"),
+				*SubDir, ViewSpriteId, LoadedCount);
+		}
 	}
 	else
 	{
 		SetLayerVisible(Layer, false);
 		L.bUsingLayerV2 = false;
+		// Clear any pending swap — the unequip/load-failure overrides it.
+		L.PendingLayerAtlasRegistry.Empty();
+		L.PendingSwapTexture = nullptr;
 	}
+}
+
+void ASpriteCharacterActor::FinalizeEquipmentSwap(FSpriteLayerState& Layer, ESpriteLayer LayerType)
+{
+	if (Layer.PendingLayerAtlasRegistry.Num() > 0)
+	{
+		Layer.LayerAtlasRegistry = MoveTemp(Layer.PendingLayerAtlasRegistry);
+	}
+	Layer.PendingLayerAtlasRegistry.Empty();
+	Layer.ActiveLayerAtlas = nullptr;
+	Layer.bUsingLayerV2 = true;
+
+	ResolveLayerAtlas(Layer);
+
+	if (Layer.ActiveLayerAtlas && Layer.ActiveLayerAtlas->AtlasTexture && Layer.MeshComp)
+	{
+		// Reuse existing material instance — just update the Atlas parameter via ResolveLayerAtlas.
+		// (ResolveLayerAtlas already calls SetTextureParameterValue when ActiveLayerTexture changes.)
+		// If for some reason no MID exists, create one now.
+		if (!IsValid(Layer.MaterialInst))
+		{
+			Layer.MaterialInst = CreateSpriteMaterial(Layer.ActiveLayerAtlas->AtlasTexture);
+			if (Layer.MaterialInst)
+			{
+				Layer.MeshComp->SetMaterial(0, Layer.MaterialInst);
+			}
+		}
+		bool bShouldShow = !(LayerType == ESpriteLayer::Hair && bHairHiddenByHeadgear);
+		Layer.MeshComp->SetVisibility(bShouldShow);
+		Layer.bActive = bShouldShow;
+		Layer.ActiveLayerTexture = Layer.ActiveLayerAtlas->AtlasTexture;
+	}
+
+	Layer.PendingSwapTexture = nullptr;
+	Layer.PendingSwapTimeoutSeconds = 0.0f;
 }
 
 void ASpriteCharacterActor::ResolveLayerAtlas(FSpriteLayerState& Layer)

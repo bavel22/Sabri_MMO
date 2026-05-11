@@ -333,6 +333,22 @@
   - On zone transition start: randomly pick from available loading textures
   - Ensure different image from last transition (if possible)
 
+- [x] **5.5** Optimistic show pattern (added 2026-05-08)
+  - Loading overlay now shows on the client-side trigger event, not the server's `zone:change` response
+  - Closes the ~60-250ms feedback gap between action (warp overlap, Kafra teleport, Butterfly Wing) and visible loading screen
+  - Public API on `UZoneTransitionSubsystem`:
+    ```cpp
+    void ShowExpectedZoneChange(const FString& StatusText = TEXT("Loading..."));
+    void HideExpectedZoneChange();
+    ```
+  - Triggers wired:
+    - `RequestWarp()` (warp portal overlap) → hidden by `HandleZoneError`
+    - `KafraSubsystem::RequestTeleport()` → hidden by `HandleKafraError`
+    - `InventorySubsystem::UseItem()` for `item_id == 1028` (Butterfly Wing) → hidden by `HandleZoneError`
+  - **Intentionally NOT wired:** Fly Wing (`item_id 1029`) — same-zone random teleport, no level change
+  - The `bLoadingShown` guard makes redundant calls safe (no-op when already shown)
+  - When `HandleZoneChange` arrives, `ShowLoadingOverlay("Entering <Zone>...")` is no-op due to the guard, but state is updated for the next world's subsystem
+
 ---
 
 ## Phase 6: Guide NPC Mark System

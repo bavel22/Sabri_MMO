@@ -734,10 +734,12 @@ void UAudioSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		// ---- Towns ----
 		// Prontera (3 layers: market chatter + birds + church bell)
 		ZoneAmbientMap.Add(TEXT("prontera"),       { PrtMarket, PrtBirds, PrtBell });
-		ZoneAmbientMap.Add(TEXT("prontera_south"), { PrtMarket, PrtBirds, PrtBell });
 		ZoneAmbientMap.Add(TEXT("prontera_north"), { PrtMarket, PrtBirds, PrtBell });
 		ZoneAmbientMap.Add(TEXT("prontera_east"),  { PrtMarket, PrtBirds, PrtBell });
 		ZoneAmbientMap.Add(TEXT("prontera_west"),  { PrtMarket, PrtBirds, PrtBell });
+		ZoneAmbientMap.Add(TEXT("Pryth"),          { PrtMarket, PrtBirds, PrtBell });  // Pastoral capital (Prontera-style mimic)
+		// NOTE: prontera_south is a field (not a town gate) — its ambient is mapped in the
+		//       "Sabri MMO renamed prt_fild zones" section below alongside grassfield05/07.
 
 		// Payon (grass + animals — quieter forest village)
 		ZoneAmbientMap.Add(TEXT("payon"),       { PayGrass, PayAnimal });
@@ -770,6 +772,15 @@ void UAudioSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		ZoneAmbientMap.Add(TEXT("prt_fild10"),  { FieldWind1, PrtBirds });
 		ZoneAmbientMap.Add(TEXT("prt_fild11"),  { FieldWind1, PrtBirds });
 		ZoneAmbientMap.Add(TEXT("prt_fild12"),  { FieldWind1, PrtBirds });
+
+		// ---- Sabri MMO renamed prt_fild zones ----
+		// Convention: a Sabri-named field that replaces an RO Classic prt_fild## inherits
+		// the same ambient stack as the original. Add new entries here when introducing
+		// further renamed fields. Mirror entry must also exist in ZoneToBgmMap.
+		ZoneAmbientMap.Add(TEXT("prontera_south"), { FieldWind1, PrtBirds }); // mirrors prt_fild08
+		ZoneAmbientMap.Add(TEXT("grassfield05"),   { FieldWind1, PrtBirds }); // mirrors prt_fild05
+		ZoneAmbientMap.Add(TEXT("grassfield07"),   { FieldWind1, PrtBirds }); // mirrors prt_fild07
+
 		ZoneAmbientMap.Add(TEXT("pay_fild01"),  { PayGrass,   PayAnimal });
 		ZoneAmbientMap.Add(TEXT("pay_fild02"),  { PayGrass,   PayAnimal });
 		ZoneAmbientMap.Add(TEXT("pay_fild03"),  { PayGrass,   PayAnimal });
@@ -798,6 +809,15 @@ void UAudioSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		ZoneAmbientMap.Add(TEXT("gl_chyard"),   { DunWind });
 		ZoneAmbientMap.Add(TEXT("gl_dun01"),    { DunWind });
 		ZoneAmbientMap.Add(TEXT("gl_dun02"),    { DunWind });
+
+		// ---- Prontera Culvert / Sewer (RO Classic prt_sewb1-4 + Sabri SewerDungeon01) ----
+		// Stack 3 layers: dungeon wind base + drainage drips + canal waterfall flow.
+		// Matches RO Classic prt_sewb atmospheric mix.
+		ZoneAmbientMap.Add(TEXT("prt_sewb1"),       { DunWind, CaveDrip, CaveFall });
+		ZoneAmbientMap.Add(TEXT("prt_sewb2"),       { DunWind, CaveDrip, CaveFall });
+		ZoneAmbientMap.Add(TEXT("prt_sewb3"),       { DunWind, CaveDrip, CaveFall });
+		ZoneAmbientMap.Add(TEXT("prt_sewb4"),       { DunWind, CaveDrip, CaveFall });
+		ZoneAmbientMap.Add(TEXT("SewerDungeon01"),  { DunWind, CaveDrip, CaveFall });
 
 		// ---- Pyramids / Sphinx ----
 		ZoneAmbientMap.Add(TEXT("moc_pryd01"), { PyramidA, MocWindMid });
@@ -837,10 +857,12 @@ void UAudioSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 
 		// ---- Towns ----
 		ZoneToBgmMap.Add(TEXT("prontera"),       BgmRoot + TEXT("bgm_08")); // Theme of Prontera
-		ZoneToBgmMap.Add(TEXT("prontera_south"), BgmRoot + TEXT("bgm_08"));
 		ZoneToBgmMap.Add(TEXT("prontera_north"), BgmRoot + TEXT("bgm_08"));
 		ZoneToBgmMap.Add(TEXT("prontera_east"),  BgmRoot + TEXT("bgm_08"));
 		ZoneToBgmMap.Add(TEXT("prontera_west"),  BgmRoot + TEXT("bgm_08"));
+		ZoneToBgmMap.Add(TEXT("Pryth"),          BgmRoot + TEXT("bgm_08")); // Pastoral capital — same Prontera theme
+		// NOTE: prontera_south is a field (not a town gate) — its BGM is mapped in the
+		//       "Sabri MMO renamed prt_fild zones" section below alongside grassfield05/07.
 		ZoneToBgmMap.Add(TEXT("morroc"),         BgmRoot + TEXT("bgm_11")); // Theme of Morroc
 		ZoneToBgmMap.Add(TEXT("morroc_south"),   BgmRoot + TEXT("bgm_11"));
 		ZoneToBgmMap.Add(TEXT("geffen"),         BgmRoot + TEXT("bgm_13")); // Theme of Geffen
@@ -882,6 +904,14 @@ void UAudioSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		ZoneToBgmMap.Add(TEXT("prt_fild10"), BgmRoot + TEXT("bgm_04"));
 		ZoneToBgmMap.Add(TEXT("prt_fild11"), BgmRoot + TEXT("bgm_04"));
 		ZoneToBgmMap.Add(TEXT("prt_fild12"), BgmRoot + TEXT("bgm_12"));
+
+		// ---- Sabri MMO renamed prt_fild zones ----
+		// Convention: when a Sabri-named field replaces an RO Classic prt_fild##, it
+		// inherits the same BGM as the original. Add new entries here when introducing
+		// further renamed fields. Source: RO Classic mp3nametable (see RO_Audio_System_Research.md).
+		ZoneToBgmMap.Add(TEXT("prontera_south"), BgmRoot + TEXT("bgm_12")); // mirrors prt_fild08 — Streamside
+		ZoneToBgmMap.Add(TEXT("grassfield05"),   BgmRoot + TEXT("bgm_12")); // mirrors prt_fild05 — Streamside
+		ZoneToBgmMap.Add(TEXT("grassfield07"),   BgmRoot + TEXT("bgm_05")); // mirrors prt_fild07 — Tread on the Ground
 
 		// Geffen fields (Plateau / Travel / Nano East alternating)
 		ZoneToBgmMap.Add(TEXT("gef_fild01"), BgmRoot + TEXT("bgm_23")); // Travel
@@ -936,10 +966,11 @@ void UAudioSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		ZoneToBgmMap.Add(TEXT("gef_dun03"),   BgmRoot + TEXT("bgm_50"));
 		ZoneToBgmMap.Add(TEXT("orcsdun01"),   BgmRoot + TEXT("bgm_48")); // Help Yourself
 		ZoneToBgmMap.Add(TEXT("orcsdun02"),   BgmRoot + TEXT("bgm_48"));
-		ZoneToBgmMap.Add(TEXT("prt_sewb1"),   BgmRoot + TEXT("bgm_19")); // Under the Ground (Culvert)
-		ZoneToBgmMap.Add(TEXT("prt_sewb2"),   BgmRoot + TEXT("bgm_19"));
-		ZoneToBgmMap.Add(TEXT("prt_sewb3"),   BgmRoot + TEXT("bgm_19"));
-		ZoneToBgmMap.Add(TEXT("prt_sewb4"),   BgmRoot + TEXT("bgm_19"));
+		ZoneToBgmMap.Add(TEXT("prt_sewb1"),       BgmRoot + TEXT("bgm_19")); // Under the Ground (Culvert)
+		ZoneToBgmMap.Add(TEXT("prt_sewb2"),       BgmRoot + TEXT("bgm_19"));
+		ZoneToBgmMap.Add(TEXT("prt_sewb3"),       BgmRoot + TEXT("bgm_19"));
+		ZoneToBgmMap.Add(TEXT("prt_sewb4"),       BgmRoot + TEXT("bgm_19"));
+		ZoneToBgmMap.Add(TEXT("SewerDungeon01"),  BgmRoot + TEXT("bgm_19")); // Prontera Culvert F1 mimic
 		ZoneToBgmMap.Add(TEXT("prt_maze01"),  BgmRoot + TEXT("bgm_16")); // Labyrinth
 		ZoneToBgmMap.Add(TEXT("prt_maze02"),  BgmRoot + TEXT("bgm_16"));
 		ZoneToBgmMap.Add(TEXT("prt_maze03"),  BgmRoot + TEXT("bgm_16"));

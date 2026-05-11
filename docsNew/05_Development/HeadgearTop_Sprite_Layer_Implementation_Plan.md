@@ -92,7 +92,7 @@ Atlas Packing (pack_atlas.py with v2 config)
   -> depth_mode "always_front" (holdout occlusion, no depth arrays)
   |
   v
-UE5 Import (UserInterface2D, Nearest, NoMipmaps)
+UE5 Import (canonical sprite settings — see memory feedback-sprite-texture-group-ui.md)
   -> Content/SabriMMO/Sprites/Atlases/HeadgearTop/{type}/
   |
   v
@@ -419,14 +419,20 @@ Multiple items can share the same `view_sprite` (same visual model, different st
 
 Import all PNGs and JSONs into `Content/SabriMMO/Sprites/Atlases/HeadgearTop/hat/`.
 
-**Texture settings** (same as all sprite atlases):
+**Texture settings** (canonical 2026-04-27 — same as all sprite atlases; see memory `feedback-sprite-texture-group-ui.md`):
 
 | Setting | Value |
 |---------|-------|
-| Compression | UserInterface2D |
+| Compression Settings | BC7 |
 | Filter | Nearest |
-| Mip Gen Settings | NoMipmaps |
-| Never Stream | On |
+| Mip Gen Settings | SimpleAverage |
+| Use Improved Image Processing | On |
+| Do Scale Mips For Alpha Coverage | On |
+| Alpha Coverage Thresholds | (0, 0, 0, 0.5) (W=0.5) |
+| Maximum Texture Size | 0 |
+| Never Stream | Off |
+| Texture Group (LOD Group) | UI |
+| **sRGB** | **On** (body sprite material samples as Color/sRGB; Off makes the sprite invisible) |
 
 **Important**: Always delete old `.uasset` files before reimporting — UE5 caches aggressively and may not pick up changes.
 
@@ -807,7 +813,7 @@ Once the first headgear is working, each additional headgear follows this checkl
 - [ ] Pack male atlas to `HeadgearTop/{name}/male/`
 - [ ] Pack female atlas to `HeadgearTop/{name}/female/`
 - [ ] Set `"hides_hair": true` in manifest JSON if headgear covers hair (future -- requires hair separation)
-- [ ] Import PNGs into UE5 (UserInterface2D, Nearest, NoMipmaps, Never Stream)
+- [ ] Import PNGs into UE5 with canonical sprite settings (BC7, UI group, Nearest, SimpleAverage mips, AlphaCoverage W=0.5, MaxTextureSize=0, NeverStream=False — see memory `feedback-sprite-texture-group-ui.md`)
 - [ ] Test: equip/unequip, all animation states, weapon mode changes, remote player sync
 
 ### Headgear Implementation Status

@@ -117,9 +117,17 @@ void UPostProcessSubsystem::SetupSceneLighting(const FString& ZoneName)
 				LC->SetIntensity(3.14f);  // ~pi lux, natural sunlight
 				LC->SetLightColor(FLinearColor(1.0f, 0.95f, 0.85f));  // warm white
 				LC->SetCastShadows(true);
+				// Cap dynamic shadows at 7000 UU. Wider transition/fadeout hides cascade seams at
+				// top-down 15deg FOV.
+				LC->SetDynamicShadowDistanceMovableLight(7000.f);
+				LC->SetDynamicShadowDistanceStationaryLight(7000.f);
+				LC->SetDynamicShadowCascades(3);
+				LC->SetCascadeDistributionExponent(3.0f);
+				LC->SetCascadeTransitionFraction(0.2f);
+				LC->SetShadowDistanceFadeoutFraction(0.25f);
 				SunLight->SetActorRotation(FRotator(-50.f, 135.f, 0.f));  // afternoon angle
 
-				UE_LOG(LogPostProcess, Log, TEXT("Directional light configured: intensity=3.14, warm white, pitch=-50"));
+				UE_LOG(LogPostProcess, Log, TEXT("Directional light configured: intensity=3.14, warm white, pitch=-50, shadow_dist=7000"));
 			}
 		}
 	}
@@ -204,6 +212,35 @@ void UPostProcessSubsystem::SetupSceneLighting(const FString& ZoneName)
 			UE_LOG(LogPostProcess, Log, TEXT("Height fog configured: density=%.3f, %s"),
 				bIsDungeon ? 0.03f : 0.004f, bIsDungeon ? TEXT("dense purple") : TEXT("light warm"));
 		}
+	}
+
+	// Per-zone fog density overrides (high-fidelity zones)
+	if (ZoneName == TEXT("SewerDungeon01") && HeightFog)
+	{
+		if (UExponentialHeightFogComponent* FC = HeightFog->GetComponent())
+		{
+			// ── Base ExponentialHeightFog (screen-space tonemap layer) ──
+			// Sewer floor sits at Z~620. Shallow falloff (0.2) so the fog reaches the
+			// player capsule; the dungeon-default 2.0 made it drop to near-zero up high.
+			FC->SetFogDensity(0.12f);
+			FC->SetFogHeightFalloff(0.2f);
+			FC->SetFogInscatteringColor(FLinearColor(0.15f, 0.20f, 0.15f));  // moss green
+			FC->SetStartDistance(0.f);
+
+			// ── Volumetric fog (true 3D voxel grid, lights scatter through it) ──
+			// Forward scatter at 0.7 = strong "Mie" phase function: light bright near the
+			// source, falls off to ambient outward → god rays from braziers, soft halo
+			// around ceiling-grate Spotlights, depth visible through the volume.
+			FC->SetVolumetricFog(true);
+			FC->SetVolumetricFogScatteringDistribution(0.7f);
+			FC->SetVolumetricFogAlbedo(FColor(80, 110, 80));         // greenish tint on scattered light
+			FC->SetVolumetricFogExtinctionScale(1.0f);                // light absorption — leaves room for Local Fog Volumes to layer denser pockets
+			FC->SetVolumetricFogStartDistance(0.f);                   // begin at camera, no near gap
+
+			UE_LOG(LogPostProcess, Log,
+				TEXT("SewerDungeon01 fog: volumetric ON, density=0.12, scatter=0.7, falloff=0.2, extinction=1.0, FogHeight=500"));
+		}
+		HeightFog->SetActorLocation(FVector(0.f, 0.f, 500.f));
 	}
 }
 
@@ -486,6 +523,22 @@ void UPostProcessSubsystem::ApplyZonePreset(const FString& ZoneName)
 		WhiteTemp = 6200.f;
 		GainHighlights = FVector4(0.98f, 0.98f, 1.02f, 1.0f);
 	}
+	else if (ZoneName == TEXT("grassfield07"))
+	{
+		Bloom = 0.35f;
+		Vignette = 0.2f;
+		ExposureBias = 1.5f;
+		WhiteTemp = 6700.f;
+		GainHighlights = FVector4(1.02f, 1.0f, 0.97f, 1.0f);
+	}
+	else if (ZoneName == TEXT("grassfield05"))
+	{
+		Bloom = 0.35f;
+		Vignette = 0.2f;
+		ExposureBias = 1.5f;
+		WhiteTemp = 6400.f;
+		GainHighlights = FVector4(0.98f, 1.0f, 1.01f, 1.0f);
+	}
 	else if (ZoneName == TEXT("prt_dungeon_01"))
 	{
 		Bloom = 0.2f;
@@ -493,6 +546,14 @@ void UPostProcessSubsystem::ApplyZonePreset(const FString& ZoneName)
 		ExposureBias = 0.0f;
 		WhiteTemp = 5000.f;
 		GainHighlights = FVector4(0.92f, 0.92f, 1.05f, 1.0f);
+	}
+	else if (ZoneName == TEXT("SewerDungeon01"))
+	{
+		Bloom = 0.15f;            // minimal bloom — no bright sun
+		Vignette = 0.5f;          // heavy — claustrophobic
+		ExposureBias = 0.0f;      // dungeon, no boost
+		WhiteTemp = 5500.f;       // slightly warm to balance cool fog
+		GainHighlights = FVector4(0.95f, 0.92f, 0.98f, 1.0f);  // subtle cool blue-green tint
 	}
 
 	S.bOverride_BloomIntensity = true;

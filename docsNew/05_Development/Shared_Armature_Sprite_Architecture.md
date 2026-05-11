@@ -574,7 +574,7 @@ Need 3D hair meshes per style. Extracting from existing Tripo3D models provides 
   "client/SabriMMO/Content/SabriMMO/Sprites/Atlases/Body" \
   --config "2D animations/atlas_configs/priest_f_v2.json"
 
-# 3. Import PNGs into UE5 (UserInterface2D, Nearest, NoMipmaps)
+# 3. Import PNGs into UE5 with canonical sprite settings (see memory feedback-sprite-texture-group-ui.md)
 # 4. Done — all existing female equipment works automatically
 ```
 
@@ -612,7 +612,7 @@ Need 3D hair meshes per style. Extracting from existing Tripo3D models provides 
   --config "2D animations/atlas_configs/weapon_sword_v2.json"
 
 # 5. DB: UPDATE items SET view_sprite = 2 WHERE weapon_type = 'sword'
-# 6. Import PNGs into UE5 (UserInterface2D, Nearest, NoMipmaps)
+# 6. Import PNGs into UE5 with canonical sprite settings (see memory feedback-sprite-texture-group-ui.md)
 # 7. Done — works for all classes of each gender
 ```
 
@@ -649,7 +649,7 @@ Need 3D hair meshes per style. Extracting from existing Tripo3D models provides 
   "client/SabriMMO/Content/SabriMMO/Sprites/Atlases/HeadgearTop/helm/female" \
   --config "2D animations/atlas_configs/headgeartop_helm_v2.json"
 
-# 5. Import PNGs into UE5 (UserInterface2D, Nearest, NoMipmaps)
+# 5. Import PNGs into UE5 with canonical sprite settings (see memory feedback-sprite-texture-group-ui.md)
 # 6. Done — works for all classes of each gender
 ```
 

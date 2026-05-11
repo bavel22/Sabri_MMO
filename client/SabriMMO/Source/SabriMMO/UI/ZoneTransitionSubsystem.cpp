@@ -3,6 +3,7 @@
 // Shows fullscreen loading overlay during level transitions.
 
 #include "ZoneTransitionSubsystem.h"
+#include "ZonePreloadSubsystem.h"
 #include "MMOGameInstance.h"
 #include "SocketEventRouter.h"
 #include "Audio/AudioSubsystem.h"
@@ -154,6 +155,7 @@ void UZoneTransitionSubsystem::Deinitialize()
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(TransitionCheckTimer);
+		World->GetTimerManager().ClearTimer(PreloadWaitTimer);
 
 		if (UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance()))
 		{
@@ -239,6 +241,9 @@ void UZoneTransitionSubsystem::HandleZoneError(const TSharedPtr<FJsonValue>& Dat
 	(*ObjPtr)->TryGetStringField(TEXT("message"), Message);
 
 	UE_LOG(LogZoneTransition, Warning, TEXT("zone:error — %s"), *Message);
+
+	// Hide any optimistic overlay shown by RequestWarp / Kafra / Butterfly Wing.
+	HideLoadingOverlay();
 }
 
 void UZoneTransitionSubsystem::HandlePlayerTeleport(const TSharedPtr<FJsonValue>& Data)
@@ -322,6 +327,20 @@ void UZoneTransitionSubsystem::RequestWarp(const FString& WarpId)
 
 	GI->EmitSocketEvent(TEXT("zone:warp"), Payload);
 	UE_LOG(LogZoneTransition, Log, TEXT("Requesting warp: %s"), *WarpId);
+
+	// Show overlay immediately for responsive feedback. HandleZoneChange will
+	// re-call with the destination display name; HandleZoneError hides it on rejection.
+	ShowLoadingOverlay(TEXT("Loading..."));
+}
+
+void UZoneTransitionSubsystem::ShowExpectedZoneChange(const FString& StatusText)
+{
+	ShowLoadingOverlay(StatusText);
+}
+
+void UZoneTransitionSubsystem::HideExpectedZoneChange()
+{
+	HideLoadingOverlay();
 }
 
 // ============================================================
@@ -424,17 +443,17 @@ void UZoneTransitionSubsystem::CheckTransitionComplete()
 		Audio->PlayZoneBgm(CurrentZoneName);
 	}
 
-	// Clear timer
+	// Clear pawn-wait timer
 	World->GetTimerManager().ClearTimer(TransitionCheckTimer);
 
-	// Hide loading after a brief delay (let the world render one frame)
-	World->GetTimerManager().SetTimerForNextTick([this]()
-	{
-		HideLoadingOverlay();
-	});
+	// Don't hide loading overlay yet — wait for sprite atlas preloads to finish
+	// (driven by enemy:spawn / player:moved events from the server's zone:ready
+	// response, which arrives asynchronously over the network).
+	WaitForPreloadAndHideOverlay();
 
 	UE_LOG(LogZoneTransition, Log,
-		TEXT("Zone transition complete — now in %s (after %d checks)"), *CurrentZoneName, TransitionCheckCount);
+		TEXT("Zone transition complete — now in %s (after %d checks). Waiting on preload."),
+		*CurrentZoneName, TransitionCheckCount);
 }
 
 void UZoneTransitionSubsystem::ForceCompleteTransition()
@@ -467,15 +486,77 @@ void UZoneTransitionSubsystem::ForceCompleteTransition()
 		Audio->PlayZoneBgm(CurrentZoneName);
 	}
 
-	// Clear timer and hide loading
+	// Clear timer and hand off to preload-wait (same flow as normal completion)
 	World->GetTimerManager().ClearTimer(TransitionCheckTimer);
-	World->GetTimerManager().SetTimerForNextTick([this]()
-	{
-		HideLoadingOverlay();
-	});
+	WaitForPreloadAndHideOverlay();
 
 	UE_LOG(LogZoneTransition, Warning,
-		TEXT("Zone transition force-completed — now in %s (no pawn teleport)"), *CurrentZoneName);
+		TEXT("Zone transition force-completed — now in %s (no pawn teleport). Waiting on preload."),
+		*CurrentZoneName);
+}
+
+void UZoneTransitionSubsystem::WaitForPreloadAndHideOverlay()
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	PreloadWaitStartTime = FPlatformTime::Seconds();
+	PreloadStableSinceTime = 0.0;
+
+	// Poll every 200ms. We want to dismiss the overlay only AFTER the in-flight
+	// load count has been zero for at least 500ms — that handles the gap between
+	// "zone:ready emitted" and "enemy:spawn events arrive and start loads."
+	World->GetTimerManager().SetTimer(PreloadWaitTimer,
+		FTimerDelegate::CreateLambda([this]()
+		{
+			UWorld* W = GetWorld();
+			if (!W) return;
+
+			UZonePreloadSubsystem* Preload = W->GetSubsystem<UZonePreloadSubsystem>();
+			const bool bAnyInFlight = Preload && Preload->IsLoadingInProgress();
+			const double Now = FPlatformTime::Seconds();
+			const double ElapsedSinceStart = Now - PreloadWaitStartTime;
+
+			// Hard timeout: 15 seconds. Don't trap the player on the loading screen
+			// if something went wrong with preload (network, missing manifest, etc.).
+			if (ElapsedSinceStart >= 15.0)
+			{
+				UE_LOG(LogZoneTransition, Warning,
+					TEXT("Preload wait timed out after 15s — dismissing overlay anyway "
+					     "(in-flight=%d)"),
+					Preload ? Preload->GetInFlightCount() : -1);
+				HideLoadingOverlay();
+				W->GetTimerManager().ClearTimer(PreloadWaitTimer);
+				return;
+			}
+
+			if (bAnyInFlight)
+			{
+				PreloadStableSinceTime = 0.0;
+				return;  // still loading
+			}
+
+			// In-flight is zero. Has it been zero long enough?
+			if (PreloadStableSinceTime <= 0.0)
+			{
+				PreloadStableSinceTime = Now;
+			}
+			const double Stable = Now - PreloadStableSinceTime;
+
+			// Need at least 700ms of stability AND at least 1.5s since we started waiting,
+			// so the network round-trip for zone:ready -> enemy:spawn has had time to arrive.
+			if (Stable >= 0.7 && ElapsedSinceStart >= 1.5)
+			{
+				UE_LOG(LogZoneTransition, Log,
+					TEXT("Preload settled after %.1fs (resident classes=%d, ~%lld MB)"),
+					ElapsedSinceStart,
+					Preload ? Preload->GetResidentClassCount() : 0,
+					Preload ? Preload->GetApproxResidentBytes() / (1024 * 1024) : 0);
+				HideLoadingOverlay();
+				W->GetTimerManager().ClearTimer(PreloadWaitTimer);
+			}
+		}),
+		0.2f, /* bLoop */ true);
 }
 
 void UZoneTransitionSubsystem::TeleportPawnToSpawn()

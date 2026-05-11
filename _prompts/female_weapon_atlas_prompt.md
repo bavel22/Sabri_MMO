@@ -220,12 +220,18 @@ rm -f "C:/Sabri_MMO/client/SabriMMO/Content/SabriMMO/Sprites/Atlases/Weapon/{wea
 
 ### Step 8: Open UE5 and import
 - Editor auto-imports the PNGs (or manually drag them into the Content Browser)
-- For each new texture, set:
-  - **Compression**: BC7
+- For each new texture, apply the canonical sprite atlas settings (2026-04-27 — see
+  `memory/feedback-sprite-texture-group-ui.md`):
+  - **Compression Settings**: BC7
   - **Filter**: Nearest
-  - **Mip Gen Settings**: NoMipmaps
-  - **Never Stream**: On
-  - **sRGB**: Off (linear color, sprites are color-precise)
+  - **Mip Gen Settings**: SimpleAverage
+  - **Use New Mip Filter**: On
+  - **Do Scale Mips For Alpha Coverage**: On
+  - **Alpha Coverage Thresholds**: (0, 0, 0, 0.5)
+  - **Maximum Texture Size**: 0 (no cap)
+  - **Never Stream**: Off (lets the runtime Sprite Quality slider free VRAM)
+  - **Texture Group**: UI
+  - **sRGB**: **On** — body sprite material samples as Color/sRGB; sRGB=Off makes the sprite invisible (verified 2026-04-28)
 
 ### Step 9: Database entry
 Add the item to the `items` table with:
@@ -266,6 +272,6 @@ If a remote player's weapon doesn't show on initial login, see `feedback-remote-
 1. **`character` field doesn't match view_sprite ID** → C++ can't find the manifest, weapon never loads. Always `weapon_{ID}`.
 2. **Forgot `depth_mode: "always_front"`** → packer emits depth_front arrays, runtime depth ordering kicks in, weapon may appear behind body randomly.
 3. **Stale .uasset files** → UE5 ignores new PNGs. Delete .uasset files first.
-4. **Texture sRGB on** → colors look washed out. Set sRGB=Off.
+4. **Texture sRGB Off** → sprite renders invisible (body material samples as Color/sRGB). Always set sRGB=On.
 5. **Wrong gender folder** → C++ falls back to flat path or fails. Use `Weapon/{weapon}/female/` exactly.
 6. **Server not restarted** → old weaponMode logic, katar/bow exceptions don't apply.

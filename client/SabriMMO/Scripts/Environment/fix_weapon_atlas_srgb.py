@@ -1,11 +1,15 @@
-"""Patches sRGB=False on all recently-imported female weapon overlay textures.
+"""Patches sRGB=True on all female weapon overlay textures (canonical 2026-04-28).
 
 Run in UE5 editor Python console:
     py "C:/Sabri_MMO/client/SabriMMO/Scripts/Environment/fix_weapon_atlas_srgb.py"
 
-Why: The sprite material samples textures as Linear Color, but UE5 imports PNGs
-with sRGB=true by default. That mismatch makes the material compile fail and
-the engine falls back to the default gray material — the weapon overlay vanishes.
+Why: The body/weapon sprite material's `TextureSampleParameter2D` has Sampler type =
+`Color` (sRGB-expecting). With `srgb=False` (linear) UE5 logs `"Sampler type is
+Color, should be Linear Color"` and the material samples the texture as all-zeros
+→ invisible weapon overlay.
+
+Verified 2026-04-28 on ambernite import: 4 enemy folders rendered invisible until
+srgb was flipped to True. See memory `feedback-sprite-texture-group-ui.md`.
 """
 import unreal
 import os
@@ -59,14 +63,14 @@ for subdir, wid in WEAPON_DIRS:
         if not tex or not isinstance(tex, unreal.Texture2D):
             total_missing += 1
             continue
-        if tex.get_editor_property("srgb"):
-            tex.set_editor_property("srgb", False)
+        if not tex.get_editor_property("srgb"):
+            tex.set_editor_property("srgb", True)
             eal.save_asset(asset_path)
             fixed_in_dir += 1
             total_fixed += 1
         else:
             total_already_ok += 1
 
-    unreal.log(f"[{subdir}/female] {fixed_in_dir} textures patched (sRGB → False)")
+    unreal.log(f"[{subdir}/female] {fixed_in_dir} textures patched (sRGB → True)")
 
 unreal.log(f"\n=== Total: fixed={total_fixed}, already_correct={total_already_ok}, missing={total_missing} ===")

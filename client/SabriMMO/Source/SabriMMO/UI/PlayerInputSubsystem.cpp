@@ -7,6 +7,7 @@
 #include "SabriMMOCharacter.h"
 #include "ShopNPC.h"
 #include "KafraNPC.h"
+#include "JobChangeNPC.h"
 #include "UI/MultiplayerEventSubsystem.h"
 #include "UI/CombatActionSubsystem.h"
 #include "UI/SkillTreeSubsystem.h"
@@ -154,6 +155,8 @@ void UPlayerInputSubsystem::OnWalkPollTick()
 					Shop->Interact();
 				else if (AKafraNPC* Kafra = Cast<AKafraNPC>(NPC))
 					Kafra->Interact();
+				else if (AJobChangeNPC* Job = Cast<AJobChangeNPC>(NPC))
+					Job->Interact();
 
 				PendingInteractNPC.Reset();
 				UE_LOG(LogMMOInput, Log, TEXT("Walk-to-interact: arrived — interacted with NPC"));
@@ -251,11 +254,21 @@ void UPlayerInputSubsystem::OnLeftClickFromCharacter(ASabriMMOCharacter* Charact
 	AActor* HitActor = Hit.GetActor();
 
 	// Priority 1: NPCs
+	// Walk Owner chain (up to 4 hops) so sprite-wrapped NPCs resolve correctly.
+	// AKafraNPC/AShopNPC spawn an ASpriteCharacterActor child whose Owner is the
+	// wrapper. With the sprite handling click collision, the cursor trace returns
+	// the sprite — without the walk, the cast fails and the click falls through.
 	if (HitActor)
 	{
-		if (Cast<AShopNPC>(HitActor) || Cast<AKafraNPC>(HitActor))
+		AActor* NpcResolved = HitActor;
+		for (int32 Hops = 0; Hops < 4 && NpcResolved; ++Hops)
 		{
-			ProcessClickOnNPC(HitActor);
+			if (Cast<AShopNPC>(NpcResolved) || Cast<AKafraNPC>(NpcResolved) || Cast<AJobChangeNPC>(NpcResolved)) break;
+			NpcResolved = NpcResolved->GetOwner();
+		}
+		if (NpcResolved && (Cast<AShopNPC>(NpcResolved) || Cast<AKafraNPC>(NpcResolved) || Cast<AJobChangeNPC>(NpcResolved)))
+		{
+			ProcessClickOnNPC(NpcResolved);
 			return;
 		}
 	}
@@ -532,6 +545,8 @@ void UPlayerInputSubsystem::ProcessClickOnNPC(AActor* NPCActor)
 			Shop->Interact();
 		else if (AKafraNPC* Kafra = Cast<AKafraNPC>(NPCActor))
 			Kafra->Interact();
+		else if (AJobChangeNPC* Job = Cast<AJobChangeNPC>(NPCActor))
+			Job->Interact();
 	}
 	else
 	{

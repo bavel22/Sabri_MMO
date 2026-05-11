@@ -4,8 +4,10 @@
 #include "HomunculusSubsystem.h"
 #include "MMOGameInstance.h"
 #include "SocketEventRouter.h"
+#include "Sprite/SpriteCharacterActor.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "GameFramework/PlayerController.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Widgets/SWeakWidget.h"
 #include "Widgets/Layout/SBox.h"
@@ -17,6 +19,17 @@
 #include "Widgets/Notifications/SProgressBar.h"
 #include "Widgets/Input/SButton.h"
 #include "Styling/CoreStyle.h"
+
+// Map homunculus type → existing enemy sprite atlas (placeholder visuals).
+// Using small/cute monsters from the Poring family + Picky for variety.
+static FString GetSpriteClassForHomunculusType(const FString& Type)
+{
+    if (Type == TEXT("lif"))        return TEXT("poring");    // pink blob — friendly healer
+    if (Type == TEXT("amistr"))     return TEXT("poporing");  // green horned blob — sturdy tank
+    if (Type == TEXT("filir"))      return TEXT("picky");     // yellow chick — bird theme
+    if (Type == TEXT("vanilmirth")) return TEXT("drops");     // yellow blob — chaotic variant
+    return TEXT("poring");
+}
 
 DEFINE_LOG_CATEGORY_STATIC(LogHomUI, Log, All);
 
@@ -207,6 +220,98 @@ public:
 									.ColorAndOpacity(FSlateColor(HomColors::TextPrimary))
 								]
 							]
+
+							// Skill point readout + Allocate row (3 small buttons)
+							+ SVerticalBox::Slot().AutoHeight().Padding(0, 4, 0, 1)
+							[
+								SNew(STextBlock)
+								.Text_Lambda([this]() -> FText {
+									if (!Sub.IsValid() || !Sub->bHasHomunculus) return FText::GetEmpty();
+									return FText::FromString(FString::Printf(
+										TEXT("Skill Points: %d   Lv: %d/%d/%d"),
+										Sub->SkillPoints, Sub->Skill1Level, Sub->Skill2Level, Sub->Skill3Level));
+								})
+								.Font(FCoreStyle::GetDefaultFontStyle("Regular", 7))
+								.ColorAndOpacity(FSlateColor(HomColors::TextPrimary))
+								.Visibility_Lambda([this]() { return (Sub.IsValid() && Sub->bHasHomunculus && Sub->bIsAlive) ? EVisibility::Visible : EVisibility::Collapsed; })
+							]
+
+							+ SVerticalBox::Slot().AutoHeight().Padding(0, 1)
+							[
+								SNew(SHorizontalBox)
+								.Visibility_Lambda([this]() { return (Sub.IsValid() && Sub->bHasHomunculus && Sub->bIsAlive) ? EVisibility::Visible : EVisibility::Collapsed; })
+								+ SHorizontalBox::Slot().FillWidth(1).Padding(1, 0)
+								[ BuildSlotButton(1, TEXT("S1+")) ]
+								+ SHorizontalBox::Slot().FillWidth(1).Padding(1, 0)
+								[ BuildSlotButton(2, TEXT("S2+")) ]
+								+ SHorizontalBox::Slot().FillWidth(1).Padding(1, 0)
+								[ BuildSlotButton(3, TEXT("S3+")) ]
+							]
+
+							// Use Skill row (3 buttons)
+							+ SVerticalBox::Slot().AutoHeight().Padding(0, 1)
+							[
+								SNew(SHorizontalBox)
+								.Visibility_Lambda([this]() { return (Sub.IsValid() && Sub->bHasHomunculus && Sub->bIsAlive) ? EVisibility::Visible : EVisibility::Collapsed; })
+								+ SHorizontalBox::Slot().FillWidth(1).Padding(1, 0)
+								[ BuildUseSkillButton(1, TEXT("Use 1")) ]
+								+ SHorizontalBox::Slot().FillWidth(1).Padding(1, 0)
+								[ BuildUseSkillButton(2, TEXT("Use 2")) ]
+								+ SHorizontalBox::Slot().FillWidth(1).Padding(1, 0)
+								[ BuildUseSkillButton(3, TEXT("Use 3")) ]
+							]
+
+							// Command cycle button
+							+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)
+							[
+								SNew(SButton)
+								.ContentPadding(FMargin(4, 2))
+								.HAlign(HAlign_Center)
+								.ButtonColorAndOpacity(HomColors::ButtonBrown)
+								.OnClicked_Lambda([this]() -> FReply {
+									if (!Sub.IsValid()) return FReply::Handled();
+									// Cycle: follow → attack → standby → follow
+									FString Next = TEXT("follow");
+									if (Sub->CurrentCommand == TEXT("follow"))      Next = TEXT("attack");
+									else if (Sub->CurrentCommand == TEXT("attack")) Next = TEXT("standby");
+									Sub->SetCommand(Next);
+									return FReply::Handled();
+								})
+								.Visibility_Lambda([this]() { return (Sub.IsValid() && Sub->bHasHomunculus && Sub->bIsAlive) ? EVisibility::Visible : EVisibility::Collapsed; })
+								[
+									SNew(STextBlock)
+									.Text_Lambda([this]() -> FText {
+										if (!Sub.IsValid()) return FText::GetEmpty();
+										return FText::FromString(FString::Printf(TEXT("Mode: %s"), *Sub->CurrentCommand));
+									})
+									.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
+									.ColorAndOpacity(FSlateColor(HomColors::TextPrimary))
+								]
+							]
+
+							// Evolve button (only when intimacy >= 911 / Loyal bracket and not yet evolved)
+							+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)
+							[
+								SNew(SButton)
+								.ContentPadding(FMargin(4, 2))
+								.HAlign(HAlign_Center)
+								.ButtonColorAndOpacity(HomColors::GoldHighlight)
+								.OnClicked_Lambda([this]() -> FReply {
+									if (Sub.IsValid()) Sub->EvolveHomunculus();
+									return FReply::Handled();
+								})
+								.Visibility_Lambda([this]() {
+									return (Sub.IsValid() && Sub->bHasHomunculus && Sub->bIsAlive
+										&& !Sub->bIsEvolved && Sub->Intimacy >= 911)
+										? EVisibility::Visible : EVisibility::Collapsed;
+								})
+								[
+									SNew(STextBlock)
+									.Text(FText::FromString(TEXT("Evolve")))
+									.Font(FCoreStyle::GetDefaultFontStyle("Bold", 9))
+									.ColorAndOpacity(FSlateColor(HomColors::PanelDark))
+								]
+							]
 						]
 					]
 				]
@@ -225,6 +330,46 @@ private:
 		[
 			SNew(SBorder).BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox")).BorderBackgroundColor(HomColors::GoldDivider)
 		];
+	}
+
+	TSharedRef<SWidget> BuildSlotButton(int32 Slot, const FString& Label)
+	{
+		return SNew(SButton)
+			.ContentPadding(FMargin(2, 1))
+			.HAlign(HAlign_Center)
+			.ButtonColorAndOpacity(HomColors::ButtonBrown)
+			.IsEnabled_Lambda([this]() { return Sub.IsValid() && Sub->SkillPoints > 0; })
+			.OnClicked_Lambda([this, Slot]() -> FReply {
+				if (Sub.IsValid()) Sub->AllocateSkillPoint(Slot);
+				return FReply::Handled();
+			})
+			[
+				SNew(STextBlock).Text(FText::FromString(Label))
+				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 8))
+				.ColorAndOpacity(FSlateColor(HomColors::TextPrimary))
+			];
+	}
+
+	TSharedRef<SWidget> BuildUseSkillButton(int32 Slot, const FString& Label)
+	{
+		return SNew(SButton)
+			.ContentPadding(FMargin(2, 1))
+			.HAlign(HAlign_Center)
+			.ButtonColorAndOpacity(HomColors::ButtonBrown)
+			.IsEnabled_Lambda([this, Slot]() {
+				if (!Sub.IsValid()) return false;
+				const int32 Lv = Slot == 1 ? Sub->Skill1Level : Slot == 2 ? Sub->Skill2Level : Sub->Skill3Level;
+				return Lv > 0;
+			})
+			.OnClicked_Lambda([this, Slot]() -> FReply {
+				if (Sub.IsValid()) Sub->UseSkill(Slot);
+				return FReply::Handled();
+			})
+			[
+				SNew(STextBlock).Text(FText::FromString(Label))
+				.Font(FCoreStyle::GetDefaultFontStyle("Bold", 8))
+				.ColorAndOpacity(FSlateColor(HomColors::TextPrimary))
+			];
 	}
 
 	TSharedRef<SWidget> BuildBar(const FString& Label, const FLinearColor& Color,
@@ -286,16 +431,44 @@ void UHomunculusSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 		Router->RegisterHandler(TEXT("homunculus:hunger_tick"), this, [this](const TSharedPtr<FJsonValue>& D) { HandleHungerTick(D); });
 		Router->RegisterHandler(TEXT("homunculus:evolved"), this, [this](const TSharedPtr<FJsonValue>& D) { HandleEvolved(D); });
 		Router->RegisterHandler(TEXT("homunculus:resurrected"), this, [this](const TSharedPtr<FJsonValue>& D) { HandleResurrected(D); });
+		// Skill point allocation result
+		Router->RegisterHandler(TEXT("homunculus:skill_updated"), this, [this](const TSharedPtr<FJsonValue>& D) {
+			if (!D.IsValid()) return;
+			const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+			if (!D->TryGetObject(ObjPtr) || !ObjPtr) return;
+			const TSharedPtr<FJsonObject>& Obj = *ObjPtr;
+			double Slot = 0, NewLv = 0, Pts = 0;
+			Obj->TryGetNumberField(TEXT("skillSlot"), Slot);
+			Obj->TryGetNumberField(TEXT("newLevel"), NewLv);
+			Obj->TryGetNumberField(TEXT("skillPoints"), Pts);
+			const int32 SlotI = (int32)Slot;
+			if (SlotI == 1) Skill1Level = (int32)NewLv;
+			else if (SlotI == 2) Skill2Level = (int32)NewLv;
+			else if (SlotI == 3) Skill3Level = (int32)NewLv;
+			SkillPoints = (int32)Pts;
+		});
+		Router->RegisterHandler(TEXT("homunculus:command_ack"), this, [this](const TSharedPtr<FJsonValue>& D) {
+			if (!D.IsValid()) return;
+			const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+			if (!D->TryGetObject(ObjPtr) || !ObjPtr) return;
+			(*ObjPtr)->TryGetStringField(TEXT("command"), CurrentCommand);
+		});
+		// Remote homunculi (other players' homunculi)
+		Router->RegisterHandler(TEXT("homunculus:other_summoned"), this, [this](const TSharedPtr<FJsonValue>& D) { HandleOtherSummoned(D); });
+		Router->RegisterHandler(TEXT("homunculus:other_dismissed"), this, [this](const TSharedPtr<FJsonValue>& D) { HandleOtherDismissed(D); });
+		Router->RegisterHandler(TEXT("homunculus:position"), this, [this](const TSharedPtr<FJsonValue>& D) { HandlePosition(D); });
 	}
-
-	// Load placeholder actor class (BP_EnemyCharacter at 60% scale)
-	HomActorClass = LoadClass<AActor>(nullptr,
-		TEXT("/Game/SabriMMO/Blueprints/BP_EnemyCharacter.BP_EnemyCharacter_C"));
+	// Sprite-based actors (ASpriteCharacterActor) are spawned directly — no BP class load needed.
 }
 
 void UHomunculusSubsystem::Deinitialize()
 {
 	DespawnHomunculusActor();
+	for (auto& Pair : RemoteHomActors)
+	{
+		if (Pair.Value) Pair.Value->Destroy();
+	}
+	RemoteHomActors.Empty();
 	if (GetWorld()) GetWorld()->GetTimerManager().ClearTimer(FollowTimerHandle);
 	HideWidget();
 	UWorld* World = GetWorld();
@@ -363,12 +536,25 @@ void UHomunculusSubsystem::HandleSummoned(const TSharedPtr<FJsonValue>& Data)
 	double LvD = 0, HpD = 0, MaxHpD = 0, SpD = 0, MaxSpD = 0, HunD = 0, IntD = 0;
 	Obj->TryGetNumberField(TEXT("level"), LvD); HomunculusLevel = (int32)LvD;
 	Obj->TryGetNumberField(TEXT("hp"), HpD); HP = (int32)HpD;
-	Obj->TryGetNumberField(TEXT("hpMax"), MaxHpD); MaxHP = (int32)MaxHpD;
+	// Server emits `maxHp` / `maxSp` (camelCase 'Hp'/'Sp'), NOT `hpMax`/`spMax`. Match exactly.
+	Obj->TryGetNumberField(TEXT("maxHp"), MaxHpD); MaxHP = (int32)MaxHpD;
 	Obj->TryGetNumberField(TEXT("sp"), SpD); SP = (int32)SpD;
-	Obj->TryGetNumberField(TEXT("spMax"), MaxSpD); MaxSP = (int32)MaxSpD;
+	Obj->TryGetNumberField(TEXT("maxSp"), MaxSpD); MaxSP = (int32)MaxSpD;
 	Obj->TryGetNumberField(TEXT("hunger"), HunD); Hunger = (int32)HunD;
 	Obj->TryGetNumberField(TEXT("intimacy"), IntD); Intimacy = (int32)IntD;
-	Obj->TryGetBoolField(TEXT("isEvolved"), bIsEvolved);
+	// Server emits the field as `evolved`, not `isEvolved`.
+	Obj->TryGetBoolField(TEXT("evolved"), bIsEvolved);
+	// Skill levels are nested under `skills` object on the server side.
+	const TSharedPtr<FJsonObject>* SkillsPtr = nullptr;
+	if (Obj->TryGetObjectField(TEXT("skills"), SkillsPtr) && SkillsPtr)
+	{
+		double Sk1 = 0, Sk2 = 0, Sk3 = 0;
+		(*SkillsPtr)->TryGetNumberField(TEXT("skill1Level"), Sk1); Skill1Level = (int32)Sk1;
+		(*SkillsPtr)->TryGetNumberField(TEXT("skill2Level"), Sk2); Skill2Level = (int32)Sk2;
+		(*SkillsPtr)->TryGetNumberField(TEXT("skill3Level"), Sk3); Skill3Level = (int32)Sk3;
+	}
+	double SkPts = 0;
+	Obj->TryGetNumberField(TEXT("skillPoints"), SkPts); SkillPoints = (int32)SkPts;
 	bHasHomunculus = true;
 	bIsAlive = true;
 
@@ -403,9 +589,11 @@ void UHomunculusSubsystem::HandleLeveledUp(const TSharedPtr<FJsonValue>& Data)
 	if (!Data.IsValid()) return;
 	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
 	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
-	double LvD = 0;
-	(*ObjPtr)->TryGetNumberField(TEXT("level"), LvD);
+	const TSharedPtr<FJsonObject>& Obj = *ObjPtr;
+	double LvD = 0, SkPts = 0;
+	Obj->TryGetNumberField(TEXT("level"), LvD);
 	HomunculusLevel = (int32)LvD;
+	if (Obj->TryGetNumberField(TEXT("skillPoints"), SkPts)) SkillPoints = (int32)SkPts;
 }
 
 void UHomunculusSubsystem::HandleDied(const TSharedPtr<FJsonValue>& Data)
@@ -456,7 +644,8 @@ void UHomunculusSubsystem::HandleResurrected(const TSharedPtr<FJsonValue>& Data)
 		if (Data->TryGetObject(ObjPtr) && ObjPtr) {
 			double HpD = 0, MaxHpD = 0;
 			(*ObjPtr)->TryGetNumberField(TEXT("hp"), HpD); HP = (int32)HpD;
-			(*ObjPtr)->TryGetNumberField(TEXT("hpMax"), MaxHpD); if (MaxHpD > 0) MaxHP = (int32)MaxHpD;
+			// Server emits `maxHp` (camelCase), not `hpMax`.
+			(*ObjPtr)->TryGetNumberField(TEXT("maxHp"), MaxHpD); if (MaxHpD > 0) MaxHP = (int32)MaxHpD;
 		}
 	}
 }
@@ -491,32 +680,33 @@ void UHomunculusSubsystem::VaporizeHomunculus()
 
 void UHomunculusSubsystem::SpawnHomunculusActor()
 {
-	if (HomActor || !HomActorClass) return;
+	if (HomActor) return;
 	UWorld* World = GetWorld();
 	if (!World) return;
 
 	APawn* Pawn = World->GetFirstPlayerController() ? World->GetFirstPlayerController()->GetPawn() : nullptr;
 	FVector SpawnLoc = Pawn ? Pawn->GetActorLocation() + FVector(-100.f, -80.f, 0.f) : FVector::ZeroVector;
 
-	FTransform SpawnTransform;
-	SpawnTransform.SetLocation(SpawnLoc);
-	SpawnTransform.SetScale3D(FVector(0.6f)); // 60% scale — homunculus-sized
-
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
-	HomActor = World->SpawnActor(HomActorClass, &SpawnTransform, SpawnParams);
-	if (HomActor)
-	{
-		HomActor->SetActorScale3D(FVector(0.6f));
-		UE_LOG(LogHomUI, Log, TEXT("Spawned homunculus placeholder actor"));
+	ASpriteCharacterActor* Sprite = World->SpawnActor<ASpriteCharacterActor>(SpawnLoc, FRotator::ZeroRotator, SpawnParams);
+	if (!Sprite) { UE_LOG(LogHomUI, Warning, TEXT("Failed to spawn homunculus sprite actor")); return; }
 
-		TWeakObjectPtr<UHomunculusSubsystem> WeakThis(this);
-		World->GetTimerManager().SetTimer(FollowTimerHandle, [WeakThis]()
-		{
-			if (WeakThis.IsValid()) WeakThis->TickFollowOwner();
-		}, 0.1f, true);
-	}
+	const FString SpriteClass = GetSpriteClassForHomunculusType(HomunculusType);
+	Sprite->SetBodyClass(SpriteClass);
+	Sprite->SetActorScale3D(FVector(0.7f)); // ~70% scale, slightly bigger than the BP placeholder
+	Sprite->bUseServerMovement = false;     // local-controlled follow (own homunculus)
+	HomActor = Sprite;
+
+	UE_LOG(LogHomUI, Log, TEXT("Spawned homunculus sprite (%s → %s) for type=%s"),
+		*HomunculusName, *SpriteClass, *HomunculusType);
+
+	TWeakObjectPtr<UHomunculusSubsystem> WeakThis(this);
+	World->GetTimerManager().SetTimer(FollowTimerHandle, [WeakThis]()
+	{
+		if (WeakThis.IsValid()) WeakThis->TickFollowOwner();
+	}, 0.1f, true);
 }
 
 void UHomunculusSubsystem::DespawnHomunculusActor()
@@ -547,5 +737,141 @@ void UHomunculusSubsystem::TickFollowOwner()
 	const FVector CurrentLoc = HomActor->GetActorLocation();
 	const FVector NewLoc = FMath::VInterpTo(CurrentLoc, TargetLoc, 0.1f, 8.f);
 	HomActor->SetActorLocation(NewLoc);
-	HomActor->SetActorRotation(OwnerRot);
+
+	// Sprite faces movement direction via ASpriteCharacterActor's billboard system; no rotation set here.
+}
+
+// ============================================================
+// Remote homunculus rendering (other players' homunculi)
+// ============================================================
+
+void UHomunculusSubsystem::HandleOtherSummoned(const TSharedPtr<FJsonValue>& Data)
+{
+	if (!Data.IsValid()) return;
+	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
+	const TSharedPtr<FJsonObject>& Obj = *ObjPtr;
+
+	double OwnerD = 0;
+	Obj->TryGetNumberField(TEXT("ownerId"), OwnerD);
+	const int32 OwnerId = (int32)OwnerD;
+	if (OwnerId <= 0) return;
+
+	FString RemoteType;
+	Obj->TryGetStringField(TEXT("type"), RemoteType);
+	if (RemoteType.IsEmpty()) RemoteType = TEXT("poring");
+
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	// Replace existing if present
+	if (RemoteHomActors.Contains(OwnerId) && RemoteHomActors[OwnerId])
+	{
+		RemoteHomActors[OwnerId]->Destroy();
+		RemoteHomActors.Remove(OwnerId);
+	}
+
+	double X = 0, Y = 0, Z = 0;
+	Obj->TryGetNumberField(TEXT("x"), X);
+	Obj->TryGetNumberField(TEXT("y"), Y);
+	Obj->TryGetNumberField(TEXT("z"), Z);
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	ASpriteCharacterActor* Sprite = World->SpawnActor<ASpriteCharacterActor>(FVector(X, Y, Z), FRotator::ZeroRotator, SpawnParams);
+	if (!Sprite) return;
+
+	Sprite->SetBodyClass(GetSpriteClassForHomunculusType(RemoteType));
+	Sprite->SetActorScale3D(FVector(0.7f));
+	Sprite->bUseServerMovement = true;
+	Sprite->ServerTargetPos = FVector(X, Y, Z);
+	RemoteHomActors.Add(OwnerId, Sprite);
+}
+
+void UHomunculusSubsystem::HandleOtherDismissed(const TSharedPtr<FJsonValue>& Data)
+{
+	if (!Data.IsValid()) return;
+	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
+	double OwnerD = 0;
+	(*ObjPtr)->TryGetNumberField(TEXT("ownerId"), OwnerD);
+	const int32 OwnerId = (int32)OwnerD;
+	if (RemoteHomActors.Contains(OwnerId))
+	{
+		if (RemoteHomActors[OwnerId]) RemoteHomActors[OwnerId]->Destroy();
+		RemoteHomActors.Remove(OwnerId);
+	}
+}
+
+void UHomunculusSubsystem::HandlePosition(const TSharedPtr<FJsonValue>& Data)
+{
+	if (!Data.IsValid()) return;
+	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
+	const TSharedPtr<FJsonObject>& Obj = *ObjPtr;
+
+	double OwnerD = 0, X = 0, Y = 0, Z = 0;
+	Obj->TryGetNumberField(TEXT("ownerId"), OwnerD);
+	Obj->TryGetNumberField(TEXT("x"), X);
+	Obj->TryGetNumberField(TEXT("y"), Y);
+	Obj->TryGetNumberField(TEXT("z"), Z);
+	const int32 OwnerId = (int32)OwnerD;
+
+	if (RemoteHomActors.Contains(OwnerId))
+	{
+		AActor* Actor = RemoteHomActors[OwnerId];
+		if (Actor)
+		{
+			ASpriteCharacterActor* Sprite = Cast<ASpriteCharacterActor>(Actor);
+			if (Sprite) Sprite->ServerTargetPos = FVector(X, Y, Z);
+		}
+	}
+}
+
+// ============================================================
+// Skill / Allocate / Evolve / Command — emit helpers (Phase 6)
+// Each just sends an existing socket event the server already handles.
+// ============================================================
+
+void UHomunculusSubsystem::UseSkill(int32 SkillSlot)
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance());
+	if (!GI || !GI->IsSocketConnected()) return;
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+	Payload->SetNumberField(TEXT("skillSlot"), SkillSlot);
+	GI->EmitSocketEvent(TEXT("homunculus:use_skill"), Payload);
+}
+
+void UHomunculusSubsystem::AllocateSkillPoint(int32 SkillSlot)
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance());
+	if (!GI || !GI->IsSocketConnected()) return;
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+	Payload->SetNumberField(TEXT("skillSlot"), SkillSlot);
+	GI->EmitSocketEvent(TEXT("homunculus:skill_up"), Payload);
+}
+
+void UHomunculusSubsystem::EvolveHomunculus()
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance());
+	if (!GI || !GI->IsSocketConnected()) return;
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+	GI->EmitSocketEvent(TEXT("homunculus:evolve"), Payload);
+}
+
+void UHomunculusSubsystem::SetCommand(const FString& Command)
+{
+	UWorld* World = GetWorld();
+	if (!World) return;
+	UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance());
+	if (!GI || !GI->IsSocketConnected()) return;
+	TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
+	Payload->SetStringField(TEXT("command"), Command);
+	GI->EmitSocketEvent(TEXT("homunculus:command"), Payload);
 }

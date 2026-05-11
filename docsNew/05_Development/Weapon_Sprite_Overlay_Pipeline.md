@@ -205,23 +205,33 @@ UE5 caches textures in `.uasset` files. If you replace the source PNGs on disk, 
    - `swordsman_m_fighting_idle.*` (removed animation)
    - `weapon_dagger_*.*` (wrong naming — must be weapon_1)
 4. **Open UE5** — it will auto-import the PNGs as new textures
-5. **Set texture properties** on all new textures (REQUIRED — all six settings):
-   - Compression: **BC7** (`TC_BC7`)
+5. **Set texture properties** on all new textures (UPDATED 2026-04-27 — required for the runtime Sprite Quality slider, ZonePreloadSubsystem, and Path C deferred equipment swap):
+   - Compression Settings: **BC7** (`TC_BC7`)
    - Filter: **Nearest** (`TF_NEAREST`) — no blur
-   - Mip Gen Settings: **NoMipmaps** (`TMGS_NO_MIPMAPS`)
-   - Never Stream: **On**
-   - sRGB: **Off** (linear color so cel-shade ramp stays accurate)
+   - **Mip Gen Settings: SimpleAverage** (`TMGS_SIMPLE_AVERAGE`) — required so the slider has mips to bias against
+   - **Use Improved Image Processing**: **On** — UE5's modern processing pipe
+   - **Do Scale Mips For Alpha Coverage**: **On** — preserves sprite edges at lower mips
+   - **Alpha Coverage Thresholds**: `(0, 0, 0, 0.5)` (W=0.5)
+   - **Maximum Texture Size**: **0** (no cap — non-square atlases need uniform downscale)
+   - **Never Stream**: **Off** — required for LODBias to actually unload high mips
+   - **sRGB: On** — body sprite material's `TextureSampleParameter2D` uses Sampler type=`Color` (sRGB). Setting `srgb=False` causes UE5 to log `"Sampler type is Color, should be Linear Color"` and the texture renders all-zeros → invisible sprite (verified 2026-04-28 on ambernite import).
    - **Texture Group: UI** (`TEXTUREGROUP_UI`) — sprite atlases are UI textures, not world textures
 
-   The proven Python block (reusable in all import scripts):
+   The canonical Python block (reusable in all import scripts):
    ```python
    texture.set_editor_property("compression_settings", unreal.TextureCompressionSettings.TC_BC7)
    texture.set_editor_property("filter", unreal.TextureFilter.TF_NEAREST)
-   texture.set_editor_property("mip_gen_settings", unreal.TextureMipGenSettings.TMGS_NO_MIPMAPS)
-   texture.set_editor_property("never_stream", True)
-   texture.set_editor_property("srgb", False)
+   texture.set_editor_property("mip_gen_settings", unreal.TextureMipGenSettings.TMGS_SIMPLE_AVERAGE)
+   texture.set_editor_property("use_new_mip_filter", True)
+   texture.set_editor_property("do_scale_mips_for_alpha_coverage", True)
+   texture.set_editor_property("alpha_coverage_thresholds", unreal.Vector4(0.0, 0.0, 0.0, 0.5))
+   texture.set_editor_property("max_texture_size", 0)
+   texture.set_editor_property("never_stream", False)
+   texture.set_editor_property("srgb", True)  # MUST be True — body sprite material samples as Color (sRGB)
    texture.set_editor_property("lod_group", unreal.TextureGroup.TEXTUREGROUP_UI)
    ```
+
+   Full reference: memory `feedback-sprite-texture-group-ui.md`. Slider/preload architecture: memory `sprite-quality-slider-system.md`.
 
 ---
 

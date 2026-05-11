@@ -113,6 +113,7 @@ FShopItem UShopSubsystem::ParseShopItemFromJson(const TSharedPtr<FJsonObject>& O
 	if (Obj->TryGetStringField(TEXT("description"), Str)) Item.Description = Str;
 	if (Obj->TryGetStringField(TEXT("fullDescription"), Str)) Item.FullDescription = Str;
 	if (Obj->TryGetStringField(TEXT("itemType"), Str)) Item.ItemType = Str;
+	if (Obj->TryGetStringField(TEXT("category"), Str)) Item.Category = Str;
 	if (Obj->TryGetStringField(TEXT("equipSlot"), Str)) Item.EquipSlot = Str;
 	if (Obj->TryGetStringField(TEXT("icon"), Str)) Item.Icon = Str;
 	if (Obj->TryGetStringField(TEXT("weaponType"), Str)) Item.WeaponType = Str;

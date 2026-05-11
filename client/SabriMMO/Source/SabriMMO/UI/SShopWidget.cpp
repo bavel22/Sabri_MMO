@@ -278,6 +278,18 @@ TSharedRef<SWidget> SShopWidget::BuildBuyModePanel()
 					.ShadowOffset(FVector2D(1, 1))
 					.ShadowColorAndOpacity(ShopColors::TextShadow)
 				]
+				// Category tab bar — populated by RebuildTabBar() from item.Category fields.
+				// Auto-hidden when only one category is present (e.g. Tool Dealer).
+				// Horizontally scrollable so 13-tab Weapon Shop fits any panel width.
+				+ SVerticalBox::Slot().AutoHeight().Padding(2, 0, 2, 2)
+				[
+					SNew(SScrollBox)
+					.Orientation(Orient_Horizontal)
+					+ SScrollBox::Slot()
+					[
+						SAssignNew(TabBarContainer, SHorizontalBox)
+					]
+				]
 				+ SVerticalBox::Slot().FillHeight(1.f)
 				[
 					SNew(SBorder)
@@ -1086,6 +1098,81 @@ TSharedRef<SWidget> SShopWidget::BuildItemTooltip(const FString& Desc, int32 ATK
 // Rebuild Helpers
 // ============================================================
 
+void SShopWidget::RebuildTabBar()
+{
+	if (!TabBarContainer.IsValid()) return;
+	TabBarContainer->ClearChildren();
+
+	UShopSubsystem* Sub = OwningSubsystem.Get();
+	if (!Sub) return;
+
+	// Collect unique categories in order of first appearance (matches server tab order).
+	TArray<FString> Cats;
+	TSet<FString> Seen;
+	for (const FShopItem& Item : Sub->ShopItems)
+	{
+		const FString Bucket = Item.Category.IsEmpty() ? FString(TEXT("Other")) : Item.Category;
+		if (!Seen.Contains(Bucket))
+		{
+			Seen.Add(Bucket);
+			Cats.Add(Bucket);
+		}
+	}
+
+	if (Cats.Num() == 0) return;
+
+	// Always default to the first category if the current selection is stale (e.g. after
+	// switching shops, or a fresh open). No "All" tab — that mode would force-render every
+	// item in the catalog (1500+ for General Store), spiking the game thread for ~1s while
+	// Slate constructs widgets. Single-category load is much cheaper.
+	if (!Cats.Contains(CurrentShopTab))
+	{
+		CurrentShopTab = Cats[0];
+	}
+
+	// Single-category shops (e.g. Tool Dealer with everything under one tab): keep
+	// CurrentShopTab valid but don't render buttons — there's nothing to choose between.
+	if (Cats.Num() <= 1) return;
+
+	for (const FString& Tab : Cats)
+	{
+		const bool bIsActive = (Tab == CurrentShopTab);
+		const FLinearColor BgColor   = bIsActive ? ShopColors::GoldDark    : ShopColors::ButtonBg;
+		const FLinearColor TextColor = bIsActive ? ShopColors::GoldHighlight : ShopColors::TextPrimary;
+
+		TabBarContainer->AddSlot().AutoWidth().Padding(2, 0)
+		[
+			SNew(SButton)
+			.ButtonStyle(&FCoreStyle::Get().GetWidgetStyle<FButtonStyle>("NoBorder"))
+			.ContentPadding(FMargin(0.f))
+			.OnClicked_Lambda([this, Tab]() -> FReply
+			{
+				if (CurrentShopTab != Tab)
+				{
+					CurrentShopTab = Tab;
+					RebuildTabBar();
+					RebuildShopItemList();
+				}
+				return FReply::Handled();
+			})
+			[
+				SNew(SBorder)
+				.BorderImage(FCoreStyle::Get().GetBrush("GenericWhiteBox"))
+				.BorderBackgroundColor(BgColor)
+				.Padding(FMargin(6.f, 3.f))
+				[
+					SNew(STextBlock)
+					.Text(FText::FromString(Tab))
+					.Font(FCoreStyle::GetDefaultFontStyle("Bold", 8))
+					.ColorAndOpacity(FSlateColor(TextColor))
+					.ShadowOffset(FVector2D(1, 1))
+					.ShadowColorAndOpacity(ShopColors::TextShadow)
+				]
+			]
+		];
+	}
+}
+
 void SShopWidget::RebuildShopItemList()
 {
 	if (!ShopItemContainer.IsValid()) return;
@@ -1094,8 +1181,16 @@ void SShopWidget::RebuildShopItemList()
 	UShopSubsystem* Sub = OwningSubsystem.Get();
 	if (!Sub) return;
 
+	// Always filter by current tab — RebuildTabBar guarantees CurrentShopTab is a valid
+	// category present in the catalog (or empty if the shop has zero items). This caps
+	// initial widget construction at one tab's worth of items (~50-550) instead of the
+	// full catalog (~1500 for General Store).
 	for (int32 i = 0; i < Sub->ShopItems.Num(); ++i)
 	{
+		const FString& Cat = Sub->ShopItems[i].Category;
+		const FString Bucket = Cat.IsEmpty() ? FString(TEXT("Other")) : Cat;
+		if (Bucket != CurrentShopTab) continue;
+
 		ShopItemContainer->AddSlot().AutoHeight()
 		[
 			BuildShopItemRow(i)
@@ -1175,6 +1270,11 @@ void SShopWidget::SwitchToMode(EShopMode NewMode)
 	// Rebuild lists on mode entry
 	if (NewMode == EShopMode::BuyMode)
 	{
+		// Clear tab so RebuildTabBar picks the first available category. (Without this,
+		// a stale CurrentShopTab from the previous shop would carry over and either show
+		// nothing or land on a non-existent tab.)
+		CurrentShopTab.Empty();
+		RebuildTabBar();
 		RebuildShopItemList();
 		RebuildBuyCart();
 	}

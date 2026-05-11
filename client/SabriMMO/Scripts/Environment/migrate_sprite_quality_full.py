@@ -1,4 +1,20 @@
-"""FULL migration: applies AlphaCoverage mips to every sprite atlas in the project.
+"""FULL migration: applies the canonical sprite atlas settings (2026-04-27)
+to every sprite atlas in the project.
+
+Canonical settings (see memory/feedback-sprite-texture-group-ui.md):
+  Compression                   = BC7
+  Filter                        = Nearest
+  Mip Gen                       = SimpleAverage
+  Use New Mip Filter            = True
+  Do Scale Mips For Alpha Cov.  = True
+  Alpha Coverage Thresholds     = (0, 0, 0, 0.5)
+  Maximum Texture Size          = 0  (no cap — uniform mip pyramid)
+  Never Stream                  = False (lets LODBias actually free VRAM)
+  LOD Group                     = TEXTUREGROUP_UI
+  sRGB                          = True
+
+These are required for the runtime Sprite Quality slider (LODBias 0-4),
+ZonePreloadSubsystem async-load, and Path C deferred equipment swap.
 
 DO NOT run this until the test (migrate_sprite_quality_test.py) has been validated.
 This script processes ~2,700 atlases in waves of 10 entities at a time. Each wave
@@ -34,8 +50,10 @@ WAVE_SIZE = 10  # entities per wave (adjust if needed)
 # ────────────────────────────────────────────────────────────
 
 def apply_quality_settings(asset_path):
-    """Apply mip-gen and alpha-coverage settings. Idempotent.
-    Returns 'configured', 'skipped', or 'failed'."""
+    """Apply the canonical sprite atlas settings (2026-04-27). Idempotent.
+    Returns 'configured', 'skipped', or 'failed'.
+
+    See memory/feedback-sprite-texture-group-ui.md for the rule set."""
     clean = asset_path.split(".")[0]
     if not eal.does_asset_exist(clean):
         return "skipped"
@@ -44,21 +62,28 @@ def apply_quality_settings(asset_path):
     if not tex or not isinstance(tex, unreal.Texture2D):
         return "failed"
 
-    if tex.get_editor_property("mip_gen_settings") == \
-            unreal.TextureMipGenSettings.TMGS_ALPHA_COVERAGE:
+    # Idempotent: skip if all canonical settings are already in place.
+    if (tex.get_editor_property("mip_gen_settings") ==
+            unreal.TextureMipGenSettings.TMGS_SIMPLE_AVERAGE
+            and tex.get_editor_property("do_scale_mips_for_alpha_coverage")
+            and tex.get_editor_property("use_new_mip_filter")
+            and tex.get_editor_property("max_texture_size") == 0
+            and not tex.get_editor_property("never_stream")):
         return "skipped"
 
-    tex.set_editor_property("mip_gen_settings",
-        unreal.TextureMipGenSettings.TMGS_ALPHA_COVERAGE)
-    tex.set_editor_property("alpha_coverage_thresholds",
-        unreal.LinearColor(0.0, 0.0, 0.0, 0.5))
-
-    # Re-affirm the existing baseline
-    tex.set_editor_property("filter", unreal.TextureFilter.TF_NEAREST)
     tex.set_editor_property("compression_settings",
         unreal.TextureCompressionSettings.TC_BC7)
+    tex.set_editor_property("filter", unreal.TextureFilter.TF_NEAREST)
+    tex.set_editor_property("mip_gen_settings",
+        unreal.TextureMipGenSettings.TMGS_SIMPLE_AVERAGE)
+    tex.set_editor_property("use_new_mip_filter", True)
+    tex.set_editor_property("do_scale_mips_for_alpha_coverage", True)
+    tex.set_editor_property("alpha_coverage_thresholds",
+        unreal.Vector4(0.0, 0.0, 0.0, 0.5))
+    tex.set_editor_property("max_texture_size", 0)
+    tex.set_editor_property("never_stream", False)
     tex.set_editor_property("lod_group", unreal.TextureGroup.TEXTUREGROUP_UI)
-    tex.set_editor_property("never_stream", True)
+    tex.set_editor_property("srgb", True)
 
     eal.save_asset(clean)
     return "configured"
@@ -153,9 +178,10 @@ def gather_enemies():
 
 def main():
     unreal.log("=" * 60)
-    unreal.log("SPRITE QUALITY MIGRATION — FULL")
+    unreal.log("SPRITE QUALITY MIGRATION — FULL (canonical settings 2026-04-27)")
     unreal.log("=" * 60)
-    unreal.log("This will set TMGS_ALPHA_COVERAGE on every sprite atlas.")
+    unreal.log("Applies BC7/Nearest/SimpleAverage/AlphaCoverage(W=0.5)/use_new_mip_filter/")
+    unreal.log("MaxTextureSize=0/NeverStream=False/TEXTUREGROUP_UI to every sprite atlas.")
     unreal.log("UE5 will recompile each texture in the background after save.")
     unreal.log("Watch the bottom-right 'Compiling Textures' indicator.")
     unreal.log("Safe to interrupt with Ctrl+C and resume — already-migrated assets are skipped.")

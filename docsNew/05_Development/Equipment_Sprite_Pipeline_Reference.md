@@ -381,13 +381,22 @@ Weapon/{weapon_type}/male/
 1. Open Unreal Editor
 2. Navigate to `Content/SabriMMO/Sprites/Atlases/Weapon/{weapon_type}/male/`
 3. Import all 17 PNG files
-4. Set texture properties on each:
+4. Set texture properties on each (UPDATED 2026-04-27 — required for the runtime Sprite Quality slider, ZonePreloadSubsystem, Path C deferred swap):
    | Property | Value |
    |----------|-------|
-   | **Compression** | `UserInterface2D` |
+   | **Compression Settings** | `BC7` |
    | **Filter** | `Nearest` |
-   | **Mip Gen Settings** | `NoMipmaps` |
-   | **Never Stream** | `On` |
+   | **Mip Gen Settings** | `SimpleAverage` |
+   | **Use Improved Image Processing** | `On` |
+   | **Do Scale Mips For Alpha Coverage** | `On` |
+   | **Alpha Coverage Thresholds** | `(0, 0, 0, 0.5)` (W=0.5) |
+   | **Maximum Texture Size** | `0` |
+   | **Never Stream** | `Off` |
+   | **Texture Group (LOD Group)** | `UI` |
+   | **sRGB** | `On` (body sprite material samples as Color/sRGB; Off makes the sprite invisible) |
+
+   Full reference: memory `feedback-sprite-texture-group-ui.md`.
+
 5. Repeat for `Weapon/{weapon_type}/female/`
 6. Save all
 7. **If re-importing**: Delete old `.uasset` files first — UE5 caches aggressively
@@ -675,7 +684,7 @@ HeadgearTop/{headgear_name}/male/
 
 #### Import
 1. Import all PNGs for both genders into their respective folders
-2. Set texture properties: UserInterface2D, Nearest, NoMipmaps, Never Stream
+2. Set texture properties (canonical 2026-04-27): BC7, Nearest, SimpleAverage mips, `use_new_mip_filter=True`, AlphaCoverage W=0.5, MaxTextureSize=0, NeverStream=Off, UI group, sRGB=On (body sprite material samples as Color/sRGB) — see memory `feedback-sprite-texture-group-ui.md`
 3. Save all
 
 #### Database

@@ -4,6 +4,7 @@
 #include "EnemySubsystem.h"
 #include "SSenseResultPopup.h"
 #include "NameTagSubsystem.h"
+#include "ZonePreloadSubsystem.h"
 #include "MMOGameInstance.h"
 #include "SocketEventRouter.h"
 #include "Audio/AudioSubsystem.h"
@@ -407,6 +408,15 @@ void UEnemySubsystem::HandleEnemySpawn(const TSharedPtr<FJsonValue>& Data)
 
 	if (!SpriteClass.IsEmpty())
 	{
+		// Kick off async preload of all atlases for this class. Idempotent:
+		// 50 porings spawning back-to-back will only trigger one batch load.
+		// SetBodyClass below registers atlas paths immediately; textures
+		// resolve from cache once the async load completes (next state change).
+		if (UZonePreloadSubsystem* Preload = World->GetSubsystem<UZonePreloadSubsystem>())
+		{
+			Preload->RequestClassPreload(SpriteClass);
+		}
+
 		// ---- Sprite enemy: C++ only, no BP actor ----
 		Sprite = World->SpawnActor<ASpriteCharacterActor>(
 			Pos, FRotator::ZeroRotator, SpawnParams);

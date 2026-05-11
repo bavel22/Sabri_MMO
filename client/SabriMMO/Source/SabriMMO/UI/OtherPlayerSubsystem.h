@@ -88,6 +88,7 @@ private:
 	void HandleVendingShopClosed(const TSharedPtr<FJsonValue>& Data);
 	void HandleBuffApplied(const TSharedPtr<FJsonValue>& Data);
 	void HandleBuffRemoved(const TSharedPtr<FJsonValue>& Data);
+	void HandleRemoteJobChanged(const TSharedPtr<FJsonValue>& Data);
 
 	// Toggle actor + name tag visibility for a player
 	void SetPlayerVisibility(int32 CharacterId, bool bVisible);

@@ -1,0 +1,41 @@
+SkillId,Level,SP,CastTime,GlobalCooldown,DelayAfter,BoltCount,BoltInterval,DamageMultiplier,Range,Element,Notes
+FIRE_BOLT,1,9,1.5,1.0,0.8,1,0.50,1.00,9,Fire,RO 1:1 cast/bolt scaling
+FIRE_BOLT,2,9,1.7,1.0,0.8,2,0.50,1.00,9,Fire,
+FIRE_BOLT,3,12,1.9,1.0,0.8,3,0.50,1.00,9,Fire,
+FIRE_BOLT,4,12,2.1,1.0,0.8,4,0.50,1.00,9,Fire,
+FIRE_BOLT,5,15,2.3,1.0,0.8,5,0.50,1.00,9,Fire,
+FIRE_BOLT,6,15,2.5,1.0,0.8,6,0.50,1.00,9,Fire,
+FIRE_BOLT,7,18,2.7,1.0,0.8,7,0.50,1.00,9,Fire,
+FIRE_BOLT,8,18,2.9,1.0,0.8,8,0.50,1.00,9,Fire,
+FIRE_BOLT,9,21,3.1,1.0,0.8,9,0.50,1.00,9,Fire,
+FIRE_BOLT,10,21,3.3,1.0,0.8,10,0.50,1.00,9,Fire,Master level
+COLD_BOLT,1,9,1.5,1.0,0.8,1,0.50,1.00,9,Water,Same scaling rules as Fire Bolt
+COLD_BOLT,2,9,1.7,1.0,0.8,2,0.50,1.00,9,Water,
+COLD_BOLT,3,12,1.9,1.0,0.8,3,0.50,1.00,9,Water,
+COLD_BOLT,4,12,2.1,1.0,0.8,4,0.50,1.00,9,Water,
+COLD_BOLT,5,15,2.3,1.0,0.8,5,0.50,1.00,9,Water,
+COLD_BOLT,6,15,2.5,1.0,0.8,6,0.50,1.00,9,Water,
+COLD_BOLT,7,18,2.7,1.0,0.8,7,0.50,1.00,9,Water,
+COLD_BOLT,8,18,2.9,1.0,0.8,8,0.50,1.00,9,Water,
+COLD_BOLT,9,21,3.1,1.0,0.8,9,0.50,1.00,9,Water,
+COLD_BOLT,10,21,3.3,1.0,0.8,10,0.50,1.00,9,Water,
+LIGHTNING_BOLT,1,9,1.5,1.0,0.8,1,0.50,1.00,9,Wind,Same scaling rules as Fire Bolt
+LIGHTNING_BOLT,2,9,1.7,1.0,0.8,2,0.50,1.00,9,Wind,
+LIGHTNING_BOLT,3,12,1.9,1.0,0.8,3,0.50,1.00,9,Wind,
+LIGHTNING_BOLT,4,12,2.1,1.0,0.8,4,0.50,1.00,9,Wind,
+LIGHTNING_BOLT,5,15,2.3,1.0,0.8,5,0.50,1.00,9,Wind,
+LIGHTNING_BOLT,6,15,2.5,1.0,0.8,6,0.50,1.00,9,Wind,
+LIGHTNING_BOLT,7,18,2.7,1.0,0.8,7,0.50,1.00,9,Wind,
+LIGHTNING_BOLT,8,18,2.9,1.0,0.8,8,0.50,1.00,9,Wind,
+LIGHTNING_BOLT,9,21,3.1,1.0,0.8,9,0.50,1.00,9,Wind,
+LIGHTNING_BOLT,10,21,3.3,1.0,0.8,10,0.50,1.00,9,Wind,
+FIRE_WALL,1,40,0.5,1.0,1.0,3,0.0,0.50,3,Fire,Tile width 3; HitsPerCell scales with level
+FIRE_WALL,2,40,0.5,1.0,1.0,3,0.0,0.55,3,Fire,
+FIRE_WALL,3,40,0.5,1.0,1.0,3,0.0,0.60,3,Fire,
+FIRE_WALL,4,40,0.5,1.0,1.0,3,0.0,0.65,3,Fire,
+FIRE_WALL,5,40,0.5,1.0,1.0,3,0.0,0.70,3,Fire,
+FIRE_WALL,6,40,0.5,1.0,1.0,3,0.0,0.75,3,Fire,
+FIRE_WALL,7,40,0.5,1.0,1.0,3,0.0,0.80,3,Fire,
+FIRE_WALL,8,40,0.5,1.0,1.0,3,0.0,0.85,3,Fire,
+FIRE_WALL,9,40,0.5,1.0,1.0,3,0.0,0.90,3,Fire,
+FIRE_WALL,10,40,0.5,1.0,1.0,3,0.0,1.00,3,Fire,Master level

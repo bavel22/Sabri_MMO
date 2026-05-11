@@ -101,7 +101,7 @@ Unique rendered atlases in `client/SabriMMO/Content/SabriMMO/Sprites/Atlases/Bod
 5. Render: `blender.exe --background --python render_monster.py -- {model}.glb {output} --monster-type {preset} --render-size 1024 --camera-angle 10 --camera-target-z 0.7 --model-rotation -90`
 6. Pack: `pack_atlas.py {render_output} {atlas_dir} --config {config}.json`
 7. Move files to `Body/enemies/{name}/` subfolder
-8. Delete old .uasset files, import PNGs in UE5 (UserInterface2D, Nearest, NoMipmaps, Never Stream)
+8. Delete old .uasset files, import PNGs in UE5 with canonical sprite settings (UPDATED 2026-04-27: BC7, UI group, Nearest, SimpleAverage mips, `use_new_mip_filter=True`, `do_scale_mips_for_alpha_coverage=True`, `alpha_coverage_thresholds=(0,0,0,0.5)`, `max_texture_size=0`, `never_stream=False`, sRGB=On (body sprite material samples as Color/sRGB; sRGB=Off makes the sprite invisible) — see memory `feedback-sprite-texture-group-ui.md`)
 
 ### Important Rules
 - Standard enemies: `--model-rotation -90`
@@ -782,7 +782,7 @@ Suggested `render_monster.py` preset. `?` means unknown — pick based on the mo
 3. Pack with `pack_atlas.py` to `Body/enemies/{name}/`.
 4. Add `spriteClass: '{name}', weaponMode: 0` to the template in `ro_monster_templates.js`.
 5. Any `pending (shares {name} GLB)` entries will auto-update to `done (shares {name})` on next regen.
-6. Import PNGs into UE5 (UserInterface2D, Nearest, NoMipmaps, Never Stream). Restart server.
+6. Import PNGs into UE5 with canonical sprite settings (BC7, UI group, Nearest, SimpleAverage mips, AlphaCoverage W=0.5, MaxTextureSize=0, NeverStream=False — see memory `feedback-sprite-texture-group-ui.md`). Restart server.
 
 ### Regenerating This List
 After rendering more sprites or adding more GLBs, run:

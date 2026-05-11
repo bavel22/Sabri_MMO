@@ -4,10 +4,12 @@
 
 #include "ShopNPC.h"
 #include "UI/NameTagSubsystem.h"
+#include "Sprite/SpriteCharacterActor.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "UObject/ConstructorHelpers.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
 #include "UI/ShopSubsystem.h"
 
@@ -23,6 +25,12 @@ AShopNPC::AShopNPC()
 	CapsuleComp->SetCollisionProfileName(TEXT("Pawn"));
 	CapsuleComp->SetSimulatePhysics(false);
 	CapsuleComp->SetEnableGravity(false);
+	// IMPORTANT: ignore Visibility traces so cursor line traces reach the sprite quad
+	// instead of stopping at the capsule. Pawn-Pawn collision (player movement blocking)
+	// is preserved. Without this, hover-only nametags fail in the lower half of the
+	// sprite — the trace hits the capsule (resolves to AShopNPC) instead of the sprite,
+	// and NameTagSubsystem's hover match (Entry.Actor == SpriteActor) fails.
+	CapsuleComp->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
 	RootComponent = CapsuleComp;
 
 	// ---- Visual mesh (editable per instance, default cylinder placeholder) ----
@@ -44,15 +52,85 @@ AShopNPC::AShopNPC()
 	// Centered on capsule (actor origin sits at ground surface).
 	MeshComp->SetRelativeScale3D(FVector(0.8f, 0.8f, 1.8f));
 	MeshComp->SetRelativeLocation(FVector(0.f, 0.f, 0.f));
+
+	// Hide the placeholder cylinder — sprite actor renders the visual.
+	// Click collision is disabled in BeginPlay if a sprite spawns successfully.
+	MeshComp->SetVisibility(false);
 }
 
 void AShopNPC::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// Register name tag (RO Classic: NPC names are hover-only, light blue)
-	if (UNameTagSubsystem* NTS = GetWorld()->GetSubsystem<UNameTagSubsystem>())
-		NTS->RegisterEntity(this, NPCDisplayName, ENameTagEntityType::NPC);
+	// Re-apply at runtime in case existing placed actors have stale serialized collision
+	// settings from before the constructor was updated. Cursor traces must reach the sprite.
+	if (CapsuleComp)
+	{
+		CapsuleComp->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
+	}
+
+	UWorld* World = GetWorld();
+
+	// Spawn the sprite billboard at the shop NPC's feet.
+	// Sprite quad bottom = sprite actor location; capsule center = GetActorLocation(),
+	// capsule half-height = 96 (set in constructor). Subtract 96 to land at the ground.
+	if (World && !SpriteAtlasName.IsEmpty())
+	{
+		FVector SpriteSpawnLoc = GetActorLocation();
+		SpriteSpawnLoc.Z -= 96.f;        // Capsule half-height (down to ground)
+		SpriteSpawnLoc.Z += SpriteZAdjust; // Per-instance fine-tune for atlas framing
+
+		FActorSpawnParameters SpawnParams;
+		SpawnParams.Owner = this;
+		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+		SpriteActor = World->SpawnActor<ASpriteCharacterActor>(
+			ASpriteCharacterActor::StaticClass(),
+			SpriteSpawnLoc, FRotator::ZeroRotator,
+			SpawnParams);
+
+		if (SpriteActor)
+		{
+			// Apply size BEFORE SetBodyClass so the initial quad layout uses our dimensions.
+			SpriteActor->SpriteSize = SpriteSize;
+			// Loads the V2 manifest. SetBodyClass(FString) checks Body/enemies/{name}/ first,
+			// so "knocker" → Body/enemies/knocker/knocker_manifest.json.
+			SpriteActor->SetBodyClass(SpriteAtlasName);
+			// Face South (front toward the camera) by default. Default FacingDir = +X (North)
+			// matches camera forward → would show the back. CalculateDirection picks the
+			// right atlas frame as the camera rotates around the NPC (right-click drag).
+			SpriteActor->SetFacingDirection(FVector(-1.f, 0.f, 0.f));
+
+			// Sprite quad becomes the click trace target (matches EnemySubsystem pattern).
+			SpriteActor->EnableClickCollision();
+			// NOTE: Do NOT set bUseServerMovement = true. Its per-tick ground-snap line trace
+			// fires from sprite_z+500 downward and hits the AShopNPC capsule (Pawn profile
+			// blocks WorldStatic) before the actual ground, snapping the sprite ~192 units up.
+			// Stationary NPCs are positioned correctly at spawn (actor_loc - 96 = ground),
+			// so the per-tick snap is unnecessary. Without bUseServerMovement and without an
+			// OwnerActor, UpdateOwnerTracking is a no-op and the sprite stays at spawn.
+		}
+	}
+
+	// Sprite is now the click target. Disable the cylinder's ECC_Visibility response
+	// so it doesn't intercept the trace before it reaches the sprite. (If sprite spawn
+	// failed, the cylinder stays clickable as a fallback.)
+	if (SpriteActor && MeshComp)
+	{
+		MeshComp->SetCollisionResponseToChannel(ECC_Visibility, ECR_Ignore);
+	}
+
+	// Register name tag — same canonical pattern as EnemySubsystem and OtherPlayerSubsystem
+	// for sprite entities: register the sprite (so the hover-only NPC check matches),
+	// pass SpriteHeight for zoom-proportional positioning above the sprite top.
+	if (World)
+	{
+		AActor* NameTagTarget = SpriteActor ? (AActor*)SpriteActor : (AActor*)this;
+		const float NameTagSpriteHeight = SpriteActor ? SpriteSize.Y : 0.f;
+		if (UNameTagSubsystem* NTS = World->GetSubsystem<UNameTagSubsystem>())
+			NTS->RegisterEntity(NameTagTarget, NPCDisplayName,
+				ENameTagEntityType::NPC, 0, 120.f, NameTagSpriteHeight);
+	}
 }
 
 void AShopNPC::Interact()

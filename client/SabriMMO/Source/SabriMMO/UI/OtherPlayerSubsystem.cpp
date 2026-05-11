@@ -3,6 +3,7 @@
 
 #include "OtherPlayerSubsystem.h"
 #include "NameTagSubsystem.h"
+#include "ZonePreloadSubsystem.h"
 #include "MMOGameInstance.h"
 #include "SocketEventRouter.h"
 #include "Sprite/SpriteCharacterActor.h"
@@ -100,6 +101,9 @@ void UOtherPlayerSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	// Some hiding removal paths (SP depletion, detection) emit buff:removed instead of skill:buff_removed
 	Router->RegisterHandler(TEXT("buff:removed"), this,
 		[this](const TSharedPtr<FJsonValue>& D) { HandleBuffRemoved(D); });
+	// Remote player class change — respawn their sprite from the new class
+	Router->RegisterHandler(TEXT("job:changed"), this,
+		[this](const TSharedPtr<FJsonValue>& D) { HandleRemoteJobChanged(D); });
 
 	// --- Remote sprite animation events ---
 	// Helper: safely set anim state on a remote sprite (skip if not ready)
@@ -347,6 +351,62 @@ void UOtherPlayerSubsystem::HandlePlayerMoved(const TSharedPtr<FJsonValue>& Data
 	UWorld* World = GetWorld();
 	if (!World || !PlayerBPClass) return;
 
+	FString PlayerName;
+	Obj->TryGetStringField(TEXT("characterName"), PlayerName);
+	FString JobClass;
+	Obj->TryGetStringField(TEXT("jobClass"), JobClass);
+	FString Gender;
+	Obj->TryGetStringField(TEXT("gender"), Gender);
+	double HairStyleD = 0, HairColorD = 0;
+	Obj->TryGetNumberField(TEXT("hairStyle"), HairStyleD);
+	Obj->TryGetNumberField(TEXT("hairColor"), HairColorD);
+
+	// Kick off async preload of this remote player's class atlases BEFORE spawning.
+	// The sprite spawns immediately; texture data resolves from cache once async load
+	// completes. Eliminates pop-in for remote players joining mid-zone.
+	UZonePreloadSubsystem* Preload = World->GetSubsystem<UZonePreloadSubsystem>();
+	const FString GenderSubDir = (Gender.ToLower() == TEXT("female")) ? TEXT("female") : TEXT("male");
+	const FString RemoteSpriteClass = FString::Printf(TEXT("%s_%s"),
+		*JobClass.ToLower(), GenderSubDir == TEXT("female") ? TEXT("f") : TEXT("m"));
+	if (Preload)
+	{
+		Preload->RequestClassPreload(RemoteSpriteClass);
+	}
+
+	// Hair preload (will be loaded onto sprite by SetHairStyle)
+	const int32 HairStyle = (int32)HairStyleD;
+	if (Preload && HairStyle > 0)
+	{
+		Preload->RequestLayerPreload(ESpriteLayer::Hair, HairStyle, GenderSubDir);
+	}
+
+	// Equipment preload: parse equipVisuals if present in the player:moved payload
+	// so weapon/headgear/garment atlases load alongside the body. (HandlePlayerAppearance
+	// will also do this when it fires, but this is earlier.)
+	if (Preload)
+	{
+		const TSharedPtr<FJsonObject>* PreloadEquipObj = nullptr;
+		if (Obj->TryGetObjectField(TEXT("equipVisuals"), PreloadEquipObj))
+		{
+			static const TArray<TPair<FString, ESpriteLayer>> SlotLayerPairs = {
+				{TEXT("weapon"),   ESpriteLayer::Weapon},
+				{TEXT("shield"),   ESpriteLayer::Shield},
+				{TEXT("head_top"), ESpriteLayer::HeadgearTop},
+				{TEXT("head_mid"), ESpriteLayer::HeadgearMid},
+				{TEXT("head_low"), ESpriteLayer::HeadgearLow},
+				{TEXT("garment"),  ESpriteLayer::Garment},
+			};
+			for (const auto& Pair : SlotLayerPairs)
+			{
+				double VisD = 0;
+				if ((*PreloadEquipObj)->TryGetNumberField(Pair.Key, VisD) && (int32)VisD > 0)
+				{
+					Preload->RequestLayerPreload(Pair.Value, (int32)VisD, GenderSubDir);
+				}
+			}
+		}
+	}
+
 	FTransform SpawnTransform;
 	SpawnTransform.SetLocation(Pos);
 
@@ -359,16 +419,6 @@ void UOtherPlayerSubsystem::HandlePlayerMoved(const TSharedPtr<FJsonValue>& Data
 		UE_LOG(LogOtherPlayerSubsystem, Warning, TEXT("Failed to spawn other player %d"), CharId);
 		return;
 	}
-
-	FString PlayerName;
-	Obj->TryGetStringField(TEXT("characterName"), PlayerName);
-	FString JobClass;
-	Obj->TryGetStringField(TEXT("jobClass"), JobClass);
-	FString Gender;
-	Obj->TryGetStringField(TEXT("gender"), Gender);
-	double HairStyleD = 0, HairColorD = 0;
-	Obj->TryGetNumberField(TEXT("hairStyle"), HairStyleD);
-	Obj->TryGetNumberField(TEXT("hairColor"), HairColorD);
 
 	SetBPVector(NewPlayer, TEXT("TargetPosition"), Pos);
 
@@ -727,11 +777,34 @@ void UOtherPlayerSubsystem::HandlePlayerAppearance(const TSharedPtr<FJsonValue>&
 			TEXT("garment")
 		};
 
+		// Async-preload each equipment layer if changed/new. The sprite swap on
+		// equipment load is gated by the texture being ready; preloading here
+		// (rather than letting LoadEquipmentLayer lazy-load) avoids a hitch on swap.
+		UZonePreloadSubsystem* Preload = GetWorld()
+			? GetWorld()->GetSubsystem<UZonePreloadSubsystem>() : nullptr;
+		const FString GenderSubDir = (Entry->Gender.ToLower() == TEXT("female"))
+			? TEXT("female") : TEXT("male");
+
 		for (const FString& SlotName : Slots)
 		{
 			double ViewSpriteD = 0;
 			(*EquipObj)->TryGetNumberField(SlotName, ViewSpriteD);
 			Entry->EquipVisuals.Add(SlotName, (int32)ViewSpriteD);
+
+			if (Preload && (int32)ViewSpriteD > 0)
+			{
+				ESpriteLayer Layer = ASpriteCharacterActor::EquipSlotToSpriteLayer(SlotName);
+				if (Layer != ESpriteLayer::MAX)
+				{
+					Preload->RequestLayerPreload(Layer, (int32)ViewSpriteD, GenderSubDir);
+				}
+			}
+		}
+
+		// Hair preload
+		if (Preload && Entry->HairStyle > 0)
+		{
+			Preload->RequestLayerPreload(ESpriteLayer::Hair, Entry->HairStyle, GenderSubDir);
 		}
 	}
 
@@ -770,4 +843,107 @@ void UOtherPlayerSubsystem::HandlePlayerAppearance(const TSharedPtr<FJsonValue>&
 
 		Sprite->ReconcileHairVisibility();
 	}
+}
+
+// ============================================================
+// Remote class change — respawn the remote sprite with the new class.
+// Server broadcasts job:changed to the zone after a successful job change.
+// ============================================================
+
+void UOtherPlayerSubsystem::HandleRemoteJobChanged(const TSharedPtr<FJsonValue>& Data)
+{
+	if (!Data.IsValid()) return;
+	const TSharedPtr<FJsonObject>* ObjPtr = nullptr;
+	if (!Data->TryGetObject(ObjPtr) || !ObjPtr) return;
+	const TSharedPtr<FJsonObject>& Obj = *ObjPtr;
+
+	double CharIdD = 0;
+	if (!Obj->TryGetNumberField(TEXT("characterId"), CharIdD)) return;
+	const int32 CharId = (int32)CharIdD;
+
+	// Local player has its own handler in UJobChangeSubsystem.
+	if (CharId == LocalCharacterId) return;
+
+	FString NewClass;
+	Obj->TryGetStringField(TEXT("newClass"), NewClass);
+	if (NewClass.IsEmpty()) return;
+
+	FPlayerEntry* Entry = Players.Find(CharId);
+	if (!Entry || !Entry->Actor.IsValid()) return;
+
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	// Tear down the old sprite + name tag.
+	UNameTagSubsystem* NTS = World->GetSubsystem<UNameTagSubsystem>();
+	if (Entry->SpriteActor.IsValid())
+	{
+		ASpriteCharacterActor* OldSprite = Entry->SpriteActor.Get();
+		if (NTS && OldSprite)
+		{
+			NTS->UnregisterEntity(OldSprite);
+		}
+		if (OldSprite)
+		{
+			OldSprite->Destroy();
+		}
+		Entry->SpriteActor.Reset();
+	}
+
+	// Spawn the new sprite at the actor's current location.
+	const FVector SpawnLoc = Entry->Actor->GetActorLocation();
+	const int32 SpriteClassId = ASpriteCharacterActor::JobClassToId(NewClass);
+	const int32 SpriteGender = (Entry->Gender.ToLower() == TEXT("female")) ? 1 : 0;
+
+	ASpriteCharacterActor* NewSprite = ASpriteCharacterActor::SpawnSpriteForClass(
+		World, SpawnLoc, SpriteClassId, SpriteGender);
+	if (!NewSprite)
+	{
+		UE_LOG(LogOtherPlayerSubsystem, Warning,
+			TEXT("HandleRemoteJobChanged: SpawnSpriteForClass returned null for charId=%d class=%s"),
+			CharId, *NewClass);
+		return;
+	}
+
+	NewSprite->AttachToOwnerActor(Entry->Actor.Get(), false, CharId);
+	Entry->SpriteActor = NewSprite;
+	Entry->JobClass = NewClass;
+
+	// AttachToOwnerActor(bIsLocal=false) returns early before the initial-equipment-load
+	// block at SpriteCharacterActor.cpp:2327-2351, so we manually replay the canonical
+	// remote-sprite-rebuild sequence here (same as the equip-visuals block at lines 826-844
+	// of this file). Without this, weapons / shields / headgear / garments disappear on
+	// class change.
+	NewSprite->ResetHairHiding();
+
+	for (const auto& Pair : Entry->EquipVisuals)
+	{
+		ESpriteLayer Layer = ASpriteCharacterActor::EquipSlotToSpriteLayer(Pair.Key);
+		if (Layer != ESpriteLayer::MAX)
+		{
+			NewSprite->LoadEquipmentLayer(Layer, Pair.Value);
+		}
+	}
+
+	if (Entry->HairStyle > 0)
+	{
+		NewSprite->SetHairStyle(Entry->HairStyle, Entry->HairColor);
+	}
+
+	NewSprite->ReconcileHairVisibility();
+
+	// Note: weapon mode is sourced from player:moved events, not stored in FPlayerEntry.
+	// The new sprite starts with ESpriteWeaponMode::None and corrects itself on the next
+	// player:moved tick (~33ms — one PositionBroadcastSubsystem cycle).
+
+	// Re-register the name tag against the new sprite.
+	if (NTS && !Entry->PlayerName.IsEmpty())
+	{
+		NTS->RegisterEntity(NewSprite, Entry->PlayerName,
+			ENameTagEntityType::Player, 0, 120.f, 150.f);
+	}
+
+	UE_LOG(LogOtherPlayerSubsystem, Log,
+		TEXT("Remote player %d (%s) class changed to %s — sprite + equip respawned (%d layers)."),
+		CharId, *Entry->PlayerName, *NewClass, Entry->EquipVisuals.Num());
 }

@@ -1,6 +1,10 @@
 // WaterArea.cpp — RO-style water: animated translucent plane + overlap trigger.
-// Visual: runtime material with animated opacity ripple and warm teal color.
+// Visual: runtime material with depth-aware shallow/deep gradient (color, opacity, roughness)
+//         and three crossing sine-wave ripples.
 // Gameplay: emits water:enter/water:exit to server for skill gating.
+// Mixed-mode: at construction, raycasts a downward grid to auto-detect deep cells, then
+//             greedy-merges them into rectangles and spawns one nav-modifier UBoxComponent
+//             per rect (each marked NavArea_Null so deep regions are cut out of the navmesh).
 
 #include "WaterArea.h"
 #include "MMOGameInstance.h"
@@ -15,13 +19,22 @@
 #include "Materials/MaterialExpressionTime.h"
 #include "Materials/MaterialExpressionMultiply.h"
 #include "Materials/MaterialExpressionAdd.h"
+#include "Materials/MaterialExpressionSubtract.h"
+#include "Materials/MaterialExpressionDivide.h"
+#include "Materials/MaterialExpressionClamp.h"
 #include "Materials/MaterialExpressionSine.h"
 #include "Materials/MaterialExpressionLinearInterpolate.h"
 #include "Materials/MaterialExpressionComponentMask.h"
+#include "Materials/MaterialExpressionSceneDepth.h"
+#include "Materials/MaterialExpressionPixelDepth.h"
 #include "Engine/StaticMesh.h"
 #include "GameFramework/PlayerController.h"
+#include "Engine/World.h"
+#include "Engine/HitResult.h"
+#include "CollisionQueryParams.h"
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonSerializer.h"
+#include "NavAreas/NavArea_Null.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogWater, Log, All);
 
@@ -44,7 +57,6 @@ AWaterArea::AWaterArea()
 	WaterPlaneMesh->CastShadow = false;
 	WaterPlaneMesh->SetCanEverAffectNavigation(false);
 
-	// Load the engine plane mesh
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> PlaneMesh(
 		TEXT("/Engine/BasicShapes/Plane.Plane"));
 	if (PlaneMesh.Succeeded())
@@ -53,33 +65,40 @@ AWaterArea::AWaterArea()
 	}
 }
 
+void AWaterArea::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	ApplyExtentToComponents();
+	ClearDeepNavBoxes();
+	PerformDepthScan();
+	SpawnDeepNavBoxes();
+}
+
 void AWaterArea::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// Update trigger box extent from editable properties
-	TriggerComp->SetBoxExtent(FVector(WaterExtent.X, WaterExtent.Y, 100.f));
+	// Re-sync runtime visuals + nav boxes (covers runtime-spawned actors and editor sessions
+	// where OnConstruction hasn't been re-run since terrain edits).
+	ApplyExtentToComponents();
+	ClearDeepNavBoxes();
+	PerformDepthScan();
+	SpawnDeepNavBoxes();
 
-	// Scale the plane mesh to match the water extent
-	// Engine Plane is 100x100 UU, so scale = extent / 50 (half-extent to full size)
-	float ScaleX = WaterExtent.X / 50.f;
-	float ScaleY = WaterExtent.Y / 50.f;
-	WaterPlaneMesh->SetRelativeScale3D(FVector(ScaleX, ScaleY, 1.f));
-
-	// Create and apply the water material
 	CreateWaterMaterial();
 
-	// Bind overlap events
 	TriggerComp->OnComponentBeginOverlap.AddDynamic(this, &AWaterArea::OnOverlapBegin);
 	TriggerComp->OnComponentEndOverlap.AddDynamic(this, &AWaterArea::OnOverlapEnd);
 
-	UE_LOG(LogWater, Log, TEXT("WaterArea '%s' ready: extent=(%.0f, %.0f), deep=%d"),
-		*WaterAreaId, WaterExtent.X, WaterExtent.Y, bIsDeep);
+	int32 DeepCellCount = 0;
+	for (bool b : DeepCells) if (b) DeepCellCount++;
+	UE_LOG(LogWater, Log, TEXT("WaterArea '%s' ready: extent=(%.0f, %.0f), deep cells=%d/%d, nav boxes=%d"),
+		*WaterAreaId, WaterExtent.X, WaterExtent.Y,
+		DeepCellCount, DeepCells.Num(), DeepNavBoxes.Num());
 }
 
 void AWaterArea::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	// If player was in water when leaving, notify server
 	if (bPlayerInWater)
 	{
 		if (UWorld* World = GetWorld())
@@ -98,8 +117,174 @@ void AWaterArea::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	Super::EndPlay(EndPlayReason);
 }
 
+void AWaterArea::ApplyExtentToComponents()
+{
+	if (TriggerComp)
+	{
+		TriggerComp->SetBoxExtent(FVector(WaterExtent.X, WaterExtent.Y, 100.f));
+	}
+	if (WaterPlaneMesh)
+	{
+		// Engine Plane is 100x100 UU, scale = half-extent / 50
+		const float ScaleX = WaterExtent.X / 50.f;
+		const float ScaleY = WaterExtent.Y / 50.f;
+		WaterPlaneMesh->SetRelativeScale3D(FVector(ScaleX, ScaleY, 1.f));
+	}
+}
+
 // ============================================================
-// Water Material — runtime creation, animated translucent
+// Depth scan — raycast grid below the water plane, mark deep cells
+// ============================================================
+
+void AWaterArea::PerformDepthScan()
+{
+	const int32 N = FMath::Clamp(DepthSampleResolution, 4, 64);
+	DeepCells.Reset();
+	DeepCells.SetNumZeroed(N * N);
+
+	if (!bAutoDetectDeep)
+	{
+		// Manual override: whole area treated uniformly per bIsDeep
+		if (bIsDeep)
+		{
+			for (int32 i = 0; i < N * N; i++) DeepCells[i] = true;
+		}
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World) return;
+
+	const FTransform Xform = GetActorTransform();
+	const float Hx = WaterExtent.X;
+	const float Hy = WaterExtent.Y;
+
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(WaterDepthScan), true);
+	Params.AddIgnoredActor(this);
+
+	const float TraceLength = 2000.f;
+
+	for (int32 j = 0; j < N; j++)
+	{
+		for (int32 i = 0; i < N; i++)
+		{
+			// Sample at the cell center: ((i + 0.5)/N) maps to [0..1], rescale to [-Hx..+Hx]
+			const float xLocal = ((float)i + 0.5f) * (2.f * Hx / (float)N) - Hx;
+			const float yLocal = ((float)j + 0.5f) * (2.f * Hy / (float)N) - Hy;
+			const FVector LocalPos(xLocal, yLocal, 0.f);
+			const FVector WorldStart = Xform.TransformPosition(LocalPos);
+			const FVector WorldEnd = WorldStart - FVector(0.f, 0.f, TraceLength);
+
+			FHitResult Hit;
+			const bool bHit = World->LineTraceSingleByChannel(
+				Hit, WorldStart, WorldEnd, ECC_Visibility, Params);
+
+			// No floor below = no walkable surface = treat as deep (block)
+			if (!bHit)
+			{
+				DeepCells[j * N + i] = true;
+				continue;
+			}
+
+			const float Depth = WorldStart.Z - Hit.ImpactPoint.Z;
+			DeepCells[j * N + i] = (Depth >= DeepDepthThreshold);
+		}
+	}
+}
+
+// ============================================================
+// Greedy rectangle merge — coalesce contiguous deep cells into
+// the smallest set of axis-aligned rectangles, then spawn one
+// nav-modifier UBoxComponent per rectangle.
+// ============================================================
+
+void AWaterArea::SpawnDeepNavBoxes()
+{
+	const int32 N = FMath::Clamp(DepthSampleResolution, 4, 64);
+	if (DeepCells.Num() != N * N) return;
+
+	const float Hx = WaterExtent.X;
+	const float Hy = WaterExtent.Y;
+	const float CellW = 2.f * Hx / (float)N;
+	const float CellH = 2.f * Hy / (float)N;
+
+	TArray<bool> Mask = DeepCells;  // working copy
+
+	for (int32 j = 0; j < N; j++)
+	{
+		for (int32 i = 0; i < N; i++)
+		{
+			if (!Mask[j * N + i]) continue;
+
+			// Expand right along row j as long as cells are deep
+			int32 RightI = i;
+			while (RightI + 1 < N && Mask[j * N + (RightI + 1)]) RightI++;
+
+			// Expand downward only while every cell across [i..RightI] in the next row is deep
+			int32 BottomJ = j;
+			while (BottomJ + 1 < N)
+			{
+				bool bRowAllDeep = true;
+				for (int32 ii = i; ii <= RightI; ii++)
+				{
+					if (!Mask[(BottomJ + 1) * N + ii]) { bRowAllDeep = false; break; }
+				}
+				if (!bRowAllDeep) break;
+				BottomJ++;
+			}
+
+			// Local-space rectangle bounds
+			const float MinX = (float)i * CellW - Hx;
+			const float MaxX = (float)(RightI + 1) * CellW - Hx;
+			const float MinY = (float)j * CellH - Hy;
+			const float MaxY = (float)(BottomJ + 1) * CellH - Hy;
+			const FVector Center((MinX + MaxX) * 0.5f, (MinY + MaxY) * 0.5f, 0.f);
+			const FVector Extent((MaxX - MinX) * 0.5f, (MaxY - MinY) * 0.5f, 200.f);
+
+			UBoxComponent* Box = NewObject<UBoxComponent>(this);
+			if (Box)
+			{
+				Box->SetupAttachment(RootComponent);
+				Box->RegisterComponent();
+				Box->SetRelativeLocation(Center);
+				Box->SetBoxExtent(Extent);
+				// QueryOnly + Ignore-all keeps the box from blocking pawns/projectiles —
+				// it exists purely as a nav-modifier shape.
+				Box->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+				Box->SetCollisionResponseToAllChannels(ECR_Ignore);
+				Box->SetCanEverAffectNavigation(true);
+				Box->SetAreaClassOverride(UNavArea_Null::StaticClass());
+				Box->SetHiddenInGame(true);
+				Box->bDynamicObstacle = true;  // updates runtime navmesh if rebuilt
+				DeepNavBoxes.Add(Box);
+			}
+
+			// Mark consumed cells so they aren't picked up by later iterations
+			for (int32 jj = j; jj <= BottomJ; jj++)
+			{
+				for (int32 ii = i; ii <= RightI; ii++)
+				{
+					Mask[jj * N + ii] = false;
+				}
+			}
+		}
+	}
+}
+
+void AWaterArea::ClearDeepNavBoxes()
+{
+	for (UBoxComponent* Box : DeepNavBoxes)
+	{
+		if (IsValid(Box))
+		{
+			Box->DestroyComponent();
+		}
+	}
+	DeepNavBoxes.Reset();
+}
+
+// ============================================================
+// Water Material — depth-aware translucent gradient + 3 sine waves
 // ============================================================
 
 void AWaterArea::CreateWaterMaterial()
@@ -107,62 +292,132 @@ void AWaterArea::CreateWaterMaterial()
 	UMaterial* Mat = NewObject<UMaterial>(GetTransientPackage(), NAME_None, RF_Transient);
 	Mat->MaterialDomain = MD_Surface;
 	Mat->BlendMode = BLEND_Translucent;
-	Mat->SetShadingModel(MSM_DefaultLit);  // Lit for reflections
+	Mat->SetShadingModel(MSM_DefaultLit);
 	Mat->TwoSided = true;
 
 	auto AddExpr = [&](UMaterialExpression* E) { Mat->GetExpressionCollection().AddExpression(E); };
 
-	// === INPUTS ===
+	// === DEPTH FACTOR — drives all gradients ===
+	// WaterDepth = SceneDepth − PixelDepth (camera-space distance from water surface
+	// to the opaque geometry behind/below it). At our isometric -55° camera this
+	// approximates vertical depth closely enough.
+	auto* SceneDepthExpr = NewObject<UMaterialExpressionSceneDepth>(Mat);
+	AddExpr(SceneDepthExpr);
 
-	// Water base color
-	auto* BaseColor = NewObject<UMaterialExpressionVectorParameter>(Mat);
-	BaseColor->ParameterName = TEXT("WaterColor");
-	BaseColor->DefaultValue = bIsDeep ? DeepColor : ShallowColor;
-	AddExpr(BaseColor);
+	auto* PixelDepthExpr = NewObject<UMaterialExpressionPixelDepth>(Mat);
+	AddExpr(PixelDepthExpr);
 
-	// Time node — this is the key to animation, updates every frame
-	auto* TimeExpr = NewObject<UMaterialExpressionTime>(Mat);
-	AddExpr(TimeExpr);
+	auto* WaterDepth = NewObject<UMaterialExpressionSubtract>(Mat);
+	WaterDepth->A.Connect(0, SceneDepthExpr);
+	WaterDepth->B.Connect(0, PixelDepthExpr);
+	AddExpr(WaterDepth);
 
-	// Speed constant
+	auto* DepthFalloff = NewObject<UMaterialExpressionScalarParameter>(Mat);
+	DepthFalloff->ParameterName = TEXT("DepthFalloff");
+	DepthFalloff->DefaultValue = 250.f;  // depth at which water is "fully deep" looking
+	AddExpr(DepthFalloff);
+
+	auto* DepthDiv = NewObject<UMaterialExpressionDivide>(Mat);
+	DepthDiv->A.Connect(0, WaterDepth);
+	DepthDiv->B.Connect(0, DepthFalloff);
+	AddExpr(DepthDiv);
+
+	auto* DepthFactor = NewObject<UMaterialExpressionClamp>(Mat);
+	DepthFactor->Input.Connect(0, DepthDiv);
+	DepthFactor->MinDefault = 0.f;
+	DepthFactor->MaxDefault = 1.f;
+	AddExpr(DepthFactor);
+
+	// === STAGE 2 DEPTH FACTOR — drives deep→abyss transition past DepthFalloff ===
+	// Stage2Factor = saturate((WaterDepth - DepthFalloff) / (AbyssDepth - DepthFalloff))
+	auto* AbyssDepthParam = NewObject<UMaterialExpressionScalarParameter>(Mat);
+	AbyssDepthParam->ParameterName = TEXT("AbyssDepth");
+	AbyssDepthParam->DefaultValue = AbyssDepth;
+	AddExpr(AbyssDepthParam);
+
+	auto* Stage2Numerator = NewObject<UMaterialExpressionSubtract>(Mat);
+	Stage2Numerator->A.Connect(0, WaterDepth);
+	Stage2Numerator->B.Connect(0, DepthFalloff);
+	AddExpr(Stage2Numerator);
+
+	auto* Stage2Range = NewObject<UMaterialExpressionSubtract>(Mat);
+	Stage2Range->A.Connect(0, AbyssDepthParam);
+	Stage2Range->B.Connect(0, DepthFalloff);
+	AddExpr(Stage2Range);
+
+	auto* Stage2Div = NewObject<UMaterialExpressionDivide>(Mat);
+	Stage2Div->A.Connect(0, Stage2Numerator);
+	Stage2Div->B.Connect(0, Stage2Range);
+	AddExpr(Stage2Div);
+
+	auto* Stage2Factor = NewObject<UMaterialExpressionClamp>(Mat);
+	Stage2Factor->Input.Connect(0, Stage2Div);
+	Stage2Factor->MinDefault = 0.f;
+	Stage2Factor->MaxDefault = 1.f;
+	AddExpr(Stage2Factor);
+
+	// === COLOR PARAMS ===
+	auto* ShallowColorParam = NewObject<UMaterialExpressionVectorParameter>(Mat);
+	ShallowColorParam->ParameterName = TEXT("ShallowColor");
+	ShallowColorParam->DefaultValue = ShallowColor;
+	AddExpr(ShallowColorParam);
+
+	auto* DeepColorParam = NewObject<UMaterialExpressionVectorParameter>(Mat);
+	DeepColorParam->ParameterName = TEXT("DeepColor");
+	DeepColorParam->DefaultValue = DeepColor;
+	AddExpr(DeepColorParam);
+
+	auto* AbyssColorParam = NewObject<UMaterialExpressionVectorParameter>(Mat);
+	AbyssColorParam->ParameterName = TEXT("AbyssColor");
+	AbyssColorParam->DefaultValue = AbyssColor;
+	AddExpr(AbyssColorParam);
+
+	auto* HighlightColorParam = NewObject<UMaterialExpressionVectorParameter>(Mat);
+	HighlightColorParam->ParameterName = TEXT("HighlightColor");
+	HighlightColorParam->DefaultValue = FLinearColor(0.4f, 0.6f, 0.85f, 1.f);
+	AddExpr(HighlightColorParam);
+
+	// Stage 1: shallow → deep across [0, DepthFalloff]
+	auto* DepthColorLerp = NewObject<UMaterialExpressionLinearInterpolate>(Mat);
+	DepthColorLerp->A.Connect(0, ShallowColorParam);
+	DepthColorLerp->B.Connect(0, DeepColorParam);
+	DepthColorLerp->Alpha.Connect(0, DepthFactor);
+	AddExpr(DepthColorLerp);
+
+	// Stage 2: deep → abyss across [DepthFalloff, AbyssDepth]
+	auto* FinalDepthColor = NewObject<UMaterialExpressionLinearInterpolate>(Mat);
+	FinalDepthColor->A.Connect(0, DepthColorLerp);
+	FinalDepthColor->B.Connect(0, AbyssColorParam);
+	FinalDepthColor->Alpha.Connect(0, Stage2Factor);
+	AddExpr(FinalDepthColor);
+
+	// === ANIMATION — 3 crossing sine waves ===
+	auto* TimeExpr = NewObject<UMaterialExpressionTime>(Mat); AddExpr(TimeExpr);
+
 	auto* SpeedConst = NewObject<UMaterialExpressionConstant>(Mat);
-	SpeedConst->R = WaveSpeed;
-	AddExpr(SpeedConst);
+	SpeedConst->R = WaveSpeed; AddExpr(SpeedConst);
 
-	// === ANIMATION CHAIN: Time * Speed ===
-
-	// AnimTime = Time * Speed
 	auto* AnimTime = NewObject<UMaterialExpressionMultiply>(Mat);
 	AnimTime->A.Connect(0, TimeExpr);
 	AnimTime->B.Connect(0, SpeedConst);
 	AddExpr(AnimTime);
 
-	// === SPATIAL RIPPLE: Pure standard nodes (no Custom HLSL) ===
-	// Pattern: Sine(UV.x * freq + AnimTime) creates a wave moving across the surface
+	auto* TexCoord = NewObject<UMaterialExpressionTextureCoordinate>(Mat); AddExpr(TexCoord);
 
-	auto* TexCoord = NewObject<UMaterialExpressionTextureCoordinate>(Mat);
-	AddExpr(TexCoord);
-
-	// Extract UV.x and UV.y as separate floats
 	auto* MaskX = NewObject<UMaterialExpressionComponentMask>(Mat);
 	MaskX->R = true; MaskX->G = false; MaskX->B = false; MaskX->A = false;
-	MaskX->Input.Connect(0, TexCoord);
-	AddExpr(MaskX);
+	MaskX->Input.Connect(0, TexCoord); AddExpr(MaskX);
 
 	auto* MaskY = NewObject<UMaterialExpressionComponentMask>(Mat);
 	MaskY->R = false; MaskY->G = true; MaskY->B = false; MaskY->A = false;
-	MaskY->Input.Connect(0, TexCoord);
-	AddExpr(MaskY);
+	MaskY->Input.Connect(0, TexCoord); AddExpr(MaskY);
 
-	// Helper lambda: create a single directional wave
-	// Sine(UV.x * freqX + UV.y * freqY + AnimTime * speedMult)
 	auto MakeWave = [&](float freqX, float freqY, float speedMult) -> UMaterialExpressionSine*
 	{
 		UMaterialExpression* SpatialTerm = nullptr;
 
 		if (freqX != 0.f && freqY != 0.f)
 		{
-			// Diagonal: UV.x * freqX + UV.y * freqY
 			auto* FX = NewObject<UMaterialExpressionConstant>(Mat); FX->R = freqX; AddExpr(FX);
 			auto* MulX = NewObject<UMaterialExpressionMultiply>(Mat);
 			MulX->A.Connect(0, MaskX); MulX->B.Connect(0, FX); AddExpr(MulX);
@@ -177,7 +432,6 @@ void AWaterArea::CreateWaterMaterial()
 		}
 		else if (freqX != 0.f)
 		{
-			// Horizontal: UV.x * freqX
 			auto* FX = NewObject<UMaterialExpressionConstant>(Mat); FX->R = freqX; AddExpr(FX);
 			auto* MulX = NewObject<UMaterialExpressionMultiply>(Mat);
 			MulX->A.Connect(0, MaskX); MulX->B.Connect(0, FX); AddExpr(MulX);
@@ -185,19 +439,16 @@ void AWaterArea::CreateWaterMaterial()
 		}
 		else
 		{
-			// Vertical: UV.y * freqY
 			auto* FY = NewObject<UMaterialExpressionConstant>(Mat); FY->R = freqY; AddExpr(FY);
 			auto* MulY = NewObject<UMaterialExpressionMultiply>(Mat);
 			MulY->A.Connect(0, MaskY); MulY->B.Connect(0, FY); AddExpr(MulY);
 			SpatialTerm = MulY;
 		}
 
-		// Time component: AnimTime * speedMult
 		auto* SM = NewObject<UMaterialExpressionConstant>(Mat); SM->R = speedMult; AddExpr(SM);
 		auto* TimeTerm = NewObject<UMaterialExpressionMultiply>(Mat);
 		TimeTerm->A.Connect(0, AnimTime); TimeTerm->B.Connect(0, SM); AddExpr(TimeTerm);
 
-		// Spatial + Time
 		auto* WaveIn = NewObject<UMaterialExpressionAdd>(Mat);
 		WaveIn->A.Connect(0, SpatialTerm); WaveIn->B.Connect(0, TimeTerm); AddExpr(WaveIn);
 
@@ -206,26 +457,16 @@ void AWaterArea::CreateWaterMaterial()
 		return WaveSine;
 	};
 
-	// --- Wave 1: Horizontal, fast, tight frequency ---
-	//     Sine(UV.x * 10 + AnimTime * 1.0) → horizontal bands moving right
 	auto* Wave1 = MakeWave(10.f, 0.f, 1.0f);
-
-	// --- Wave 2: Vertical, slower, wider frequency ---
-	//     Sine(UV.y * 7 + AnimTime * 0.6) → vertical bands moving down
 	auto* Wave2 = MakeWave(0.f, 7.f, 0.6f);
-
-	// --- Wave 3: Diagonal (45 deg), medium speed ---
-	//     Sine(UV.x * 5 + UV.y * 5 + AnimTime * 0.8) → diagonal bands
 	auto* Wave3 = MakeWave(5.f, 5.f, 0.8f);
 
-	// --- Combine: each wave contributes equally, normalize to 0-1 ---
 	auto* Sum12 = NewObject<UMaterialExpressionAdd>(Mat);
 	Sum12->A.Connect(0, Wave1); Sum12->B.Connect(0, Wave2); AddExpr(Sum12);
 
 	auto* Sum123 = NewObject<UMaterialExpressionAdd>(Mat);
 	Sum123->A.Connect(0, Sum12); Sum123->B.Connect(0, Wave3); AddExpr(Sum123);
 
-	// (W1+W2+W3) ranges from -3 to +3, scale to 0-1: * 0.15 + 0.5 (subtle waves)
 	auto* NormScale = NewObject<UMaterialExpressionConstant>(Mat);
 	NormScale->R = 0.15f; AddExpr(NormScale);
 
@@ -238,70 +479,89 @@ void AWaterArea::CreateWaterMaterial()
 	auto* RippleNorm = NewObject<UMaterialExpressionAdd>(Mat);
 	RippleNorm->A.Connect(0, Scaled); RippleNorm->B.Connect(0, HalfConst); AddExpr(RippleNorm);
 
-	// === EMISSIVE COLOR: Lerp(BaseColor, White highlight, RippleNorm) ===
-	// Strong contrast so ripples are visible
+	// === RIPPLE → COLOR (intensity falls off with depth) ===
+	// RippleAmplitude = lerp(0.5, 0.15, DepthFactor) — calmer in deeper water
+	auto* RippAmpHigh = NewObject<UMaterialExpressionConstant>(Mat); RippAmpHigh->R = 0.5f; AddExpr(RippAmpHigh);
+	auto* RippAmpLow = NewObject<UMaterialExpressionConstant>(Mat); RippAmpLow->R = 0.15f; AddExpr(RippAmpLow);
+	auto* RippAmpLerp = NewObject<UMaterialExpressionLinearInterpolate>(Mat);
+	RippAmpLerp->A.Connect(0, RippAmpHigh);
+	RippAmpLerp->B.Connect(0, RippAmpLow);
+	RippAmpLerp->Alpha.Connect(0, DepthFactor);
+	AddExpr(RippAmpLerp);
 
-	auto* WhiteHighlight = NewObject<UMaterialExpressionVectorParameter>(Mat);
-	WhiteHighlight->ParameterName = TEXT("HighlightColor");
-	WhiteHighlight->DefaultValue = FLinearColor(0.2f, 0.4f, 0.8f, 1.0f);  // brighter blue highlight
-	AddExpr(WhiteHighlight);
+	auto* RippleAlpha = NewObject<UMaterialExpressionMultiply>(Mat);
+	RippleAlpha->A.Connect(0, RippleNorm);
+	RippleAlpha->B.Connect(0, RippAmpLerp);
+	AddExpr(RippleAlpha);
 
-	auto* ColorLerp = NewObject<UMaterialExpressionLinearInterpolate>(Mat);
-	ColorLerp->A.Connect(0, BaseColor);
-	ColorLerp->B.Connect(0, WhiteHighlight);
-	ColorLerp->Alpha.Connect(0, RippleNorm);
-	AddExpr(ColorLerp);
+	auto* FinalColor = NewObject<UMaterialExpressionLinearInterpolate>(Mat);
+	FinalColor->A.Connect(0, FinalDepthColor);
+	FinalColor->B.Connect(0, HighlightColorParam);
+	FinalColor->Alpha.Connect(0, RippleAlpha);
+	AddExpr(FinalColor);
 
-	// === OPACITY: Spatial ripples drive transparency (most visible effect) ===
-	// RippleNorm (0.25-0.75) scaled to opacity range: darker bands = more opaque, lighter = more transparent
+	// === OPACITY — depth-driven (shallow translucent → deep mostly opaque) ===
+	auto* ShallowOpacityParam = NewObject<UMaterialExpressionScalarParameter>(Mat);
+	ShallowOpacityParam->ParameterName = TEXT("ShallowOpacity");
+	ShallowOpacityParam->DefaultValue = 0.5f;
+	AddExpr(ShallowOpacityParam);
 
-	auto* OpacityBase = NewObject<UMaterialExpressionConstant>(Mat);
-	OpacityBase->R = bIsDeep ? 0.6f : 0.45f;
-	AddExpr(OpacityBase);
+	auto* DeepOpacityParam = NewObject<UMaterialExpressionScalarParameter>(Mat);
+	DeepOpacityParam->ParameterName = TEXT("DeepOpacity");
+	DeepOpacityParam->DefaultValue = 0.92f;
+	AddExpr(DeepOpacityParam);
 
-	auto* OpacityRange = NewObject<UMaterialExpressionConstant>(Mat);
-	OpacityRange->R = bIsDeep ? 0.3f : 0.2f;  // moderate opacity variation
-	AddExpr(OpacityRange);
+	auto* AbyssOpacityParam = NewObject<UMaterialExpressionScalarParameter>(Mat);
+	AbyssOpacityParam->ParameterName = TEXT("AbyssOpacity");
+	AbyssOpacityParam->DefaultValue = AbyssOpacity;
+	AddExpr(AbyssOpacityParam);
 
-	auto* OpacityWave = NewObject<UMaterialExpressionMultiply>(Mat);
-	OpacityWave->A.Connect(0, RippleNorm);  // spatial wave pattern 0.25-0.75
-	OpacityWave->B.Connect(0, OpacityRange);
-	AddExpr(OpacityWave);
+	// Stage 1 opacity: shallow → deep
+	auto* OpacityLerp = NewObject<UMaterialExpressionLinearInterpolate>(Mat);
+	OpacityLerp->A.Connect(0, ShallowOpacityParam);
+	OpacityLerp->B.Connect(0, DeepOpacityParam);
+	OpacityLerp->Alpha.Connect(0, DepthFactor);
+	AddExpr(OpacityLerp);
 
-	auto* FinalOpacity = NewObject<UMaterialExpressionAdd>(Mat);
-	FinalOpacity->A.Connect(0, OpacityBase);
-	FinalOpacity->B.Connect(0, OpacityWave);
-	AddExpr(FinalOpacity);
+	// Stage 2 opacity: deep → abyss (reaches AbyssOpacity, e.g. 1.0 = fully opaque)
+	auto* FinalOpacityLerp = NewObject<UMaterialExpressionLinearInterpolate>(Mat);
+	FinalOpacityLerp->A.Connect(0, OpacityLerp);
+	FinalOpacityLerp->B.Connect(0, AbyssOpacityParam);
+	FinalOpacityLerp->Alpha.Connect(0, Stage2Factor);
+	AddExpr(FinalOpacityLerp);
 
-	// === ROUGHNESS: low = reflective surface ===
-	auto* RoughnessVal = NewObject<UMaterialExpressionConstant>(Mat);
-	RoughnessVal->R = 0.15f;  // very smooth = reflective
-	AddExpr(RoughnessVal);
+	// === ROUGHNESS — depth-driven (shallow more diffuse → deep glassier) ===
+	auto* RoughShallow = NewObject<UMaterialExpressionConstant>(Mat); RoughShallow->R = 0.3f; AddExpr(RoughShallow);
+	auto* RoughDeep = NewObject<UMaterialExpressionConstant>(Mat); RoughDeep->R = 0.08f; AddExpr(RoughDeep);
+	auto* RoughLerp = NewObject<UMaterialExpressionLinearInterpolate>(Mat);
+	RoughLerp->A.Connect(0, RoughShallow);
+	RoughLerp->B.Connect(0, RoughDeep);
+	RoughLerp->Alpha.Connect(0, DepthFactor);
+	AddExpr(RoughLerp);
 
-	// === SPECULAR: boost reflections ===
-	auto* SpecularVal = NewObject<UMaterialExpressionConstant>(Mat);
-	SpecularVal->R = 0.8f;  // strong specular
-	AddExpr(SpecularVal);
+	// === SPECULAR — depth-driven ===
+	auto* SpecShallow = NewObject<UMaterialExpressionConstant>(Mat); SpecShallow->R = 0.6f; AddExpr(SpecShallow);
+	auto* SpecDeep = NewObject<UMaterialExpressionConstant>(Mat); SpecDeep->R = 0.95f; AddExpr(SpecDeep);
+	auto* SpecLerp = NewObject<UMaterialExpressionLinearInterpolate>(Mat);
+	SpecLerp->A.Connect(0, SpecShallow);
+	SpecLerp->B.Connect(0, SpecDeep);
+	SpecLerp->Alpha.Connect(0, DepthFactor);
+	AddExpr(SpecLerp);
 
 	// === WIRE OUTPUTS ===
-	Mat->GetEditorOnlyData()->BaseColor.Connect(0, ColorLerp);
-	Mat->GetEditorOnlyData()->Opacity.Connect(0, FinalOpacity);
-	Mat->GetEditorOnlyData()->Roughness.Connect(0, RoughnessVal);
-	Mat->GetEditorOnlyData()->Specular.Connect(0, SpecularVal);
+	Mat->GetEditorOnlyData()->BaseColor.Connect(0, FinalColor);
+	Mat->GetEditorOnlyData()->Opacity.Connect(0, FinalOpacityLerp);
+	Mat->GetEditorOnlyData()->Roughness.Connect(0, RoughLerp);
+	Mat->GetEditorOnlyData()->Specular.Connect(0, SpecLerp);
 
 	Mat->PreEditChange(nullptr);
 	Mat->PostEditChange();
 
-	// Create MID for per-instance parameter tweaks
 	WaterMID = UMaterialInstanceDynamic::Create(Mat, this);
 	if (WaterMID && WaterPlaneMesh)
 	{
 		WaterPlaneMesh->SetMaterial(0, WaterMID);
 	}
-
-	UE_LOG(LogWater, Log, TEXT("Water material created: %s, opacity=%.2f"),
-		bIsDeep ? TEXT("deep") : TEXT("shallow"),
-		bIsDeep ? 0.8f : 0.55f);
 }
 
 // ============================================================
@@ -315,28 +575,31 @@ void AWaterArea::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor* Oth
 	UWorld* World = GetWorld();
 	if (!World) return;
 
-	// Only react to local player pawn
 	APlayerController* PC = World->GetFirstPlayerController();
 	if (!PC || PC->GetPawn() != OtherActor) return;
 
-	// Spam guard (1 second cooldown)
 	const double Now = FPlatformTime::Seconds();
 	if (Now - LastWaterEventTime < 1.0) return;
 	LastWaterEventTime = Now;
 
 	bPlayerInWater = true;
 
-	// Emit to server
 	UMMOGameInstance* GI = Cast<UMMOGameInstance>(World->GetGameInstance());
 	if (GI && GI->IsSocketConnected())
 	{
+		// Whole-area "is this water containing any deep cells" — used by server for
+		// remote-player visual cues, not for skill gating (skills only care that the
+		// player is in water at all).
+		bool bAnyDeep = false;
+		for (bool b : DeepCells) { if (b) { bAnyDeep = true; break; } }
+
 		TSharedPtr<FJsonObject> Payload = MakeShared<FJsonObject>();
 		Payload->SetStringField(TEXT("waterAreaId"), WaterAreaId);
-		Payload->SetBoolField(TEXT("isDeep"), bIsDeep);
+		Payload->SetBoolField(TEXT("isDeep"), bAnyDeep);
 		GI->EmitSocketEvent(TEXT("water:enter"), Payload);
 
-		UE_LOG(LogWater, Log, TEXT("Player entered water: %s (%s)"),
-			*WaterAreaId, bIsDeep ? TEXT("deep") : TEXT("shallow"));
+		UE_LOG(LogWater, Log, TEXT("Player entered water: %s (anyDeep=%d)"),
+			*WaterAreaId, bAnyDeep ? 1 : 0);
 	}
 }
 

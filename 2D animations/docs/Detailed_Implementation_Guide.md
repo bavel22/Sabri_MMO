@@ -985,18 +985,21 @@ app.alert("Palette normalized!")
 ### 10.1 Sprite Import Settings (Critical for Pixel Art)
 
 ```
-After importing a sprite sheet PNG into UE5:
+After importing a sprite sheet PNG into UE5 (canonical 2026-04-27 — see memory `feedback-sprite-texture-group-ui.md`):
 
 1. Double-click texture in Content Browser
 2. Set these properties:
 
-Texture Group: UI
-Compression: UserInterface2D (NO compression)
-Filter: Nearest                    ← CRITICAL: prevents bilinear blur
-Mip Gen Settings: NoMipmaps       ← CRITICAL: prevents mip blending
-sRGB: True
-LOD Group: UI
-Max Texture Size: 0 (no limit)
+Compression Settings: BC7
+Filter: Nearest                              ← prevents bilinear blur
+Mip Gen Settings: SimpleAverage              ← required for runtime LOD slider
+Use Improved Image Processing: True          ← modern processing pipe
+Do Scale Mips For Alpha Coverage: True       ← preserves sprite edges at low mips
+Alpha Coverage Thresholds: (0, 0, 0, 0.5)    ← W = 0.5
+Maximum Texture Size: 0                       ← no cap (uniform mip downscale)
+Never Stream: False                           ← lets the slider release VRAM
+Texture Group / LOD Group: UI
+sRGB: True (body sprite material samples as Color/sRGB; srgb=False makes the sprite invisible)
 
 3. Apply and save
 4. Right-click → Sprite Actions → Extract Sprites
@@ -1124,8 +1127,8 @@ void ASabriMMOSpriteCharacter::Tick(float DeltaTime)
 | Pitfall | Why It Happens | Solution |
 |---------|----------------|----------|
 | **Blurry sprites** | Bilinear filtering is default | Set Filter: Nearest on ALL sprite textures |
-| **Mip shimmer** | Mipmaps blend pixels at distance | Set Mip Gen Settings: NoMipmaps |
-| **Compression artifacts** | Default compression is lossy | Set Compression: UserInterface2D |
+| **Mip shimmer** | GPU picks wrong mip | Use TMGS_SimpleAverage + alpha coverage; canonical settings handle this |
+| **Compression artifacts** | Wrong compression | Set Compression Settings: BC7 (canonical) |
 | **Z-fighting** | Multiple sprite layers at same depth | Offset each layer by 0.1-1.0 units in depth |
 | **Sorting errors** | Translucent sprites don't sort correctly | Use Masked blend mode, not Translucent |
 | **Flash/pop on direction change** | Abrupt sprite swap | Add 1-frame blend or just accept it (RO does this too) |

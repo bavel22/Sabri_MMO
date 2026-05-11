@@ -171,7 +171,7 @@ In UE5 Python console (open via Tools → Python Console):
 py "C:/Sabri_MMO/client/SabriMMO/Scripts/Environment/import_enemy_batch_{N}.py"
 ```
 
-This imports new PNGs and applies sprite settings (BC7, TEXTUREGROUP_UI, TF_NEAREST, NoMipmaps, never_stream). It SKIPS already-imported assets.
+This imports new PNGs and applies the canonical sprite settings (UPDATED 2026-04-27): BC7, TEXTUREGROUP_UI, TF_NEAREST, **TMGS_SIMPLE_AVERAGE** (was NoMipmaps), `use_new_mip_filter=True`, `do_scale_mips_for_alpha_coverage=True`, `alpha_coverage_thresholds=(0,0,0,0.5)`, `max_texture_size=0`, **`never_stream=False`** (was True). Required for the runtime Sprite Quality slider + Path C deferred swap. Full reference: memory `feedback-sprite-texture-group-ui.md`. It SKIPS already-imported assets.
 
 **For RE-import after re-render** (e.g. after changing rotation or fixing animations): use a force-reimport script that DELETES existing `.uasset` files first. UE5 caches imported textures aggressively, and `replace_existing=True` alone often doesn't update the data. Template: `client/SabriMMO/Scripts/Environment/reimport_requiem_megalith.py` — copy and edit `FOLDERS` to target other enemies.
 

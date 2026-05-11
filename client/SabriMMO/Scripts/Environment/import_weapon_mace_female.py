@@ -5,9 +5,11 @@ Usage (in UE5 editor Python console):
 
 Imports 17 weapon_8_*.png atlases from
     Content/SabriMMO/Sprites/Atlases/Weapon/mace/female/
-and applies the standard sprite texture settings:
-    Filter=Nearest, Compression=BC7, MipGen=NoMipmaps,
-    LODGroup=UI, NeverStream=true.
+and applies the canonical sprite atlas settings (2026-04-27):
+    Filter=Nearest, Compression=BC7, MipGen=SimpleAverage, UseNewMipFilter=True,
+    DoScaleMipsForAlphaCoverage=True, AlphaCoverageThresholds=(0,0,0,0.5),
+    MaxTextureSize=0, NeverStream=False, LODGroup=UI, sRGB=True (body sprite material samples as Color/sRGB; srgb=False makes the sprite invisible).
+See memory/feedback-sprite-texture-group-ui.md for the full rule set.
 
 Set DELETE_FIRST=True to drop old .uasset files first if UE5 caches stale data.
 """
@@ -31,9 +33,15 @@ def apply_sprite_settings(asset_path):
     tex.set_editor_property("compression_settings",
         unreal.TextureCompressionSettings.TC_BC7)
     tex.set_editor_property("mip_gen_settings",
-        unreal.TextureMipGenSettings.TMGS_NO_MIPMAPS)
+        unreal.TextureMipGenSettings.TMGS_SIMPLE_AVERAGE)
+    tex.set_editor_property("use_new_mip_filter", True)
+    tex.set_editor_property("do_scale_mips_for_alpha_coverage", True)
+    tex.set_editor_property("alpha_coverage_thresholds",
+        unreal.Vector4(0.0, 0.0, 0.0, 0.5))
+    tex.set_editor_property("max_texture_size", 0)
+    tex.set_editor_property("never_stream", False)
     tex.set_editor_property("lod_group", unreal.TextureGroup.TEXTUREGROUP_UI)
-    tex.set_editor_property("never_stream", True)
+    tex.set_editor_property("srgb", True)
     eal.save_asset(clean)
     return True
 
