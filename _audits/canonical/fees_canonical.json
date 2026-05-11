@@ -1,0 +1,50 @@
+{
+  "_comment": "Canonical RO Classic / pre-renewal NPC service fees. Sources: iRO Wiki Kafra, RMS shops, rAthena npc/ scripts.",
+
+  "kafra": {
+    "storage_open_fee": 60,
+    "_storage_note": "Most rAthena scripts use 60z. Some private servers use 0-100z.",
+    "cart_rental_novice_to_first_class": 800,
+    "cart_rental_super_novice": 800,
+    "_cart_note": "Original RO charged 800z for all classes."
+  },
+
+  "kafra_teleport_costs": {
+    "_format": "{ from_zone: { to_zone: zeny_cost } }",
+    "prontera": {
+      "izlude": 600,
+      "geffen": 1200,
+      "morroc": 1200,
+      "alberta": 1800,
+      "payon": 1200,
+      "aldebaran": 0,
+      "_note": "Aldebaran teleport is FREE from Prontera Kafra."
+    },
+    "_note": "All Kafra teleport prices are subject to Discount skill (Merchant) reductions when player has it."
+  },
+
+  "weight_thresholds": {
+    "_comment": "RO Classic weight penalty thresholds.",
+    "regen_stops_pct": 50,
+    "_regen_note": "At 50% weight, natural HP/SP regen stops.",
+    "no_attacks_pct": 90,
+    "_attacks_note": "At 90% weight, cannot attack or use skills (movement only).",
+    "no_pickup_pct": 100
+  },
+
+  "vending": {
+    "tax_threshold": 10000000,
+    "tax_rate_pct": 5,
+    "_note": "Items priced above 10M zeny incur 5% vendor tax (sink).",
+    "max_item_price": 1000000000
+  },
+
+  "trade_zeny_max": 999999999,
+  "character_zeny_max": 2147483647,
+
+  "exp_loss_on_death_pct_of_to_next_level": 1,
+  "_exp_loss_note": "Pre-renewal: lose 1% of base EXP needed for current level on death. Novice/Super Novice exempt.",
+
+  "stat_food_duration_ms": 1200000,
+  "_food_note": "+1 to +10 stat foods last 20 minutes."
+}

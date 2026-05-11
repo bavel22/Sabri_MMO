@@ -37,7 +37,8 @@ const { NPC_SKILLS, MONSTER_SKILL_DB, getMonsterSkills, isPlayerClassSkill } = r
 // Import RO zone registry (map definitions, warps, spawns, Kafra NPCs)
 const { ZONE_REGISTRY, getZone, getAllEnemySpawns, getZoneNames } = require('./ro_zone_data');
 // Import NavMesh pathfinding module (loads OBJ files exported from UE5, builds Detour navmeshes)
-const { initNavMeshes, findNavMeshPath, findClosestNavMeshPoint } = require('./ro_navmesh');
+const { initNavMeshes, findNavMeshPath, findClosestNavMeshPoint, hasNavMesh } = require('./ro_navmesh');
+const { initSpawnRegions, generateSpawnsFromPool, hasSpawnRegions } = require('./ro_spawn_regions');
 // Import RO pre-renewal damage formulas (element table, size penalty, HIT/FLEE, critical, DEF)
 const {
     ELEMENT_TABLE, SIZE_PENALTY,
@@ -95,6 +96,19 @@ function shouldLog(level) {
 
 function formatLog(level, message) {
     return `[${new Date().toISOString()}] [${level}] ${message}`;
+}
+
+// Resolve a respawn time value. Accepts:
+//   - number (fixed delay in ms, current behavior)
+//   - [min, max] array (uniform random delay in ms — for "rare named" spawn variance)
+// Returns the resolved delay in ms. Falls back to 15000 if value is missing.
+function resolveRespawnMs(value) {
+    if (Array.isArray(value) && value.length === 2) {
+        const min = value[0];
+        const max = value[1];
+        return min + Math.floor(Math.random() * Math.max(0, max - min + 1));
+    }
+    return value || 15000;
 }
 
 const logger = {
@@ -581,6 +595,19 @@ const COMBAT = {
     COMBAT_TICK_MS: 50,         // Server combat tick interval (ms)
     RESPAWN_DELAY_MS: 5000,
     SPAWN_POSITION: { x: 0, y: 0, z: 300 }
+};
+
+// ============================================================
+// SERVER RATES — multipliers applied at runtime for EXP / drops / zeny.
+// Default 1.0 = canonical pre-renewal (kRO/iRO Classic) rates.
+// Most public servers run 5x-100x for playable progression — change here.
+// AUDIT 2026-05-10: introduced as a global knob so ops can tune leveling
+// pace without modifying ro_monster_templates.js.
+// ============================================================
+const SERVER_RATES = {
+    EXP_RATE_MULTIPLIER: 1,      // Scales mob baseExp + jobExp at award time
+    DROP_RATE_MULTIPLIER: 1,     // Reserved — not yet wired
+    ZENY_RATE_MULTIPLIER: 1      // Reserved — not yet wired
 };
 
 // ============================================================
@@ -2476,8 +2503,9 @@ async function processEnemyDeathFromSkill(enemy, attacker, attackerId, io) {
     const cardExtraDrops = processCardDropBonuses(attacker, enemy);
 
     // Award EXP (with card race bonus + party distribution)
-    let baseExpReward = enemy.baseExp || 0;
-    let jobExpReward = enemy.jobExp || 0;
+    // SERVER_RATES.EXP_RATE_MULTIPLIER scales mob EXP at award time (canonical = 1).
+    let baseExpReward = Math.floor((enemy.baseExp || 0) * SERVER_RATES.EXP_RATE_MULTIPLIER);
+    let jobExpReward = Math.floor((enemy.jobExp || 0) * SERVER_RATES.EXP_RATE_MULTIPLIER);
     if (cardKillResult.expBonusPercent > 0) {
         baseExpReward = Math.floor(baseExpReward * (100 + cardKillResult.expBonusPercent) / 100);
         jobExpReward = Math.floor(jobExpReward * (100 + cardKillResult.expBonusPercent) / 100);
@@ -2788,8 +2816,9 @@ async function processEnemyDeathFromSkill(enemy, attacker, attackerId, io) {
     }
 
     // Schedule respawn — MVPs/bosses get random variance (RO Classic pre-renewal)
-    // MVP: base 120min + 0-10min variance. Boss: base 60min + 0-10min variance. Normal: fixed.
-    let respawnDelay = enemy.respawnMs || 15000;
+    // MVP: base 120min + 0-10min variance. Boss: base 60min + 0-10min variance.
+    // Normal: resolved via resolveRespawnMs() — supports fixed number or [min, max] range.
+    let respawnDelay = resolveRespawnMs(enemy.respawnMs);
     if (enemy.monsterClass === 'mvp') {
         respawnDelay = 7200000 + Math.floor(Math.random() * 600000); // 120-130 min
     } else if (enemy.monsterClass === 'boss') {
@@ -4704,11 +4733,58 @@ const ENEMY_SPAWNS = [
     // See docsNew/03_Server_Side/Enemy_System.md for full zone config
 ];
 
+// Spawn all enemies for a zone — fixed `enemySpawns` plus random `spawnPool` points if defined.
+// Called from every zone-first-load path. Random points are generated inside ASpawnAllowVolume
+// actors (exported to server/spawn_regions/<zone>.json), rejected if inside ASpawnDenyVolume,
+// and NavMesh-snapped to ground. Returns total count spawned.
+function spawnZoneEnemies(zoneData, zoneName) {
+    if (!zoneData) return 0;
+    let count = 0;
+
+    for (const spawn of (zoneData.enemySpawns || [])) {
+        if (spawnEnemy({ ...spawn, zone: zoneName })) count++;
+    }
+
+    if (zoneData.spawnPool && zoneData.spawnPool.length > 0) {
+        if (!hasSpawnRegions(zoneName)) {
+            logger.warn(`[ZONE] '${zoneName}' has spawnPool but no spawn_regions/${zoneName}.json — random spawns skipped`);
+        } else {
+            const result = generateSpawnsFromPool(zoneName, zoneData.spawnPool);
+            for (const spawn of result.spawns) {
+                if (spawnEnemy(spawn)) count++;
+            }
+            if (result.generated < result.requested) {
+                logger.warn(`[ZONE] '${zoneName}' spawnPool: ${result.generated}/${result.requested} placed (others rejected by deny boxes or no walkable NavMesh near random point)`);
+            } else if (result.generated > 0) {
+                logger.info(`[ZONE] '${zoneName}' spawnPool: ${result.generated} random spawns placed`);
+            }
+        }
+    }
+
+    return count;
+}
+
 function spawnEnemy(spawnConfig) {
     const template = ENEMY_TEMPLATES[spawnConfig.template];
     if (!template) {
         logger.warn(`[ENEMY] Unknown template '${spawnConfig.template}' — skipping spawn`);
         return null;
+    }
+    // Snap spawn point to nearest navmesh point — defends against zone data that drops
+    // spawn coords inside deep water (NavArea_Null) or other unwalkable areas.
+    // Warns when snap distance exceeds 100u so designer typos surface in the logs.
+    let snappedX = spawnConfig.x, snappedY = spawnConfig.y, snappedZ = spawnConfig.z;
+    const spawnZone = spawnConfig.zone || 'prontera_south';
+    if (hasNavMesh(spawnZone)) {
+        const snapped = findClosestNavMeshPoint(spawnZone, snappedX, snappedY, snappedZ);
+        if (snapped) {
+            const sdx = snapped.x - snappedX, sdy = snapped.y - snappedY;
+            const snapDist = Math.sqrt(sdx * sdx + sdy * sdy);
+            if (snapDist > 100) {
+                logger.warn(`[ENEMY] Spawn '${spawnConfig.template}' at (${snappedX.toFixed(0)}, ${snappedY.toFixed(0)}) snapped ${snapDist.toFixed(0)}u to navmesh in '${spawnZone}' — possibly inside deep water or unwalkable area`);
+            }
+            snappedX = snapped.x; snappedY = snapped.y; snappedZ = snapped.z;
+        }
     }
     const enemyId = nextEnemyId++;
     // Compute RO Classic mode flags from AI code lookup
@@ -4759,8 +4835,8 @@ function spawnEnemy(spawnConfig) {
         softDef: Math.floor(((template.stats?.vit || 0)) * 0.5 + Math.max(0, (template.stats?.vit || 0) - 20) * 0.3),
         softMDef: Math.floor((template.stats?.int || 0) + Math.floor((template.stats?.vit || 0) / 5) + Math.floor((template.stats?.dex || 0) / 5) + Math.floor((template.level || 1) / 4)),
         hardMDef: template.magicDefense || 0,
-        x: spawnConfig.x, y: spawnConfig.y, z: spawnConfig.z,
-        spawnX: spawnConfig.x, spawnY: spawnConfig.y, spawnZ: spawnConfig.z,
+        x: snappedX, y: snappedY, z: snappedZ,
+        spawnX: snappedX, spawnY: snappedY, spawnZ: snappedZ,
         wanderRadius: spawnConfig.wanderRadius, respawnMs: template.respawnMs,
         // AI state machine fields
         aiCode,
@@ -4867,49 +4943,53 @@ const itemNameToId = new Map();
 const NPC_SHOPS = {
     1: {
         name: 'Tool Dealer',
-        // Red Potion(501), Orange Potion(502), Yellow Potion(503), Blue Potion(505),
-        // Green Potion(506), Red Herb(507), Yellow Herb(508), Green Herb(511),
-        // White Herb(510), Carrot Juice(520), Butterfly Wing(602), Fly Wing(601), Magnifier(611)
-        itemIds: [501, 502, 503, 505, 506, 507, 508, 511, 510, 520, 602, 601, 611]
+        // Hardcoded curated list (5 tabs: Healing / Travel / Utility / Refine / Forge).
+        // Tab assignment is done by getToolCategory() — keep IDs grouped by tab here.
+        itemIds: [
+            // Healing — potions (501-506) and herbs (507-511, 520)
+            501, 502, 503, 505, 506, 507, 508, 510, 511, 520,
+            // Travel — Fly Wing (601), Butterfly Wing (602)
+            601, 602,
+            // Utility — Magnifier (611)
+            611,
+            // Refine — Phracon (1010), Emveretarcon (1011), Oridecon (984), Elunium (985)
+            1010, 1011, 984, 985,
+            // Forge — elemental hearts (994-997), Star Crumb (1000), Coal (1003),
+            //   elemental stones (7521-7524 = Flame/Ice/Wind/Shadow)
+            994, 995, 996, 997, 1000, 1003, 7521, 7522, 7523, 7524
+        ]
     },
     2: {
         name: 'Weapon Dealer',
-        // Knife(1201), Cutter(1202), Main Gauche(1204), Sword(1101), Falchion(1109),
-        // Bow(1701), Rod(1601), Mace(1504), Spear(1401), Guisarme(1404),
-        // Club(1301), Javelin(1501), Arc Wand(1604), Guitar(1907), Rope(1950)
-        itemIds: [1201, 1202, 1204, 1101, 1109, 1701, 1601, 1504, 1401, 1404, 1301, 1501, 1604, 1907, 1950]
+        // Auto-populated from DB at startup by populateShopsFromDB():
+        // ALL weapons whose view_sprite has an equipped overlay atlas + canonical buy_price > 0.
+        // Pricing is rAthena pre-renewal canonical (already tiered by level/power).
+        itemIds: []
     },
     3: {
         name: 'Armor Dealer',
-        // Cotton Shirt(2301), Leather Jacket(2312), Chain Mail(2314), Guard(2101),
-        // Hat(2220), Sandals(2401), Mantle(2321), Ribbon(2208), Kitty Band(2213),
-        // Skull Ring(2609), Goggles(2298), Gangster Mask(2262), Angry Snarl(5113), Biretta(2207)
-        itemIds: [2301, 2312, 2314, 2101, 2220, 2401, 2321, 2208, 2213, 2609, 2298, 2262, 5113, 2207]
+        // Auto-populated from DB at startup by populateShopsFromDB():
+        // ALL armor pieces (head/body/shield/garment/footgear/accessory) with buy_price > 0.
+        itemIds: []
     },
     4: {
         name: 'General Store',
-        // Red Potion(501), Orange Potion(502), Yellow Potion(503), Blue Potion(505),
-        // Green Potion(506), Cotton Shirt(2301), Leather Jacket(2312), Chain Mail(2314)
-        itemIds: [501, 502, 503, 505, 506, 2301, 2312, 2314]
+        // Auto-populated from DB at startup by populateShopsFromDB():
+        // ALL consumables (potions, scrolls, foods, wings, etc.) with buy_price > 0.
+        itemIds: []
     },
     5: {
         name: 'Arrow Dealer',
-        // Elemental: Arrow(1750), Silver Arrow(1751), Fire Arrow(1752), Steel Arrow(1753),
-        //   Crystal Arrow(1754), Arrow of Wind(1755), Stone Arrow(1756), Immaterial Arrow(1757),
-        //   Iron Arrow(1770), Oridecon Arrow(1765), Arrow of Shadow(1767),
-        //   Rusty Arrow(1762), Holy Arrow(1772), Arrow of Counter Evil(1766)
-        // Status: Stun Arrow(1758), Frozen Arrow(1759), Flash Arrow(1760), Cursed Arrow(1761),
-        //   Poison Arrow(1763), Sleep Arrow(1768), Mute Arrow(1769)
-        // Special: Sharp Arrow(1764)
-        // Quivers: Arrow(12004), Iron(12005), Steel(12006), Oridecon(12007), Fire(12008),
-        //   Silver(12009), Wind(12010), Stone(12011), Crystal(12012), Shadow(12013),
-        //   Immaterial(12014), Rusty(12015), Holy(12183)
-        itemIds: [
-            1750, 1751, 1752, 1753, 1754, 1755, 1756, 1757, 1770, 1765, 1767, 1762, 1772, 1766,
-            1758, 1759, 1760, 1761, 1763, 1768, 1769,
-            1764,
-            12004, 12005, 12006, 12007, 12008, 12009, 12010, 12011, 12012, 12013, 12014, 12015, 12183
-        ]
+        // Auto-populated from DB at startup by populateShopsFromDB():
+        // ALL ammo arrows (sub_type='Arrow') + ALL arrow quivers (consumable containers).
+        itemIds: []
+    },
+    6: {
+        name: 'Card Shop',
+        // Auto-populated from DB at startup by populateShopsFromDB():
+        // ALL cards (item_type='card') with buy_price > 0. Categorized by card_type
+        // (weapon/armor/shield/garment/footgear/headgear/accessory/other) for tabs.
+        itemIds: []
     }
 };
 
@@ -5179,6 +5259,266 @@ async function loadItemDefinitions() {
         logger.info(`[ITEMS] Loaded ${itemDefinitions.size} item definitions from database (${itemNameToId.size} name lookups)`);
     } catch (err) {
         logger.error(`[ITEMS] Failed to load item definitions: ${err.message}`);
+    }
+}
+
+// view_sprite IDs that have an equipped weapon overlay atlas in the project.
+// See client/.../Sprites/Atlases/Weapon/{type}/{gender}/weapon_{N}_manifest.json
+//   1=dagger, 2=sword_1h, 3=sword_2h, 4=spear_1h, 5=spear_2h, 6=axe_1h, 7=axe_2h,
+//   8=mace, 10=rod, 11=bow, 12=knuckle, 13=instrument, 14=whip, 15=book, 16=katar, 23=staff
+const SHOP_WEAPON_VIEW_SPRITES = [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14, 15, 16, 23];
+
+// ────────────────────────────────────────────────────────────────────────────
+// Shop tab categorization — sent to the client as item.category so the shop
+// UI can render tabs and filter the catalog client-side. Single payload, instant
+// tab switching.
+// ────────────────────────────────────────────────────────────────────────────
+
+const WEAPON_CATEGORY_LABELS = {
+    'dagger': 'Dagger',
+    'one_hand_sword': '1H Sword',
+    'two_hand_sword': '2H Sword',
+    'spear': 'Spear',
+    'axe': 'Axe',
+    'mace': 'Mace',
+    'staff': 'Staff',
+    'bow': 'Bow',
+    'knuckle': 'Knuckle',
+    'katar': 'Katar',
+    'instrument': 'Instrument',
+    'whip': 'Whip',
+    'book': 'Book',
+};
+
+const ARMOR_CATEGORY_LABELS = {
+    'head_top':  'Headgear',
+    'head_mid':  'Glasses',
+    'head_low':  'Mask',
+    'armor':     'Armor',
+    'shield':    'Shield',
+    'garment':   'Garment',
+    'footgear':  'Footgear',
+    'accessory': 'Accessory',
+};
+
+// Categorize a consumable for the General Store. Uses ITEM_USE_EFFECTS where
+// available, falls back to name/ID heuristics for box-like items that have no
+// runtime effect entry. Returns a short tab label.
+function getConsumableCategory(item) {
+    const name = (item.name || '').toLowerCase();
+
+    // Wings (Fly Wing 601, Butterfly Wing 602) — handled in inventory:use directly,
+    // ITEM_USE_EFFECTS may not cover them, so check by ID first.
+    if (item.item_id === 601 || item.item_id === 602 || name.includes('wing')) return 'Travel';
+
+    // Boxes / chests / eggs / tickets — usually getitem effects with random rolls.
+    if (name.includes('box') || name.includes('chest') || name.includes('egg') ||
+        name.includes('ticket') || name.includes('voucher') || name.includes('coupon')) return 'Container';
+
+    // Scrolls — typically itemskill effect type, but easier to detect by name.
+    if (name.includes('scroll')) return 'Scroll';
+
+    // Effect-driven categorization for the rest.
+    const effect = ITEM_USE_EFFECTS[item.item_id];
+    if (effect) {
+        switch (effect.type) {
+            case 'heal':
+            case 'percentheal':
+                return 'Healing';
+            case 'cure':
+                return 'Cure';
+            case 'multi':
+                // Royal Jelly etc. — heal + cure combined; classify as Cure since
+                // pure healing is the more common use case (and this tab is rarer).
+                return 'Cure';
+            case 'sc_start': {
+                const status = (effect.status || '').toUpperCase();
+                if (status.startsWith('SC_STR') || status.startsWith('SC_AGI') ||
+                    status.startsWith('SC_VIT') || status.startsWith('SC_INT') ||
+                    status.startsWith('SC_DEX') || status.startsWith('SC_LUK')) return 'Food';
+                return 'Buff';
+            }
+            case 'itemskill':
+                return 'Scroll';
+            case 'getitem':
+                return 'Container';
+        }
+    }
+
+    // Name-based fallbacks for items without a registered effect.
+    if (name.includes('food') || name.includes('dish') || name.includes('cake') ||
+        name.includes('pie')  || name.includes('bread') || name.includes('fruit') ||
+        name.includes('drink') || name.includes('juice') || name.includes('rice') ||
+        name.includes('soup') || name.includes('meat')) return 'Food';
+    if (name.includes('potion') || name.includes('berry') || name.includes('herb') ||
+        name.includes('jelly')) return 'Healing';
+
+    return 'Other';
+}
+
+// Categorize a Tool Dealer item by its item_id (the catalog is curated, so we know
+// exactly which IDs map to which tab).
+function getToolCategory(item) {
+    const id = item.item_id;
+    // Refine ores
+    if (id === 984 || id === 985 || id === 1010 || id === 1011) return 'Refine';
+    // Forge supplies — elemental hearts, Star Crumb, Coal, elemental stones
+    if ((id >= 994 && id <= 997) || id === 1000 || id === 1003 ||
+        (id >= 7521 && id <= 7524)) return 'Forge';
+    // Wings
+    if (id === 601 || id === 602) return 'Travel';
+    // Magnifier and other utility items
+    if (id === 611) return 'Utility';
+    // Default: HP/SP potions and herbs
+    return 'Healing';
+}
+
+// Categorize a card by its slot type (item.card_type).
+const CARD_CATEGORY_LABELS = {
+    'weapon':    'Weapon',
+    'armor':     'Armor',
+    'shield':    'Shield',
+    'garment':   'Garment',
+    'footgear':  'Footgear',
+    'headgear':  'Headgear',
+    'accessory': 'Accessory',
+};
+
+// Categorize an arrow / quiver for the Arrow Dealer.
+function getArrowCategory(item) {
+    const name = (item.name || '').toLowerCase();
+    if (name.includes('quiver')) return 'Quiver';
+    // Status-effect arrows (rAthena: ATK 1, but apply Stun/Sleep/Frozen/etc. on hit)
+    if (name.includes('stun')   || name.includes('flash')  || name.includes('cursed') ||
+        name.includes('sleep')  || name.includes('mute')   || name.includes('frozen') ||
+        name.includes('poison')) return 'Status';
+    // Standard ATK arrows (no element bonus)
+    if (name === 'arrow' || name.includes('iron arrow') || name.includes('steel arrow') ||
+        name.includes('oridecon') || name.includes('sharp')) return 'Standard';
+    // Everything else (Fire / Crystal / Wind / Stone / Silver / Holy / Shadow / Rusty / Immaterial / Counter Evil)
+    return 'Elemental';
+}
+
+// Resolve the tab label for a (shopId, item) pair. Returns 'All' for shops that
+// don't use tabs (or unknown shops).
+function getShopItemCategory(shopId, item) {
+    if (shopId === 1) return getToolCategory(item);
+    if (shopId === 2) return WEAPON_CATEGORY_LABELS[item.weapon_type] || 'Other';
+    if (shopId === 3) return ARMOR_CATEGORY_LABELS[item.equip_slot] || 'Other';
+    if (shopId === 4) return getConsumableCategory(item);
+    if (shopId === 5) return getArrowCategory(item);
+    if (shopId === 6) return CARD_CATEGORY_LABELS[(item.card_type || '').toLowerCase()] || 'Other';
+    return 'All';
+}
+
+// Preferred tab order per shop. The client builds tabs in item-encounter order,
+// so we sort items by this index before sending to get a sensible tab layout.
+// Categories not listed here go last (sort key 999).
+const SHOP_TAB_ORDER = {
+    1: ['Healing', 'Travel', 'Utility', 'Refine', 'Forge'],
+    2: ['Dagger', '1H Sword', '2H Sword', 'Spear', 'Axe', 'Mace', 'Staff',
+        'Bow', 'Knuckle', 'Katar', 'Instrument', 'Whip', 'Book'],
+    3: ['Headgear', 'Glasses', 'Mask', 'Armor', 'Shield', 'Garment', 'Footgear', 'Accessory'],
+    4: ['Healing', 'Cure', 'Buff', 'Food', 'Travel', 'Scroll', 'Container', 'Other'],
+    5: ['Standard', 'Elemental', 'Status', 'Quiver'],
+    6: ['Weapon', 'Armor', 'Shield', 'Garment', 'Footgear', 'Headgear', 'Accessory', 'Other'],
+};
+
+function getShopTabSortIndex(shopId, category) {
+    const order = SHOP_TAB_ORDER[shopId];
+    if (!order) return 0;
+    const idx = order.indexOf(category);
+    return idx >= 0 ? idx : 999;
+}
+
+// Items that the inventory:use handler can actually process. An item is usable if
+// it has a runtime effect entry in ITEM_USE_EFFECTS (heal/cure/sc_start/etc.) OR
+// is one of the special-case IDs handled directly in the use handler before the
+// data-driven path (Fly Wing 601, Butterfly Wing 602 — see index.js ~L24750).
+// Used to hide ~1000 decorative consumables (boxes/eggs whose `getitem` scripts
+// aren't yet wired into the runtime) from the shop catalog.
+const SPECIAL_USABLE_ITEM_IDS = new Set([601, 602]);
+function isFunctionalConsumable(itemId) {
+    return ITEM_USE_EFFECTS[itemId] !== undefined || SPECIAL_USABLE_ITEM_IDS.has(itemId);
+}
+
+// Populate Weapon Dealer / Armor Dealer / General Store from the items table.
+// Pricing is rAthena pre-renewal canonical (already tiered by level/strength), so we
+// trust buy_price as-is and exclude items with buy_price = 0 (drops/quest/MVP loot).
+// For weapons we also restrict to view_sprite values with an equipped overlay atlas
+// so every weapon sold in the shop is "fully implemented with a sprite in the game".
+async function populateShopsFromDB() {
+    try {
+        // Weapon Dealer (id=2). ORDER BY level then price = starter gear first in the list.
+        const weaponRes = await pool.query(
+            `SELECT item_id FROM items
+             WHERE item_type = 'weapon'
+               AND view_sprite = ANY($1::int[])
+               AND buy_price > 0
+             ORDER BY equip_level_min ASC, buy_price ASC, item_id ASC`,
+            [SHOP_WEAPON_VIEW_SPRITES]
+        );
+        NPC_SHOPS[2].itemIds = weaponRes.rows.map(r => r.item_id);
+
+        // Armor Dealer (id=3). All armor pieces — head, body, shield, garment, footgear, accessory.
+        // Sorted by slot then level so each slot is contiguous in the list.
+        const armorRes = await pool.query(
+            `SELECT item_id FROM items
+             WHERE item_type = 'armor'
+               AND buy_price > 0
+             ORDER BY equip_slot ASC, equip_level_min ASC, buy_price ASC, item_id ASC`
+        );
+        NPC_SHOPS[3].itemIds = armorRes.rows.map(r => r.item_id);
+
+        // General Store (id=4). All consumables (potions, scrolls, foods, wings, gemstones)
+        // that the inventory:use handler can actually process. Items without an
+        // ITEM_USE_EFFECTS entry (most "X Box" containers, decorative event items)
+        // are filtered out — they would just emit "Cannot use this item" if bought.
+        // Sorted by price ascending — cheap basics first.
+        // Quivers are excluded by name — they live in the Arrow Dealer.
+        const consumableRes = await pool.query(
+            `SELECT item_id FROM items
+             WHERE item_type = 'consumable'
+               AND buy_price > 0
+               AND name NOT ILIKE '%quiver%'
+             ORDER BY buy_price ASC, item_id ASC`
+        );
+        const consumableTotal = consumableRes.rows.length;
+        NPC_SHOPS[4].itemIds = consumableRes.rows
+            .map(r => r.item_id)
+            .filter(isFunctionalConsumable);
+        const consumableHidden = consumableTotal - NPC_SHOPS[4].itemIds.length;
+
+        // Arrow Dealer (id=5). Ammo arrows always work (consumed by bow attacks,
+        // no use-handler needed). Quivers are consumables that need ITEM_USE_EFFECTS
+        // to expand into stacks of arrows — filter those by isFunctionalConsumable.
+        const arrowRes = await pool.query(
+            `SELECT item_id, item_type FROM items
+             WHERE (item_type = 'ammo' AND sub_type = 'Arrow' AND buy_price > 0)
+                OR (item_type = 'consumable' AND name ILIKE '%quiver%' AND buy_price > 0)
+             ORDER BY
+               CASE WHEN item_type = 'ammo' THEN 0 ELSE 1 END,  -- arrows first, quivers last
+               buy_price ASC, item_id ASC`
+        );
+        const arrowTotal = arrowRes.rows.length;
+        NPC_SHOPS[5].itemIds = arrowRes.rows
+            .filter(r => r.item_type === 'ammo' || isFunctionalConsumable(r.item_id))
+            .map(r => r.item_id);
+        const arrowHidden = arrowTotal - NPC_SHOPS[5].itemIds.length;
+
+        // Card Shop (id=6) — all cards with a buy_price.
+        // Sorted by card_type then name so each card-slot tab is contiguous and alpha-sorted.
+        const cardRes = await pool.query(
+            `SELECT item_id FROM items
+             WHERE item_type = 'card'
+               AND buy_price > 0
+             ORDER BY card_type ASC NULLS LAST, name ASC, item_id ASC`
+        );
+        NPC_SHOPS[6].itemIds = cardRes.rows.map(r => r.item_id);
+
+        logger.info(`[SHOPS] Populated from DB — Weapon: ${NPC_SHOPS[2].itemIds.length}, Armor: ${NPC_SHOPS[3].itemIds.length}, General: ${NPC_SHOPS[4].itemIds.length} (hid ${consumableHidden} non-functional), Arrow: ${NPC_SHOPS[5].itemIds.length} (hid ${arrowHidden} non-functional), Card: ${NPC_SHOPS[6].itemIds.length}`);
+    } catch (err) {
+        logger.error(`[SHOPS] populateShopsFromDB failed: ${err.message}`);
     }
 }
 
@@ -5702,6 +6042,19 @@ function getActiveZones() {
         if (player.zone) zones.add(player.zone);
     }
     return zones;
+}
+// Test whether a world position falls inside any deep-water area in the zone.
+// Used as a server-authoritative backstop on top of NavMesh exclusion (catches WASD bypass).
+function isInDeepWater(zoneName, x, y) {
+    const zone = ZONE_REGISTRY[zoneName];
+    if (!zone || !zone.waterAreas) return false;
+    for (const area of zone.waterAreas) {
+        if (area.type !== 'deep') continue;
+        if (Math.abs(x - area.x) <= area.extentX && Math.abs(y - area.y) <= area.extentY) {
+            return true;
+        }
+    }
+    return false;
 }
 // Track which zones have enemies spawned (lazy spawning)
 const spawnedZones = new Set();
@@ -6612,11 +6965,9 @@ io.on('connection', (socket) => {
         // Lazy enemy spawning: spawn enemies for this zone if not yet active
         if (!spawnedZones.has(playerZone)) {
             const zoneData = getZone(playerZone);
-            if (zoneData && zoneData.enemySpawns.length > 0) {
-                logger.info(`[ZONE] First player in '${playerZone}' — spawning ${zoneData.enemySpawns.length} enemies`);
-                for (const spawn of zoneData.enemySpawns) {
-                    spawnEnemy({ ...spawn, zone: playerZone });
-                }
+            if (zoneData) {
+                const spawned = spawnZoneEnemies(zoneData, playerZone);
+                if (spawned > 0) logger.info(`[ZONE] First player in '${playerZone}' — spawned ${spawned} enemies`);
             }
             spawnedZones.add(playerZone);
         }
@@ -6804,6 +7155,31 @@ io.on('connection', (socket) => {
                     }
                 }
             }
+            // Deep water: server-authoritative backstop on top of NavMesh exclusion.
+            // Two layers: a fast AABB check against zone data (for whole-area deep water),
+            // then a navmesh validation that catches per-cell deep regions auto-detected
+            // by AWaterArea (mixed shallow/deep) and any other off-navmesh position.
+            const dwZone = player.zone || 'prontera_south';
+            if (isInDeepWater(dwZone, x, y)) {
+                socket.emit('player:position_rejected', {
+                    x: player.lastX || x, y: player.lastY || y, z: player.lastZ || z,
+                    reason: 'deep_water'
+                });
+                return;
+            }
+            if (hasNavMesh(dwZone)) {
+                const dwSnap = findClosestNavMeshPoint(dwZone, x, y, z);
+                if (dwSnap) {
+                    const ndx = dwSnap.x - x, ndy = dwSnap.y - y;
+                    if (Math.sqrt(ndx * ndx + ndy * ndy) > 100) {
+                        socket.emit('player:position_rejected', {
+                            x: player.lastX || x, y: player.lastY || y, z: player.lastZ || z,
+                            reason: 'off_navmesh'
+                        });
+                        return;
+                    }
+                }
+            }
         }
 
         // Movement cancels casting (RO: cannot move while casting)
@@ -6898,11 +7274,9 @@ io.on('connection', (socket) => {
 
                         // 6. Lazy-spawn enemies in destination zone if first player
                         if (!spawnedZones.has(portal.destZone)) {
-                            if (destZoneData.enemySpawns && destZoneData.enemySpawns.length > 0) {
-                                logger.info(`[ZONE] First player in '${portal.destZone}' via warp portal — spawning ${destZoneData.enemySpawns.length} enemies`);
-                                for (const spawn of destZoneData.enemySpawns) {
-                                    spawnEnemy({ ...spawn, zone: portal.destZone });
-                                }
+                            if (destZoneData) {
+                                const spawned = spawnZoneEnemies(destZoneData, portal.destZone);
+                                if (spawned > 0) logger.info(`[ZONE] First player in '${portal.destZone}' via warp portal — spawned ${spawned} enemies`);
                             }
                             spawnedZones.add(portal.destZone);
                         }
@@ -7108,12 +7482,8 @@ io.on('connection', (socket) => {
 
         // Lazy spawn enemies in new zone
         if (!spawnedZones.has(newZone)) {
-            if (newZoneData.enemySpawns.length > 0) {
-                logger.info(`[ZONE] First player in '${newZone}' — spawning ${newZoneData.enemySpawns.length} enemies`);
-                for (const spawn of newZoneData.enemySpawns) {
-                    spawnEnemy({ ...spawn, zone: newZone });
-                }
-            }
+            const spawned = spawnZoneEnemies(newZoneData, newZone);
+            if (spawned > 0) logger.info(`[ZONE] First player in '${newZone}' — spawned ${spawned} enemies`);
             spawnedZones.add(newZone);
         }
 
@@ -7225,6 +7595,36 @@ io.on('connection', (socket) => {
             }
         }
 
+        // Predictive preload: tell the client which sprite classes the adjacent
+        // zones contain, so it can async-preload them in the background while the
+        // player is still in this zone. Crossing the warp portal becomes instant.
+        try {
+            const zoneData = ZONE_REGISTRY[zone];
+            if (zoneData && Array.isArray(zoneData.warps)) {
+                const adjacentClasses = {};
+                const seenZones = new Set();
+                for (const warp of zoneData.warps) {
+                    const adjZone = warp.destZone;
+                    if (!adjZone || adjZone === zone || seenZones.has(adjZone)) continue;
+                    seenZones.add(adjZone);
+                    const classes = new Set();
+                    for (const enemy of enemies.values()) {
+                        if (enemy.zone === adjZone && enemy.spriteClass && !enemy.isDead) {
+                            classes.add(enemy.spriteClass);
+                        }
+                    }
+                    if (classes.size > 0) {
+                        adjacentClasses[adjZone] = Array.from(classes);
+                    }
+                }
+                if (Object.keys(adjacentClasses).length > 0) {
+                    socket.emit('zone:adjacent_classes', { zones: adjacentClasses });
+                }
+            }
+        } catch (err) {
+            logger.warn(`adjacent_classes emit failed for zone ${zone}: ${err.message}`);
+        }
+
         // Send all ground items in this zone to this client
         const zoneGItems = zoneGroundItems.get(zone);
         if (zoneGItems && zoneGItems.size > 0) {
@@ -7323,25 +7723,36 @@ io.on('connection', (socket) => {
     // ============================================================
     // Water Area Events
     // ============================================================
+    // Water enter/exit uses a per-player Map of active water areas (areaId → { isDeep })
+    // so overlapping AWaterArea actors don't break inWater state. inWater is derived from
+    // map size; the dry→wet and wet→dry transitions are what get broadcast to the zone.
     socket.on('water:enter', (data) => {
         const playerInfo = findPlayerBySocketId(socket.id);
         if (!playerInfo) return;
         const { characterId, player } = playerInfo;
         const { waterAreaId, isDeep } = data || {};
+        if (!waterAreaId) return;
 
+        if (!player.activeWaterAreas) player.activeWaterAreas = new Map();
+        const wasInWater = player.activeWaterAreas.size > 0;
+        player.activeWaterAreas.set(waterAreaId, { isDeep: !!isDeep });
+
+        // Derived flags — read by skill handlers (Aqua Benedicta 413, Water Ball 412)
         player.inWater = true;
-        player.waterAreaId = waterAreaId || '';
+        player.waterAreaId = waterAreaId;
 
-        logger.info(`[WATER] Player ${characterId} entered water: ${waterAreaId} (deep=${isDeep})`);
+        logger.info(`[WATER] Player ${characterId} entered water: ${waterAreaId} (deep=${isDeep}) [active=${player.activeWaterAreas.size}]`);
 
-        // Broadcast to zone so other clients can show visual effects
-        const zone = player.zone || 'prontera_south';
-        broadcastToZoneExcept(socket, zone, 'player:water_state', {
-            characterId,
-            inWater: true,
-            waterAreaId: waterAreaId || '',
-            isDeep: isDeep || false
-        });
+        // Broadcast only the dry→wet transition so remote clients show visual effects once
+        if (!wasInWater) {
+            const zone = player.zone || 'prontera_south';
+            broadcastToZoneExcept(socket, zone, 'player:water_state', {
+                characterId,
+                inWater: true,
+                waterAreaId,
+                isDeep: !!isDeep
+            });
+        }
     });
 
     socket.on('water:exit', (data) => {
@@ -7350,10 +7761,23 @@ io.on('connection', (socket) => {
         const { characterId, player } = playerInfo;
         const { waterAreaId } = data || {};
 
-        player.inWater = false;
-        player.waterAreaId = '';
+        if (!player.activeWaterAreas) player.activeWaterAreas = new Map();
+        if (waterAreaId) player.activeWaterAreas.delete(waterAreaId);
 
-        logger.info(`[WATER] Player ${characterId} exited water: ${waterAreaId}`);
+        const stillInWater = player.activeWaterAreas.size > 0;
+        player.inWater = stillInWater;
+
+        if (stillInWater) {
+            // Still inside another overlapping water area — keep cached waterAreaId
+            // pointing to one of the remaining ones (last-entered, by Map insertion order)
+            const remaining = Array.from(player.activeWaterAreas.keys());
+            player.waterAreaId = remaining[remaining.length - 1];
+            logger.info(`[WATER] Player ${characterId} exited water: ${waterAreaId} [still in ${player.activeWaterAreas.size} other area(s), now ${player.waterAreaId}]`);
+            return;
+        }
+
+        player.waterAreaId = '';
+        logger.info(`[WATER] Player ${characterId} exited water: ${waterAreaId} [fully out of water]`);
 
         const zone = player.zone || 'prontera_south';
         broadcastToZoneExcept(socket, zone, 'player:water_state', {
@@ -7538,11 +7962,7 @@ io.on('connection', (socket) => {
 
         // Lazy spawn enemies
         if (!spawnedZones.has(destZone)) {
-            if (destZoneData.enemySpawns.length > 0) {
-                for (const spawn of destZoneData.enemySpawns) {
-                    spawnEnemy({ ...spawn, zone: destZone });
-                }
-            }
+            spawnZoneEnemies(destZoneData, destZone);
             spawnedZones.add(destZone);
         }
 
@@ -9743,11 +10163,7 @@ io.on('connection', (socket) => {
             // Lazy spawn enemies in the new zone if needed
             if (!spawnedZones.has(saveMap)) {
                 const zd = getZone(saveMap);
-                if (zd && zd.enemySpawns.length > 0) {
-                    for (const spawn of zd.enemySpawns) {
-                        spawnEnemy({ ...spawn, zone: saveMap });
-                    }
-                }
+                if (zd) spawnZoneEnemies(zd, saveMap);
                 spawnedZones.add(saveMap);
             }
 
@@ -9966,7 +10382,28 @@ io.on('connection', (socket) => {
             socket.emit('job:error', { message: 'No target class specified' });
             return;
         }
-        
+
+        // Gating: cannot change class while dead, sitting, in combat, or overweight.
+        if (player.isDead) {
+            socket.emit('job:error', { message: 'Cannot change class while dead.' });
+            return;
+        }
+        if (player.isSitting) {
+            socket.emit('job:error', { message: 'Cannot change class while sitting.' });
+            return;
+        }
+        const weightStatus = getWeightStatus(player);
+        if (weightStatus.isOverweight90) {
+            socket.emit('job:error', { message: 'Cannot change class while overweight (90%+).' });
+            return;
+        }
+        // "In combat" = attacked something within the last 5 seconds (matches RO state-out timer).
+        const COMBAT_OUT_OF_COMBAT_MS = 5000;
+        if (player.lastAttackTime && (Date.now() - player.lastAttackTime) < COMBAT_OUT_OF_COMBAT_MS) {
+            socket.emit('job:error', { message: 'Cannot change class while in combat.' });
+            return;
+        }
+
         const currentClass = player.jobClass || 'novice';
         const currentTier = getClassTier(currentClass);
         const targetTier = getClassTier(targetClass);
@@ -10058,10 +10495,39 @@ io.on('connection', (socket) => {
             timestamp: Date.now()
         });
         
-        // Send updated stats with new EXP data
+        // Recalculate derived stats — new class HP/SP coefficients apply.
         const effectiveStats = getEffectiveStats(player);
         const derived = calculateDerivedStats(effectiveStats);
         const finalAspd = Math.min(COMBAT.ASPD_CAP, derived.aspd + (player.weaponAspdMod || 0));
+
+        // Update server's authoritative max HP/SP (matches the level-up flow at L4290-4299).
+        // Without this, in-memory player.maxHealth stays stale for downstream regen / damage calc.
+        player.maxHealth = derived.maxHP;
+        player.maxMana = derived.maxSP;
+
+        // Refill HP/SP to new max — classic RO behavior on class change.
+        player.health = player.maxHealth;
+        player.mana = player.maxMana;
+
+        // Broadcast the refilled HP/SP so peers' floating health bars update.
+        const healthPayload = {
+            characterId,
+            health: player.health, maxHealth: player.maxHealth,
+            mana: player.mana, maxMana: player.maxMana,
+        };
+        socket.emit('combat:health_update', healthPayload);
+        broadcastToZoneExcept(socket, jobZone, 'combat:health_update', healthPayload);
+
+        // Persist the new HP/SP to DB so reconnect doesn't roll back.
+        try {
+            await pool.query(
+                `UPDATE characters SET max_health = $1, max_mana = $2, health = $3, mana = $4 WHERE character_id = $5`,
+                [player.maxHealth, player.maxMana, player.health, player.mana, characterId]
+            );
+        } catch (err) {
+            logger.warn(`[DB] Failed to save HP/SP after job change for character ${characterId}: ${err.message}`);
+        }
+
         socket.emit('player:stats', buildFullStatsPayload(characterId, player, effectiveStats, derived, finalAspd));
     });
 
@@ -13939,11 +14405,9 @@ io.on('connection', (socket) => {
 
                                 // Lazy-spawn enemies in destination zone if first player
                                 if (!spawnedZones.has(destZoneName)) {
-                                    if (destZone.enemySpawns && destZone.enemySpawns.length > 0) {
-                                        logger.info(`[ZONE] First player in '${destZoneName}' via Teleport Lv2 — spawning ${destZone.enemySpawns.length} enemies`);
-                                        for (const spawn of destZone.enemySpawns) {
-                                            spawnEnemy({ ...spawn, zone: destZoneName });
-                                        }
+                                    if (destZone) {
+                                        const spawned = spawnZoneEnemies(destZone, destZoneName);
+                                        if (spawned > 0) logger.info(`[ZONE] First player in '${destZoneName}' via Teleport Lv2 — spawned ${spawned} enemies`);
                                     }
                                     spawnedZones.add(destZoneName);
                                 }
@@ -23590,20 +24054,28 @@ io.on('connection', (socket) => {
     socket.on('homunculus:command', async (data) => {
         const playerInfo = findPlayerBySocketId(socket.id);
         if (!playerInfo) return;
-        const { characterId } = playerInfo;
+        const { characterId, player } = playerInfo;
         const hState = activeHomunculi.get(characterId);
         if (!hState) return;
 
         const command = data.command || 'follow';
-        if (['follow', 'attack', 'standby'].includes(command)) {
+        if (!['follow', 'attack', 'standby'].includes(command)) return;
+
+        if (command === 'attack') {
+            // G10: validate targetId is a real, alive enemy in the same zone
+            const tid = parseInt(data.targetId);
+            if (!tid) { socket.emit('skill:error', { message: 'Attack command requires a target' }); return; }
+            const tgt = enemies.get(tid);
+            if (!tgt || tgt.isDead) { socket.emit('skill:error', { message: 'Invalid target' }); return; }
+            const ownerZone = player.zone || 'prontera_south';
+            if ((tgt.zone || 'prontera_south') !== ownerZone) { socket.emit('skill:error', { message: 'Target not in your zone' }); return; }
+            hState.command = 'attack';
+            hState.targetId = tid;
+        } else {
             hState.command = command;
-            if (command === 'attack' && data.targetId) {
-                hState.targetId = parseInt(data.targetId);
-            } else if (command === 'follow' || command === 'standby') {
-                hState.targetId = null;
-            }
-            socket.emit('homunculus:command_ack', { command: hState.command, targetId: hState.targetId });
+            hState.targetId = null;
         }
+        socket.emit('homunculus:command_ack', { command: hState.command, targetId: hState.targetId });
     });
 
     // Allocate homunculus skill point
@@ -23630,6 +24102,19 @@ io.on('connection', (socket) => {
         if (slot === 1) hState.skill1Level++;
         else if (slot === 2) hState.skill2Level++;
         else hState.skill3Level++;
+
+        // G4 FIX: persist immediately so skill points survive disconnect/crash
+        // (was previously memory-only — only saved on Rest/vaporize/disconnect)
+        try {
+            await pool.query(
+                `UPDATE character_homunculus
+                 SET skill_1_level = $1, skill_2_level = $2, skill_3_level = $3, skill_points = $4, updated_at = NOW()
+                 WHERE character_id = $5`,
+                [hState.skill1Level, hState.skill2Level, hState.skill3Level, hState.skillPoints, characterId]
+            );
+        } catch (err) {
+            logger.warn(`[HOMUNCULUS] Failed to persist skill_up for ${characterId}: ${err.message}`);
+        }
 
         socket.emit('homunculus:skill_updated', {
             skillSlot: slot, newLevel: slot === 1 ? hState.skill1Level : slot === 2 ? hState.skill2Level : hState.skill3Level,
@@ -24533,9 +25018,9 @@ io.on('connection', (socket) => {
                     );
                     // Lazy spawn enemies in destination
                     if (!spawnedZones.has(saveMap) && destZoneData) {
-                        destZoneData.enemySpawns.forEach(sc => spawnEnemy({ ...sc, zone: saveMap }));
+                        const spawned = spawnZoneEnemies(destZoneData, saveMap);
                         spawnedZones.add(saveMap);
-                        logger.info(`[ZONE] Lazy-spawned enemies for ${saveMap}`);
+                        logger.info(`[ZONE] Lazy-spawned ${spawned} enemies for ${saveMap}`);
                     }
                     // Emit zone:change
                     socket.emit('zone:change', {
@@ -26359,6 +26844,7 @@ io.on('connection', (socket) => {
                 fullDescription: item.full_description || '',
                 itemType: item.item_type,
                 equipSlot: item.equip_slot || '',
+                category: getShopItemCategory(shopId, item),  // tab label for client-side filtering
                 buyPrice: applyDiscount(item.buy_price || item.price * 2, discountPct),
                 sellPrice: applyOvercharge(item.sell_price || item.price, overchargePct),
                 weight: item.weight || 0,
@@ -26410,6 +26896,13 @@ io.on('connection', (socket) => {
         }
 
         const maxWeight = getPlayerMaxWeight(player);
+
+        // Stable-sort by preferred tab order so the client encounters categories in
+        // the right sequence (the tab bar is built from item-encounter order).
+        // Within a category, the DB query's ORDER BY (level/price) is preserved.
+        shopItems.sort((a, b) =>
+            getShopTabSortIndex(shopId, a.category) - getShopTabSortIndex(shopId, b.category)
+        );
 
         socket.emit('shop:data', {
             shopId,
@@ -26846,11 +27339,13 @@ io.on('connection', (socket) => {
     };
 
     // Ore requirements: { oreItemId, zenyFee }
+    // AUDIT 2026-05-10: weapon_lv3 zeny fee 5000→1000, weapon_lv4 20000→2000 per
+    // canonical rAthena pre-re refine_db.txt. Was 5x and 10x too expensive respectively.
     const REFINE_MATERIALS = {
         weapon_lv1: { oreItemId: 1010, oreName: 'Phracon', zenyFee: 50 },
         weapon_lv2: { oreItemId: 1011, oreName: 'Emveretarcon', zenyFee: 200 },
-        weapon_lv3: { oreItemId: 984, oreName: 'Oridecon', zenyFee: 5000 },
-        weapon_lv4: { oreItemId: 984, oreName: 'Oridecon', zenyFee: 20000 },
+        weapon_lv3: { oreItemId: 984, oreName: 'Oridecon', zenyFee: 1000 },
+        weapon_lv4: { oreItemId: 984, oreName: 'Oridecon', zenyFee: 2000 },
         armor:      { oreItemId: 985, oreName: 'Elunium', zenyFee: 2000 }
     };
 
@@ -28414,8 +28909,9 @@ setInterval(async () => {
                     const cardExtraDrops2 = processCardDropBonuses(attacker, enemy);
 
                     // ── Award EXP (with party distribution — RO Classic) ──
-                    let baseExpReward = enemy.baseExp || 0;
-                    let jobExpReward = enemy.jobExp || 0;
+                    // SERVER_RATES.EXP_RATE_MULTIPLIER scales mob EXP at award time (canonical = 1).
+                    let baseExpReward = Math.floor((enemy.baseExp || 0) * SERVER_RATES.EXP_RATE_MULTIPLIER);
+                    let jobExpReward = Math.floor((enemy.jobExp || 0) * SERVER_RATES.EXP_RATE_MULTIPLIER);
                     if (cardKillResult2.expBonusPercent > 0) {
                         baseExpReward = Math.floor(baseExpReward * (100 + cardKillResult2.expBonusPercent) / 100);
                         jobExpReward = Math.floor(jobExpReward * (100 + cardKillResult2.expBonusPercent) / 100);
@@ -28653,7 +29149,7 @@ setInterval(async () => {
                                 if (enemy.spriteScale) combatRespawnPayload.spriteScale = enemy.spriteScale;
                             }
                             broadcastToZone(respawnEnemyZone, 'enemy:spawn', combatRespawnPayload);
-                        }, enemy.respawnMs);
+                        }, resolveRespawnMs(enemy.respawnMs));
                     }
                 }
             } catch (err) {
@@ -30223,6 +30719,123 @@ setInterval(() => {
         }
     }
 }, 10000); // Every 10 seconds
+
+// ============================================================
+// Homunculus Autocast AI Tick (2s) — minimal scope (Lif Healing Hands only)
+// G2 partial fix: Lif auto-heals owner when HP < 50%. Other types stay manual
+// (use the client widget skill buttons) until a proper AI design pass.
+// ============================================================
+setInterval(() => {
+    if (typeof activeHomunculi === 'undefined' || activeHomunculi.size === 0) return;
+    const now = Date.now();
+    for (const [ownerId, hom] of activeHomunculi.entries()) {
+        if (!hom.isAlive || !hom.isSummoned || hom.isDead) continue;
+        if (hom.type !== 'lif') continue; // only Lif autocasts heal for now
+
+        // Healing Hands is skill slot 1 for Lif
+        const skillLv = hom.skill1Level || 0;
+        if (skillLv <= 0) continue;
+
+        const owner = connectedPlayers.get(ownerId);
+        if (!owner || owner.isDead) continue;
+        if (owner.health >= Math.floor(owner.maxHealth * 0.5)) continue; // only when below 50% HP
+
+        // SP cost (Healing Hands array: [13, 16, 19, 22, 25])
+        const spCostArr = [13, 16, 19, 22, 25];
+        const spCost = spCostArr[skillLv - 1] || 13;
+        if (hom.spCurrent < spCost) continue;
+
+        // Cooldown check (skill1Cooldown — 2s default)
+        if (hom.skill1Cooldown && now < hom.skill1Cooldown) continue;
+
+        // Cast: same heal formula as the manual handler at line 23729
+        const homDerived = calculateHomunculusStats(hom);
+        const baseHeal = Math.floor((hom.level + homDerived.int) / 8 * (4 + skillLv * 8));
+        const brainSurgeryLv = hom.skill3Level || 0; // Brain Surgery passive bonus
+        const finalHeal = Math.floor(baseHeal * (100 + brainSurgeryLv * 2) / 100);
+
+        hom.spCurrent -= spCost;
+        owner.health = Math.min(owner.maxHealth, owner.health + finalHeal);
+        hom.skill1Cooldown = now + 2000;
+
+        const ownerSocket = io.sockets.sockets.get(owner.socketId);
+        if (ownerSocket) {
+            ownerSocket.emit('combat:health_update', {
+                characterId: ownerId, health: owner.health, maxHealth: owner.maxHealth,
+                mana: owner.mana, maxMana: owner.maxMana
+            });
+        }
+        const homZone = owner.zone || 'prontera_south';
+        broadcastToZone(homZone, 'skill:effect_damage', {
+            attackerId: `hom_${ownerId}`, attackerName: hom.name,
+            targetId: ownerId, targetName: owner.characterName, isEnemy: false,
+            skillId: 0, skillName: 'Healing Hands', skillLevel: skillLv, element: 'neutral',
+            damage: 0, healAmount: finalHeal, hitType: 'heal', isCritical: false, isMiss: false,
+            targetHealth: owner.health, targetMaxHealth: owner.maxHealth, timestamp: now
+        });
+        logger.info(`[HOMUNCULUS] ${hom.name} (Lif) auto-cast Healing Hands Lv${skillLv}: ${finalHeal} HP to ${owner.characterName}`);
+    }
+}, 2000);
+
+// ============================================================
+// Homunculus Position Tick (200ms — server-side follow + zone broadcast)
+// G7+G9: server tracks position so other players can render homunculi.
+// Urgent Escape (Lif) speed bonus is applied here via hState.urgentEscapeSpeedBonus.
+// ============================================================
+setInterval(() => {
+    if (typeof activeHomunculi === 'undefined' || activeHomunculi.size === 0) return;
+    const now = Date.now();
+    for (const [ownerId, hom] of activeHomunculi.entries()) {
+        if (!hom.isAlive || !hom.isSummoned || hom.isDead) continue;
+        const owner = connectedPlayers.get(ownerId);
+        if (!owner || owner.isDead) continue;
+
+        // Skip if owner just teleported / changed zone (snap on next tick)
+        if ((hom.zone || 'prontera_south') !== (owner.zone || 'prontera_south')) {
+            hom.zone = owner.zone || 'prontera_south';
+            hom.x = owner.lastX || owner.x || 0;
+            hom.y = owner.lastY || owner.y || 0;
+            hom.z = owner.lastZ || owner.z || 0;
+        }
+
+        // Target position: behind-left of owner, ~100 units back, ~80 units left.
+        const ownerX = owner.lastX || 0;
+        const ownerY = owner.lastY || 0;
+        const targetX = ownerX - 100;
+        const targetY = ownerY - 80;
+
+        // Lerp toward target. Base speed 600 UE/s; +10% per Urgent Escape level (G9).
+        const escapeBonus = hom.urgentEscapeSpeedBonus || 0;
+        const speedPerSec = 600 * (1 + escapeBonus / 100);
+        const dt = 0.2;             // 200ms tick
+        const maxStep = speedPerSec * dt;
+        const dx = targetX - (hom.x || 0);
+        const dy = targetY - (hom.y || 0);
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        let movedX = hom.x || 0, movedY = hom.y || 0;
+        if (dist > 1) {
+            const stepDist = Math.min(maxStep, dist);
+            movedX = (hom.x || 0) + (dx / dist) * stepDist;
+            movedY = (hom.y || 0) + (dy / dist) * stepDist;
+        }
+
+        // Only broadcast if moved meaningfully (>2 UE units) — saves bandwidth
+        const lastX = hom._lastBroadcastX || 0;
+        const lastY = hom._lastBroadcastY || 0;
+        const moveDist = Math.sqrt((movedX - lastX) ** 2 + (movedY - lastY) ** 2);
+        hom.x = movedX;
+        hom.y = movedY;
+        hom.z = owner.lastZ || 0;
+
+        if (moveDist > 2) {
+            hom._lastBroadcastX = movedX;
+            hom._lastBroadcastY = movedY;
+            broadcastToZone(hom.zone || 'prontera_south', 'homunculus:position', {
+                ownerId, x: movedX, y: movedY, z: hom.z || 0
+            });
+        }
+    }
+}, 200);
 
 // ============================================================
 // Pet Hunger Tick (every 10 seconds — check hunger decay + starvation)
@@ -32524,15 +33137,23 @@ function calculateEnemyDamage(enemy, targetCharId) {
     const player = connectedPlayers.get(targetCharId);
     if (!player) return null;
 
+    // RO Classic monster damage: rAthena mob_db `atk1`/`atk2` ARE the final
+    // pre-DEF damage range — they already include any mob stat contribution.
+    // Roll uniform(atk1, atk2) here and pass it as weaponATK with isMonsterAttack:true,
+    // which tells the formula to skip player-style StatusATK and DEX-narrowed variance.
+    const atk1 = enemy.damage || 1;
+    const atk2 = enemy.attack2 || atk1;
+    const rolledATK = atk2 > atk1
+        ? atk1 + Math.floor(Math.random() * (atk2 - atk1 + 1))
+        : atk1;
+
     const attackerStats = {
-        str: (enemy.stats && enemy.stats.str) || 1,
-        agi: (enemy.stats && enemy.stats.agi) || 1,
-        vit: (enemy.stats && enemy.stats.vit) || 0,
-        int: (enemy.stats && enemy.stats.int) || 0,
-        dex: (enemy.stats && enemy.stats.dex) || 1,
+        // Stats zeroed so StatusATK contribution is 0 (mob atk fields already include it).
+        // LUK preserved so the crit roll inside the formula uses canonical mob LUK.
+        str: 0, agi: 0, vit: 0, int: 0, dex: 0,
         luk: (enemy.stats && enemy.stats.luk) || 1,
         level: enemy.level,
-        weaponATK: enemy.damage || 1,
+        weaponATK: rolledATK,
         passiveATK: 0,
     };
 
@@ -32553,7 +33174,10 @@ function calculateEnemyDamage(enemy, targetCharId) {
         player.hardDef || 0,
         targetInfo,
         attackerInfo,
-        { isNonElemental: true }  // Monster auto-attacks bypass element table (RO Classic pre-renewal)
+        {
+            isNonElemental: true,   // Monster auto-attacks bypass element table (RO Classic pre-renewal)
+            isMonsterAttack: true   // Skip StatusATK + variance re-roll (mob atk1/atk2 are final)
+        }
     );
 }
 
@@ -34528,25 +35152,72 @@ app.post('/api/characters', authenticateToken, async (req, res) => {
         // All characters start as Novice (RO classic)
         const charClass = 'novice';
 
-        const result = await pool.query(
-            `INSERT INTO characters
-             (user_id, name, class, level, x, y, z, health, mana,
-              max_health, max_mana, job_level, base_exp, job_exp,
-              job_class, skill_points, stat_points,
-              hair_style, hair_color, gender)
-             VALUES ($1, $2, $3, 1, 0, 0, 0, 100, 100,
-                     100, 100, 1, 0, 0,
-                     'novice', 0, 48,
-                     $4, $5, $6)
-             RETURNING character_id, name, class, level, job_level, job_class,
-                       hair_style, hair_color, gender, health, max_health,
-                       mana, max_mana, stat_points, created_at`,
-            [req.user.user_id, name.trim(), charClass,
-             validHairStyle, validHairColor, validGender]
-        );
+        const dbClient = await pool.connect();
+        let character;
+        try {
+            await dbClient.query('BEGIN');
 
-        const character = result.rows[0];
-        logger.info(`Character created: ${name} (ID: ${character.character_id})`);
+            // New Novices spawn in Prontera town near the south gate (canonical RO Classic
+            // experience — fresh chars start in a town, walk out to the field for combat).
+            // Coords match prontera.defaultSpawn from ro_zone_data.js.
+            const result = await dbClient.query(
+                `INSERT INTO characters
+                 (user_id, name, class, level, x, y, z, health, mana,
+                  max_health, max_mana, job_level, base_exp, job_exp,
+                  job_class, skill_points, stat_points,
+                  hair_style, hair_color, gender, zuzucoin, zone_name)
+                 VALUES ($1, $2, $3, 1, -240, -1700, 590, 100, 100,
+                         100, 100, 1, 0, 0,
+                         'novice', 0, 48,
+                         $4, $5, $6, 1000, 'prontera')
+                 RETURNING character_id, name, class, level, job_level, job_class,
+                           hair_style, hair_color, gender, health, max_health,
+                           mana, max_mana, stat_points, zuzucoin, zone_name,
+                           x, y, z, created_at`,
+                [req.user.user_id, name.trim(), charClass,
+                 validHairStyle, validHairColor, validGender]
+            );
+
+            character = result.rows[0];
+
+            // Starter kit (RO Classic Novice loadout)
+            const STARTER_KIT = [
+                { itemId: 1201, qty:  1, slot: 0, equipped: true,  position: 'weapon'   }, // Knife
+                { itemId: 2301, qty:  1, slot: 1, equipped: true,  position: 'armor'    }, // Cotton Shirt
+                { itemId: 2401, qty:  1, slot: 2, equipped: true,  position: 'footgear' }, // Sandals
+                { itemId:  501, qty: 25, slot: 3, equipped: false, position: null       }, // Red Potion
+                { itemId:  601, qty:  5, slot: 4, equipped: false, position: null       }, // Fly Wing
+                { itemId:  602, qty:  1, slot: 5, equipped: false, position: null       }, // Butterfly Wing
+            ];
+
+            const invIdByItem = {};
+            for (const it of STARTER_KIT) {
+                const invRes = await dbClient.query(
+                    `INSERT INTO character_inventory
+                     (character_id, item_id, quantity, slot_index, is_equipped, equipped_position, identified)
+                     VALUES ($1, $2, $3, $4, $5, $6, true)
+                     RETURNING inventory_id`,
+                    [character.character_id, it.itemId, it.qty, it.slot, it.equipped, it.position]
+                );
+                invIdByItem[it.itemId] = invRes.rows[0].inventory_id;
+            }
+
+            // Bind Red Potion to hotbar slot 0 so the heal key works on first login
+            await dbClient.query(
+                `INSERT INTO character_hotbar (character_id, slot_index, inventory_id, item_id, item_name)
+                 VALUES ($1, 0, $2, 501, 'Red Potion')`,
+                [character.character_id, invIdByItem[501]]
+            );
+
+            await dbClient.query('COMMIT');
+        } catch (txErr) {
+            await dbClient.query('ROLLBACK');
+            throw txErr;
+        } finally {
+            dbClient.release();
+        }
+
+        logger.info(`Character created: ${name} (ID: ${character.character_id}) with starter kit (1000z + knife/shirt/sandals/25 red pots/5 fly wings/1 butterfly)`);
 
         res.status(201).json({
             message: 'Character created successfully',
@@ -35364,6 +36035,9 @@ server.listen(PORT, async () => {
   // Load item definitions into memory cache, then resolve monster drop itemIds
   await loadItemDefinitions();
   resolveDropItemIds();
+  // Populate Weapon Dealer / Armor Dealer / General Store from the items table
+  // (must run after loadItemDefinitions — uses the same `items` table)
+  await populateShopsFromDB();
   // Parse card scripts into combat/defense modifiers
   buildCardEffects(itemDefinitions);
 
@@ -35372,6 +36046,14 @@ server.listen(PORT, async () => {
     await initNavMeshes(ZONE_REGISTRY, logger);
   } catch (err) {
     logger.warn(`[NAVMESH] Initialization failed: ${err.message} — using straight-line movement`);
+  }
+
+  // Initialize spawn region JSON (allow/deny boxes exported from UE5).
+  // Must run AFTER initNavMeshes — pickRandomSpawnPoint snaps random points to NavMesh.
+  try {
+    await initSpawnRegions(ZONE_REGISTRY, logger);
+  } catch (err) {
+    logger.warn(`[SPAWN_REGIONS] Initialization failed: ${err.message} — zones using spawnPool will skip random spawns`);
   }
 
   // Zone-based lazy enemy spawning: enemies spawn when first player enters a zone

@@ -64,6 +64,9 @@ UnrealBuildTool SabriMMO Win64 Development "C:/Sabri_MMO/client/SabriMMO/SabriMM
 ### Server (`server/src/index.js`)
 Single monolithic file (~30000 lines). Key sections: REST API (JWT auth, character CRUD), Socket.io events (`player:*`, `combat:*`, `inventory:*`, `chat:*`, `enemy:*`, `stats:*`, `skills:*`), combat tick loop (50ms, ASPD-based), enemy AI loop (509 templates, 46 spawn points), class systems (20 classes), consumable/card/ensemble/ground effect handlers. 17 data modules (`ro_monster_templates`, `ro_skill_data`, `ro_card_effects`, `ro_damage_formulas`, etc.). Load `/full-stack` for details.
 
+### Canonical pre-renewal compliance (verified 2026-05-10)
+All 509 monster templates are byte-for-byte canonical vs rAthena `db/pre-re/mob_db.yml` master (HP, atk, def, mdef, race, size, element, AI mode bitmasks, drop tables). Re-runnable audit infrastructure under `_audits/`. Drop entries should include explicit `itemId:` (server prefers id over name lookup at `index.js:4655`). Server EXP rate at `index.js:599-610` `SERVER_RATES.EXP_RATE_MULTIPLIER` (default 1 = canonical). See memory `canonical-compliance-audit.md` for the full workflow.
+
 ### Client C++ (`client/SabriMMO/Source/SabriMMO/`)
 
 **Core infrastructure:**
@@ -205,6 +208,7 @@ Widget prefix: `WBP_`. Blueprint prefix: `BP_`. Interface prefix: `BPI_`.
 | Login screen, login background, character select UI | `/sabrimmo-login-screen` | — |
 | Resolution, aspect ratio, DPI, standalone squishing | `/sabrimmo-resolution` | — |
 | Zones, maps, warp portals | `/sabrimmo-zone` | `docsNew/05_Development/Zone_System_UE5_Setup_Guide.md` |
+| Random enemy spawn distribution, allow/deny volumes, `spawnPool` field | `/sabrimmo-zone` + `/sabrimmo-navmesh` | `docsNew/05_Development/Spawn_Region_System.md` |
 | Minimap, world map, loading screens, guide NPC marks | `/sabrimmo-map` | `docsNew/05_Development/Map_System_Implementation_Plan.md` |
 | VFX, particles, Niagara | `/sabrimmo-skills-vfx` | `docsNew/05_Development/VFX_Asset_Reference.md` |
 | Skill icon art generation | `/sabrimmo-generate-icons` | — |
@@ -277,6 +281,7 @@ Many tasks touch multiple systems. **Load ALL relevant skills.** Examples:
 - "Add a new skill with VFX" -> `/sabrimmo-skills` + `/sabrimmo-combat` + `/sabrimmo-skills-vfx` + `/full-stack`
 - "Fix any class skill" -> `/sabrimmo-skill-{class}` + `/sabrimmo-skills` + `/sabrimmo-combat` (if damage) or `/sabrimmo-debuff` (if status) or `/sabrimmo-buff` (if buff)
 - "Add a new zone with NPCs and warps" -> `/sabrimmo-zone` + `/sabrimmo-npcs` + `/sabrimmo-click-interact` + `/sabrimmo-3d-world`
+- "Populate a zone with random enemy spawns / export spawn regions" -> `/sabrimmo-zone` + `/sabrimmo-navmesh` + `/sabrimmo-enemy` (paired NavMesh + SpawnRegion export workflow, `spawnPool` on zone, see `docsNew/05_Development/Spawn_Region_System.md`)
 - "Scene/lighting/post-process issues" -> `/sabrimmo-3d-world` + `/debugger` (+ `/sabrimmo-zone` if per-zone preset, + `/sabrimmo-persistent-socket` if zone transition)
 - "Ground textures/tiling" -> `/sabrimmo-ground-textures` (+ `/sabrimmo-zone` + `/sabrimmo-navmesh` if building full zone)
 - "Water issues" -> `/sabrimmo-water` + `/sabrimmo-zone` (+ `/sabrimmo-skill-acolyte` if Aqua Benedicta)

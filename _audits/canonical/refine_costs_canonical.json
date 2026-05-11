@@ -1,0 +1,49 @@
+{
+  "_comment": "Canonical RO pre-renewal refinement costs and rates. Source: iRO Wiki Refinement page + rAthena db/pre-re/refine_db.txt.",
+
+  "ore_costs": {
+    "weapon_lv1": { "ore_id": 1010, "ore_name": "Phracon",       "ore_count": 1, "zeny_fee": 50    },
+    "weapon_lv2": { "ore_id": 1011, "ore_name": "Emveretarcon",  "ore_count": 1, "zeny_fee": 200   },
+    "weapon_lv3": { "ore_id": 984,  "ore_name": "Oridecon",      "ore_count": 1, "zeny_fee": 1000  },
+    "weapon_lv4": { "ore_id": 984,  "ore_name": "Oridecon",      "ore_count": 1, "zeny_fee": 2000  },
+    "armor":      { "ore_id": 985,  "ore_name": "Elunium",       "ore_count": 1, "zeny_fee": 2000  }
+  },
+
+  "safe_limits": {
+    "weapon_lv1": 7,
+    "weapon_lv2": 6,
+    "weapon_lv3": 5,
+    "weapon_lv4": 4,
+    "armor": 4
+  },
+
+  "atk_per_refine": {
+    "weapon_lv1": 2,
+    "weapon_lv2": 3,
+    "weapon_lv3": 5,
+    "weapon_lv4": 7
+  },
+
+  "over_refine_random_max": {
+    "weapon_lv1": 3,
+    "weapon_lv2": 5,
+    "weapon_lv3": 8,
+    "weapon_lv4": 13
+  },
+
+  "armor_def_per_refine": 1,
+
+  "success_rates_pct": {
+    "_format": "[refine_target: { weapon_lv1, weapon_lv2, weapon_lv3, weapon_lv4, armor }]",
+    "+5":  { "wlv1": 100, "wlv2": 100, "wlv3":  60, "wlv4":  60, "armor":  60 },
+    "+6":  { "wlv1": 100, "wlv2":  60, "wlv3":  50, "wlv4":  40, "armor":  40 },
+    "+7":  { "wlv1": 100, "wlv2":  40, "wlv3":  20, "wlv4":  40, "armor":  40 },
+    "+8":  { "wlv1":  60, "wlv2":  40, "wlv3":  20, "wlv4":  20, "armor":  20 },
+    "+9":  { "wlv1":  40, "wlv2":  20, "wlv3":  20, "wlv4":  20, "armor":  20 },
+    "+10": { "wlv1":  20, "wlv2":  20, "wlv3":  20, "wlv4":  10, "armor":  10 }
+  },
+
+  "max_refine_level": 10,
+  "failure_destroys_item": true,
+  "failure_destroys_cards": true
+}

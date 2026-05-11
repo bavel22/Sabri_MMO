@@ -1,0 +1,26 @@
+{
+  "_comment": "Canonical RO pre-renewal HP/SP coefficients per class. Source: iRO Wiki Pre-Renewal class pages + rAthena db/pre-re/job_basehpsp_pre.txt. Format: { HP_JOB_A: <quadratic factor>, HP_JOB_B: <linear factor>, SP_JOB: <SP per level> }. HP formula: BaseHP = 35 + (Lv * HP_JOB_B); for i=2..Lv: BaseHP += round(HP_JOB_A * i). MaxHP = floor(BaseHP * (1 + VIT/100) * TransMod).",
+  "_trans_mod": "Transcendent classes get TransMod = 1.25 (additional +25% HP/SP).",
+
+  "novice":      { "HP_JOB_A": 0.0,  "HP_JOB_B": 5,   "SP_JOB": 1,   "_verified": true },
+  "swordsman":   { "HP_JOB_A": 0.7,  "HP_JOB_B": 5,   "SP_JOB": 2,   "_verified": true },
+  "mage":        { "HP_JOB_A": 0.3,  "HP_JOB_B": 5,   "SP_JOB": 6,   "_verified": true },
+  "archer":      { "HP_JOB_A": 0.5,  "HP_JOB_B": 5,   "SP_JOB": 2,   "_verified": true },
+  "thief":       { "HP_JOB_A": 0.5,  "HP_JOB_B": 5,   "SP_JOB": 2,   "_verified": true },
+  "merchant":    { "HP_JOB_A": 0.4,  "HP_JOB_B": 5,   "SP_JOB": 3,   "_verified": true },
+  "acolyte":     { "HP_JOB_A": 0.4,  "HP_JOB_B": 5,   "SP_JOB": 5,   "_verified": true },
+  "knight":      { "HP_JOB_A": 1.5,  "HP_JOB_B": 5,   "SP_JOB": 3,   "_verified": true },
+  "wizard":      { "HP_JOB_A": 0.55, "HP_JOB_B": 5,   "SP_JOB": 9,   "_verified": true },
+  "hunter":      { "HP_JOB_A": 0.85, "HP_JOB_B": 5,   "SP_JOB": 4,   "_verified": true },
+  "assassin":    { "HP_JOB_A": 1.1,  "HP_JOB_B": 5,   "SP_JOB": 4,   "_verified": true },
+  "blacksmith":  { "HP_JOB_A": 0.9,  "HP_JOB_B": 5,   "SP_JOB": 4,   "_verified": true },
+  "priest":      { "HP_JOB_A": 0.75, "HP_JOB_B": 5,   "SP_JOB": 8,   "_verified": true },
+  "crusader":    { "HP_JOB_A": 1.1,  "HP_JOB_B": 7,   "SP_JOB": 4.7, "_verified": true, "_notes": "HP_JOB_B is 7 (not 5) — more HP per level." },
+  "sage":        { "HP_JOB_A": 0.75, "HP_JOB_B": 5,   "SP_JOB": 7,   "_verified": true },
+  "bard":        { "HP_JOB_A": 0.75, "HP_JOB_B": 3,   "SP_JOB": 6,   "_verified": true, "_notes": "HP_JOB_B is 3 — lowest in game (frail)." },
+  "dancer":      { "HP_JOB_A": 0.75, "HP_JOB_B": 3,   "SP_JOB": 6,   "_verified": true, "_notes": "Same coefficients as Bard." },
+  "rogue":       { "HP_JOB_A": 0.85, "HP_JOB_B": 5,   "SP_JOB": 5,   "_verified": true },
+  "monk":        { "HP_JOB_A": 0.9,  "HP_JOB_B": 6.5, "SP_JOB": 4.7, "_verified": true, "_notes": "HP_JOB_B is 6.5." },
+  "alchemist":   { "HP_JOB_A": 0.9,  "HP_JOB_B": 5,   "SP_JOB": 4,   "_verified": true },
+  "super_novice":{ "HP_JOB_A": 0.0,  "HP_JOB_B": 5,   "SP_JOB": 1,   "_verified": true, "_notes": "Same as Novice — Super Novice keeps Novice base." }
+}

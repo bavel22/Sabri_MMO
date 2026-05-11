@@ -449,7 +449,12 @@ function calculatePhysicalDamage(attacker, target, options = {}) {
         forceCrit = false,
         ignoreDefense = false,
         skillElement = null,
-        isNonElemental = false
+        isNonElemental = false,
+        // Monster auto-attack mode: rAthena mob_db `atk1`/`atk2` are the final
+        // pre-DEF damage range, NOT a weapon ATK that StatusATK gets added on top of.
+        // When set, the caller pre-rolls random(atk1, atk2) into attacker.weaponATK,
+        // and the formula skips StatusATK contribution + DEX-narrowing variance re-roll.
+        isMonsterAttack = false
     } = options;
 
     const atkDerived = calculateDerivedStats(attacker.stats || attacker);
@@ -548,7 +553,7 @@ function calculatePhysicalDamage(attacker, target, options = {}) {
     // WeaponATK from equipment + stat-based bonus + variance
     // PassiveATK from skills (Sword Mastery, etc.)
     // ─────────────────────────────────────────────────────
-    const statusATK = atkDerived.statusATK;
+    const statusATK = isMonsterAttack ? 0 : atkDerived.statusATK;
     const weaponATK = attacker.weaponATK || 0;
     const passiveATK = attacker.passiveATK || 0;
 
@@ -584,6 +589,11 @@ function calculatePhysicalDamage(attacker, target, options = {}) {
     let variancedWeaponATK;
     if (isCritical || isMaxPower) {
         variancedWeaponATK = atkMax; // Critical/Maximize Power: always max ATK
+    } else if (isMonsterAttack) {
+        // Monsters: caller pre-rolled random(atk1, atk2) into weaponATK.
+        // Skip the DEX-narrowing variance re-roll (which would re-randomize
+        // between min(DEX*WL, ATK) and ATK and effectively double-roll the variance).
+        variancedWeaponATK = sizedWeaponATK;
     } else {
         // Min weapon ATK = min(secondaryStat * (0.8 + 0.2*WL), weaponATK)
         const atkMin = Math.min(

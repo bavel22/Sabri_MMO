@@ -1,7 +1,7 @@
 # Sabri_MMO Dashboard
 
 ## Quick Links
-- [Session Tracker](Session%20Tracker.md) — All 73 Claude Code sessions with resume IDs
+- [Session Tracker](Session%20Tracker.md) — All Claude Code sessions with resume IDs
 - [Workflow Guide](Workflow%20Guide.md) — How to use Obsidian + Claude Code together
 - [Prompt Library](../_prompts/README.md) — Reusable prompts that work
 - [Documentation Index](DocsNewINDEX.md) — Master doc navigation
@@ -9,35 +9,42 @@
 - [Global Rules](../docsNew/00_Global_Rules/Global_Rules.md) — Design standards
 - [CLAUDE.md](../CLAUDE.md) — Claude Code project instructions
 
-## Current Stats (2026-04-22)
+## Current Stats (2026-05-10)
 | Metric | Count |
 |--------|-------|
-| Server lines | ~35,300 (index.js) + 11 data modules (~6,300) |
-| Socket handlers | 106 `socket.on(...)` in index.js |
+| Server lines | ~35,940 (index.js — +402 from 05-07 + ~40 from 05-09 `job:change` gating/HP-SP refill/DB persist) + 12 data modules (~6,400 — +`ro_spawn_regions.js` 8.9 KB) |
+| Socket handlers | 107 `socket.on(...)` in index.js (water:enter/exit handlers expanded with ref counting + ZoneTransition `ShowExpectedZoneChange`/`HideExpectedZoneChange` API) |
 | REST endpoints | 11 |
-| C++ UI Subsystems | 40 (+AudioSubsystem, +GroundItemSubsystem) |
+| C++ UI Subsystems | **42** (+JobChangeSubsystem 05-09) |
+| In-world NPC actor types | **3** — `AShopNPC`, `AKafraNPC`, `AJobChangeNPC` (05-09). Live click handler: `UPlayerInputSubsystem::ProcessClickOnNPC` (4 cast sites must include each new type) |
 | Skill definitions | 293 (69 first + 224 second) |
 | Buff types | 95 |
 | Status effects | 10 |
 | Items in DB | 6,169 |
 | Cards | 538 |
-| Monster templates | 509 (**~183 now have spriteClass**, ~150 sprites rendered) |
-| Active spawns | ~250 (grid layout across Prontera South, Y=-11000..+1500) |
-| Zones | 4 |
+| Monster templates | 509 (**~183 now have spriteClass**, ~150 sprites rendered, 4 with `[min,max]` respawn ranges) |
+| Active spawns | **`spawnPool` system live** — prt_south migrated off 195-line hand grid (10 templates × proportional count). grassfield05 (6 templates), grassfield07 (4 templates), SewerDungeon01 (4 templates × 200 total). High-level prt_south enemies still commented out 04-27 (restorable) |
+| Zones | **7** (prontera, prontera_south, prt_north, prt_dungeon_01, **+grassfield05**, **+grassfield07**, **+SewerDungeon01** as of 05-07/08) |
 | DB migrations | 28 |
 | VFX configs | 97 |
 | Classes | 19 (6 first + 13 second) |
-| Textures | 1,061 (AI + RO originals) |
+| Textures | 1,061 (AI + RO originals) + **~1,063 Hunyuan3D 2.1 GLBs** (235 base × ~828 color variants across 7 categories: vegetation/architecture/props/terrain/dungeon/special/centerpiece) |
 | Material variants | 2,700+ |
 | Decal instances | 91 |
 | Scatter meshes | 135 (75 V1 + 60 V3) |
-| Environment scripts | 80+ |
+| Environment scripts | **150+** (+35 sprite-quality migration 04-27 + ~15 hunyuan import + multi-object detect + flatten + tune + verify + collision + spawn region exporter) |
+| `_tools/` Hunyuan3D scripts | **13** master/orchestrator/cleanup/variants/regen + supervisor + 5 diagnostic |
 | Audio files | 121 BGM tracks + 626 ROSFX |
 | Enemy 3D models | ~205 GLBs (Tripo3D) |
 | Enemy atlas configs | 191 `_v2.json` files |
 | Enemy atlas folders (in UE5) | 162 in `Body/enemies/` |
 | UE5 import batch scripts | 13 (`import_batch3.py` through `import_batch13.py`) |
 | Monster animation presets | 12 (blob + 10 new body types + humanoid) |
+| Sprite Quality slider tiers | 5 (Ultra=0 / High=1 / Medium=2 / Low=3 / Very Low=4) |
+| Class Skill Audit docs done | 13/19 (+Priest +Monk +Assassin 04-26) — Rogue / Blacksmith / Alchemist still pending |
+| C++ Spawn-region actor classes | 2 (`ASpawnAllowVolume` + `ASpawnDenyVolume`) + `SpawnRegionExporter` console command |
+| `AWaterArea` deployments | 1 zone (SewerDungeon01 canals — first end-to-end use of mixed-mode auto-detected deep cells) |
+| NavMesh OBJ exports | 7 (prontera, prontera_north, prontera_south rebuilt 05-07, prt_dungeon_01, **+grassfield05**, **+grassfield07**, **+SewerDungeon01**) |
 
 ## What's Implemented
 - [x] All 6 first classes + 13 second classes
@@ -111,6 +118,26 @@
 - [x] `render_monster.py --model-z-offset` flag — lifts mesh before render for flying creatures; preserves across lunge interpolation
 - [x] Lighting defaults bumped — `--cel-shadow 0.92 --cel-mid 0.98` is now the default for both render_monster.py and blender_sprite_render_v2.py (matches RO Classic posterized look)
 - [x] Ranged attack visual swap — EnemySubsystem ranged attacks now spawn a scaled-down billboard sprite burst (using attacker's sprite class) instead of the vine decal, so the effect is visible from any camera angle
+- [x] **Runtime Sprite Quality slider** (2026-04-26 → 04-27) — 5 tiers (Ultra/High/Medium/Low/Very Low), `iSpriteQuality = 2` Medium default, `OptionsSubsystem::ApplySpriteQualityToLoadedTextures` iterates `/Game/SabriMMO/Sprites/Atlases/` and sets `LODBias = GlobalLODBias` on every loaded `UTexture2D`. Slider entry under Video options
+- [x] **`UZonePreloadSubsystem`** (2026-04-26) — per-world subsystem, 3-tier handle system (Pinned / Active / 4 GB LRU), `RequestClassPreload` / `RequestLayerPreload` / `PinClass` / `BeginZone` / `HandleAdjacentClasses` API, async via `FStreamableManager` + `FStreamableHandle`. Hooks in `EnemySubsystem::HandleEnemySpawn` (idempotent batch preload) + `OtherPlayerSubsystem::HandlePlayerMoved` (body + hair + 6 equipment slots) + `ZoneTransitionSubsystem` (loading screen waits on preload)
+- [x] **Server `zone:adjacent_classes` predictive emit** (2026-04-26) — after `zone:ready`, walks `ZONE_REGISTRY[zone].warps` and emits `{destZone: [spriteClass...]}` so client warms neighbour-zone atlases before warp transitions
+- [x] **Path C deferred equipment swap** (2026-04-27) — `FSpriteLayerState::PendingLayerAtlasRegistry` + `FinalizeEquipmentSwap()`. New equipment held in pending registry until atlas streaming completes (or 1s timeout); old equipment stays visible. Eliminates pop-in on weapon/hair/headgear changes
+- [x] **Helmet flicker fix** (2026-04-27) — `if (!IsValid(L.MaterialInst))` guard in `LoadEquipmentLayer`. Without it, fresh `UMaterialInstanceDynamic*` was created on every call (e.g. inventory open) causing one-frame flashes
+- [x] **Canonical sprite atlas settings** (2026-04-27) — single source of truth at `_meta/settings for importing sprite atlases.md` + memory `feedback-sprite-texture-group-ui.md`: BC7 + TEXTUREGROUP_UI + TF_NEAREST + TMGS_SIMPLE_AVERAGE + use_new_mip_filter + do_scale_mips_for_alpha_coverage + alpha_coverage W=0.5 + max_texture_size=0 + never_stream=False + **srgb=True** (sprite material samples as Color/sRGB; False renders invisible). All 35+ migrate / import scripts + 11 docs + 4 prompts synced. `migrate_test_verify.py` enforces canonical settings + multi-mip presence
+- [x] **Homunculus end-to-end re-audit** (2026-04-26) — 7/10 gaps fixed, partial G2 (Lif autocast only), 2 deferred. DB persistence on skill_up, server position tick (200ms, 600 UE/s + Urgent Escape mult), per-type sprite swap (Lif=poring / Amistr=poporing / Filir=picky / Vanilmirth=drops), attack-target validation, 8 new client widget buttons, remote rendering via `homunculus:other_summoned/dismissed/position` + `RemoteHomActors` map
+- [x] **Priest / Monk / Assassin skill audit docs** (2026-04-26) — `docsNew/05_Development/Priest_Skills_Audit_And_Fix_Plan.md` + `Monk_Skills_Audit_And_Fix_Plan.md` + `Assassin_Skills_Audit_And_Fix_Plan.md` + small `ro_skill_data_2nd.js` + `ro_buff_system.js` corrections
+- [x] **Sprite material foliage occlusion** (2026-04-29) — `FoliageOcclusionDist` scalar parameter (default 80 UU) on the sprite material; small occluders (grass < 80 UU thick) discard sprite pixels, walls (≥ 80 UU thick) still trigger the line-trace silhouette path
+- [x] **Spawn Region System** (2026-05-02) — `ASpawnAllowVolume` + `ASpawnDenyVolume` placeable actors with `MonsterFilter` whitelist + `RegionTag`. `ExportSpawnRegions <Zone>` console command writes `server/spawn_regions/<zone>.json`. Server `ro_spawn_regions.js` picks weighted-random points (∝ XY area), rejects deny-box overlaps, NavMesh ground-snaps. `enemySpawns[]` and `spawnPool[]` coexist
+- [x] **Hunyuan3D 2.1 production asset pipeline** (2026-05-03 → 05-06) — 235 base + ~828 color variants = ~1,063 game-ready GLBs across 7 categories (vegetation 54, architecture 38, props 61, terrain 34, dungeon 29, special 12, centerpiece 7). Multi-input mandatory (2 strategies × 2 seeds), decimate-FIRST then texture (30× speedup), quality-aware scoring (`cube_artifact = 0.001`), 8-attempt reroll loop, backup OUTSIDE asset_dir, ComfyUI supervisor + UTF-8 logger patch + KJNodes pinned to commit `37a0973`. 96% GOOD after 3 cleanup passes. Master pipeline `_tools/hunyuan_asset_pipeline.py` 48 KB, `3D_World_Asset_Pipeline_2026.md` 1,460 lines, `Session_Record_2026-05-03.md` + `REUSABLE_SESSION_PROMPT.md`
+- [x] **AWaterArea mixed-mode water system** (2026-05-06) — auto-detected per-cell deep via downward raycast grid (default 16x16 = 256 samples), greedy rect-merge → 1 `UBoxComponent` per rectangle as `NavArea_Null` modifier (cuts navmesh AND server-side OBJ), three-stop depth gradient (shallow [0-250 UU] → deep → abyss [900 UU, opacity 1.0]), runtime material via standard `UMaterialExpression*` nodes (NOT custom HLSL — confirmed not to animate), reference-counted server tracking via `Map<areaId,{isDeep}>`, two-layer movement validation (deep AABB + off-navmesh), `spawnEnemy()` snap-and-warn
+- [x] **Server `spawnPool` integration** (2026-05-07) — `index.js` `spawnZoneEnemies(zoneData, zoneName)` called from all 7 zone-first-load paths. prt_south migrated off the 195-line hand-placed grid → proportional spawnPool. Two new field zones grassfield05 (6 templates) + grassfield07 (4 templates incl. `vocal × 1` rare named with 15-25 min respawn). `_journal/Session Tracker.md` "World Building / Zones" section
+- [x] **`respawnMs` per-template ranges** (2026-05-07) — `respawnMs: [min, max]` array form for non-MVP rare named / farming spawns. `resolveRespawnMs()` helper at `index.js:~100`, used at status-event respawn (~L2793) + combat-death respawn (~L28799). 4 templates migrated: blue_plant + green_plant `[300000, 600000]` (5-10 min), black_mushroom `[120000, 360000]` (2-6 min), vocal `[900000, 1500000]` (15-25 min). MVP/boss variance untouched (still hardcoded in death handler). Memory `feedback-respawn-range-syntax.md`
+- [x] **Sewer Dungeon F1 server-side scaffold + build plan** (2026-05-07/08) — `SewerDungeon01` registered in `ZONE_REGISTRY` with full RO Classic flag set (indoor:true, nosave:true, noteleport:false, noreturn:false). 200-spawn pool (thief_bug × 50 + thief_bug_egg × 120 + farmiliar × 15 + tarou × 15). `prtsouth_to_dungeon` portal repurposed → `prtsouth_to_sewerdungeon01`. `ZONE_INFO` + `WORLD_MAP_GRID` row 5 col 8. AudioSubsystem ambient stack (DunWind+CaveDrip+CaveFall) + `bgm_19 "Under the Ground"`. PostProcessSubsystem zone preset (vignette 0.5, bloom 0.15, exposure 0, white temp 5500K, cool blue-green tint) + fog override (density 0.30, falloff 0.2, moss-green inscatter, FogHeight=500). NavMesh + spawn region exported. `Sewer_Dungeon_01_Build_Plan.md` 82 KB / 20 sections / 14 phases / 5 appendices
+- [x] **ZoneTransition preload-wait** (2026-05-08) — `WaitForPreloadAndHideOverlay` polls `UZonePreloadSubsystem::IsLoadingInProgress` every 200ms, dismisses overlay after 700ms of zero in-flight + 1.5s minimum + 15s hard timeout. `ShowExpectedZoneChange` / `HideExpectedZoneChange` API for Kafra / Butterfly / RequestWarp optimistic overlay. Fixes the 04-26 sprite-quality work — without preload-wait, loading screen dismissed mid-streaming → pop-in storm
+- [x] **Directional shadow cap** (2026-05-08) — `SetDynamicShadowDistanceMovableLight(7000.f)` + 3 cascades + tuned distribution (exponent 3.0, transition 0.2, fadeout 0.25) to fight 15° top-down FOV cascade seams in all outdoor zones
+- [x] **Per-zone PostProcess presets for grassfield07 / grassfield05** (2026-05-08) — outdoor field tuning (warmer / cooler highlight tints, 6700/6400 K white temp)
+- [x] **Canonical bootstrap prompt for new zones** (2026-05-08) — `_prompts/new_zone_creation.md` 22 KB, self-contained starter that loads skills + reads SewerDungeon01 plan + reads journal + asks 2-4 clarifying questions before generating per-zone build plan
+- [x] **Job Master NPC + in-game class change** (2026-05-09 → 05-10) — `AJobChangeNPC` (antonio sprite atlas) + `UJobChangeSubsystem` (Z=26) + `SJobChangeWidget` (centered + draggable, RO brown/gold, 3-page `SWidgetSwitcher`: Greeting / Selection / Congrats). Server `index.js` `job:change` handler now gates on dead/sit/combat/overweight + refills HP/SP to new max + persists. Client respawns local sprite (`SpawnSpriteForClass`) + emits `skill:data` to refresh skill tree. `UOtherPlayerSubsystem::HandleRemoteJobChanged` respawns peer sprites in zone (`ResetHairHiding` → `EquipVisuals` reload → `SetHairStyle` → `ReconcileHairVisibility`). `MMOGameInstance::SetSelectedCharacterJobClass` keeps cached character data in sync. `tests/unit/job_change.test.js` — 31 tests (data integrity, client mirror parity, eligibility tree, transitions, server gating). 05-10 follow-up fix: live click handler is `UPlayerInputSubsystem::ProcessClickOnNPC` (4 cast sites), NOT `TryInteractWithNPC` (dead code) — silent-click gotcha now in `feedback-npc-click-pipeline.md`
 
 ## What's Next
 
@@ -120,12 +147,67 @@
 - [x] Hunter (IDs 900-917)
 - [x] Bard (IDs 1500-1537)
 - [x] Dancer (IDs 1520-1557)
-- [ ] Priest (IDs 1000-1018)
-- [ ] Monk (IDs 1600-1615)
-- [ ] Assassin (IDs 1100-1111)
+- [x] Priest (IDs 1000-1018) — audit doc landed 2026-04-26
+- [x] Monk (IDs 1600-1615) — audit doc landed 2026-04-26
+- [x] Assassin (IDs 1100-1111) — audit doc landed 2026-04-26
 - [ ] Rogue (IDs 1700-1718)
 - [ ] Blacksmith (IDs 1200-1230)
-- [ ] Alchemist (IDs 1800-1815)
+- [ ] Alchemist (IDs 1800-1815) — Homunculus re-audit landed 2026-04-26 (appended to existing plan), broader Alchemist class audit still pending
+
+**Sprite-Quality Slider — Validation (NEW 2026-04-27, still open)**
+- [ ] UE5 rebuild and end-to-end slider test at every tier (Ultra / High / Medium / Low / Very Low) — measure VRAM curve + visual quality on busy zones
+- [ ] Re-import the 4 sRGB-broken enemy atlases (ambernite / parasite / plasma / rafflesia) — currently invisible until re-imported with `srgb=True`
+- [ ] `migrate_test_verify.py` post-rebuild — should report all-green
+- [ ] `zone:adjacent_classes` end-to-end test — verify warp-portal transitions are faster than cold zone enter
+- [ ] `ZonePreloadSubsystem` 4 GB LRU budget calibration — measure on 16 GB GPU at every quality tier
+- [ ] Path C / helmet flicker validation — equip / unequip / open inventory rapidly, confirm no flashes
+- [ ] Restore high-level enemies in `prt_south` after testing wraps (currently commented out in `ro_zone_data.js`)
+- [ ] **Big commit triage** — ~98 files in working tree since `56dce91` (04-26). Splits: `feat(sprite-quality)` + `chore(scripts)` + `docs(canonical-settings)` + `feat(spawn-region)` + `feat(water-system)` + `feat(zones)` (grassfield05/07/SewerDungeon01) + `feat(hunyuan3d)` (large — own commit) + `chore(journal)` (12 daily logs)
+
+**Sewer Dungeon F1 — Build Phases (NEW 2026-05-08)**
+- [x] Phase 12.1 — server scaffold (registry / world map / audio mappings) — committed 05-07
+- [x] PostProcess preset + fog override — landed 05-08
+- [x] AWaterArea canals placed in `L_SewerDungeon01` — confirmed by user 05-08
+- [x] NavMesh + spawn region exported — 05-08 01:49
+- [ ] UE5 rebuild and first walkthrough — confirm all per-zone settings work end-to-end
+- [ ] Greybox geometry replacement — sewer brick modular meshes
+- [ ] `MI_DungeonFloor_Wet` + `MI_DungeonWall_Mossy` material instances (`Scripts/Environment/create_sewer_dungeon_mis.py`)
+- [ ] 6 sewer slime decal MIs (`Scripts/Environment/create_sewer_decal_instances.py`)
+- [ ] 10 missing Hunyuan3D assets per `Sewer_Dungeon_01_Build_Plan.md` Appendix B
+- [ ] Brazier Point Lights + ceiling Spotlight grate shafts placed in level
+- [ ] AWarpPortal `WarpId` rename in `L_PrtSouth`: `prtsouth_to_dungeon` → `prtsouth_to_sewerdungeon01`
+- [ ] 28-test test matrix (`Sewer_Dungeon_01_Build_Plan.md` Section 13)
+
+**Spawn Pool Validation (NEW 2026-05-07)**
+- [ ] Place SpawnAllowVolume actors in `L_GrassField05` + `L_GrassField07` + run `ExportSpawnRegions <zone>` for each (JSONs don't exist yet, server warns "spawnPool but no spawn_regions/<zone>.json — random spawns skipped")
+- [ ] `vocal` rare-named spawn rate test (15-25 min respawn, single instance at a time)
+- [ ] Black mushroom + plant farmability test (verify sparse spawns are still findable)
+- [ ] prt_south enemy density tuning — random vs old hand-placed grid play-test
+
+**Hunyuan3D Assets (NEW 2026-05-03 → 05)**
+- [ ] Verify batch 3 final asset count + variant count after queue completes (~20 hours from 05-03 23:23)
+- [ ] Triage v3 regional output (Moscovia / Umbala / Eclage prompts) — first quality pass on regional outputs
+- [ ] Decide regional priority order (Moscovia and Eclage most visually distinct)
+- [ ] Diversion VCS check-in for the ~6-8 GB asset library
+- [ ] Place Hunyuan asset waves in `L_PrtSouth` + `L_GrassField05/07` (most of the library is unused so far — only SewerDungeon01 will draw from it directly)
+- [ ] 4 stubborn multi-object assets — keep with `largest_component_only` artifact, or drop entirely?
+- [ ] OGH/Geffenia palette safety filter test (demonic prompts may trip SDXL filters)
+
+**AWaterArea Follow-ups (NEW 2026-05-06)**
+- [ ] First end-to-end test in `L_SewerDungeon01` — verify auto-detect deep + nav cuts + 3-stop gradient
+- [ ] OBB server-side check for rotated water actors (currently AABB only — looser than visual + navmesh shape for rotated actors)
+- [ ] Splash particles, wading sound, caustics, vertex displacement (all explicitly deferred)
+- [ ] Per-zone default water tint (sewer = greenish-black, ocean = blue, swamp = muddy — currently every AWaterArea defaults to clean blue)
+
+**Sprite Material Validation (NEW 2026-04-29)**
+- [ ] Validate foliage occlusion threshold in-game — walk through prt_south V3 grass, confirm sprites disappear behind clumps but still get the silhouette behind walls. Tune `FoliageOcclusionDist` if grass blades are too tall to hide at 80 UU
+
+**Homunculus follow-ups (NEW 2026-04-26)**
+- [ ] Skill-point persistence regression test — connect, allocate, hard-kill server, restart, verify
+- [ ] Remote homunculus rendering test — two clients, verify other player sees the trailing pet
+- [ ] Lif autocast smoke test — drop owner HP < 50%, confirm 2s heal tick + cooldown gate
+- [ ] Per-type homunculus AI design pass (Amistr / Filir / Vanilmirth)
+- [ ] Per-type homunculus dedicated sprites (currently using poring/poporing/picky/drops as placeholders)
 
 **Systems to test:**
 - [x] Account creation (register, login, character create/delete, JWT auth)
@@ -276,6 +358,23 @@ See [Skill_VFX_Execution_Plan](../docsNew/05_Development/Skill_VFX_Execution_Pla
 
 ## Recent Sessions
 <!-- Add links to session logs here, newest first -->
+- **2026-05-10** — **Canonical pre-renewal compliance audit (100%) + character starter kit + early-game tuning**. Cloned rAthena master, built `_audits/` infrastructure (5 extract/audit scripts, 5 fix scripts, JSON canonical references for 1,004 mobs + 6,169 items). Fixed monster damage formula (`isMonsterAttack` flag — was doubling Poring damage from 8→17 vs Novices). Stat point off-by-one (was overpaying +19 over 1-99). Refine fees Wlv3 5000z→1000z, Wlv4 20000z→2000z. New character INSERT now seeds Prontera town spawn + starter kit (1000z + Knife/Cotton Shirt/Sandals equipped + 25 Red Potions hotbar 0 + 5 Fly Wings + 1 Butterfly Wing). All 509 monsters: 0 stat findings, 0 mode findings, 0 drop findings vs canonical. Server `SERVER_RATES.EXP_RATE_MULTIPLIER` constant (default 1) wired into both award sites for easy rate scaling. Drop entries now use explicit `itemId:` to avoid display-name collisions (Knife=1201/1202/1203). 4 new memory files + 5 skill updates.
+- **2026-05-08** — **Sewer Dungeon F1 build plan + ZoneTransition preload-wait + new_zone_creation prompt**. `Sewer_Dungeon_01_Build_Plan.md` 82 KB / 20 sections / 14 phases. PostProcessSubsystem: SewerDungeon01 zone preset (vignette 0.5, bloom 0.15, cool blue-green) + fog override (density 0.30, falloff 0.2, moss-green) + grassfield07/05 presets + 7000-UU directional shadow cap to fight 15° FOV cascade seams. ZoneTransitionSubsystem: `WaitForPreloadAndHideOverlay` polls `UZonePreloadSubsystem::IsLoadingInProgress` every 200ms (700ms stability + 1.5s minimum + 15s timeout) — fixes 04-26 sprite-quality work that dismissed loading screen mid-streaming. `ShowExpectedZoneChange`/`HideExpectedZoneChange` API for Kafra/Butterfly/RequestWarp optimistic overlay. NavMesh + spawn region exported for SewerDungeon01. Exit warp radius 200→250 + position adjusted for cramped sewer geometry. `_prompts/new_zone_creation.md` 22 KB canonical bootstrap. Journal catch-up for 04-28 → 05-08 (11-day gap). ([daily note](2026-05-08.md))
+- **2026-05-07** — **Server `spawnPool` integration** + grassfield05/07 + Sewer Dungeon scaffold + respawn ranges + water-state wiring. `index.js` +402/-60 lines: `resolveRespawnMs` (number OR `[min,max]` range), `spawnZoneEnemies` from all 7 zone-first-load paths, `isInDeepWater` AABB, `water:enter`/`water:exit` ref counting via `Map<areaId,{isDeep}>`, two-layer movement validation (deep-water AABB + off-navmesh), `spawnEnemy()` snap-and-warn (>100 UU snap = designer typo warning). Per-template respawn ranges (blue_plant/green_plant `[300000, 600000]`, black_mushroom `[120000, 360000]`, vocal `[900000, 1500000]`) — MVP/boss variance untouched. NavMesh exports for grassfield05 (11:37) + prt_south rebuild (11:45) + grassfield07 (16:04). prt_south migrated off 195-line hand-grid → proportional `spawnPool`. `prtsouth_to_dungeon` repurposed → `prtsouth_to_sewerdungeon01`. AudioSubsystem zone mappings for prt_sewb1-4 + SewerDungeon01 (DunWind+CaveDrip+CaveFall + bgm_19). Filed memory `feedback-respawn-range-syntax.md`. ([daily note](2026-05-07.md))
+- **2026-05-06** — **`AWaterArea` mixed-mode water system**. Auto-detected per-cell deep via downward raycast grid (default 16x16 = 256 samples), greedy rect-merge → 1 `UBoxComponent` per rectangle as `NavArea_Null` modifier (cuts navmesh + server OBJ). Three-stop depth gradient: shallow (0-250 UU) → deep → abyss (900 UU, opacity 1.0). Material via standard `UMaterialExpression*` nodes (NOT custom HLSL — confirmed not to animate at runtime). `Water_System_Research.md` "Implementation Status" addendum documenting deviations + extensions vs original research. Hunyuan alt-mesh regen (`hunyuan_alt_meshes_regen.py` 11 KB) + flatten v3 + flatten_combined. Memory `water-system-mixed-mode.md`. ([daily note](2026-05-06.md))
+- **2026-05-05** — **RO Classic World Assets Expanded** + **v3 regional Hunyuan generator**. `_meta/RO_Classic_World_Assets_Expanded.md` 15 KB cataloging 9 niche regions (Umbala / Moscovia / Rachel-Veins / Eclage / Brasilis-Dewata-Malaya / Old Glast Heim-Geffenia / Jawaii / Yuno Sage Academy) with per-region asset checklists. `_tools/hunyuan_v3_regional.py` 140 KB — per-region asset definitions + regional palette overrides + lower 5-attempt reroll budget (vs 8). Light day, mostly autonomous queued runs. ([daily note](2026-05-05.md))
+- **2026-05-04** — **Hunyuan continuation: multi-object detection + regen v2 + UE5 import**. `Session_Record_2026-05-03.md` 24 KB (the canonical multi-day record) + `REUSABLE_SESSION_PROMPT.md` 7 KB filed at 00:27. `find_multi_object_assets.py` + `find_multi_object_v2.py` (centroid spread + bbox overlap heuristics). `hunyuan_v2_regen.py` strengthens single-object negatives + 8-seed sweep + largest-component-only. `flatten_to_final_v2.py` for UE5 import layout. `import_hunyuan_assets.py` + `import_hunyuan_v2_assets.py` + tuning helpers. `prontera_south.json` first real-world `ExportSpawnRegions` output (22:14). ([daily note](2026-05-04.md))
+- **2026-05-03** — **Hunyuan3D 2.1 production pipeline build + 135 batch 1 assets**. Master pipeline `hunyuan_asset_pipeline.py` 48 KB: multi-input mandatory (2 strategies × 2 seeds), decimate-FIRST then texture (30× speedup), quality-aware scoring (cube_artifact=0.001), reroll loop with 8 cycle suffixes, backup OUTSIDE asset_dir. `comfyui_supervisor.py` + UTF-8 logger patch (prevents cp1252 crash on custom node logs). KJNodes pinned to commit `37a0973`. Batch 1: 135 assets across 7 categories, **96% GOOD** after 3 cleanup passes. Color variants: ~470 (`hunyuan_color_variants.py` 65 KB). Batch 3 queued: 100 gap-filling assets (`hunyuan_batch3_100.py` 44 KB). 6 inherent-bad assets accepted (thin shapes the AI fundamentally can't make volumetric). `3D_World_Asset_Pipeline_2026.md` ~1,460 lines. ([daily note](2026-05-03.md))
+- **2026-05-02** — **Spawn Region System** (visual spawn-area editor). `ASpawnAllowVolume` + `ASpawnDenyVolume` placeable actors (green/red wireframe boxes), `MonsterFilter: TArray<FString>` whitelist + `RegionTag` label. `ExportSpawnRegions <Zone>` console command writes world-space AABBs to `server/spawn_regions/<zone>.json`. Server `ro_spawn_regions.js` 8.9 KB: weighted-random by XY area, deny-box rejection, NavMesh ground-snap (500 UU halfExtent on Z so vertical box positioning doesn't matter). `Spawn_Region_System.md` 16 KB. Late evening: Hunyuan3D 2.1 single-asset proof (test tree, depth ratio 0.97, confirmed `mc_algo="mc"` mandatory). ([daily note](2026-05-02.md))
+- **2026-05-01** — Day off. ([daily note](2026-05-01.md))
+- **2026-04-30** — Day off. ([daily note](2026-04-30.md))
+- **2026-04-29** — Single 02:00 sprite material edit. `SpriteCharacterActor::CreateSpriteMaterial` adds `FoliageOcclusionDist` scalar parameter (default 80 UU): small occluders < 80 UU thick discard sprite pixels; walls ≥ 80 UU still trigger the line-trace silhouette path. Side trip from the 04-27 main queue. ([daily note](2026-04-29.md))
+- **2026-04-28** — Day off. ([daily note](2026-04-28.md))
+- **2026-04-27** — **Sprite-Quality Slider final wiring** + project-wide canonical-settings migration. Slider lands end-to-end (Ultra/High/Medium/Low/Very Low, LODBias 0-4, `OptionsSubsystem::ApplySpriteQualityToLoadedTextures`). Mass migration: `MaxTextureSize=0` (12 `clear_maxsize_*` scripts to fix non-square atlas downscale), `NeverStream=False` (18 `enable_streaming_*` scripts so slider can actually free VRAM). Path C deferred equipment swap + helmet flicker `IsValid(MaterialInst)` guard. **sRGB=True is mandatory** (4 enemies invisible until corrected via `check_srgb.py` diff). 11-doc + 4-prompt skills sweep + canonical settings doc at `_meta/settings for importing sprite atlases.md`. Filed `_prompts/sprite_quality_canonical_settings_resume.md` as next-session re-entry. Journal catch-up for 04-23 / 04-24 / 04-25 / 04-26 / 04-27 (5-day gap). ([daily note](2026-04-27.md))
+- **2026-04-26** — TRIPLE-STREAM big day. (1) Knuckle weapon texture diagnosis (00:45 — `diag_weapon_textures.py` + `fix_knuckle_match_working.py`, precursor to canonical-settings work). (2) Class skill audit closures: Priest / Assassin / Monk audit docs + `ro_skill_data_2nd.js` + `ro_buff_system.js` corrections (3/6 remaining now done). (3) Big git commit `56dce91` — flushes 7-day backlog (~190 atlas configs, 14 batch scripts, 14 weapon scripts, hosting/packaging research, journal catch-up 04-15 → 04-22). (4) **Homunculus end-to-end re-audit** — 7/10 gaps fixed (DB persistence, server position-tick, sprite swap, target validation, 8 widget buttons, remote rendering), partial G2 (Lif autocast only), 2 deferred. (5) **Sprite-Quality system architecture** late evening — `ZonePreloadSubsystem.h/.cpp` (3-tier handles, 4 GB LRU, async via `FStreamableManager`), hooks in EnemySubsystem + OtherPlayerSubsystem + ZoneTransitionSubsystem, server `zone:adjacent_classes` predictive emit. ([daily note](2026-04-26.md))
+- **2026-04-25** — Day off. ([daily note](2026-04-25.md))
+- **2026-04-24** — Single one-line `ro_monster_templates.js` tweak at 23:39. No Claude session traces. ([daily note](2026-04-24.md))
+- **2026-04-23** — Day off. ([daily note](2026-04-23.md))
 - **2026-04-22** — Tail-end imports (alligator / blazzer / stone_shooter / plasma / metaller — 6 atlas folders into `Body/enemies/`). `metaller` late render (Lv 22 insect, biped_insect preset). Journal catch-up for 04-19 / 04-20 / 04-21 / 04-22 — filled 4-day gap, Dashboard + Session Tracker updated. Closes out the sprite-production week. ([daily note](2026-04-22.md))
 - **2026-04-21** — Batches 10-13 finale: 28 new atlas configs / renders / imports across `magmaring` → `kraben` range. **Plasma tint siblings** — plasma base atlas + 4 tint variants (plasma_r `[1.5,0.6,0.6]`, plasma_b `[0.6,0.6,1.5]`, plasma_g `[0.6,1.5,0.6]`, plasma_p `[1.3,0.6,1.5]`) validates tint system beyond Eclipse. `.add_batchN.js` pattern formalized (5 batch scripts: 10 / 11 / 12 / 13 / blazzer). Late additions: `vocal`, `blazzer` (GLB arrived mid-day), `orc_baby`. Progress now **150 done / 104 pending / 255 no GLB / 509 total**. ([daily note](2026-04-21.md))
 - **2026-04-20** — MASSIVE production day. Batches 2 through 9 — ~90 renders, ~70 UE5 imports. **EnemySubsystem C++ hardening**: `FEnemyEntry.SpriteTint` + `bCanMove`, size→scale parser (small/medium/large = 0.5x/1.0x/1.5x), `spriteScale` per-template override, `canMove` gate on attack lunge (stationary mobs thrash in place), ranged attack swap from vine decal → billboard sprite burst. Server: `size` / `canMove` / `spriteTint` / `spriteScale` added to all 5 emit paths (spawnEnemy / respawn / player:join / zone:ready / adapter). `render_monster.py --model-z-offset` for flying creatures + default lighting 0.92/0.98. 195-line spawn grid in `ro_zone_data.js` (Y=-11000..-3000). Navmesh rebuilt (+5243 lines). ([daily note](2026-04-20.md))

@@ -392,9 +392,12 @@ const JOB_CLASS_CONFIG = {
 const MAX_BASE_LEVEL = 99;
 
 // Stat points gained per base level up (RO classic formula)
-// Formula: floor(newLevel / 5) + 3
+// Canonical formula: floor(BaseLevel / 5) + 3 — where BaseLevel is the level you ARE LEAVING
+// (old level), not the new one. The pre-renewal canonical total over 1→99 is 1225 stat points
+// from leveling (1273 with the 48 starting). Using `newLevel` directly gives 1244 (+19 extra).
+// AUDIT 2026-05-10: corrected from `Math.floor(newLevel / 5)` to `Math.floor((newLevel - 1) / 5)`.
 function getStatPointsForLevelUp(newLevel) {
-    return Math.floor(newLevel / 5) + 3;
+    return Math.floor((newLevel - 1) / 5) + 3;
 }
 
 // Skill points gained per job level up (always 1 in classic RO)
@@ -501,7 +504,7 @@ const HP_SP_COEFFICIENTS = {
 // ASPD = 200 - (WD - floor((WD*AGI/25 + WD*DEX/100) / 10)) * (1 - SpeedMod)
 // ============================================================
 const ASPD_BASE_DELAYS = {
-    novice:     { bare_hand: 50, dagger: 55 },
+    novice:     { bare_hand: 50, dagger: 50 },  // AUDIT 2026-05-10: dagger 55→50 per rAthena pre-re job_db2_pre.txt
     swordsman:  { bare_hand: 40, dagger: 65, one_hand_sword: 70, two_hand_sword: 60, spear: 65, mace: 70, axe: 80 },
     mage:       { bare_hand: 35, dagger: 60, staff: 65 },
     archer:     { bare_hand: 50, dagger: 55, bow: 70 },

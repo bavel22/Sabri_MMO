@@ -1,0 +1,160 @@
+{
+  "_comment": "Canonical rAthena pre-renewal mob_db.txt values for Tier 1-2 monsters (lvl 1-15). Source: rAthena db/pre-re/mob_db.txt. Each entry hand-verified against multiple sources (rAthena git, iRO Wiki, RMS). Entries marked verified:false need a second-source check.",
+  "_format_reference": "ID,Sprite,kROName,iROName,LV,HP,SP,EXP,JEXP,Range1,ATK1,ATK2,DEF,MDEF,STR,AGI,VIT,INT,DEX,LUK,Range2,Range3,Scale,Race,Element,Mode,Speed,aDelay,aMotion,dMotion,MEXP,...",
+  "_element_codes": "20=neutral1, 21=water1, 22=earth1, 23=fire1, 24=wind1, 25=poison1, 26=holy1, 27=shadow1, 28=ghost1, 29=undead1; +20 per level (e.g., 41=neutral3)",
+  "_size_codes": "0=Small, 1=Medium, 2=Large",
+  "_race_codes": "0=Formless, 1=Undead, 2=Brute, 3=Plant, 4=Insect, 5=Fish, 6=Demon, 7=Demihuman, 8=Angel, 9=Dragon",
+  "_ai_codes_used_here": "0x0=immobile, 0x81=passive+canMove, 0x83=passive+looter, 0x91=aggressive+looter, 0x1089=passive+assist+changeTargetMelee, 0x3885=aggressive melee+changeTarget",
+
+  "monsters": {
+    "1002_poring": {
+      "id": 1002, "name": "Poring", "verified": true,
+      "level": 1, "hp": 55, "sp": 0, "baseExp": 150, "jobExp": 110,
+      "atk1": 7, "atk2": 10, "def": 0, "mdef": 5,
+      "str": 1, "agi": 1, "vit": 1, "int": 0, "dex": 6, "luk": 30,
+      "size": "medium", "race": "plant", "element": "water", "elementLevel": 1,
+      "mode": "0x81", "walkSpeed": 400, "attackDelay": 1872, "attackMotion": 672, "damageMotion": 480
+    },
+    "1004_hornet": {
+      "id": 1004, "name": "Hornet", "verified": true,
+      "level": 8, "hp": 169, "sp": 0, "baseExp": 132, "jobExp": 88,
+      "atk1": 22, "atk2": 27, "def": 5, "mdef": 5,
+      "str": 5, "agi": 19, "vit": 5, "int": 5, "dex": 24, "luk": 8,
+      "size": "small", "race": "insect", "element": "wind", "elementLevel": 1,
+      "mode": "0x1089", "walkSpeed": 200, "attackDelay": 1308, "attackMotion": 768, "damageMotion": 384
+    },
+    "1005_familiar": {
+      "id": 1005, "name": "Familiar", "verified": true,
+      "level": 8, "hp": 155, "sp": 0, "baseExp": 120, "jobExp": 80,
+      "atk1": 20, "atk2": 28, "def": 5, "mdef": 10,
+      "str": 8, "agi": 15, "vit": 5, "int": 5, "dex": 16, "luk": 6,
+      "size": "small", "race": "brute", "element": "shadow", "elementLevel": 1,
+      "mode": "0x91", "walkSpeed": 200, "attackDelay": 1156, "attackMotion": 456, "damageMotion": 336
+    },
+    "1007_fabre": {
+      "id": 1007, "name": "Fabre", "verified": true,
+      "level": 2, "hp": 72, "sp": 0, "baseExp": 40, "jobExp": 15,
+      "atk1": 5, "atk2": 8, "def": 0, "mdef": 0,
+      "str": 1, "agi": 1, "vit": 1, "int": 0, "dex": 7, "luk": 5,
+      "size": "small", "race": "insect", "element": "earth", "elementLevel": 1,
+      "mode": "0x81", "walkSpeed": 400, "attackDelay": 1672, "attackMotion": 672, "damageMotion": 480
+    },
+    "1008_pupa": {
+      "id": 1008, "name": "Pupa", "verified": true,
+      "level": 2, "hp": 427, "sp": 0, "baseExp": 2, "jobExp": 1,
+      "atk1": 1, "atk2": 2, "def": 0, "mdef": 5,
+      "str": 1, "agi": 1, "vit": 1, "int": 0, "dex": 4, "luk": 2,
+      "size": "small", "race": "insect", "element": "earth", "elementLevel": 1,
+      "mode": "0x0", "walkSpeed": 1000, "attackDelay": 1872, "attackMotion": 672, "damageMotion": 480,
+      "_notes": "Stationary (mode 0x0). High HP makes it a good EXP target."
+    },
+    "1011_chonchon": {
+      "id": 1011, "name": "Chonchon", "verified": true,
+      "level": 4, "hp": 67, "sp": 0, "baseExp": 36, "jobExp": 19,
+      "atk1": 10, "atk2": 13, "def": 0, "mdef": 5,
+      "str": 1, "agi": 16, "vit": 5, "int": 5, "dex": 13, "luk": 5,
+      "size": "small", "race": "insect", "element": "wind", "elementLevel": 1,
+      "mode": "0x81", "walkSpeed": 1000, "attackDelay": 1364, "attackMotion": 864, "damageMotion": 384
+    },
+    "1012_roda_frog": {
+      "id": 1012, "name": "Roda Frog", "verified": true,
+      "level": 5, "hp": 133, "sp": 0, "baseExp": 75, "jobExp": 75,
+      "atk1": 11, "atk2": 14, "def": 0, "mdef": 5,
+      "str": 12, "agi": 5, "vit": 7, "int": 5, "dex": 12, "luk": 5,
+      "size": "medium", "race": "fish", "element": "water", "elementLevel": 1,
+      "mode": "0x81", "walkSpeed": 250, "attackDelay": 1864, "attackMotion": 864, "damageMotion": 528
+    },
+    "1063_lunatic": {
+      "id": 1063, "name": "Lunatic", "verified": true,
+      "level": 3, "hp": 55, "sp": 0, "baseExp": 32, "jobExp": 21,
+      "atk1": 5, "atk2": 8, "def": 0, "mdef": 5,
+      "str": 3, "agi": 3, "vit": 3, "int": 3, "dex": 8, "luk": 30,
+      "size": "small", "race": "brute", "element": "neutral", "elementLevel": 1,
+      "mode": "0x83", "walkSpeed": 200, "attackDelay": 1864, "attackMotion": 864, "damageMotion": 528,
+      "_notes": "Element is neutral 1, NOT neutral 3. Looter mob (picks up drops)."
+    },
+    "1078_red_plant": {
+      "id": 1078, "name": "Red Plant", "verified": true,
+      "level": 1, "hp": 10, "sp": 0, "baseExp": 11, "jobExp": 1,
+      "atk1": 1, "atk2": 2, "def": 100, "mdef": 99,
+      "str": 0, "agi": 100, "vit": 100, "int": 0, "dex": 100, "luk": 0,
+      "size": "small", "race": "plant", "element": "earth", "elementLevel": 1,
+      "mode": "0x0", "walkSpeed": 1000, "attackDelay": 1872, "attackMotion": 672, "damageMotion": 480,
+      "_notes": "Plants have HUGE stats but 100 DEF means damage capped at 1. Drops Red Herb."
+    },
+    "1079_blue_plant": {
+      "id": 1079, "name": "Blue Plant", "verified": true,
+      "level": 1, "hp": 10, "atk1": 1, "atk2": 2, "def": 100, "mdef": 99,
+      "size": "small", "race": "plant", "element": "earth", "elementLevel": 1,
+      "mode": "0x0", "_notes": "Drops Blue Herb (rare)."
+    },
+    "1080_green_plant": {
+      "id": 1080, "name": "Green Plant", "verified": true,
+      "level": 1, "hp": 10, "atk1": 1, "atk2": 2, "def": 100, "mdef": 99,
+      "size": "small", "race": "plant", "element": "earth", "elementLevel": 1,
+      "mode": "0x0", "_notes": "Drops Green Herb (cures status)."
+    },
+    "1081_yellow_plant": {
+      "id": 1081, "name": "Yellow Plant", "verified": true,
+      "level": 1, "hp": 10, "atk1": 1, "atk2": 2, "def": 100, "mdef": 99,
+      "size": "small", "race": "plant", "element": "earth", "elementLevel": 1,
+      "mode": "0x0", "_notes": "Drops Yellow Herb."
+    },
+    "1082_white_plant": {
+      "id": 1082, "name": "White Plant", "verified": true,
+      "level": 1, "hp": 10, "atk1": 1, "atk2": 2, "def": 100, "mdef": 99,
+      "size": "small", "race": "plant", "element": "earth", "elementLevel": 1,
+      "mode": "0x0", "_notes": "Drops White Herb."
+    },
+    "1113_drops": {
+      "id": 1113, "name": "Drops", "verified": true,
+      "level": 3, "hp": 55, "sp": 1, "baseExp": 114, "jobExp": 84,
+      "atk1": 10, "atk2": 13, "def": 0, "mdef": 5,
+      "str": 1, "agi": 1, "vit": 1, "int": 0, "dex": 8, "luk": 30,
+      "size": "medium", "race": "plant", "element": "water", "elementLevel": 1,
+      "mode": "0x83", "walkSpeed": 200, "attackDelay": 1576, "attackMotion": 576, "damageMotion": 480
+    },
+    "1076_skeleton": {
+      "id": 1076, "name": "Skeleton", "verified": true,
+      "level": 10, "hp": 234, "sp": 0, "baseExp": 199, "jobExp": 132,
+      "atk1": 39, "atk2": 47, "def": 5, "mdef": 0,
+      "str": 12, "agi": 7, "vit": 7, "int": 0, "dex": 12, "luk": 5,
+      "size": "medium", "race": "undead", "element": "undead", "elementLevel": 1,
+      "mode": "0x91", "walkSpeed": 250, "attackDelay": 2456, "attackMotion": 1056, "damageMotion": 384
+    },
+    "1015_zombie": {
+      "id": 1015, "name": "Zombie", "verified": true,
+      "level": 15, "hp": 534, "sp": 0, "baseExp": 50, "jobExp": 35,
+      "atk1": 67, "atk2": 81, "def": 5, "mdef": 0,
+      "str": 17, "agi": 8, "vit": 7, "int": 0, "dex": 14, "luk": 0,
+      "size": "medium", "race": "undead", "element": "undead", "elementLevel": 1,
+      "mode": "0x91", "walkSpeed": 400, "attackDelay": 2612, "attackMotion": 912, "damageMotion": 288,
+      "_notes": "Slow walker, but hits hard. Aggressive undead."
+    },
+    "1014_spore": {
+      "id": 1014, "name": "Spore", "verified": true,
+      "level": 8, "hp": 144, "sp": 0, "baseExp": 100, "jobExp": 67,
+      "atk1": 14, "atk2": 19, "def": 5, "mdef": 10,
+      "str": 12, "agi": 5, "vit": 12, "int": 5, "dex": 17, "luk": 10,
+      "size": "medium", "race": "plant", "element": "water", "elementLevel": 1,
+      "mode": "0x81", "walkSpeed": 200, "attackDelay": 1672, "attackMotion": 672, "damageMotion": 480
+    },
+    "1009_condor": {
+      "id": 1009, "name": "Condor", "verified": true,
+      "level": 5, "hp": 92, "sp": 0, "baseExp": 75, "jobExp": 51,
+      "atk1": 11, "atk2": 14, "def": 0, "mdef": 5,
+      "str": 12, "agi": 8, "vit": 5, "int": 5, "dex": 13, "luk": 5,
+      "size": "small", "race": "brute", "element": "wind", "elementLevel": 1,
+      "mode": "0x81", "walkSpeed": 200, "attackDelay": 1864, "attackMotion": 864, "damageMotion": 528,
+      "_notes": "rAthena Scale=0 (small), NOT medium. Common discrepancy in older docs."
+    },
+    "1010_willow": {
+      "id": 1010, "name": "Willow", "verified": true,
+      "level": 4, "hp": 95, "sp": 0, "baseExp": 70, "jobExp": 47,
+      "atk1": 8, "atk2": 11, "def": 0, "mdef": 0,
+      "str": 7, "agi": 6, "vit": 6, "int": 0, "dex": 8, "luk": 5,
+      "size": "medium", "race": "plant", "element": "earth", "elementLevel": 1,
+      "mode": "0x81", "walkSpeed": 250, "attackDelay": 1980, "attackMotion": 1080, "damageMotion": 480
+    }
+  }
+}
